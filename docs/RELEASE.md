@@ -18,7 +18,8 @@ Use uma Preview Deployment da Vercel para cada pull request. A homologação dev
 ## Conferência do roteamento da publicação
 
 ```
-npm run check:deploy -- https://o-endereco-da-publicacao
+npm run check:deploy                            # produção (padrão)
+npm run check:deploy -- https://uma-previa      # uma pré-visualização
 ```
 
 Rode contra a **pré-visualização primeiro**, e depois contra produção. É a única verificação que alcança o roteamento da Vercel; todas as outras leem o repositório e param onde a plataforma começa.

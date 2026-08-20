@@ -21,9 +21,10 @@
 //
 // Como usar:
 //
-//     node scripts/check-deploy.js https://o-endereco-da-publicacao
+//     node scripts/check-deploy.js                     confere a produção
+//     node scripts/check-deploy.js https://uma-previa  confere o endereço dado
 //
-// Sem argumento, ele usa DEPLOY_URL. Sem nenhum dos dois, explica e sai.
+// A ordem é: argumento, depois DEPLOY_URL, depois o padrão (a produção).
 
 const crypto = require("crypto");
 const fs = require("fs");
@@ -43,21 +44,21 @@ function aviso(label, extra) {
   console.log(`  aviso ${label}${extra == null ? "" : `: ${extra}`}`);
 }
 
-const alvo = (process.argv[2] || process.env.DEPLOY_URL || "").trim().replace(/\/+$/, "");
-if (!alvo) {
-  console.error([
-    "",
-    "Informe o endereço da publicação:",
-    "",
-    "    node scripts/check-deploy.js https://o-endereco-da-publicacao",
-    "",
-    "Serve tanto para produção quanto para uma pré-visualização. As duas",
-    "precisam passar: a pré-visualização é onde um erro de roteamento deve",
-    "aparecer, e não no domínio que já está recebendo gente.",
-    "",
-  ].join("\n"));
-  process.exit(2);
-}
+// O ENDEREÇO PADRÃO É O DE PRODUÇÃO.
+//
+// Antes, sem argumento, este script explicava e saía. Só que a conferência
+// que mais precisa acontecer — a da produção — é sempre no mesmo endereço, e
+// obrigar a digitá-lo toda vez é o tipo de atrito que faz a conferência
+// simplesmente deixar de ser feita.
+//
+// O que não pode acontecer é alguém achar que conferiu uma pré-visualização
+// quando conferiu a produção. Por isso o endereço em uso vai impresso no
+// cabeçalho da execução junto com a procedência dele.
+const PRODUCAO = "https://www.financemanager.dev.br";
+
+const informado = (process.argv[2] || process.env.DEPLOY_URL || "").trim().replace(/\/+$/, "");
+const alvo = informado || PRODUCAO;
+const procedencia = process.argv[2] ? "argumento" : (process.env.DEPLOY_URL ? "DEPLOY_URL" : "padrão do script");
 
 let base;
 try {
@@ -106,7 +107,8 @@ const CSP_ESPERADA = [
 ];
 
 async function main() {
-  console.log(`\nConferindo ${base.origin}\n`);
+  console.log(`\nConferindo ${base.origin}  (${procedencia})\n`);
+  if (!informado) console.log("Sem argumento, a conferência vai para a produção. Para checar uma pré-visualização, passe o endereço dela.\n");
 
   /* ---------------------------------------------------------------- *
    * 1. A RAIZ ENTREGA A PÁGINA COMERCIAL
