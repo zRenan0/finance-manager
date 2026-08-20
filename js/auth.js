@@ -154,7 +154,9 @@ const AccountAPI = (() => {
     session: () => request("session"), register: (body) => request("register", { method: "POST", body }),
     login: (body) => request("login", { method: "POST", body }), recover: (body) => request("recover", { method: "POST", body }),
     resend: (email) => request("resend", { method: "POST", body: { email } }),
-    exchange: (code) => request("exchange", { method: "POST", body: { code } }), logout: () => request("logout", { method: "POST", body: {} }),
+    exchange: (code) => request("exchange", { method: "POST", body: { code } }),
+    verify: (tokenHash, type) => request("verify", { method: "POST", body: { tokenHash, type } }),
+    logout: () => request("logout", { method: "POST", body: {} }),
     password: (password) => request("password", { method: "POST", body: { password } }), devices: () => request("devices"),
     revokeDevice: (deviceId) => request("revoke-device", { method: "POST", body: { deviceId } }),
     deleteAccount: (password, confirmation) => request("delete", { method: "POST", body: { password, confirmation } }),
@@ -264,13 +266,29 @@ function authLinkErrorMessage(codigo) {
 async function bootstrapAccount() {
   const params = new URLSearchParams(location.search || "");
   const code = params.get("code");
+  const tokenHash = params.get("token_hash");
   const callback = params.get("auth_callback");
   const recuperacao = callback === "recovery";
   const erroNaQuery = params.get("error_code") || params.get("error") || "";
   const erroNoHash = authCallbackError();
   let consumiu = false;
 
-  if (code) {
+  // O `token_hash` vem primeiro porque e o caminho novo, o que funciona em
+  // qualquer aparelho. Um link so traz um dos dois; a ordem decide caso o
+  // modelo de email seja trocado enquanto ainda ha link antigo circulando.
+  if (tokenHash) {
+    consumiu = true;
+    try {
+      const result = await AccountAPI.verify(tokenHash, params.get("type") || (recuperacao ? "recovery" : "signup"));
+      state.account.authenticated = true;
+      state.account.email = result.email || "";
+      state.account.pendingEmail = "";
+      state.account.mode = result.purpose === "recovery" ? "password" : "login";
+      state.account.message = result.purpose === "recovery"
+        ? "Defina uma nova senha para concluir a recuperação."
+        : "Email confirmado. Sua conta está pronta.";
+    } catch (error) { state.account.error = error.message; }
+  } else if (code) {
     consumiu = true;
     try {
       const result = await AccountAPI.exchange(code);
@@ -303,7 +321,10 @@ async function bootstrapAccount() {
   if (consumiu) {
     state.tab = "account";
     if (typeof NavHistory !== "undefined") NavHistory.replace("account", [], 0);
-    ["code", "auth_callback", "error", "error_code", "error_description"].forEach((chave) => params.delete(chave));
+    // `token_hash` sai daqui junto com o resto: ele confirma uma conta, e
+    // deixar isso na barra de endereços o entrega ao histórico, ao próximo
+    // `Referer` e a quem olhar a tela por cima do ombro.
+    ["code", "token_hash", "type", "auth_callback", "error", "error_code", "error_description"].forEach((chave) => params.delete(chave));
     const query = params.toString();
     // O hash só é limpo quando ERA aviso de erro do link. Limpar sempre
     // apagaria a rota do aplicativo, que também mora depois do `#`.

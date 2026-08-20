@@ -56,7 +56,36 @@ Consequência prática: **sem as variáveis do Supabase configuradas, as anális
    - reenviar a confirmação responde certo e também não chega;
    - com esta versão, o erro do envio deixa de ficar mudo e a tela mostra "O servidor não conseguiu enviar o email. Confira a configuração de SMTP do Supabase.";
    - no painel, Authentication → Logs registra `Error sending confirmation email`.
-6. Configure os modelos de email com o domínio real do produto antes de receber usuários externos.
+6. **Troque os modelos de email para apontarem o link ao SEU domínio** (Authentication → Emails → Templates).
+
+   O modelo padrão usa `{{ .ConfirmationURL }}`, que aponta para `https://SEU-PROJETO.supabase.co/auth/v1/verify?...`. Isso custa duas coisas de uma vez:
+
+   - **Spam.** O remetente é do seu domínio e o link é de outro. Filtro de spam lê remetente e link em domínios diferentes como sinal de phishing, e é um dos motivos mais comuns de a confirmação cair na caixa de spam mesmo com SPF e DKIM passando.
+   - **Só funciona no navegador que cadastrou.** Aquele caminho devolve um `code` que só vira sessão com o verificador PKCE, e o verificador é um cookie do navegador que pediu o link. Cadastrar no computador e abrir o email no celular não conclui.
+
+   Use `{{ .TokenHash }}`, que viaja dentro do link e não depende de cookie nenhum. Em **Confirm signup**:
+
+   ```html
+   <a href="https://SEU-DOMINIO/index.html?auth_callback=signup&token_hash={{ .TokenHash }}&type=signup">Confirmar meu email</a>
+   ```
+
+   Em **Reset password**:
+
+   ```html
+   <a href="https://SEU-DOMINIO/index.html?auth_callback=recovery&token_hash={{ .TokenHash }}&type=recovery">Definir nova senha</a>
+   ```
+
+   Quem recebe esse endereço é `bootstrapAccount()` em `js/auth.js`, que manda o token para `POST /api/account/verify`; o servidor troca por sessão e devolve os cookies. O token é apagado da barra de endereços logo depois, porque ele confirma uma conta e não pode ficar no histórico.
+
+   **Isto não substitui as URLs de redirecionamento do item 3.** Os links já enviados usam o caminho antigo, e ele continua atendido pela rota `exchange`. As duas entradas continuam necessárias enquanto houver link antigo circulando.
+
+7. Publique um registro **DMARC** para o domínio remetente. Sem ele, Gmail e Outlook penalizam a entrega mesmo com SPF e DKIM corretos. Comece em modo de observação, que não bloqueia nada:
+
+   ```
+   _dmarc.SEU-DOMINIO   TXT   "v=DMARC1; p=none; rua=mailto:VOCE@SEU-DOMINIO"
+   ```
+
+8. Configure o restante dos modelos de email com o nome e o domínio reais do produto antes de receber usuários externos.
 
 ## 1.1 O que o aplicativo faz com a confirmação
 

@@ -205,13 +205,72 @@ async function main() {
   check("o reenvio exige a mesma origem", outraOrigem.statusCode === 403, `${outraOrigem.statusCode} ${outraOrigem.body}`);
 
   /* ================================================================ *
-   * 6. O ERRO DO SUPABASE CHEGA TRADUZIDO, NÃO APAGADO
+   * 6. CONFIRMAR PELO `token_hash`, EM QUALQUER APARELHO
+   * ================================================================ *
+   * O caminho `code` + PKCE só conclui no navegador que pediu o link, porque o
+   * verificador mora num cookie de lá. Cadastrar no computador e abrir o email
+   * no celular é o caso comum, e nele o `exchange` não tem como funcionar.
+   *
+   * O `token_hash` viaja dentro do próprio link: não há estado deste lado, e
+   * por isso não há aparelho certo nem aparelho errado. O que este bloco
+   * garante é que a rota exista, valide o que recebe e devolva sessão.
+   */
+  console.log("\n6. Confirmação por token_hash");
+
+  let verificado = null;
+  api.auth.verifyToken = async (tokenHash, type) => {
+    verificado = { tokenHash, type };
+    return {
+      access_token: "access-secret", refresh_token: "refresh-secret", expires_in: 3600,
+      user: { id: USER, email: EMAIL, email_confirmed_at: "2026-08-20T12:00:00Z" },
+    };
+  };
+
+  const HASH = "pkce_5f3e9c1a7b2d4e6f8a0c2e4b6d8f0a1c3e5b7d9f";
+  const confirmado = await account.handler(event("POST", "verify", { tokenHash: HASH, type: "signup" }));
+  check("confirmar por token_hash devolve sessão", confirmado.statusCode === 200 && corpoDe(confirmado).authenticated === true, confirmado.body);
+  check("o token vai para o provedor sem ser alterado", verificado && verificado.tokenHash === HASH, JSON.stringify(verificado));
+  check("o tipo do link é repassado", verificado && verificado.type === "signup", JSON.stringify(verificado));
+  check("a confirmação devolve os cookies da sessão", cookiesDe(confirmado).length >= 2, String(cookiesDe(confirmado).length));
+  check("o cookie do PKCE é descartado no caminho novo", cookiesDe(confirmado).some((c) => /^cofre_pkce=;?/.test(c) || /^cofre_pkce=.*Max-Age=0/.test(c)), JSON.stringify(cookiesDe(confirmado)));
+
+  // NENHUM COOKIE: é exatamente o celular que não participou do cadastro.
+  const outroAparelho = await account.handler({
+    ...event("POST", "verify", { tokenHash: HASH, type: "signup" }),
+    headers: { origin: ORIGEM, host: HOST, "x-forwarded-proto": "https", "x-device-id": "device-celular-9876" },
+  });
+  check("o link vale num aparelho que nunca viu o cadastro", outroAparelho.statusCode === 200, `${outroAparelho.statusCode} ${outroAparelho.body}`);
+
+  const recuperar = await account.handler(event("POST", "verify", { tokenHash: HASH, type: "recovery" }));
+  check("o link de recuperação abre o formulário de nova senha", corpoDe(recuperar).purpose === "recovery", recuperar.body);
+
+  const tipoInventado = await account.handler(event("POST", "verify", { tokenHash: HASH, type: "../admin" }));
+  check("tipo fora da lista é recusado", tipoInventado.statusCode === 400 && corpoDe(tipoInventado).code === "invalid_callback", tipoInventado.body);
+
+  const hashTorto = await account.handler(event("POST", "verify", { tokenHash: "curto", type: "signup" }));
+  check("token malformado nem chega ao provedor", hashTorto.statusCode === 400 && corpoDe(hashTorto).code === "invalid_callback", hashTorto.body);
+
+  // Provedor que confirma sem devolver sessão não pode virar "entrou".
+  api.auth.verifyToken = async () => ({ user: { id: USER, email: EMAIL } });
+  const semSessao = await account.handler(event("POST", "verify", { tokenHash: HASH, type: "signup" }));
+  check("confirmação sem sessão não vira login", semSessao.statusCode === 400 && corpoDe(semSessao).code === "link_invalid", semSessao.body);
+  check("confirmação sem sessão não deixa cookie", cookiesDe(semSessao).length === 0, JSON.stringify(cookiesDe(semSessao)));
+
+  api.auth.verifyToken = async () => ({
+    access_token: "access-secret", refresh_token: "refresh-secret", expires_in: 3600,
+    user: { id: USER, email: EMAIL, email_confirmed_at: "2026-08-20T12:00:00Z" },
+  });
+  const verifyOutraOrigem = await account.handler(event("POST", "verify", { tokenHash: HASH, type: "signup" }, { origin: "https://attacker.test" }));
+  check("confirmar exige a mesma origem", verifyOutraOrigem.statusCode === 403, `${verifyOutraOrigem.statusCode} ${verifyOutraOrigem.body}`);
+
+  /* ================================================================ *
+   * 7. O ERRO DO SUPABASE CHEGA TRADUZIDO, NÃO APAGADO
    * ================================================================ *
    * Antes, todo 4xx virava a mesma frase. Era o que impedia de saber por que o
    * email não chegava, e o que fazia "falta rodar a migração" parecer senha
    * errada.
    */
-  console.log("\n6. A tradução do erro do Supabase");
+  console.log("\n7. A tradução do erro do Supabase");
 
   async function traduzir(status, corpo) {
     const originalFetch = globalThis.fetch;

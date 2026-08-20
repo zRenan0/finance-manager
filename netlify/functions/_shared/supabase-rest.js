@@ -140,6 +140,20 @@ const auth = {
     const query = redirectTo ? `?redirect_to=${encodeURIComponent(redirectTo)}` : "";
     return request(`/auth/v1/resend${query}`, { method: "POST", body: { type: "signup", email, code_challenge: challenge, code_challenge_method: "s256" } });
   },
+  // CONFIRMACAO PELO TOKEN DO PROPRIO LINK, SEM PASSAR PELO DOMINIO DO SUPABASE.
+  //
+  // O caminho `code` + PKCE exige que o verificador esteja no navegador que
+  // pediu o link, e o link mora em `<projeto>.supabase.co`. Isso custa duas
+  // coisas: o email sai com remetente de um dominio e link de outro, que os
+  // filtros de spam leem como phishing; e abrir o email no celular depois de
+  // cadastrar no computador nao conclui, porque o cookie ficou no computador.
+  //
+  // O `token_hash` viaja DENTRO do link. Nao ha estado guardado deste lado, e
+  // por isso o link vale em qualquer aparelho. E o mesmo caminho que o
+  // `verifyOtp({ token_hash, type })` do supabase-js usa.
+  verifyToken(tokenHash, type) {
+    return request("/auth/v1/verify", { method: "POST", body: { type, token_hash: tokenHash } });
+  },
   user(token) { return request("/auth/v1/user", { token }); },
   updateUser(token, body) { return request("/auth/v1/user", { method: "PUT", token, body }); },
   logout(token) { return request("/auth/v1/logout?scope=local", { method: "POST", token, body: {} }); },

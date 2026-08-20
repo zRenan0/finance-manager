@@ -67,6 +67,33 @@ function pkce() {
   const challenge = crypto.createHash("sha256").update(verifier).digest("base64url");
   return { verifier, challenge };
 }
+
+// CONFIRMACAO POR `token_hash`: O LINK NO NOSSO DOMINIO.
+//
+// Os tipos aceitos sao os que o GoTrue reconhece em `/auth/v1/verify`. A lista
+// e fechada porque o valor vem do endereco que o usuario clicou, e repassar
+// texto livre para o provedor e como nao validar nada.
+const VERIFY_TYPES = ["signup", "email", "recovery", "invite", "magiclink", "email_change"];
+
+function verifyTypeOf(value) {
+  const type = String(value || "").trim().toLowerCase();
+  if (VERIFY_TYPES.indexOf(type) < 0) {
+    throw Object.assign(new Error("O link não trouxe um código válido."), { statusCode: 400, code: "invalid_callback" });
+  }
+  return type;
+}
+
+// O formato do hash muda entre versoes do GoTrue (hexadecimal puro nas antigas,
+// prefixo `pkce_` nas novas), entao a checagem e de FORMA, nao de tamanho fixo:
+// so caracteres que podem aparecer num endereco sem escape, e um teto que
+// impede mandar um corpo qualquer para o provedor.
+function tokenHashOf(value) {
+  const hash = String(value || "").trim();
+  if (!/^[A-Za-z0-9_-]{16,512}$/.test(hash)) {
+    throw Object.assign(new Error("O link não trouxe um código válido."), { statusCode: 400, code: "invalid_callback" });
+  }
+  return hash;
+}
 // EMAIL CONFIRMADO É PRÉ-REQUISITO DE SESSÃO, NÃO DECORAÇÃO.
 //
 // O backend nunca olhava para isto. A tela dizia "Confira seu email para
@@ -150,7 +177,7 @@ async function handler(event) {
     if (!cfg.configured) return json(200, { ok: true, configured: false, authenticated: false });
     if (method !== "GET") assertSameOrigin(event);
     // Limite compartilhado entre instâncias e persistido (ver _shared/rate-limit.js).
-    if (["register", "login", "recover", "resend", "exchange", "password", "delete"].includes(action)) {
+    if (["register", "login", "recover", "resend", "exchange", "verify", "password", "delete"].includes(action)) {
       await rateLimit.enforce(event, { bucket: "conta", limit: RATE_MAX_ATTEMPTS, windowSeconds: RATE_WINDOW_SECONDS });
     }
 
@@ -206,6 +233,25 @@ async function handler(event) {
         if (!error || (error.code !== "already_confirmed" && error.code !== "user_not_found")) throw error;
       }
       return json(200, { ok: true, sent: true }, { cookies });
+    }
+    // CAMINHO NOVO: o link do email aponta para o nosso dominio e traz o
+    // `token_hash`. Nao consulta cookie nenhum, entao vale no celular depois de
+    // cadastrar no computador, que e o caso que o `exchange` abaixo nao cobre.
+    // O `exchange` continua existindo porque os links JA ENVIADOS usam ele.
+    if (action === "verify" && method === "POST") {
+      const body = readJson(event, 16 * 1024);
+      const type = verifyTypeOf(body.type);
+      const result = await api.auth.verifyToken(tokenHashOf(body.tokenHash), type);
+      // Provedor que confirma sem devolver sessao deixaria o aplicativo achando
+      // que entrou. Melhor tratar como link gasto e mandar entrar com a senha.
+      if (!result || !result.access_token || !result.user || !result.user.id) {
+        throw Object.assign(new Error("Este link não vale mais. Entre com seu email e senha."), { statusCode: 400, code: "link_invalid" });
+      }
+      const device = await touchDevice(result.user.id, event, true);
+      return json(200, {
+        ok: true, authenticated: true, purpose: type === "recovery" ? "recovery" : "signup",
+        email: result.user.email || "", userId: result.user.id,
+      }, { cookies: [...sessionCookies(event, result), ...device.cookies, clearCookie(VERIFIER, event)] });
     }
     if (action === "exchange" && method === "POST") {
       const body = readJson(event, 16 * 1024); const stored = String(cookiesOf(event)[VERIFIER] || "");

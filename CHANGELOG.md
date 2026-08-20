@@ -1,5 +1,42 @@
 # Histórico de versões
 
+## 0.29.2
+
+O link do email de confirmação passou a apontar para o domínio do produto, em
+vez do domínio do Supabase. Resolve dois problemas que tinham a mesma raiz: o
+email caindo em spam, e a confirmação que só funcionava no navegador que
+cadastrou.
+
+### O link do email agora é do nosso domínio
+
+- **Nova rota `POST /api/account/verify`.** Ela recebe o `token_hash` que o
+  próprio link carrega e o troca por sessão em `/auth/v1/verify` do Supabase.
+  É o mesmo caminho que o `verifyOtp({ token_hash, type })` do supabase-js usa.
+- **Confirmar deixou de depender do aparelho.** O caminho anterior devolvia um
+  `code` que só vira sessão com o verificador PKCE, e o verificador é um cookie
+  do navegador que pediu o link. Cadastrar no computador e abrir o email no
+  celular, que é o caso comum, não concluía. O `token_hash` viaja dentro do
+  link e não guarda estado deste lado, então vale em qualquer aparelho.
+- **Remetente e link no mesmo domínio.** O modelo padrão do Supabase aponta
+  para `SEU-PROJETO.supabase.co`, enquanto o email sai do domínio do produto.
+  Filtro de spam lê essa combinação como phishing, e era o que sobrava depois
+  de SPF e DKIM já estarem corretos.
+- **O token não fica na barra de endereços.** Ele confirma uma conta, então é
+  apagado da URL junto com o resto do retorno, e não entra no histórico nem no
+  próximo `Referer`.
+- **O caminho antigo continua atendido.** A rota `exchange` não foi removida:
+  os links que já saíram usam ela, e quebrá-los seria trocar um defeito por
+  outro. O aplicativo tenta o `token_hash` primeiro e cai no `code` depois.
+- **A rota valida antes de repassar.** O tipo do link sai de uma lista fechada
+  e o formato do token é conferido, porque os dois vêm do endereço que a pessoa
+  clicou. Confirmação que volta sem sessão é tratada como link gasto, e não
+  como login concluído.
+
+### Documentação
+
+- `docs/BACKEND_SETUP.md` ganhou os modelos de email prontos, com
+  `{{ .TokenHash }}`, e a instrução de publicar um registro DMARC, que faltava.
+
 ## 0.29.1
 
 Correção do cadastro por email e do diagnóstico da sincronização. Três defeitos
