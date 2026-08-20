@@ -1,0 +1,1235 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+
+<title>Cofre | Organizador financeiro pessoal</title>
+<meta name="description" content="Veja quanto entrou, quanto saiu e quanto realmente sobrou, com contas, metas e patrimônio no mesmo painel. Sem conectar banco. Grátis no beta." />
+
+<!-- ENDEREÇO ABSOLUTO.
+     O domínio público ainda não está fixado neste repositório, e inventar um
+     seria pior do que não ter: `og:url` errado quebra o compartilhamento de
+     verdade. As três marcas abaixo saem relativas do código-fonte e o
+     `scripts/build-dist.js` as reescreve para absolutas quando a publicação
+     informa o endereço (na Vercel, `VERCEL_PROJECT_PRODUCTION_URL` já vem
+     pronta no ambiente de build; fora
+     dela, use `SITE_URL=https://seu-dominio npm run build:dist`). -->
+<link rel="canonical" href="/" data-lp-absolute />
+<meta name="robots" content="index, follow, max-image-preview:large" />
+
+<meta name="theme-color" content="#05100D" />
+<meta name="color-scheme" content="dark" />
+
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="Cofre" />
+<meta property="og:locale" content="pt_BR" />
+<meta property="og:url" content="/" data-lp-absolute />
+<meta property="og:title" content="Cofre | Todo mês some um dinheiro. Aqui ele aparece." />
+<meta property="og:description" content="Organizador financeiro pessoal: quanto entrou, quanto saiu, quanto sobrou, e como o patrimônio está evoluindo. Sem conectar banco, com os dados no seu aparelho." />
+<meta property="og:image" content="icons/icon-512.png" data-lp-absolute />
+<meta property="og:image:alt" content="Marca do Cofre: um cofre com um visto dentro." />
+
+<meta name="twitter:card" content="summary" />
+<meta name="twitter:title" content="Cofre | Todo mês some um dinheiro. Aqui ele aparece." />
+<meta name="twitter:description" content="Organizador financeiro pessoal com contas, metas, patrimônio e nove simuladores. Os dados ficam no seu aparelho." />
+<meta name="twitter:image" content="icons/icon-512.png" data-lp-absolute />
+
+<link rel="icon" href="icons/icon-192.png" />
+<link rel="apple-touch-icon" href="icons/icon-192.png" />
+<!-- O manifesto é o mesmo do aplicativo, e o `start_url` dele aponta para o
+     aplicativo. Instalar a partir daqui instala o produto, não o folheto. -->
+<link rel="manifest" href="manifest.webmanifest" />
+
+<script src="js/landing-boot.js"></script>
+<link rel="stylesheet" href="css/landing.css" />
+<script src="js/landing.js" defer></script>
+</head>
+<body class="lp">
+
+<a class="lp-skip" href="#conteudo">Pular para o conteúdo</a>
+
+<!-- Atmosfera: grade técnica, brilho que acompanha o cursor e granulação. Puramente decorativa. -->
+<div class="lp-atmos" aria-hidden="true">
+  <div class="lp-atmos__grid"></div>
+  <div class="lp-atmos__glow" data-cursor-glow></div>
+  <div class="lp-atmos__noise"></div>
+</div>
+
+<header class="lp-nav" data-nav>
+  <div class="lp-nav__inner">
+    <a class="lp-brand" href="/" aria-label="Cofre, página inicial">
+      <span class="lp-brand__mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32" fill="none" focusable="false">
+          <rect x="2.5" y="4.5" width="27" height="23" rx="6.5" stroke="currentColor" stroke-width="1.7"/>
+          <circle cx="16" cy="16" r="7" stroke="currentColor" stroke-width="1.7"/>
+          <path d="M12.4 18.1 15 15.2l2.3 2 3.4-4.4" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M16 6.4v-3M16 28.6v3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+        </svg>
+      </span>
+      <span class="lp-brand__word">Cofre</span>
+    </a>
+
+    <nav class="lp-nav__links" aria-label="Seções da página">
+      <a href="#recursos">Recursos</a>
+      <a href="#simuladores">Simuladores</a>
+      <a href="#seguranca">Segurança</a>
+      <a href="#precos">Preços</a>
+      <a href="#faq">FAQ</a>
+    </nav>
+
+    <div class="lp-nav__actions">
+      <a class="lp-link-quiet" href="index.html#/conta-e-acesso">Entrar</a>
+      <a class="lp-btn lp-btn--primary lp-btn--sm" href="index.html" data-magnetic>
+        <span>Começar grátis</span>
+      </a>
+      <button class="lp-nav__toggle" type="button" data-menu-toggle aria-expanded="false" aria-controls="menu-mobile" aria-label="Abrir menu">
+        <span class="lp-nav__bars" aria-hidden="true"><i></i><i></i></span>
+      </button>
+    </div>
+  </div>
+
+  <div class="lp-nav__sheet" id="menu-mobile" data-menu hidden>
+    <a href="#recursos">Recursos</a>
+    <a href="#simuladores">Simuladores</a>
+    <a href="#como-funciona">Como funciona</a>
+    <a href="#seguranca">Segurança</a>
+    <a href="#precos">Preços</a>
+    <a href="#faq">FAQ</a>
+    <a href="index.html#/conta-e-acesso">Entrar</a>
+    <a class="lp-nav__sheet-cta" href="index.html">Começar grátis</a>
+  </div>
+
+  <span class="lp-nav__progress" data-scroll-progress aria-hidden="true"></span>
+</header>
+
+<main id="conteudo">
+
+<!-- ================================================================
+     1. HERO. O texto apresenta; o painel prova.
+     ================================================================ -->
+<section class="lp-hero" data-hero>
+  <div class="lp-shell">
+    <div class="lp-hero__intro">
+      <p class="lp-eyebrow lp-anim" data-anim="1">
+        <span class="lp-eyebrow__dot" data-loop aria-hidden="true"></span>
+        Beta aberto · grátis · sem cartão
+      </p>
+
+      <h1 class="lp-hero__title">
+        <span class="lp-line lp-anim" data-anim="2"><span>Todo mês some</span></span>
+        <span class="lp-line lp-anim" data-anim="3"><span>um dinheiro.</span></span>
+        <span class="lp-line lp-anim" data-anim="4"><span class="lp-accent">Aqui ele aparece.</span></span>
+      </h1>
+
+      <p class="lp-hero__lead lp-anim" data-anim="5">
+        Veja quanto entrou, quanto saiu e quanto <em>realmente sobrou</em>, com contas,
+        metas e patrimônio organizados num lugar só.
+      </p>
+
+      <div class="lp-hero__actions lp-anim" data-anim="6">
+        <a class="lp-btn lp-btn--primary lp-btn--lg" href="index.html" data-magnetic>
+          <span>Começar grátis</span>
+          <svg class="lp-btn__arrow" viewBox="0 0 16 16" fill="none" aria-hidden="true" focusable="false">
+            <path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </a>
+        <a class="lp-btn lp-btn--ghost lp-btn--lg" href="#historia">
+          <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" focusable="false">
+            <circle cx="8" cy="8" r="6.4" stroke="currentColor" stroke-width="1.4"/>
+            <path d="M6.6 5.4 11 8l-4.4 2.6V5.4Z" fill="currentColor"/>
+          </svg>
+          <span>Ver como funciona</span>
+        </a>
+      </div>
+
+      <p class="lp-hero__micro lp-anim" data-anim="7">
+        Dá para usar sem criar conta. Nenhuma senha de banco, em nenhum momento.
+      </p>
+    </div>
+  </div>
+
+  <div class="lp-hero__stage">
+    <div class="lp-stage__halo" aria-hidden="true"></div>
+
+    <div class="lp-app lp-anim" data-anim="8" data-app>
+      <div class="lp-app__bar">
+        <span class="lp-app__dots" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="lp-app__crumb">Cofre <span aria-hidden="true">/</span> Início</span>
+        <span class="lp-badge lp-badge--demo">demonstração</span>
+      </div>
+
+      <div class="lp-app__body">
+        <nav class="lp-app__rail" aria-label="Navegação ilustrativa do aplicativo">
+          <span class="lp-app__railitem is-active" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none"><path d="M3.5 9 10 3.8 16.5 9v6.4a1.1 1.1 0 0 1-1.1 1.1H4.6a1.1 1.1 0 0 1-1.1-1.1V9Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg></span>
+          <span class="lp-app__railitem" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none"><path d="M3.6 6.2h12.8M3.6 10h12.8M3.6 13.8h8.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
+          <span class="lp-app__railitem" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none"><rect x="3.4" y="5.4" width="13.2" height="9.6" rx="2.2" stroke="currentColor" stroke-width="1.5"/><path d="M3.4 8.6h13.2" stroke="currentColor" stroke-width="1.5"/></svg></span>
+          <span class="lp-app__railitem" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none"><path d="M4 15V9.4M8 15V5.2M12 15v-4M16 15V7.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></span>
+          <span class="lp-app__railitem" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="6.4" stroke="currentColor" stroke-width="1.5"/><path d="M10 6.4v3.8l2.6 1.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
+          <span class="lp-app__railitem lp-app__railitem--foot" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="2.6" stroke="currentColor" stroke-width="1.5"/><path d="M10 3.4v1.8M10 14.8v1.8M16.6 10h-1.8M5.2 10H3.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
+        </nav>
+
+        <div class="lp-app__screen">
+          <header class="lp-app__head">
+            <div>
+              <p class="lp-app__hello">Olá, Lucas</p>
+              <p class="lp-app__when">Agosto de 2026</p>
+            </div>
+            <div class="lp-app__headright">
+              <span class="lp-pill">Tudo conciliado</span>
+              <span class="lp-app__avatar" aria-hidden="true">L</span>
+            </div>
+          </header>
+
+          <div class="lp-app__layout">
+            <section class="lp-card lp-card--balance" data-stagger="1">
+              <p class="lp-card__label">Patrimônio total</p>
+              <p class="lp-card__amount" data-count="18750" data-count-decimals="2">R$ 18.750,00</p>
+              <p class="lp-card__delta">
+                <svg viewBox="0 0 12 12" fill="none" aria-hidden="true" focusable="false"><path d="M6 9.5v-7M3 5.5 6 2.5l3 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                8,4% nos últimos 6 meses
+              </p>
+
+              <figure class="lp-chart" data-chart>
+                <svg viewBox="0 0 620 180" preserveAspectRatio="none" role="img" aria-label="Gráfico ilustrativo do patrimônio subindo ao longo de doze meses.">
+                  <defs>
+                    <linearGradient id="lpFillHero" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stop-color="var(--lp-brand)" stop-opacity="0.34"/>
+                      <stop offset="100%" stop-color="var(--lp-brand)" stop-opacity="0"/>
+                    </linearGradient>
+                  </defs>
+                  <g class="lp-chart__grid" aria-hidden="true">
+                    <line x1="0" y1="40" x2="620" y2="40"/>
+                    <line x1="0" y1="82" x2="620" y2="82"/>
+                    <line x1="0" y1="124" x2="620" y2="124"/>
+                    <line x1="0" y1="166" x2="620" y2="166"/>
+                  </g>
+                  <path class="lp-chart__area" data-chart-area fill="url(#lpFillHero)" d="M16 145.8L69.5 137.5L122.9 131.6L176.4 117.4L229.8 122.2L283.3 103.2L336.7 95L390.2 87.9L443.6 72.5L497.1 63.1L550.5 52.4L604 32.9L604 178L16 178Z"/>
+                  <path class="lp-chart__line" data-chart-line pathLength="1" fill="none" d="M16 145.8L69.5 137.5L122.9 131.6L176.4 117.4L229.8 122.2L283.3 103.2L336.7 95L390.2 87.9L443.6 72.5L497.1 63.1L550.5 52.4L604 32.9"/>
+                  <circle class="lp-chart__head" data-chart-head cx="604" cy="32.9" r="4.5"/>
+                </svg>
+                <figcaption class="lp-chart__axis" aria-hidden="true">
+                  <span>set</span><span>out</span><span>nov</span><span>dez</span><span>jan</span><span>fev</span><span>mar</span><span>abr</span><span>mai</span><span>jun</span><span>jul</span><span>ago</span>
+                </figcaption>
+              </figure>
+            </section>
+
+            <section class="lp-card lp-card--goal" data-stagger="2">
+              <p class="lp-card__label">Meta em andamento</p>
+              <div class="lp-goal">
+                <div class="lp-ring lp-ring--61">
+                  <svg viewBox="0 0 84 84" role="img" aria-label="Progresso da meta: 61 por cento.">
+                    <circle class="lp-ring__track" cx="42" cy="42" r="34"/>
+                    <circle class="lp-ring__value" cx="42" cy="42" r="34" pathLength="1"/>
+                  </svg>
+                  <span class="lp-ring__num" data-count="61" data-count-suffix="%">61%</span>
+                </div>
+                <div class="lp-goal__text">
+                  <p class="lp-goal__name">Viagem para a Europa</p>
+                  <p class="lp-goal__value"><b>R$ 7.350</b> de R$ 12.000</p>
+                  <p class="lp-goal__hint">Mantendo o ritmo, fecha em maio.</p>
+                </div>
+              </div>
+              <div class="lp-goal__foot">
+                <span class="lp-goal__pace">Guardando <b>R$ 620</b> por mês</span>
+                <span class="lp-goal__months" aria-hidden="true">
+                  <i class="is-done"></i><i class="is-done"></i><i class="is-done"></i><i class="is-done"></i><i class="is-done"></i><i class="is-done"></i><i class="is-done"></i><i></i><i></i><i></i><i></i><i></i>
+                </span>
+              </div>
+            </section>
+
+            <section class="lp-card lp-card--tiles" data-stagger="3">
+              <div class="lp-tile lp-tile--in">
+                <p class="lp-tile__label">Receitas</p>
+                <p class="lp-tile__value" data-count="5420" data-count-decimals="2">R$ 5.420,00</p>
+                <span class="lp-tile__bar" aria-hidden="true"></span>
+              </div>
+              <div class="lp-tile lp-tile--out">
+                <p class="lp-tile__label">Despesas</p>
+                <p class="lp-tile__value" data-count="3180" data-count-decimals="2">R$ 3.180,00</p>
+                <span class="lp-tile__bar" aria-hidden="true"></span>
+              </div>
+              <div class="lp-tile lp-tile--net">
+                <p class="lp-tile__label">Saldo do mês</p>
+                <p class="lp-tile__value" data-count="2240" data-count-decimals="2">R$ 2.240,00</p>
+                <span class="lp-tile__bar" aria-hidden="true"></span>
+              </div>
+            </section>
+
+            <section class="lp-card lp-card--cats" data-stagger="4">
+              <p class="lp-card__label">Para onde foram os R$ 3.180,00</p>
+              <ul class="lp-cats">
+                <li class="lp-cat lp-cat--1"><span class="lp-cat__name">Moradia</span><span class="lp-cat__track"><i></i></span><span class="lp-cat__value">R$ 1.017,60</span></li>
+                <li class="lp-cat lp-cat--2"><span class="lp-cat__name">Alimentação</span><span class="lp-cat__track"><i></i></span><span class="lp-cat__value">R$ 763,20</span></li>
+                <li class="lp-cat lp-cat--3"><span class="lp-cat__name">Transporte</span><span class="lp-cat__track"><i></i></span><span class="lp-cat__value">R$ 477,00</span></li>
+                <li class="lp-cat lp-cat--4"><span class="lp-cat__name">Lazer</span><span class="lp-cat__track"><i></i></span><span class="lp-cat__value">R$ 349,80</span></li>
+                <li class="lp-cat lp-cat--5"><span class="lp-cat__name">Assinaturas</span><span class="lp-cat__track"><i></i></span><span class="lp-cat__value">R$ 254,40</span></li>
+                <li class="lp-cat lp-cat--6"><span class="lp-cat__name">Outros</span><span class="lp-cat__track"><i></i></span><span class="lp-cat__value">R$ 318,00</span></li>
+              </ul>
+            </section>
+
+            <section class="lp-card lp-card--moves" data-stagger="5">
+              <p class="lp-card__label">Últimos lançamentos</p>
+              <ul class="lp-moves">
+                <li><span class="lp-moves__icon lp-moves__icon--food" aria-hidden="true"></span><span class="lp-moves__main"><b>Mercado Bom Preço</b><small>Alimentação · hoje</small></span><span class="lp-moves__val">- R$ 214,90</span></li>
+                <li><span class="lp-moves__icon lp-moves__icon--in" aria-hidden="true"></span><span class="lp-moves__main"><b>Salário</b><small>Receita · 05/08</small></span><span class="lp-moves__val lp-moves__val--in">+ R$ 5.420,00</span></li>
+                <li><span class="lp-moves__icon lp-moves__icon--home" aria-hidden="true"></span><span class="lp-moves__main"><b>Aluguel</b><small>Moradia · 05/08</small></span><span class="lp-moves__val">- R$ 1.450,00</span></li>
+              </ul>
+            </section>
+
+            <p class="lp-app__insight" data-stagger="6">
+              <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" focusable="false"><path d="M8 1.8a4.4 4.4 0 0 0-2.6 7.95c.4.3.63.76.63 1.25v.2h3.94v-.2c0-.49.23-.95.63-1.25A4.4 4.4 0 0 0 8 1.8Z" stroke="currentColor" stroke-width="1.3"/><path d="M6.5 13.4h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+              <span>Seus gastos com delivery caíram <b>18%</b> este mês.</span>
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="lp-float lp-float--alert lp-anim" data-anim="9" data-loop aria-hidden="true">
+      <span class="lp-float__dot"></span>
+      <span class="lp-float__body"><b>Assinatura vence em 3 dias</b><small>Streaming de vídeo · R$ 44,90</small></span>
+    </div>
+
+    <div class="lp-float lp-float--proj lp-anim" data-anim="10" data-loop aria-hidden="true">
+      <span class="lp-float__label">Projeção de fechamento</span>
+      <span class="lp-float__value">R$ 1.840</span>
+      <span class="lp-float__spark">
+        <svg viewBox="0 0 92 26" fill="none" preserveAspectRatio="none"><path d="M1 20 12 17 23 19 34 12 45 14 56 8 67 9 78 4 91 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </span>
+    </div>
+  </div>
+
+  <a class="lp-scrollhint" href="#caos" aria-label="Rolar para a próxima seção">
+    <span class="lp-scrollhint__rail" aria-hidden="true"><i data-loop></i></span>
+    <span class="lp-scrollhint__word">role</span>
+  </a>
+</section>
+
+<!-- ================================================================
+     2. FAIXA DE CONFIANÇA. Três objeções derrubadas antes da narrativa
+     longa começar. É faixa, não seção: nada de três cartões grandes.
+     ================================================================ -->
+<section class="lp-strip" aria-label="Como o Cofre trata seus dados">
+  <ul class="lp-shell lp-strip__list">
+    <li class="lp-strip__item">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
+        <path d="M3.6 9.6 12 4.8l8.4 4.8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M5.8 11.6v6M10 11.6v6M14 11.6v6M18.2 11.6v6M3.4 19.6h17.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        <path d="M4 20 20 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+      </svg>
+      <span>Sem conectar banco</span>
+    </li>
+    <li class="lp-strip__item">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
+        <rect x="7" y="2.8" width="10" height="18.4" rx="2.6" stroke="currentColor" stroke-width="1.5"/>
+        <path d="M10.4 5.4h3.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        <rect x="9.6" y="11" width="4.8" height="4" rx="1.1" stroke="currentColor" stroke-width="1.4"/>
+        <path d="M10.7 11v-1.1a1.3 1.3 0 0 1 2.6 0V11" stroke="currentColor" stroke-width="1.4"/>
+      </svg>
+      <span>Dados no seu aparelho por padrão</span>
+    </li>
+    <li class="lp-strip__item">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
+        <path d="M6.6 18.4a3.8 3.8 0 0 1-.5-7.57 5.2 5.2 0 0 1 9.96-1.36A4.3 4.3 0 0 1 18.6 18.4H6.6Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+        <path d="M4 20.4 20 3.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+      </svg>
+      <span>Funciona offline</span>
+    </li>
+  </ul>
+</section>
+
+<!-- ================================================================
+     3. CAOS. O problema, mostrado em vez de descrito: as pontas soltas
+     do mês entram na tela espalhadas e convergem para o painel.
+     ================================================================ -->
+<section class="lp-sec lp-caos" id="caos" data-caos>
+  <div class="lp-shell">
+    <header class="lp-head lp-head--center">
+      <p class="lp-kicker">O problema</p>
+      <h2 class="lp-h2">O dinheiro não some.<br>Ele se espalha.</h2>
+      <p class="lp-lead">
+        O salário cai numa conta. O cartão fecha em outra data. O Pix sai do celular,
+        o boleto chega por e-mail, a assinatura renova sozinha e a parcela some no meio.
+        No fim do mês sobra a pergunta de sempre: <b>cadê o dinheiro?</b>
+      </p>
+    </header>
+
+    <div class="lp-caos__stage">
+      <div class="lp-caos__field" aria-hidden="true">
+        <span class="lp-chip lp-chip--1">Pix R$ 120</span>
+        <span class="lp-chip lp-chip--2">Boleto luz</span>
+        <span class="lp-chip lp-chip--3">Cartão 3/10</span>
+        <span class="lp-chip lp-chip--4">Assinatura</span>
+        <span class="lp-chip lp-chip--5">Mercado</span>
+        <span class="lp-chip lp-chip--6">Uber</span>
+        <span class="lp-chip lp-chip--7">Aluguel</span>
+        <span class="lp-chip lp-chip--8">Salário</span>
+        <span class="lp-chip lp-chip--9">Farmácia</span>
+        <span class="lp-chip lp-chip--10">Parcela do carro</span>
+        <span class="lp-chip lp-chip--11">Meta: Europa</span>
+        <span class="lp-chip lp-chip--12">Internet</span>
+      </div>
+
+      <div class="lp-caos__target">
+        <div class="lp-caos__panel">
+          <span class="lp-caos__panelhead">
+            <b>Agosto</b>
+            <span>fechado e conferido</span>
+          </span>
+          <span class="lp-caos__rows">
+            <i class="lp-caos__row lp-caos__row--a"></i>
+            <i class="lp-caos__row lp-caos__row--b"></i>
+            <i class="lp-caos__row lp-caos__row--c"></i>
+            <i class="lp-caos__row lp-caos__row--d"></i>
+          </span>
+          <span class="lp-caos__total">
+            <small>Sobrou este mês</small>
+            <b>R$ 2.240,00</b>
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <p class="lp-caos__punch">Tudo isso cabe em <span class="lp-accent">uma tela só</span>.</p>
+  </div>
+</section>
+
+<!-- ================================================================
+     4. HISTÓRIA DO PRODUTO.
+     No desktop: texto à esquerda, interface fixa à direita, trocando
+     de estado a cada etapa.
+     No celular: composição própria. A interface fixa sai de cena e
+     cada etapa carrega o seu próprio recorte da tela, logo abaixo do
+     texto que ele ilustra. Sticky no estreito colocava o painel por
+     cima do texto; não é um problema de margem, é de composição.
+     ================================================================ -->
+<section class="lp-sec lp-story" id="historia" data-story>
+  <div class="lp-shell">
+    <header class="lp-head">
+      <p class="lp-kicker">Da bagunça ao controle</p>
+      <h2 class="lp-h2">Quatro telas resolvem<br>o mês inteiro.</h2>
+    </header>
+
+    <div class="lp-story__grid">
+      <div class="lp-story__stage" aria-hidden="true">
+        <div class="lp-story__frame">
+          <span class="lp-story__chrome"><i></i><i></i><i></i><b>demonstração</b></span>
+
+          <div class="lp-panel is-active" data-panel="1">
+            <p class="lp-panel__title">Gastos de agosto</p>
+            <p class="lp-panel__big">R$ 3.180,00</p>
+            <span class="lp-stackbar">
+              <i class="lp-stackbar--a"></i><i class="lp-stackbar--b"></i><i class="lp-stackbar--c"></i><i class="lp-stackbar--d"></i><i class="lp-stackbar--e"></i><i class="lp-stackbar--f"></i>
+            </span>
+            <ul class="lp-panel__list">
+              <li><span class="lp-swatch lp-swatch--a"></span>Moradia<b>32%</b><em>R$ 1.017,60</em></li>
+              <li><span class="lp-swatch lp-swatch--b"></span>Alimentação<b>24%</b><em>R$ 763,20</em></li>
+              <li><span class="lp-swatch lp-swatch--c"></span>Transporte<b>15%</b><em>R$ 477,00</em></li>
+              <li><span class="lp-swatch lp-swatch--d"></span>Lazer<b>11%</b><em>R$ 349,80</em></li>
+            </ul>
+            <p class="lp-panel__note">Delivery aparece dentro de Alimentação e caiu 18% em relação a julho.</p>
+          </div>
+
+          <div class="lp-panel" data-panel="2">
+            <p class="lp-panel__title">Orçamento de agosto</p>
+            <p class="lp-panel__big">R$ 2.050,00 <small>planejados</small></p>
+            <ul class="lp-budget">
+              <li><span>Alimentação</span><span class="lp-budget__track"><i class="lp-budget--85"></i></span><b>R$ 763 / 900</b></li>
+              <li class="is-over"><span>Transporte</span><span class="lp-budget__track"><i class="lp-budget--106"></i></span><b>R$ 477 / 450</b></li>
+              <li><span>Lazer</span><span class="lp-budget__track"><i class="lp-budget--87"></i></span><b>R$ 349 / 400</b></li>
+              <li><span>Assinaturas</span><span class="lp-budget__track"><i class="lp-budget--85b"></i></span><b>R$ 254 / 300</b></li>
+            </ul>
+            <p class="lp-panel__alert">Transporte passou do teto em R$ 27,00. Ainda dá tempo de compensar.</p>
+          </div>
+
+          <div class="lp-panel" data-panel="3">
+            <p class="lp-panel__title">Suas metas</p>
+            <ul class="lp-goals">
+              <li>
+                <span class="lp-goals__row"><b>Viagem para a Europa</b><em>61%</em></span>
+                <span class="lp-goals__track"><i class="lp-goals--61"></i></span>
+                <small>R$ 7.350 de R$ 12.000 · faltam R$ 4.650</small>
+              </li>
+              <li>
+                <span class="lp-goals__row"><b>Reserva de emergência</b><em>38%</em></span>
+                <span class="lp-goals__track"><i class="lp-goals--38"></i></span>
+                <small>R$ 4.560 de R$ 12.000 · faltam R$ 7.440</small>
+              </li>
+              <li>
+                <span class="lp-goals__row"><b>Trocar o notebook</b><em>84%</em></span>
+                <span class="lp-goals__track"><i class="lp-goals--84"></i></span>
+                <small>R$ 4.200 de R$ 5.000 · faltam R$ 800</small>
+              </li>
+            </ul>
+            <p class="lp-panel__note">Guardando R$ 620 por mês, a primeira meta fecha em maio.</p>
+          </div>
+
+          <div class="lp-panel" data-panel="4">
+            <p class="lp-panel__title">Evolução do patrimônio</p>
+            <p class="lp-panel__big">R$ 18.750,00 <small class="lp-up">+8,4%</small></p>
+            <span class="lp-bars">
+              <i class="lp-bars--1"></i><i class="lp-bars--2"></i><i class="lp-bars--3"></i><i class="lp-bars--4"></i><i class="lp-bars--5"></i><i class="lp-bars--6"></i><i class="lp-bars--7"></i><i class="lp-bars--8"></i><i class="lp-bars--9"></i><i class="lp-bars--10"></i><i class="lp-bars--11"></i><i class="lp-bars--12"></i>
+            </span>
+            <ul class="lp-panel__list lp-panel__list--plain">
+              <li><span class="lp-swatch lp-swatch--a"></span>Conta e reserva<b></b><em>R$ 9.310,00</em></li>
+              <li><span class="lp-swatch lp-swatch--b"></span>Investimentos<b></b><em>R$ 7.980,00</em></li>
+              <li><span class="lp-swatch lp-swatch--c"></span>Outros bens<b></b><em>R$ 1.460,00</em></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <ol class="lp-story__steps">
+        <li class="lp-step" data-step="1">
+          <span class="lp-step__num">01</span>
+          <h3 class="lp-step__title">Saiba exatamente para onde seu dinheiro está indo.</h3>
+          <p>Cada gasto entra numa categoria e vira gráfico sozinho. Sem fórmula, sem aba escondida, sem descobrir no extrato do banco três semanas depois.</p>
+          <div class="lp-step__art lp-reveal" aria-hidden="true">
+            <p class="lp-panel__title">Gastos de agosto</p>
+            <p class="lp-panel__big">R$ 3.180,00</p>
+            <span class="lp-stackbar">
+              <i class="lp-stackbar--a"></i><i class="lp-stackbar--b"></i><i class="lp-stackbar--c"></i><i class="lp-stackbar--d"></i><i class="lp-stackbar--e"></i><i class="lp-stackbar--f"></i>
+            </span>
+            <ul class="lp-panel__list">
+              <li><span class="lp-swatch lp-swatch--a"></span>Moradia<b>32%</b><em>R$ 1.017,60</em></li>
+              <li><span class="lp-swatch lp-swatch--b"></span>Alimentação<b>24%</b><em>R$ 763,20</em></li>
+            </ul>
+          </div>
+        </li>
+
+        <li class="lp-step" data-step="2">
+          <span class="lp-step__num">02</span>
+          <h3 class="lp-step__title">Planeje antes de gastar, não depois.</h3>
+          <p>Você define um teto por categoria e o app avisa quando o mês está apertando. O aviso chega no meio do mês, que é quando ele ainda serve para alguma coisa.</p>
+          <div class="lp-step__art lp-reveal" aria-hidden="true">
+            <p class="lp-panel__title">Orçamento de agosto</p>
+            <ul class="lp-budget">
+              <li><span>Alimentação</span><span class="lp-budget__track"><i class="lp-budget--85"></i></span><b>R$ 763 / 900</b></li>
+              <li class="is-over"><span>Transporte</span><span class="lp-budget__track"><i class="lp-budget--106"></i></span><b>R$ 477 / 450</b></li>
+              <li><span>Lazer</span><span class="lp-budget__track"><i class="lp-budget--87"></i></span><b>R$ 349 / 400</b></li>
+            </ul>
+            <p class="lp-panel__alert">Transporte passou do teto em R$ 27,00.</p>
+          </div>
+        </li>
+
+        <li class="lp-step" data-step="3">
+          <span class="lp-step__num">03</span>
+          <h3 class="lp-step__title">Transforme objetivo em meta com data.</h3>
+          <p>Viagem, reserva de emergência, trocar o carro. Você diz quanto e para quando; o app mostra quanto precisa guardar por mês e o quanto já andou.</p>
+          <div class="lp-step__art lp-reveal" aria-hidden="true">
+            <p class="lp-panel__title">Suas metas</p>
+            <ul class="lp-goals">
+              <li>
+                <span class="lp-goals__row"><b>Viagem para a Europa</b><em>61%</em></span>
+                <span class="lp-goals__track"><i class="lp-goals--61"></i></span>
+                <small>R$ 7.350 de R$ 12.000 · faltam R$ 4.650</small>
+              </li>
+              <li>
+                <span class="lp-goals__row"><b>Reserva de emergência</b><em>38%</em></span>
+                <span class="lp-goals__track"><i class="lp-goals--38"></i></span>
+                <small>R$ 4.560 de R$ 12.000 · faltam R$ 7.440</small>
+              </li>
+            </ul>
+          </div>
+        </li>
+
+        <li class="lp-step" data-step="4">
+          <span class="lp-step__num">04</span>
+          <h3 class="lp-step__title">Veja sua evolução acontecendo.</h3>
+          <p>Contas, reserva, investimentos e bens somados num número só, mês a mês. É a linha que responde se o esforço está dando resultado.</p>
+          <div class="lp-step__art lp-reveal" aria-hidden="true">
+            <p class="lp-panel__title">Evolução do patrimônio</p>
+            <p class="lp-panel__big">R$ 18.750,00 <small class="lp-up">+8,4%</small></p>
+            <span class="lp-bars">
+              <i class="lp-bars--1"></i><i class="lp-bars--2"></i><i class="lp-bars--3"></i><i class="lp-bars--4"></i><i class="lp-bars--5"></i><i class="lp-bars--6"></i><i class="lp-bars--7"></i><i class="lp-bars--8"></i><i class="lp-bars--9"></i><i class="lp-bars--10"></i><i class="lp-bars--11"></i><i class="lp-bars--12"></i>
+            </span>
+          </div>
+        </li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================
+     5. RECURSOS EM BENTO. Cada bloco mostra o recurso funcionando,
+     em vez de descrever o recurso.
+     A ordem dos blocos é a ordem do grid: 3+3 / 4+2 / 2+2+2 / 3+3.
+     Mexer na sequência sem refazer os `span` deixa buraco na malha.
+     ================================================================ -->
+<section class="lp-sec lp-bento" id="recursos">
+  <div class="lp-shell">
+    <header class="lp-head">
+      <p class="lp-kicker">Recursos</p>
+      <h2 class="lp-h2">O mês inteiro, resolvido<br>em blocos pequenos.</h2>
+    </header>
+
+    <div class="lp-bento__grid">
+
+      <article class="lp-bx lp-bx--nlp lp-reveal">
+        <div class="lp-bx__art">
+          <div class="lp-nlp">
+            <span class="lp-nlp__field"><span class="lp-nlp__typed" data-typewriter>gastei 45 no mercado ontem</span><i class="lp-nlp__caret" data-loop aria-hidden="true"></i></span>
+            <div class="lp-nlp__out">
+              <span class="lp-nlp__chip lp-nlp__chip--1">R$ 45,00</span>
+              <span class="lp-nlp__chip lp-nlp__chip--2">Alimentação</span>
+              <span class="lp-nlp__chip lp-nlp__chip--3">Ontem</span>
+              <span class="lp-nlp__chip lp-nlp__chip--4">Despesa</span>
+            </div>
+          </div>
+        </div>
+        <h3>Lançamento por frase</h3>
+        <p>Escreva como você fala. O app entende valor, categoria e data e monta o lançamento para você conferir.</p>
+      </article>
+
+      <article class="lp-bx lp-bx--subs lp-reveal">
+        <div class="lp-bx__art">
+          <ul class="lp-subs">
+            <li><span class="lp-subs__dot lp-subs__dot--now"></span><b>Streaming de vídeo</b><em>em 3 dias</em><span>R$ 44,90</span></li>
+            <li><span class="lp-subs__dot"></span><b>Streaming de música</b><em>em 9 dias</em><span>R$ 21,90</span></li>
+            <li><span class="lp-subs__dot"></span><b>Academia</b><em>em 12 dias</em><span>R$ 129,00</span></li>
+            <li><span class="lp-subs__dot"></span><b>Internet</b><em>em 18 dias</em><span>R$ 99,90</span></li>
+          </ul>
+          <p class="lp-subs__total">R$ 295,70 saem todo mês sem você fazer nada.</p>
+        </div>
+        <h3>Assinaturas e recorrentes</h3>
+        <p>Tudo o que renova sozinho, com o próximo vencimento e o peso no mês.</p>
+      </article>
+
+      <article class="lp-bx lp-bx--forecast lp-reveal">
+        <div class="lp-bx__art">
+          <div class="lp-forecast">
+            <span class="lp-forecast__line" aria-hidden="true">
+              <svg viewBox="0 0 320 96" fill="none" preserveAspectRatio="none">
+                <path class="lp-forecast__real" d="M4 74 44 68 84 71 124 58 164 61" pathLength="1"/>
+                <path class="lp-forecast__proj" d="M164 61 204 52 244 44 284 33 316 22" pathLength="1"/>
+                <circle class="lp-forecast__now" cx="164" cy="61" r="4"/>
+              </svg>
+            </span>
+            <span class="lp-forecast__legend"><i></i>realizado<i class="is-proj"></i>projetado</span>
+          </div>
+        </div>
+        <h3>Previsão de saldo</h3>
+        <p>Com o que já entrou e o que se repete, o app estima o fechamento e avisa antes de o saldo apertar.</p>
+      </article>
+
+      <article class="lp-bx lp-bx--health lp-reveal">
+        <div class="lp-bx__art">
+          <div class="lp-gauge" data-gauge>
+            <svg viewBox="0 0 120 70" role="img" aria-label="Indicador de saúde financeira em 74 de 100.">
+              <path class="lp-gauge__track" d="M12 62a48 48 0 0 1 96 0" pathLength="1"/>
+              <path class="lp-gauge__value" d="M12 62a48 48 0 0 1 96 0" pathLength="1"/>
+            </svg>
+            <span class="lp-gauge__num" data-count="74">74</span>
+            <span class="lp-gauge__cap">saudável</span>
+          </div>
+        </div>
+        <h3>Saúde financeira</h3>
+        <p>Uma nota que olha reserva, dívida e sobra, e diz em português o que puxou para baixo.</p>
+      </article>
+
+      <article class="lp-bx lp-bx--qr lp-reveal">
+        <div class="lp-bx__art">
+          <div class="lp-qr" aria-hidden="true">
+            <span class="lp-qr__frame"><i></i><i></i><i></i><i></i></span>
+            <span class="lp-qr__scan" data-loop></span>
+            <span class="lp-qr__code"></span>
+          </div>
+        </div>
+        <h3>Leitura de QR</h3>
+        <p>Aponte para o QR do Pix ou da nota fiscal: o valor já vem preenchido.</p>
+      </article>
+
+      <article class="lp-bx lp-bx--rules lp-reveal">
+        <div class="lp-bx__art">
+          <div class="lp-rules">
+            <span class="lp-rules__if">contém <b>"posto"</b></span>
+            <span class="lp-rules__then" aria-hidden="true"></span>
+            <span class="lp-rules__cat">Transporte</span>
+          </div>
+        </div>
+        <h3>Regras automáticas</h3>
+        <p>Ensine uma vez; o app categoriza sozinho dali em diante, inclusive no extrato.</p>
+      </article>
+
+      <article class="lp-bx lp-bx--offline lp-reveal">
+        <div class="lp-bx__art">
+          <span class="lp-offline" aria-hidden="true">
+            <i class="lp-offline__wave lp-offline__wave--1" data-loop></i>
+            <i class="lp-offline__wave lp-offline__wave--2" data-loop></i>
+            <b>sem internet</b>
+          </span>
+        </div>
+        <h3>Funciona offline</h3>
+        <p>Instala no celular e abre sem rede. Avião, metrô e sinal fraco deixam de ser desculpa.</p>
+      </article>
+
+      <article class="lp-bx lp-bx--debts lp-reveal">
+        <div class="lp-bx__art">
+          <ul class="lp-debts">
+            <li><b>Cartão</b><span class="lp-debts__track"><i class="lp-debts--72"></i></span><em>14,0% a.m.</em></li>
+            <li><b>Empréstimo</b><span class="lp-debts__track"><i class="lp-debts--44"></i></span><em>2,5% a.m.</em></li>
+            <li><b>Financiamento</b><span class="lp-debts__track"><i class="lp-debts--18"></i></span><em>0,9% a.m.</em></li>
+          </ul>
+          <p class="lp-debts__note">Quitando o cartão primeiro, você economiza <b>R$ 3.180</b> em juros.</p>
+        </div>
+        <h3>Central de dívidas</h3>
+        <p>Ordenadas pelo que custa mais caro, com o plano de quitação e quanto cada ordem economiza.</p>
+      </article>
+
+      <article class="lp-bx lp-bx--import lp-reveal">
+        <div class="lp-bx__art">
+          <div class="lp-import">
+            <span class="lp-import__file">extrato-agosto.ofx</span>
+            <span class="lp-import__arrow" aria-hidden="true"></span>
+            <span class="lp-import__rows"><i></i><i></i><i></i><i></i><i></i></span>
+          </div>
+        </div>
+        <h3>Importar extrato</h3>
+        <p>OFX ou CSV do banco entra de uma vez, sem digitar lançamento por lançamento.</p>
+      </article>
+
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================
+     6. MOMENTO WOW. O ano inteiro contado pela rolagem: o vermelho vira
+     verde, o mês avança, a meta anda, o patrimônio sobe.
+     ================================================================ -->
+<section class="lp-wow" data-wow aria-label="Demonstração animada de um ano de organização financeira">
+  <div class="lp-wow__sticky">
+    <div class="lp-shell lp-wow__inner">
+      <p class="lp-kicker lp-kicker--center">Um ano inteiro, em quatro segundos de rolagem</p>
+
+      <div class="lp-wow__stage">
+        <div class="lp-wow__chart" aria-hidden="true">
+          <span class="lp-wow__zero"></span>
+          <span class="lp-wbar lp-wbar--1"><i></i></span>
+          <span class="lp-wbar lp-wbar--2"><i></i></span>
+          <span class="lp-wbar lp-wbar--3"><i></i></span>
+          <span class="lp-wbar lp-wbar--4"><i></i></span>
+          <span class="lp-wbar lp-wbar--5"><i></i></span>
+          <span class="lp-wbar lp-wbar--6"><i></i></span>
+          <span class="lp-wbar lp-wbar--7"><i></i></span>
+          <span class="lp-wbar lp-wbar--8"><i></i></span>
+          <span class="lp-wbar lp-wbar--9"><i></i></span>
+          <span class="lp-wbar lp-wbar--10"><i></i></span>
+          <span class="lp-wbar lp-wbar--11"><i></i></span>
+          <span class="lp-wbar lp-wbar--12"><i></i></span>
+        </div>
+        <p class="lp-wow__axis" aria-hidden="true">
+          <span>jan</span><span>fev</span><span>mar</span><span>abr</span><span>mai</span><span>jun</span><span>jul</span><span>ago</span><span>set</span><span>out</span><span>nov</span><span>dez</span>
+        </p>
+
+        <aside class="lp-wow__side" aria-hidden="true">
+          <div class="lp-wow__stat">
+            <p class="lp-wow__statlabel">Mês</p>
+            <p class="lp-wow__statvalue lp-wow__statvalue--sm" data-wow-out="mes">janeiro</p>
+          </div>
+          <div class="lp-wow__stat">
+            <p class="lp-wow__statlabel">Sobra do mês</p>
+            <p class="lp-wow__statvalue" data-wow-out="sobra">- R$ 180</p>
+          </div>
+          <div class="lp-wow__stat">
+            <p class="lp-wow__statlabel">Patrimônio</p>
+            <p class="lp-wow__statvalue lp-wow__statvalue--big" data-wow-out="patrimonio">R$ 9.200</p>
+          </div>
+          <div class="lp-wow__stat">
+            <p class="lp-wow__statlabel">Meta: viagem</p>
+            <span class="lp-wow__meter"><i data-wow-meter></i></span>
+            <p class="lp-wow__statvalue lp-wow__statvalue--sm" data-wow-out="meta">4%</p>
+          </div>
+        </aside>
+      </div>
+
+      <div class="lp-wow__captions">
+        <p class="lp-wow__caption" data-caption="0">Janeiro fecha no vermelho e ninguém consegue explicar exatamente por quê.</p>
+        <p class="lp-wow__caption" data-caption="1">Aí você começa a registrar. As categorias aparecem, os tetos entram, o vermelho encolhe.</p>
+        <p class="lp-wow__caption" data-caption="2">Dezembro. <span class="lp-accent">Pequenas decisões, uma diferença enorme no fim do ano.</span></p>
+      </div>
+    </div>
+  </div>
+  <div class="lp-wow__scrollarea" aria-hidden="true"></div>
+</section>
+
+<!-- ================================================================
+     7. SIMULADORES. Não são a proposta principal: são o que o produto
+     faz depois de organizar o passado. Por isso entram aqui, com uma
+     ponte conceitual antes do título.
+     ================================================================ -->
+<section class="lp-sec lp-sim" id="simuladores" data-sim>
+  <div class="lp-shell">
+    <header class="lp-head lp-head--center">
+      <p class="lp-kicker">Antes da próxima decisão grande</p>
+      <p class="lp-bridge">Organizar o que aconteceu é só metade do trabalho.</p>
+      <h2 class="lp-h2">Faça a conta antes<br>de assinar o contrato.</h2>
+      <p class="lp-lead">
+        São nove simuladores para as decisões que custam caro: CET com tarifa e seguro
+        dentro, Price ou SAC, imposto regressivo, taxa de administração, amortização.
+        Tudo calculado no seu aparelho.
+      </p>
+    </header>
+
+    <div class="lp-sim__live">
+      <div class="lp-sim__controls">
+        <p class="lp-sim__eyebrow">Experimente agora</p>
+        <h3 class="lp-sim__title">Juros compostos</h3>
+        <p class="lp-sim__sub">Mexa nos controles. A conta refaz na hora, aqui mesmo na página.</p>
+
+        <div class="lp-field">
+          <label for="sim-inicial">Valor inicial</label>
+          <output for="sim-inicial" data-sim-out="inicial">R$ 1.000</output>
+          <input id="sim-inicial" type="range" min="0" max="50000" step="500" value="1000" data-sim-input="inicial" />
+        </div>
+
+        <div class="lp-field">
+          <label for="sim-aporte">Aporte mensal</label>
+          <output for="sim-aporte" data-sim-out="aporte">R$ 500</output>
+          <input id="sim-aporte" type="range" min="0" max="5000" step="50" value="500" data-sim-input="aporte" />
+        </div>
+
+        <div class="lp-field">
+          <label for="sim-anos">Prazo</label>
+          <output for="sim-anos" data-sim-out="anos">10 anos</output>
+          <input id="sim-anos" type="range" min="1" max="35" step="1" value="10" data-sim-input="anos" />
+        </div>
+
+        <div class="lp-field">
+          <label for="sim-taxa">Rendimento esperado</label>
+          <output for="sim-taxa" data-sim-out="taxa">10,0% ao ano</output>
+          <input id="sim-taxa" type="range" min="1" max="20" step="0.5" value="10" data-sim-input="taxa" />
+        </div>
+
+        <p class="lp-sim__disclaimer">
+          Projeção matemática com as premissas que você informou. Não é promessa de rendimento,
+          não considera imposto e não é recomendação de investimento.
+        </p>
+      </div>
+
+      <div class="lp-sim__result">
+        <div class="lp-sim__headline">
+          <p class="lp-sim__label" data-sim-out="prazo">Em 10 anos você teria</p>
+          <p class="lp-sim__amount" data-sim-out="total">R$ 102.525,67</p>
+          <p class="lp-sim__split">
+            <span><i class="lp-dot lp-dot--in"></i> Você investiu <b data-sim-out="investido">R$ 61.000,00</b></span>
+            <span><i class="lp-dot lp-dot--juros"></i> Só de juros <b data-sim-out="juros">R$ 41.525,67</b></span>
+          </p>
+        </div>
+
+        <figure class="lp-sim__chart" aria-hidden="true">
+          <div class="lp-sim__bars" data-sim-bars></div>
+          <figcaption class="lp-sim__axis"><span>hoje</span><span data-sim-out="fim">daqui a 10 anos</span></figcaption>
+        </figure>
+
+        <p class="lp-sim__foot">
+          <span data-sim-out="frase">Depois de 10 anos, os juros já respondem por 41% do total.</span>
+        </p>
+      </div>
+    </div>
+
+    <div class="lp-sim__catalog">
+      <p class="lp-sim__catalogtitle">E mais oito, todos com a conta completa</p>
+      <ul class="lp-simlist">
+        <li><a class="lp-simcard" href="index.html#/simuladores">
+          <span class="lp-simcard__name">Renda fixa</span>
+          <span class="lp-simcard__hint">tributos e custos do cenário informado</span>
+          <span class="lp-simcard__go" aria-hidden="true"></span>
+        </a></li>
+        <li><a class="lp-simcard" href="index.html#/simuladores">
+          <span class="lp-simcard__name">Empréstimo</span>
+          <span class="lp-simcard__hint">CET com tarifa e seguro dentro</span>
+          <span class="lp-simcard__go" aria-hidden="true"></span>
+        </a></li>
+        <li><a class="lp-simcard" href="index.html#/simuladores">
+          <span class="lp-simcard__name">Financiamento</span>
+          <span class="lp-simcard__hint">Price ou SAC, e quanto o bem fica mais caro</span>
+          <span class="lp-simcard__go" aria-hidden="true"></span>
+        </a></li>
+        <li><a class="lp-simcard lp-simcard--star" href="index.html#/simuladores">
+          <span class="lp-simcard__name">Entrada ou amortizar depois?</span>
+          <span class="lp-simcard__hint">usar na entrada ou deixar rendendo e abater na frente</span>
+          <span class="lp-simcard__go" aria-hidden="true"></span>
+        </a></li>
+        <li><a class="lp-simcard" href="index.html#/simuladores">
+          <span class="lp-simcard__name">Cartão de crédito</span>
+          <span class="lp-simcard__hint">rotativo, parcelamento da fatura e a troca por crédito mais barato</span>
+          <span class="lp-simcard__go" aria-hidden="true"></span>
+        </a></li>
+        <li><a class="lp-simcard" href="index.html#/simuladores">
+          <span class="lp-simcard__name">Consórcio</span>
+          <span class="lp-simcard__hint">taxa de administração virando custo efetivo</span>
+          <span class="lp-simcard__go" aria-hidden="true"></span>
+        </a></li>
+        <li><a class="lp-simcard" href="index.html#/simuladores">
+          <span class="lp-simcard__name">FGTS</span>
+          <span class="lp-simcard__hint">saque-aniversário contra a liquidez na demissão</span>
+          <span class="lp-simcard__go" aria-hidden="true"></span>
+        </a></li>
+        <li><a class="lp-simcard" href="index.html#/simuladores">
+          <span class="lp-simcard__name">Aposentadoria</span>
+          <span class="lp-simcard__hint">em valores de hoje, e o aporte que falta</span>
+          <span class="lp-simcard__go" aria-hidden="true"></span>
+        </a></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================
+     8. PLANILHA x COFRE. Faixa clara, para o olho descansar.
+     A planilha não é o inimigo: o trabalho manual é.
+     ================================================================ -->
+<section class="lp-sec lp-vs lp-light">
+  <div class="lp-shell">
+    <header class="lp-head lp-head--center">
+      <p class="lp-kicker">Quem veio da planilha</p>
+      <h2 class="lp-h2">A planilha funciona. O trabalho manual é que não precisa continuar.</h2>
+      <p class="lp-lead">Sua planilha te ensinou a olhar o mês. O Cofre assume a parte que você refazia toda vez.</p>
+    </header>
+
+    <div class="lp-vs__grid">
+      <article class="lp-vs__col lp-vs__col--old">
+        <h3>Na planilha</h3>
+        <div class="lp-sheet" aria-hidden="true">
+          <span class="lp-sheet__head"><i>A</i><i>B</i><i>C</i><i>D</i></span>
+          <span class="lp-sheet__row"><i>Mercado</i><i>214,90</i><i>Alim.</i><i>ago</i></span>
+          <span class="lp-sheet__row"><i>Uber</i><i>32,00</i><i>—</i><i>ago</i></span>
+          <span class="lp-sheet__row"><i>Aluguel</i><i>1.450</i><i>Casa</i><i>ago</i></span>
+          <span class="lp-sheet__row lp-sheet__row--formula"><i>Total</i><i>=SOMA(B2:B9)</i></span>
+        </div>
+        <ul class="lp-vs__list">
+          <li>A manutenção é sua: fórmula, faixa e categoria</li>
+          <li>Cada gráfico só existe depois que você monta</li>
+          <li>Meta, dívida e patrimônio viram abas que ninguém abre</li>
+        </ul>
+      </article>
+
+      <article class="lp-vs__col lp-vs__col--new">
+        <h3>No Cofre</h3>
+        <div class="lp-sheet lp-sheet--app" aria-hidden="true">
+          <span class="lp-sheet__apphead"><b>Agosto</b><em>conferido</em></span>
+          <span class="lp-sheet__appbar"><i class="lp-sheet__appbar--a"></i><i class="lp-sheet__appbar--b"></i><i class="lp-sheet__appbar--c"></i><i class="lp-sheet__appbar--d"></i></span>
+          <span class="lp-sheet__approw"><b>Sobrou</b><em>R$ 2.240,00</em></span>
+          <span class="lp-sheet__approw"><b>Meta Europa</b><em>61%</em></span>
+        </div>
+        <ul class="lp-vs__list lp-vs__list--good">
+          <li>Soma, categoriza e desenha a partir do que já foi registrado</li>
+          <li>Os gráficos do mês, do ano e do patrimônio já vêm prontos</li>
+          <li>Meta, dívida e evolução na mesma tela do saldo</li>
+        </ul>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================
+     9. SEGURANÇA. Só o que o aplicativo faz hoje. Nenhum selo inventado.
+     ================================================================ -->
+<section class="lp-sec lp-trust" id="seguranca">
+  <div class="lp-shell">
+    <header class="lp-head">
+      <p class="lp-kicker">Privacidade</p>
+      <h2 class="lp-h2">Seus dados financeiros<br>merecem respeito.</h2>
+      <p class="lp-lead">
+        Extrato, salário e dívida dizem mais sobre uma pessoa do que quase qualquer outro dado.
+        Por isso a arquitetura começa pela decisão mais simples: o padrão é não sair do seu aparelho.
+      </p>
+    </header>
+
+    <div class="lp-trust__grid">
+      <article class="lp-trustcard lp-reveal">
+        <span class="lp-trustcard__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><rect x="4" y="9.5" width="16" height="10.5" rx="3" stroke="currentColor" stroke-width="1.6"/><path d="M8 9.5V7a4 4 0 0 1 8 0v2.5" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="14.8" r="1.5" fill="currentColor"/></svg>
+        </span>
+        <h3>Fica no seu aparelho</h3>
+        <p>Lançamentos, extratos importados e leituras de QR são gravados no armazenamento local do navegador. Não existe servidor nosso guardando isso por padrão.</p>
+      </article>
+
+      <article class="lp-trustcard lp-reveal">
+        <span class="lp-trustcard__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8.4" r="3.6" stroke="currentColor" stroke-width="1.6"/><path d="M4.8 20c.7-3.6 3.7-5.6 7.2-5.6s6.5 2 7.2 5.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        </span>
+        <h3>Conta é opcional</h3>
+        <p>Dá para usar o aplicativo inteiro sem criar cadastro. A conta existe para quem quiser sincronizar entre aparelhos, e é uma escolha, não um pedágio.</p>
+      </article>
+
+      <article class="lp-trustcard lp-reveal">
+        <span class="lp-trustcard__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M12 3.6 4.8 6.4v5.2c0 4.3 3 8.1 7.2 9.2 4.2-1.1 7.2-4.9 7.2-9.2V6.4L12 3.6Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M9.2 12.2 11.3 14.3l3.7-4.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </span>
+        <h3>Nada de terceiro carrega junto</h3>
+        <p>Sem fonte de fora, sem script de rastreio, sem pixel de anúncio. A página do aplicativo bloqueia por política o que não veio do próprio site.</p>
+      </article>
+
+      <article class="lp-trustcard lp-reveal">
+        <span class="lp-trustcard__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M12 4v10M8.4 10.4 12 14l3.6-3.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M4.8 16.4v2a1.6 1.6 0 0 0 1.6 1.6h11.2a1.6 1.6 0 0 0 1.6-1.6v-2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        </span>
+        <h3>Leva embora quando quiser</h3>
+        <p>Backup completo em JSON a qualquer momento e um botão que apaga tudo do aparelho, incluindo cópias de recuperação e diagnósticos.</p>
+      </article>
+
+      <article class="lp-trustcard lp-reveal">
+        <span class="lp-trustcard__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M12 4.4a4.8 4.8 0 0 0-2.9 8.6c.5.4.8.9.8 1.5v.3h4.2v-.3c0-.6.3-1.1.8-1.5A4.8 4.8 0 0 0 12 4.4Z" stroke="currentColor" stroke-width="1.5"/><path d="M10.2 18h3.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        </span>
+        <h3>A análise por IA é opcional</h3>
+        <p>Quando você pede, sai apenas um resumo agregado: totais por grupo, progresso de metas e histórico. Descrição, data individual e estabelecimento não saem. O app mostra a lista e pede confirmação antes de cada envio, e dá para bloquear de vez.</p>
+      </article>
+
+      <article class="lp-trustcard lp-reveal">
+        <span class="lp-trustcard__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><rect x="5" y="3.8" width="14" height="16.4" rx="2.6" stroke="currentColor" stroke-width="1.6"/><path d="M8.4 8.6h7.2M8.4 12h7.2M8.4 15.4h4.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        </span>
+        <h3>Política escrita para ser lida</h3>
+        <p>Dentro do app: quem responde pelos dados, por quanto tempo cada coisa fica, os direitos do titular pela LGPD e o canal para comunicar incidente. Com consentimento versionado, e novo aceite quando o conteúdo muda.</p>
+      </article>
+    </div>
+
+    <p class="lp-trust__foot">
+      Sem selo inventado: o que está escrito aqui é o que o aplicativo faz hoje.
+      <a href="index.html#/privacidade">Ler a política completa</a>
+    </p>
+  </div>
+</section>
+
+<!-- ================================================================
+     10. COMO FUNCIONA. Três passos, uma linha ligando.
+     ================================================================ -->
+<section class="lp-sec lp-steps" id="como-funciona">
+  <div class="lp-shell">
+    <header class="lp-head lp-head--center">
+      <p class="lp-kicker">Como funciona</p>
+      <h2 class="lp-h2">Três passos.<br>Nenhuma senha de banco.</h2>
+    </header>
+
+    <ol class="lp-howto" data-howto>
+      <li class="lp-howto__item">
+        <span class="lp-howto__num">01</span>
+        <h3>Abra e responda quatro perguntas</h3>
+        <p>Renda, contas que você usa, as categorias do seu dia e, se quiser, uma primeira meta. Nada de importar banco nem digitar senha.</p>
+      </li>
+      <li class="lp-howto__item">
+        <span class="lp-howto__num">02</span>
+        <h3>Registre o que entra e o que sai</h3>
+        <p>Por frase, pelo QR do Pix e da nota fiscal, ou importando o extrato em OFX e CSV. As regras aprendem e param de perguntar a categoria.</p>
+      </li>
+      <li class="lp-howto__item">
+        <span class="lp-howto__num">03</span>
+        <h3>Acompanhe a evolução</h3>
+        <p>Saldo do mês, previsão de fechamento, metas andando e patrimônio subindo. E os simuladores ali do lado, para a próxima decisão grande.</p>
+      </li>
+      <span class="lp-howto__line" aria-hidden="true"><i data-howto-line></i></span>
+    </ol>
+  </div>
+</section>
+
+<!-- ================================================================
+     11. PREÇOS. Uma oferta só, porque é isso que existe hoje.
+     Nada de valor reservado na tela: preço fictício comunica produto
+     inacabado e não vende nada.
+     ================================================================ -->
+<section class="lp-sec lp-price" id="precos">
+  <div class="lp-shell">
+    <header class="lp-head lp-head--center">
+      <p class="lp-kicker">Preços</p>
+      <h2 class="lp-h2">Um acesso completo.<br>Sem complicação.</h2>
+      <p class="lp-lead">Enquanto o Cofre está em beta aberto, todo mundo entra pela mesma porta e usa o aplicativo inteiro.</p>
+    </header>
+
+    <div class="lp-price__grid">
+      <article class="lp-plan lp-plan--now">
+        <p class="lp-plan__tag">Agora</p>
+        <h3 class="lp-plan__name">Beta aberto</h3>
+        <p class="lp-plan__value"><b>Grátis</b></p>
+        <p class="lp-plan__note">Acesso completo durante o beta.</p>
+        <ul class="lp-plan__list">
+          <li>Todas as telas do aplicativo</li>
+          <li>Os nove simuladores</li>
+          <li>Uso sem criar conta</li>
+          <li>Sem cartão de crédito</li>
+          <li>Backup em JSON quando quiser</li>
+          <li>Exclusão total dos dados do aparelho</li>
+        </ul>
+        <a class="lp-btn lp-btn--primary lp-btn--lg lp-btn--block" href="index.html" data-magnetic><span>Começar grátis</span></a>
+        <p class="lp-plan__foot">Se as condições comerciais mudarem no futuro, isso será comunicado antes de qualquer cobrança.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================
+     12. FAQ. Accordion nativo: funciona sem JavaScript e pelo teclado.
+     ================================================================ -->
+<section class="lp-sec lp-faq" id="faq">
+  <div class="lp-shell lp-shell--narrow">
+    <header class="lp-head lp-head--center">
+      <p class="lp-kicker">Dúvidas</p>
+      <h2 class="lp-h2">Perguntas que todo mundo faz</h2>
+    </header>
+
+    <div class="lp-faq__list" data-faq>
+      <details class="lp-faq__item">
+        <summary><span>Como funciona o controle financeiro no dia a dia?</span><i class="lp-faq__sign" aria-hidden="true"></i></summary>
+        <div class="lp-faq__body"><p>Você registra o que entra e o que sai. Pode escrever uma frase como "gastei 45 no mercado ontem", ler o QR do Pix ou da nota fiscal, ou importar o extrato do banco em OFX e CSV. A partir daí o app soma, categoriza, desenha os gráficos e avisa quando o mês foge do planejado.</p></div>
+      </details>
+
+      <details class="lp-faq__item">
+        <summary><span>Preciso entender de finanças para usar?</span><i class="lp-faq__sign" aria-hidden="true"></i></summary>
+        <div class="lp-faq__body"><p>Não. A primeira tela responde uma pergunta só: quanto sobrou. O resto aparece conforme você usa: categorias, metas, orçamento, patrimônio. Os simuladores explicam o que cada número significa em português, sem jargão de mercado.</p></div>
+      </details>
+
+      <details class="lp-faq__item">
+        <summary><span>Dá para usar pelo celular?</span><i class="lp-faq__sign" aria-hidden="true"></i></summary>
+        <div class="lp-faq__body"><p>Sim, e é onde ele foi desenhado para viver. Abre pelo navegador e pode ser instalado como aplicativo na tela inicial. Depois do primeiro carregamento funciona sem internet.</p></div>
+      </details>
+
+      <details class="lp-faq__item">
+        <summary><span>Meus dados ficam seguros?</span><i class="lp-faq__sign" aria-hidden="true"></i></summary>
+        <div class="lp-faq__body"><p>Eles ficam no armazenamento do seu próprio navegador, não em um servidor nosso. Nada de extrato ou leitura de câmera é enviado para lugar nenhum. A única exceção é a análise por IA, que é opcional, envia apenas um resumo agregado e pede sua confirmação a cada uso. Você pode exportar tudo em JSON ou apagar tudo do aparelho a qualquer momento.</p></div>
+      </details>
+
+      <details class="lp-faq__item">
+        <summary><span>Preciso conectar o meu banco?</span><i class="lp-faq__sign" aria-hidden="true"></i></summary>
+        <div class="lp-faq__body"><p>Não, e o app nem pede senha de banco. Você importa o arquivo de extrato que o próprio banco disponibiliza, ou lança direto. Nenhuma credencial bancária é solicitada em momento algum.</p></div>
+      </details>
+
+      <details class="lp-faq__item">
+        <summary><span>Quanto custa? Posso parar quando quiser?</span><i class="lp-faq__sign" aria-hidden="true"></i></summary>
+        <div class="lp-faq__body"><p>Durante o beta o uso é gratuito e não há cobrança nem cartão cadastrado. Se existir plano pago, ele será anunciado com antecedência e as condições comerciais estarão nos termos de uso dentro do app. Seus dados são seus: o backup em JSON sai com você em qualquer cenário.</p></div>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================
+     13. FECHAMENTO.
+     ================================================================ -->
+<section class="lp-final">
+  <div class="lp-final__glow" aria-hidden="true"></div>
+  <div class="lp-shell lp-final__inner">
+    <h2 class="lp-final__title">
+      Seu dinheiro já está em movimento.<br>
+      <span class="lp-accent">Comece a acompanhar para onde ele vai.</span>
+    </h2>
+    <p class="lp-final__lead">
+      Sem cartão. Sem senha de banco. Sem obrigação de criar conta.
+      E, se não for para você, um botão apaga tudo.
+    </p>
+    <div class="lp-final__actions">
+      <a class="lp-btn lp-btn--primary lp-btn--lg" href="index.html" data-magnetic>
+        <span>Começar grátis</span>
+        <svg class="lp-btn__arrow" viewBox="0 0 16 16" fill="none" aria-hidden="true" focusable="false"><path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </a>
+      <a class="lp-btn lp-btn--ghost lp-btn--lg" href="#simuladores"><span>Testar um simulador</span></a>
+    </div>
+
+    <div class="lp-final__proof" aria-hidden="true">
+      <div class="lp-mini">
+        <span class="lp-mini__head"><b>Agosto</b><em>demonstração</em></span>
+        <span class="lp-mini__amount">R$ 2.240,00</span>
+        <span class="lp-mini__label">sobrou este mês</span>
+        <span class="lp-mini__bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="lp-foot">
+  <div class="lp-shell lp-foot__inner">
+    <div class="lp-foot__brand">
+      <a class="lp-brand" href="/" aria-label="Cofre, página inicial">
+        <span class="lp-brand__mark" aria-hidden="true">
+          <svg viewBox="0 0 32 32" fill="none" focusable="false">
+            <rect x="2.5" y="4.5" width="27" height="23" rx="6.5" stroke="currentColor" stroke-width="1.7"/>
+            <circle cx="16" cy="16" r="7" stroke="currentColor" stroke-width="1.7"/>
+            <path d="M12.4 18.1 15 15.2l2.3 2 3.4-4.4" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M16 6.4v-3M16 28.6v3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+          </svg>
+        </span>
+        <span class="lp-brand__word">Cofre</span>
+      </a>
+      <p class="lp-foot__tag">Controle financeiro pessoal que roda no seu aparelho.</p>
+    </div>
+
+    <nav class="lp-foot__nav" aria-label="Produto">
+      <h2>Produto</h2>
+      <a href="#recursos">Recursos</a>
+      <a href="#simuladores">Simuladores</a>
+      <a href="#como-funciona">Como funciona</a>
+      <a href="#precos">Preços</a>
+      <a href="#faq">FAQ</a>
+    </nav>
+
+    <nav class="lp-foot__nav" aria-label="Legal">
+      <h2>Legal</h2>
+      <a href="index.html#/privacidade">Política de Privacidade</a>
+      <a href="index.html#/privacidade">Termos de Uso</a>
+      <a href="index.html#/privacidade">Limites das estimativas</a>
+    </nav>
+
+    <nav class="lp-foot__nav" aria-label="Acesso">
+      <h2>Acesso</h2>
+      <a href="index.html">Começar grátis</a>
+      <a href="index.html#/conta-e-acesso">Entrar</a>
+      <a href="#seguranca">Segurança e privacidade</a>
+      <!-- SUBSTITUIR: incluir Instagram e LinkedIn quando os perfis existirem. -->
+    </nav>
+  </div>
+
+  <div class="lp-shell lp-foot__base">
+    <p>Cofre. Aplicativo em beta aberto.</p>
+    <p>Os valores e telas desta página são demonstrativos e não representam resultado de nenhuma pessoa. Simulações são projeções matemáticas com as premissas informadas, não recomendação de investimento nem garantia de rendimento.</p>
+  </div>
+</footer>
+
+<div class="lp-dock" data-dock hidden>
+  <span class="lp-dock__text">Grátis no beta · sem cartão</span>
+  <a class="lp-btn lp-btn--primary lp-btn--sm" href="index.html"><span>Começar grátis</span></a>
+</div>
+
+<!-- ==================================================================
+     PROVA SOCIAL, DESLIGADA ATÉ EXISTIR PROVA.
+     ------------------------------------------------------------------
+     O bloco abaixo está pronto e NÃO é renderizado: o conteúdo de um
+     <template> fica fora do documento. Enquanto não houver avaliação de
+     gente de verdade, publicar cartões vazios (ou uma seção explicando
+     que não há depoimento) custa conversão e passa aparência de obra
+     inacabada. Nenhum nome, foto, nota ou número de clientes pode ser
+     inventado aqui.
+
+     PARA ATIVAR: troque o texto de cada <blockquote>/<figcaption> por
+     depoimento real, mova este bloco para dentro de <main> — o lugar
+     natural é entre "Planilha x Cofre" e "Segurança" — e apague o
+     <template> em volta.
+     ================================================================== -->
+<template data-lp-social-proof>
+  <section class="lp-sec lp-social">
+    <div class="lp-shell">
+      <header class="lp-head lp-head--center">
+        <p class="lp-kicker">Quem está usando</p>
+        <h2 class="lp-h2">Quem já organizou o mês</h2>
+      </header>
+      <div class="lp-social__grid">
+        <figure class="lp-quote">
+          <blockquote></blockquote>
+          <figcaption><span class="lp-quote__avatar" aria-hidden="true"></span><span><b></b><small></small></span></figcaption>
+        </figure>
+        <figure class="lp-quote">
+          <blockquote></blockquote>
+          <figcaption><span class="lp-quote__avatar" aria-hidden="true"></span><span><b></b><small></small></span></figcaption>
+        </figure>
+        <figure class="lp-quote">
+          <blockquote></blockquote>
+          <figcaption><span class="lp-quote__avatar" aria-hidden="true"></span><span><b></b><small></small></span></figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+</template>
+
+</body>
+</html>

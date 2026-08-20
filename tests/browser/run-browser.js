@@ -1,0 +1,620 @@
+"use strict";
+
+const fs = require("fs");
+const http = require("http");
+const os = require("os");
+const path = require("path");
+const { chromium } = require("playwright");
+
+const root = path.resolve(__dirname, "..", "..");
+const mime = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json", ".webmanifest": "application/manifest+json", ".png": "image/png" };
+
+const server = http.createServer((request, response) => {
+  const urlPath = decodeURIComponent(new URL(request.url, "http://localhost").pathname);
+  const relative = urlPath === "/" ? "index.html" : urlPath.replace(/^\/+/, "");
+  const file = path.resolve(root, relative);
+  if (!file.startsWith(root + path.sep) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
+    response.writeHead(404); response.end("Not found"); return;
+  }
+  response.writeHead(200, { "Content-Type": mime[path.extname(file)] || "application/octet-stream", "Cache-Control": "no-store" });
+  fs.createReadStream(file).pipe(response);
+});
+
+const results = [];
+async function test(name, fn) {
+  try { await fn(); results.push({ name, ok: true }); console.log(`  ✓ ${name}`); }
+  catch (error) { results.push({ name, ok: false, error }); console.error(`  ✗ ${name}\n    ${error.message}`); }
+}
+function assert(condition, message) { if (!condition) throw new Error(message); }
+
+async function completeOnboarding(page, focus = "month") {
+  await page.locator('[data-action-select="onb-legal"]').check();
+  await page.locator(`[data-action="onb-focus"][data-value="${focus}"]`).click();
+  await page.fill("#onb-name", "Teste");
+  await page.locator('[data-action="onb-next"]').click();
+  await page.fill("#onb-income", "5000,00");
+  await page.locator('[data-action="onb-next"]').click();
+  await page.fill("#onb-acc-name", "Conta principal");
+  await page.fill("#onb-acc-balance", "2000,00");
+  await page.locator('[data-action="onb-next"]').click();
+  await page.locator('[data-action="onb-finish"]').click();
+  await page.waitForSelector(".main-content");
+}
+
+async function openFresh(browser, viewport = { width: 390, height: 844 }, contextOptions = {}) {
+  const context = await browser.newContext({ viewport, ...contextOptions });
+  const page = await context.newPage();
+  const pageErrors = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  await page.goto(`${globalThis.baseUrl}?__test=1`, { waitUntil: "domcontentloaded" });
+  await page.waitForSelector('[role="dialog"][aria-label="Configuração inicial"]');
+  return { context, page, pageErrors };
+}
+
+async function captureOnboardingGeometryM4(page) {
+  return page.evaluate(() => {
+    const required = (selector) => {
+      const node = document.querySelector(selector);
+      if (!node) throw new Error(`elemento ausente na medição do onboarding: ${selector}`);
+      return node;
+    };
+    const rectOf = (node) => {
+      const rect = node.getBoundingClientRect();
+      return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height };
+    };
+    const overflowOf = (node) => Math.max(0, node.scrollWidth - node.clientWidth);
+    const layer = required(".onb");
+    const sheet = required(".onb__sheet");
+    const head = required(".onb__head");
+    const progress = required(".onb__progress");
+    const body = required(".onb__body");
+    const foot = required(".onb__foot");
+    const cta = required("#onb-advance");
+    const skip = required('[data-action="onb-skip"]');
+    const footerButtons = Array.from(foot.querySelectorAll("button"));
+    const progressLabels = Array.from(progress.querySelectorAll(".onb__step-label"));
+    const last = body.lastElementChild;
+    if (!last) throw new Error("o corpo do onboarding não tem último elemento");
+
+    const previousScrollTop = body.scrollTop;
+    body.scrollTop = body.scrollHeight;
+    const bodyAtEnd = rectOf(body);
+    const lastAtEnd = rectOf(last);
+    const scrollTopAtEnd = body.scrollTop;
+    const scrollRange = Math.max(0, body.scrollHeight - body.clientHeight);
+    const geometry = {
+      viewport: (() => {
+        const visual = window.visualViewport;
+        const left = visual ? visual.offsetLeft : 0;
+        const top = visual ? visual.offsetTop : 0;
+        const width = visual ? visual.width : window.innerWidth;
+        const height = visual ? visual.height : window.innerHeight;
+        return { left, top, right: left + width, bottom: top + height, width, height, devicePixelRatio: window.devicePixelRatio };
+      })(),
+      rects: {
+        layer: rectOf(layer), sheet: rectOf(sheet), head: rectOf(head), progress: rectOf(progress),
+        body: bodyAtEnd, foot: rectOf(foot), cta: rectOf(cta), last: lastAtEnd,
+      },
+      horizontalOverflow: {
+        document: overflowOf(document.documentElement), layer: overflowOf(layer), sheet: overflowOf(sheet), body: overflowOf(body),
+      },
+      fixedVerticalRange: {
+        layer: Math.max(0, layer.scrollHeight - layer.clientHeight),
+        sheet: Math.max(0, sheet.scrollHeight - sheet.clientHeight),
+      },
+      fixedScrollTop: { layer: layer.scrollTop, sheet: sheet.scrollTop },
+      controls: {
+        skip: { action: "onb-skip", rect: rectOf(skip) },
+        footer: footerButtons.map((button) => ({ action: button.dataset.action || "", rect: rectOf(button) })),
+      },
+      progressLabels: progressLabels.map((node) => ({
+        text: node.textContent.trim(),
+        rect: rectOf(node),
+        clientWidth: node.clientWidth,
+        scrollWidth: node.scrollWidth,
+        clientHeight: node.clientHeight,
+        scrollHeight: node.scrollHeight,
+      })),
+      body: {
+        clientHeight: body.clientHeight,
+        scrollHeight: body.scrollHeight,
+        scrollRange,
+        scrollTopAtEnd,
+        overflowY: getComputedStyle(body).overflowY,
+        lastReachable: lastAtEnd.bottom <= bodyAtEnd.bottom + 1 && lastAtEnd.bottom >= bodyAtEnd.top - 1,
+      },
+    };
+    body.scrollTop = previousScrollTop;
+    return geometry;
+  });
+}
+
+async function assertOnboardingGeometryM4(page, label, options = {}) {
+  const geometry = await captureOnboardingGeometryM4(page);
+  const tolerance = 1;
+  const withinViewport = (rect) => rect.left >= geometry.viewport.left - tolerance
+    && rect.right <= geometry.viewport.right + tolerance
+    && rect.top >= geometry.viewport.top - tolerance
+    && rect.bottom <= geometry.viewport.bottom + tolerance;
+  ["layer", "sheet", "head", "progress", "foot", "cta"].forEach((name) => {
+    assert(withinViewport(geometry.rects[name]), `${label}: ${name} saiu da viewport: ${JSON.stringify(geometry)}`);
+  });
+  assert(geometry.rects.cta.height >= 44, `${label}: CTA tem menos de 44 px: ${geometry.rects.cta.height}`);
+  assert(geometry.body.clientHeight >= 44, `${label}: o corpo tem menos de 44 px úteis: ${geometry.body.clientHeight}`);
+  assert(["auto", "scroll"].includes(geometry.body.overflowY),
+    `${label}: o corpo não é a região rolável: overflow-y=${geometry.body.overflowY}`);
+  assert(geometry.body.scrollTopAtEnd >= geometry.body.scrollRange - tolerance,
+    `${label}: o corpo não chegou ao fim: ${JSON.stringify(geometry.body)}`);
+  assert(geometry.body.lastReachable, `${label}: o último filho do corpo não ficou alcançável: ${JSON.stringify(geometry)}`);
+  if (options.expectBodyOverflow) {
+    assert(geometry.body.scrollRange > tolerance, `${label}: o cenário longo não produziu rolagem no corpo`);
+  }
+  Object.entries(geometry.horizontalOverflow).forEach(([name, value]) => {
+    assert(value <= tolerance, `${label}: rolagem horizontal em ${name}: ${value}px`);
+  });
+  Object.entries(geometry.fixedVerticalRange).forEach(([name, value]) => {
+    assert(value <= tolerance, `${label}: ${name} ganhou faixa vertical de ${value}px`);
+  });
+  Object.entries(geometry.fixedScrollTop).forEach(([name, value]) => {
+    assert(value <= tolerance, `${label}: ${name} rolou para scrollTop=${value}`);
+  });
+  [geometry.controls.skip, ...geometry.controls.footer].forEach((control) => {
+    assert(withinViewport(control.rect), `${label}: botão ${control.action} saiu da viewport: ${JSON.stringify(control.rect)}`);
+    assert(control.rect.width >= 44 && control.rect.height >= 44,
+      `${label}: botão ${control.action} tem alvo menor que 44 px: ${JSON.stringify(control.rect)}`);
+  });
+  assert(geometry.progressLabels.length === 4, `${label}: a barra não mostrou os quatro rótulos de progresso`);
+  geometry.progressLabels.forEach((item) => {
+    assert(item.rect.width > 0 && item.rect.height > 0, `${label}: rótulo de progresso oculto: ${item.text}`);
+    assert(item.scrollWidth <= item.clientWidth + tolerance && item.scrollHeight <= item.clientHeight + tolerance,
+      `${label}: rótulo de progresso cortado: ${JSON.stringify(item)}`);
+    const progress = geometry.rects.progress;
+    assert(item.rect.left >= progress.left - tolerance && item.rect.right <= progress.right + tolerance
+      && item.rect.top >= progress.top - tolerance && item.rect.bottom <= progress.bottom + tolerance,
+    `${label}: rótulo saiu da barra de progresso: ${JSON.stringify(item)}`);
+  });
+  const adjacent = [["head", "progress"], ["progress", "body"], ["body", "foot"]];
+  adjacent.forEach(([first, second]) => {
+    const a = geometry.rects[first];
+    const b = geometry.rects[second];
+    const overlapWidth = Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left));
+    const overlapHeight = Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+    assert(overlapWidth <= tolerance || overlapHeight <= tolerance,
+      `${label}: ${first} sobrepõe ${second}: ${JSON.stringify({ overlapWidth, overlapHeight, a, b })}`);
+  });
+  return geometry;
+}
+
+async function assertOnboardingScrollResetM4(page, label) {
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  const scrollTop = await page.locator(".onb__body").evaluate((body) => body.scrollTop);
+  assert(scrollTop <= 1, `${label}: o novo passo herdou scrollTop=${scrollTop}`);
+}
+
+async function scrollOnboardingBodyToEndM4(page) {
+  await page.locator(".onb__body").evaluate((body) => { body.scrollTop = body.scrollHeight; });
+}
+
+async function assertOnboardingFocusRingM4(page, selector, label) {
+  const control = page.locator(selector);
+  await page.evaluate(() => {
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+  });
+  await control.focus();
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  const measurement = await control.evaluate((node) => {
+    const body = node.closest(".onb__body");
+    if (!body) throw new Error("controle focado fora do corpo do onboarding");
+    const rect = (element) => {
+      const box = element.getBoundingClientRect();
+      return { left: box.left, right: box.right, top: box.top, bottom: box.bottom };
+    };
+    return { active: document.activeElement === node, control: rect(node), body: rect(body) };
+  });
+  const ring = 3;
+  const tolerance = 1;
+  assert(measurement.active, `${label}: ${selector} não recebeu foco`);
+  assert(measurement.control.left - ring >= measurement.body.left - tolerance
+    && measurement.control.right + ring <= measurement.body.right + tolerance
+    && measurement.control.top - ring >= measurement.body.top - tolerance
+    && measurement.control.bottom + ring <= measurement.body.bottom + tolerance,
+  `${label}: o anel de foco de ${selector} saiu do corpo: ${JSON.stringify(measurement)}`);
+}
+
+async function runOnboardingViewportM4(browser, scenario) {
+  const fresh = await openFresh(browser, scenario.viewport, { hasTouch: true, reducedMotion: "reduce", ...scenario.contextOptions });
+  const page = fresh.page;
+  const step = (number) => page.locator(`.onb__progress[aria-label="Passo ${number} de 4"]`);
+  try {
+    const first = await assertOnboardingGeometryM4(page, `${scenario.label}, passo 1`);
+    assert(Math.abs(first.viewport.devicePixelRatio - scenario.devicePixelRatio) < 0.01,
+      `${scenario.label}: devicePixelRatio inesperado: ${first.viewport.devicePixelRatio}`);
+
+    await page.locator(".onb-legal-summary > summary").click();
+    assert(await page.locator(".onb-legal-summary").getAttribute("open") !== null,
+      `${scenario.label}: o resumo legal não abriu`);
+    await assertOnboardingGeometryM4(page, `${scenario.label}, passo 1 com resumo legal`, { expectBodyOverflow: true });
+    await page.locator('[data-action-select="onb-legal"]').check();
+    await assertOnboardingFocusRingM4(page, '[data-action-select="onb-legal"]', `${scenario.label}, passo 1`);
+    await page.locator('[data-action="onb-focus"][data-value="debt"]').click();
+    await page.fill("#onb-name", "Teste M4");
+    await assertOnboardingFocusRingM4(page, "#onb-name", `${scenario.label}, passo 1`);
+    await scrollOnboardingBodyToEndM4(page);
+    await page.locator("#onb-advance").click();
+
+    await step(2).waitFor();
+    await assertOnboardingScrollResetM4(page, `${scenario.label}, Próximo para o passo 2`);
+    await assertOnboardingGeometryM4(page, `${scenario.label}, passo 2`);
+    await page.fill("#onb-income", "5000,00");
+    await assertOnboardingFocusRingM4(page, "#onb-income", `${scenario.label}, passo 2`);
+    await scrollOnboardingBodyToEndM4(page);
+    await page.locator("#onb-advance").click();
+
+    await step(3).waitFor();
+    await assertOnboardingScrollResetM4(page, `${scenario.label}, Próximo para o passo 3`);
+    await assertOnboardingGeometryM4(page, `${scenario.label}, passo 3`);
+    await page.fill("#onb-acc-name", "Conta principal");
+    await assertOnboardingFocusRingM4(page, "#onb-acc-name", `${scenario.label}, passo 3`);
+    await page.fill("#onb-acc-balance", "2000,00");
+    await assertOnboardingFocusRingM4(page, "#onb-acc-balance", `${scenario.label}, passo 3`);
+    await scrollOnboardingBodyToEndM4(page);
+    await page.locator("#onb-advance").click();
+
+    await step(4).waitFor();
+    await assertOnboardingScrollResetM4(page, `${scenario.label}, Próximo para o passo 4`);
+    assert(await page.locator(".onb__preview").count() === 1, `${scenario.label}: o passo 4 não mostrou a prévia da renda`);
+    await assertOnboardingGeometryM4(page, `${scenario.label}, passo 4`, { expectBodyOverflow: true });
+    await scrollOnboardingBodyToEndM4(page);
+    await page.locator('[data-action="onb-back"]').click();
+
+    await step(3).waitFor();
+    await assertOnboardingScrollResetM4(page, `${scenario.label}, Voltar para o passo 3`);
+    await assertOnboardingGeometryM4(page, `${scenario.label}, passo 3 após Voltar`);
+    await scrollOnboardingBodyToEndM4(page);
+    await page.locator("#onb-advance").click();
+
+    await step(4).waitFor();
+    await assertOnboardingScrollResetM4(page, `${scenario.label}, novo Próximo para o passo 4`);
+    await assertOnboardingGeometryM4(page, `${scenario.label}, passo 4 final`, { expectBodyOverflow: true });
+    await page.locator('[data-action="onb-finish"]').click();
+    await page.waitForSelector(".main-content");
+
+    const saved = await page.evaluate(() => CofreUI.test.snapshot());
+    assert(saved.dashboardFocus === "debt", `${scenario.label}: o objetivo não foi gravado`);
+    assert(saved.monthlyIncome === 5000 && saved.accountCount === 1,
+      `${scenario.label}: renda ou conta não foi gravada no fluxo real`);
+    assert(fresh.pageErrors.length === 0, `${scenario.label}: erros no navegador: ${fresh.pageErrors.join("; ")}`);
+  } finally {
+    await fresh.context.close();
+  }
+}
+
+(async () => {
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  globalThis.baseUrl = `http://127.0.0.1:${server.address().port}/`;
+  const browser = await chromium.launch({ headless: true });
+  let shared;
+
+  await test("onboarding grava objetivo, renda e conta", async () => {
+    shared = await openFresh(browser);
+    await completeOnboarding(shared.page, "debt");
+    const data = await shared.page.evaluate(() => CofreUI.test.snapshot());
+    assert(data.dashboardFocus === "debt", "o objetivo escolhido não foi gravado");
+    assert(data.monthlyIncome === 5000 && data.accountCount === 1, "renda ou conta não foi gravada");
+  });
+
+  await test("onboarding mantém ações alcançáveis em tela baixa e viewport CSS de zoom de 200%", async () => {
+    const scenarios = [
+      { label: "320x480 touch", viewport: { width: 320, height: 480 }, contextOptions: {}, devicePixelRatio: 1 },
+      // O DPR 2 cobre densidade. O espaço reduzido de 390x450 CSS é o que
+      // representa a área disponível numa janela ampliada em 200%.
+      { label: "390x450 CSS com DPR 2", viewport: { width: 390, height: 450 }, contextOptions: { deviceScaleFactor: 2 }, devicePixelRatio: 2 },
+    ];
+    for (const scenario of scenarios) await runOnboardingViewportM4(browser, scenario);
+  });
+
+  await test("lançamento mostra erro no campo e limita centavos", async () => {
+    const page = shared.page;
+    await page.locator('[data-action="nav"][data-tab="add"]').last().click();
+    await page.locator('[data-action="submit-tx"]').click();
+    assert(await page.locator("#tx-amount-input").getAttribute("aria-invalid") === "true", "valor inválido não recebeu aria-invalid");
+    assert(await page.evaluate(() => document.activeElement && document.activeElement.id) === "tx-amount-input", "o primeiro erro não recebeu foco");
+    await page.fill("#tx-amount-input", "123,456");
+    assert(await page.inputValue("#tx-amount-input") === "123,45", "o valor manteve mais de duas casas");
+    await page.locator("#tx-category-group .chip").first().click();
+    await page.locator('[data-action="submit-tx"]').click();
+    await page.waitForFunction(() => CofreUI.test.snapshot().transactionCount === 1);
+  });
+
+  await test("compra parcelada e pagamento da fatura percorrem a interface", async () => {
+    const page = shared.page;
+    await page.evaluate(() => CofreUI.test.navigate("accounts"));
+    await page.locator('[data-action="card-new"]').click();
+    await page.fill("#card-name-input", "Cartão teste");
+    await page.fill("#card-limit-input", "3000,00");
+    await page.locator('[data-action="card-save"]').click();
+    await page.evaluate(() => CofreUI.test.navigate("add"));
+    await page.fill("#tx-amount-input", "300,00");
+    await page.locator("#tx-category-group .chip").first().click();
+    await page.locator('[data-action="select-payment"][data-value="Crédito"]').click();
+    await page.selectOption("#tx-card-select", { index: 1 });
+    await page.locator('[data-action="select-installments"][data-value="3"]').click();
+    await page.locator('[data-action="submit-tx"]').click();
+    await page.waitForFunction(() => CofreUI.test.snapshot().installmentCount === 3);
+    await page.evaluate(() => CofreUI.test.navigate("accounts"));
+    const pay = page.locator('[data-action="card-pay-open"]').first();
+    assert(await pay.count() === 1, "a fatura aberta não ofereceu pagamento");
+    await pay.click();
+    await page.locator('[data-action="card-pay-save"]').click();
+    await page.waitForFunction(() => CofreUI.test.snapshot().cardPaymentCount === 1);
+  });
+
+  await test("meta, aporte e confirmação por teclado funcionam", async () => {
+    const page = shared.page;
+    await page.evaluate(() => CofreUI.test.navigate("goals"));
+    await page.locator('[data-action="toggle-goal-form"]').click();
+    await page.fill("#goal-name-input", "Reserva teste");
+    await page.fill("#goal-target-input", "1000,00");
+    await page.locator('[data-action="submit-goal"]').click();
+    await page.waitForFunction(() => CofreUI.test.snapshot().goalCount === 1);
+    await page.locator('[data-action="expand-goal"][data-value="aportar"]').click();
+    await page.fill("#goal-contribution-input", "100,00");
+    await page.locator('[data-action="submit-goal-action"]').click();
+    await page.waitForFunction(() => CofreUI.test.snapshot().goalCurrent === 100);
+
+    await page.locator('[data-action="toggle-goal-form"]').click();
+    await page.fill("#goal-name-input", "Compra teste");
+    await page.fill("#goal-target-input", "2000,00");
+    await page.fill("#goal-saved-input", "200,00");
+    const submit = page.locator('[data-action="submit-goal"]');
+    await submit.click();
+    const dialog = page.locator('[role="alertdialog"]');
+    await dialog.waitFor();
+    assert(await page.locator(".main-content").getAttribute("inert") !== null, "o fundo não foi isolado");
+    await page.keyboard.press("Shift+Tab");
+    assert(await dialog.evaluate((node) => node.contains(document.activeElement)), "Shift+Tab saiu do diálogo");
+    await page.keyboard.press("Escape");
+    await dialog.waitFor({ state: "detached" });
+    assert(await page.evaluate(() => document.activeElement && document.activeElement.dataset.action) === "submit-goal", "o foco não voltou ao botão de origem");
+  });
+
+  await test("central filtra, revisa e mostra a origem", async () => {
+    const page = shared.page;
+    await page.evaluate(() => CofreUI.test.navigate("analytics"));
+    await page.waitForSelector(".movement-row");
+    assert(await page.locator("h1").first().textContent() === "Movimentações", "a rota não abriu a central");
+    await page.locator(".movement-row__main").first().click();
+    await page.waitForSelector('[data-action="cancel-edit"]');
+    await page.locator('[data-action="cancel-edit"]').click();
+    await page.waitForSelector(".movement-row");
+    assert(await page.locator("h1").first().textContent() === "Movimentações", "cancelar a edição não voltou para a central");
+    await page.locator('[data-action="movement-detail"]').first().click();
+    const detail = page.locator(".movement-detail");
+    await detail.waitFor();
+    assert((await detail.textContent()).includes("Origem") && (await detail.textContent()).includes("Alterações"), "o popup não mostrou procedência e histórico");
+    await detail.locator('[data-action="movement-detail-close"]').click();
+    await detail.waitFor({ state:"detached" });
+    await page.locator('[data-action-select="movement-select"]').first().check();
+    await page.waitForSelector(".movement-bulk");
+    await page.selectOption("#movement-bulk-category", { index:1 });
+    await page.locator('[data-action="movement-bulk-apply"]').click();
+    await page.locator('[data-action="movement-review-toggle"]').click();
+    assert(await page.locator(".review-issue").count() >= 1, "a conta sem conferência não entrou na caixa de revisão");
+    await page.locator('[data-action="movement-filters-toggle"]').click();
+    await page.selectOption("#movement-type", "expense");
+    assert(await page.locator(".movement-row").count() >= 1, "o filtro removeu saídas válidas");
+  });
+
+  await test("explicações, Assistente financeiro e fontes funcionam juntos", async () => {
+    const page = shared.page;
+    await page.evaluate(() => CofreUI.test.navigate("accounts"));
+    await page.locator('[data-action="accounts-view"][data-value="sources"]').click();
+    await page.waitForSelector(".sources-center");
+    const sourcesText = await page.locator(".sources-center").textContent();
+    assert(sourcesText.includes("Sem conexão bancária") && sourcesText.includes("Origens encontradas"), "a central não explicou a situação e as origens");
+
+    await page.locator('[data-action="accounts-view"][data-value="accounts"]').click();
+    await page.locator('[data-action="calculation-open"][data-id="accounts-balance"]').first().click();
+    const calculation = page.locator(".calculation-dialog");
+    await calculation.waitFor();
+    const calculationText = await calculation.textContent();
+    assert(calculationText.includes("Realizado") && calculationText.includes("Premissas utilizadas"), "o popup não separou natureza e premissas");
+    await calculation.locator('[data-action="calculation-close"]').click();
+    await calculation.waitFor({ state:"detached" });
+
+    await page.locator('[data-action="assistant-open"]').click();
+    const assistant = page.locator(".assistant-dialog");
+    await assistant.waitFor();
+    await assistant.locator('[data-action="assistant-question"][data-id="accounts-purchase"]').click();
+    await assistant.locator('[data-action="assistant-action"][data-id="accounts-purchase"]').click();
+    await page.waitForSelector("#sim-entrada-amortizacao-dinheiro-input");
+    assert((await page.inputValue("#sim-entrada-amortizacao-dinheiro-input")) !== "", "o assistente não preencheu o simulador");
+  });
+
+  await test("backup atual e arquivo antigo passam pela restauração", async () => {
+    const page = shared.page;
+    await page.evaluate(() => CofreUI.test.navigate("settings"));
+    // Ajustes virou acordeao: backup mora no topico "dados" e o painel so
+    // existe no DOM depois de abrir. O estado fica em `state.settingsSection`,
+    // entao um clique basta para o resto deste teste.
+    await page.locator('[data-action="settings-section"][data-value="dados"]').click();
+    await page.waitForSelector('[data-action="export-json"]');
+    const downloadPromise = page.waitForEvent("download");
+    await page.locator('[data-action="export-json"]').click();
+    const download = await downloadPromise;
+    const backupPath = path.join(os.tmpdir(), `cofre-browser-${Date.now()}.json`);
+    await download.saveAs(backupPath);
+    await page.setInputFiles("#import-file-input", backupPath);
+    await page.waitForSelector('[data-action="backup-confirm"]');
+    await page.locator('[data-action="backup-set-mode"][data-value="replace"]').click();
+    await page.locator('[data-action="backup-confirm"]').click();
+    await page.waitForFunction(() => !CofreUI.test.snapshot().backupPreviewOpen);
+    assert((await page.evaluate(() => CofreUI.test.snapshot().transactionCount)) >= 4, "o backup atual não restaurou os lançamentos");
+
+    const oldPath = path.join(os.tmpdir(), `cofre-old-${Date.now()}.json`);
+    fs.writeFileSync(oldPath, JSON.stringify({ version: 6, monthlyIncome: 1200, transactions: [], categories: [], goals: [], assets: [] }));
+    await page.setInputFiles("#import-file-input", oldPath);
+    await page.waitForSelector('[data-action="backup-confirm"]');
+    assert((await page.locator("body").textContent()).toLowerCase().includes("formato antigo"), "o arquivo antigo não foi reconhecido");
+    await page.locator('[data-action="backup-confirm"]').click();
+    await page.waitForFunction(() => CofreUI.test.snapshot().version === 22);
+    fs.unlinkSync(backupPath); fs.unlinkSync(oldPath);
+  });
+
+  await test("conta preserva o modo local quando o backend não está configurado", async () => {
+    const page = shared.page;
+    await page.evaluate(() => CofreUI.test.navigate("account"));
+    await page.waitForSelector(".account-status");
+    const text = await page.locator(".main-content").textContent();
+    assert(text.includes("Modo local ativo") && text.includes("sem enviar seus dados"), "a tela não explicou o modo local");
+    assert(await page.locator("#account-password").count() === 0, "o formulário apareceu mesmo sem backend configurado");
+    for (const width of [320, 390]) {
+      await page.setViewportSize({ width, height: 844 });
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      assert(overflow <= 2, `a tela de conta criou rolagem horizontal em ${width}px`);
+    }
+  });
+
+  await test("320, 390, 768, 1440, zoom de 200% e temas não quebram a página", async () => {
+    const page = shared.page;
+    await page.evaluate(() => CofreUI.test.navigate("dashboard"));
+    for (const width of [320, 390, 768, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      assert(overflow <= 2, `houve rolagem horizontal em ${width}px`);
+    }
+    // Em 200% de zoom, uma janela física de 780 px entrega cerca de 390 CSS px
+    // ao layout. Repetimos essa largura e dobramos o texto para também cobrir
+    // o redimensionamento exigido pela WCAG, sem usar a propriedade CSS `zoom`,
+    // que amplia a página sem recalcular o viewport e não simula o navegador.
+    await page.setViewportSize({ width: 390, height: 900 });
+    await page.evaluate(() => { document.body.style.fontSize = "32px"; });
+    const zoomOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    const overflowSources = zoomOverflow > 2 ? await page.evaluate(() => Array.from(document.querySelectorAll("body *")).map((node) => {
+      const rect = node.getBoundingClientRect();
+      return { tag: node.tagName, cls: node.className || "", right: Math.round(rect.right), width: Math.round(rect.width) };
+    }).filter((item) => item.right > document.documentElement.clientWidth + 2).sort((a, b) => b.right - a.right).slice(0, 5)) : [];
+    assert(zoomOverflow <= 2, `houve rolagem horizontal com zoom de 200%: ${JSON.stringify(overflowSources)}`);
+    await page.evaluate(() => { document.body.style.fontSize = ""; CofreUI.test.theme("dark"); });
+    assert(await page.locator("html").getAttribute("data-theme") === "dark", "tema escuro não foi aplicado");
+    await page.evaluate(() => CofreUI.test.theme("light"));
+    assert(await page.locator("html").getAttribute("data-theme") === "light", "tema claro não foi aplicado");
+    const styleProblems = await page.evaluate(() => ({
+      inline: document.querySelectorAll("#app [style]").length,
+      pending: document.querySelectorAll("#app [data-ui-css]").length,
+      rejected: document.querySelectorAll("#app [data-ui-style-rejected]").length,
+    }));
+    assert(styleProblems.inline === 0 && styleProblems.pending === 0 && styleProblems.rejected === 0, `estilos calculados não foram consolidados: ${JSON.stringify(styleProblems)}`);
+    assert(shared.pageErrors.length === 0, `erros no navegador: ${shared.pageErrors.join("; ")}`);
+  });
+
+  await test("320 px mantém doca, assistente e controles sem corte nem sobreposição", async () => {
+    const touch = await openFresh(browser, { width: 320, height: 844 }, { hasTouch: true });
+    const page = touch.page;
+    const intersection = (a, b) => ({
+      width: Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left)),
+      height: Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top)),
+    });
+
+    try {
+      await completeOnboarding(page);
+      const shell = await page.evaluate(() => {
+        const rect = (node) => {
+          const box = node.getBoundingClientRect();
+          return { left: box.left, right: box.right, top: box.top, bottom: box.bottom };
+        };
+        const labels = Array.from(document.querySelectorAll(".bottom-nav__item span, .bottom-nav__fab-label"));
+        return {
+          documentOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+          clipped: labels.filter((node) => node.scrollWidth > node.clientWidth + 1).map((node) => ({
+            text: node.textContent.trim(), clientWidth: node.clientWidth, scrollWidth: node.scrollWidth,
+          })),
+          nav: rect(document.querySelector(".bottom-nav")),
+          launcher: rect(document.querySelector(".assistant-launcher")),
+        };
+      });
+      assert(shell.documentOverflow === 0, `houve rolagem horizontal em 320px: ${shell.documentOverflow}px`);
+      assert(shell.clipped.length === 0, `a doca cortou rótulos: ${JSON.stringify(shell.clipped)}`);
+      const navOverlap = intersection(shell.nav, shell.launcher);
+      assert(navOverlap.width === 0 || navOverlap.height === 0,
+        `o assistente cobriu a doca: ${JSON.stringify(navOverlap)}`);
+
+      await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+      await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      const end = await page.evaluate(() => {
+        const rect = (node) => {
+          const box = node.getBoundingClientRect();
+          return { left: box.left, right: box.right, top: box.top, bottom: box.bottom };
+        };
+        return {
+          launcher: rect(document.querySelector(".assistant-launcher")),
+          content: rect(document.querySelector(".screen > :last-child")),
+        };
+      });
+      const contentOverlap = intersection(end.launcher, end.content);
+      assert(contentOverlap.width === 0 || contentOverlap.height === 0,
+        `o assistente cobriu o último conteúdo: ${JSON.stringify(contentOverlap)}`);
+
+      await page.evaluate(() => CofreUI.test.navigate("privacy"));
+      await page.waitForSelector(".tool-links");
+      const privacyLayout = await page.evaluate(() => ({
+        documentOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        toolLinksOverflow: Array.from(document.querySelectorAll(".tool-links")).map((links) => {
+          const parent = links.getBoundingClientRect();
+          const children = Array.from(links.children).map((node) => {
+            const child = node.getBoundingClientRect();
+            return { left: child.left, right: child.right };
+          });
+          return {
+            clientWidth: links.clientWidth,
+            scrollWidth: links.scrollWidth,
+            childOutside: children.some((child) => child.left < parent.left - 1 || child.right > parent.right + 1),
+          };
+        }).filter((item) => item.scrollWidth > item.clientWidth + 1 || item.childOutside),
+      }));
+      assert(privacyLayout.documentOverflow === 0,
+        `Privacidade criou rolagem horizontal: ${privacyLayout.documentOverflow}px`);
+      assert(privacyLayout.toolLinksOverflow.length === 0,
+        `os controles excederam .tool-links: ${JSON.stringify(privacyLayout.toolLinksOverflow)}`);
+      assert(touch.pageErrors.length === 0, `erros no navegador móvel: ${touch.pageErrors.join("; ")}`);
+    } finally {
+      await touch.context.close();
+    }
+  });
+
+  await test("privacidade bloqueia IA e exclusão exige APAGAR", async () => {
+    const page = shared.page;
+    await page.evaluate(() => CofreUI.test.navigate("privacy"));
+    await page.waitForSelector('[data-action="privacy-ai-mode"][data-value="blocked"]');
+    assert((await page.locator("h1").textContent()).includes("Privacidade"), "a central de privacidade não abriu");
+
+    const blocked = page.locator('[data-action="privacy-ai-mode"][data-value="blocked"]');
+    await blocked.click();
+    assert(await blocked.getAttribute("aria-checked") === "true", "o bloqueio da IA não foi gravado");
+
+    await page.locator('[data-action="privacy-delete-all"]').click();
+    const dialog = page.locator('[role="alertdialog"]');
+    await dialog.waitFor();
+    const confirm = dialog.locator('[data-action="confirmation-accept"]');
+    assert(await confirm.isDisabled(), "a exclusão ficou disponível sem a frase de segurança");
+    await dialog.locator("#confirmation-required-input").fill("apagar");
+    assert(await confirm.isDisabled(), "a confirmação aceitou texto com caixa incorreta");
+    await dialog.locator("#confirmation-required-input").fill("APAGAR");
+    assert(await confirm.isEnabled(), "a frase APAGAR não liberou a exclusão");
+    await confirm.click();
+    await page.waitForSelector('[role="dialog"][aria-label="Configuração inicial"]');
+    const snapshot = await page.evaluate(() => CofreUI.test.snapshot());
+    assert(snapshot.transactionCount === 0 && snapshot.accountCount === 0 && snapshot.goalCount === 0, "a exclusão não limpou os dados financeiros");
+  });
+
+  await shared.context.close();
+  await browser.close();
+  server.close();
+  const failures = results.filter((result) => !result.ok);
+  console.log(`\n${results.length - failures.length} passaram, ${failures.length} falharam.`);
+  process.exit(failures.length ? 1 : 0);
+})().catch((error) => {
+  console.error(error);
+  server.close();
+  process.exit(1);
+});

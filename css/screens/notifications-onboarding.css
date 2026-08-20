@@ -1,0 +1,244 @@
+/* ==================================================================
+   [M8] CENTRAL DE NOTIFICAÇÕES
+   ==================================================================
+   Nenhuma cor de gravidade é escolhida aqui: a classe de tom chega pronta do
+   JS (`NOTIF_TONE_CLASS`), como nos Módulos 2, 5 e 7. Uma regra de estilo
+   nunca decide se um aviso é urgente. */
+
+.header-actions {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+
+.notif-bell {
+  position: relative; width: 40px; height: 40px; flex: 0 0 auto;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-sm); border: 1px solid var(--border);
+  background: var(--card); color: var(--ink-soft);
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+.notif-bell:hover { background: var(--paper-alt); color: var(--ink); }
+.notif-bell:active { transform: scale(0.92); }
+.notif-bell--urgent { color: var(--negative); border-color: color-mix(in srgb, var(--negative) 35%, var(--border)); }
+
+.notif-bell__badge {
+  position: absolute; top: -5px; right: -5px; min-width: 18px; height: 18px;
+  padding: 0 5px; border-radius: 999px;
+  background: var(--negative); color: #fff;
+  font-size: 10.5px; font-weight: 800; line-height: 18px; text-align: center;
+  box-shadow: 0 0 0 2px var(--paper);
+}
+
+/* Faixa de filtros: com muitos grupos ela precisa rolar em vez de espremer. */
+.segmented--scroll { overflow-x: auto; scrollbar-width: none; }
+.segmented--scroll::-webkit-scrollbar { display: none; }
+.segmented--scroll .segmented__option { flex: 0 0 auto; white-space: nowrap; padding: 0 14px; }
+
+.notif-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+
+.notif-item {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 13px 14px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border-soft); background: var(--card-alt);
+  border-left: 3px solid var(--brand);
+}
+.notif-item--danger { border-left-color: var(--negative); }
+.notif-item--warn   { border-left-color: var(--goal); }
+.notif-item--positive { border-left-color: var(--positive); }
+/* Lida continua legível; apagar o texto seria esconder o histórico. */
+.notif-item.is-read { background: transparent; border-left-color: var(--border); }
+.notif-item.is-read .notif-item__title { font-weight: 600; color: var(--ink-soft); }
+
+.notif-item__icon {
+  flex: 0 0 auto; width: 30px; height: 30px; border-radius: 10px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--paper-alt); color: var(--ink-soft);
+}
+.notif-item--danger .notif-item__icon { background: var(--negative-soft); color: var(--negative); }
+.notif-item--warn .notif-item__icon { background: var(--goal-soft); color: var(--goal); }
+.notif-item--positive .notif-item__icon { background: var(--positive-soft); color: var(--positive); }
+
+.notif-item__body { flex: 1 1 auto; min-width: 0; }
+.notif-item__title {
+  margin: 0; font-size: 14px; font-weight: 750; color: var(--ink);
+  letter-spacing: -0.01em; display: flex; align-items: center; gap: 7px;
+}
+.notif-item__msg { margin: 3px 0 0; font-size: 13px; color: var(--ink-soft); line-height: 1.45; }
+.notif-item__meta { margin: 5px 0 0; font-size: 11.5px; font-weight: 650; color: var(--ink-faint); }
+
+.notif-dot {
+  flex: 0 0 auto; width: 7px; height: 7px; border-radius: 999px;
+  background: var(--brand);
+}
+.notif-item--danger .notif-dot { background: var(--negative); }
+.notif-item--warn .notif-dot { background: var(--goal); }
+.notif-item--positive .notif-dot { background: var(--positive); }
+
+.notif-item__actions { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+
+@media (max-width: 560px) {
+  .notif-item { flex-wrap: wrap; }
+  .notif-item__actions { width: 100%; justify-content: flex-end; }
+}
+
+/* O interruptor de silenciar ocupa o lugar do chevron nesta lista. */
+.tool-link > .switch { margin-left: auto; flex-shrink: 0; }
+
+/* ==================================================================
+   CONFIGURAÇÃO INICIAL (4 passos)
+   ------------------------------------------------------------------
+   Camada de tela cheia do primeiro uso. Fica fora do grid do app de
+   propósito: enquanto ela está no ar não existe navegação por baixo,
+   então nada aqui herda espaçamento de `.screen` nem da barra inferior.
+   ================================================================== */
+.onb {
+  --onb-inset-top: max(16px, env(safe-area-inset-top, 0px));
+  --onb-inset-bottom: max(16px, env(safe-area-inset-bottom, 0px));
+  position: fixed; inset: 0; z-index: 90;
+  display: flex; align-items: center; justify-content: center;
+  height: 100vh;
+  height: 100dvh;
+  background: var(--paper);
+  padding: var(--onb-inset-top) 16px var(--onb-inset-bottom);
+  overflow: hidden;
+}
+.onb__sheet {
+  width: 100%; max-width: 460px;
+  max-height: calc(100vh - var(--onb-inset-top) - var(--onb-inset-bottom));
+  max-height: calc(100dvh - var(--onb-inset-top) - var(--onb-inset-bottom));
+  display: flex; flex-direction: column; gap: 18px;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-lg), var(--sheen);
+  padding: 20px 20px 18px;
+  animation: onb-in var(--dur-slow, 420ms) var(--ease) both;
+}
+@keyframes onb-in { from { opacity: 0; transform: translateY(10px) scale(0.985); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .onb__sheet { animation: none; } }
+
+.onb__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex: 0 0 auto; }
+.onb__brand {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-family: "Space Grotesk", Inter, system-ui, sans-serif;
+  font-size: 15px; font-weight: 700; letter-spacing: -0.02em; color: var(--brand);
+}
+
+/* Barra de progresso: quatro segmentos com rótulo. Um passo concluído fica
+   cheio, o atual fica cheio e com o rótulo em destaque, os seguintes vazios. */
+.onb__progress { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; flex: 0 0 auto; }
+.onb__step { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.onb__step-bar {
+  height: 4px; border-radius: 999px; background: var(--border);
+  transition: background var(--dur, 220ms) var(--ease);
+}
+.onb__step.active .onb__step-bar, .onb__step.done .onb__step-bar { background: var(--brand); }
+.onb__step-label {
+  font-size: 10.5px; font-weight: 650; color: var(--ink-faint);
+  letter-spacing: 0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.onb__step.active .onb__step-label { color: var(--ink); }
+
+.onb__body {
+  display: flex; flex: 1 1 auto; flex-direction: column; gap: 14px;
+  min-height: 0; overflow-x: hidden; overflow-y: auto;
+  overscroll-behavior: contain;
+  /* O anel global ocupa 3px fora do controle. A folga interna impede que a
+     borda da região rolável corte esse sinal no primeiro ou no último campo. */
+  padding: 4px; margin: -4px;
+  scroll-padding-block: 4px;
+}
+.onb__intro { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.onb__icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 54px; height: 54px; border-radius: var(--radius);
+  background: var(--brand-soft); color: var(--brand);
+}
+.onb__title {
+  margin: 2px 0 0; font-family: "Space Grotesk", Inter, system-ui, sans-serif;
+  font-size: 21px; font-weight: 700; letter-spacing: -0.025em; line-height: 1.2; color: var(--ink);
+}
+.onb__lead { margin: 0; font-size: 13.5px; color: var(--ink-soft); line-height: 1.55; max-width: 36ch; }
+
+.onb-focus { margin: 0; padding: 0; border: 0; }
+.onb-focus__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
+.onb-focus__option {
+  min-height: 66px; padding: 10px; display: grid; grid-template-columns: 32px minmax(0, 1fr);
+  gap: 9px; align-items: center; text-align: left; color: var(--ink-soft);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--card-alt);
+}
+.onb-focus__option.active { color: var(--ink); border-color: var(--brand); background: var(--brand-soft); }
+.onb-focus__icon { width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center; color: var(--brand); background: var(--card); }
+.onb-focus__option b, .onb-focus__option small { display: block; }
+.onb-focus__option b { font-size: 12.5px; line-height: 1.25; }
+.onb-focus__option small { margin-top: 3px; font-size: 10.5px; line-height: 1.3; color: var(--ink-faint); }
+
+.onb__fields { display: flex; flex-direction: column; gap: 14px; transition: opacity var(--dur, 220ms) var(--ease); }
+.onb__fields--off { opacity: 0.42; }
+
+.onb__note {
+  display: flex; align-items: flex-start; gap: 10px;
+  background: var(--paper-alt); border-radius: var(--radius-sm);
+  padding: 12px 14px; color: var(--ink-soft);
+}
+.onb__note svg { flex: 0 0 auto; margin-top: 1px; color: var(--ink-faint); }
+.onb__note p { margin: 0; font-size: 12.5px; line-height: 1.5; }
+
+/* Alvo de toque de 44px: o texto é longo e o quadradinho sozinho seria pequeno
+   demais no celular, então a linha inteira é o botão. */
+.onb__toggle {
+  display: flex; align-items: center; gap: 11px; width: 100%;
+  min-height: 44px; padding: 10px 13px; text-align: left;
+  background: transparent; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  color: var(--ink-soft); font-size: 12.5px; font-weight: 600; line-height: 1.45;
+  cursor: pointer; transition: border-color var(--dur, 220ms) var(--ease), color var(--dur, 220ms) var(--ease);
+}
+.onb__toggle:hover { border-color: var(--ink-faint); color: var(--ink); }
+.onb__toggle.active { border-color: var(--brand); color: var(--ink); }
+.onb__toggle-box {
+  flex: 0 0 auto; width: 19px; height: 19px; border-radius: 6px;
+  border: 1.5px solid var(--border); display: inline-flex; align-items: center; justify-content: center;
+}
+.onb__toggle.active .onb__toggle-box { background: var(--brand); border-color: var(--brand); color: #fff; }
+
+.onb__presets { display: flex; flex-direction: column; gap: 9px; }
+.onb__preset {
+  display: flex; flex-direction: column; gap: 3px; width: 100%;
+  padding: 13px 15px; text-align: left; cursor: pointer;
+  background: var(--card-alt); border: 1.5px solid var(--border); border-radius: var(--radius-sm);
+  transition: border-color var(--dur, 220ms) var(--ease), background var(--dur, 220ms) var(--ease);
+}
+.onb__preset:hover { border-color: var(--ink-faint); }
+.onb__preset.active { border-color: var(--brand); background: var(--brand-soft); }
+.onb__preset-title {
+  font-family: "Space Grotesk", Inter, system-ui, sans-serif;
+  font-size: 15px; font-weight: 700; letter-spacing: -0.015em; color: var(--ink);
+}
+.onb__preset-hint { font-size: 12px; color: var(--ink-soft); line-height: 1.45; }
+
+.onb__preview {
+  display: flex; flex-direction: column; gap: 8px;
+  background: var(--paper-alt); border-radius: var(--radius-sm); padding: 13px 14px;
+}
+.onb__preview-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.onb__preview-label {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 12.5px; font-weight: 650; color: var(--ink-soft);
+}
+.onb__preview-pct { color: var(--ink-faint); font-weight: 600; }
+.onb__preview-value { font-size: 13.5px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+
+.onb__foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex: 0 0 auto; }
+.onb__foot .btn { min-width: 118px; }
+
+/* Em telas baixas, os intervalos menores devolvem altura ao único scrollport.
+   Assim o foco programático mantém o controle e seu anel dentro do corpo. */
+@media (max-height: 520px) {
+  .onb__sheet { gap: 8px; }
+}
+
+@media (max-width: 420px) {
+  .onb { padding-left: 10px; padding-right: 10px; }
+  .onb__sheet { padding: 18px 15px 16px; border-radius: var(--radius); }
+  .onb__title { font-size: 19px; }
+  .onb__step-label { font-size: 9.5px; }
+  .onb__foot .btn { min-width: 0; flex: 1; }
+  .onb-focus__grid { grid-template-columns: 1fr; }
+}

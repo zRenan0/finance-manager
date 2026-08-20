@@ -1,0 +1,261 @@
+/* ==================================================================
+   M11. PERSONALIZAÇÃO DO INÍCIO, TELA "TUDO" E REGRAS DE CATEGORIZAÇÃO
+   ================================================================== */
+
+/* ---- Botão de personalizar, no cabeçalho do Início ---- */
+.icon-btn--active { background: var(--brand-soft); color: var(--brand); }
+.icon-btn--danger { background: var(--negative-soft); color: var(--negative); }
+
+/* ---- Painel de personalização ----
+   Cada linha tem duas colunas de toque (mover / mostrar) e ambas precisam
+   respeitar 44px de alvo mesmo com o ícone menor: no celular esta é a tela em
+   que um toque errado desfaz o que o usuário acabou de arrumar. */
+.dash-config { margin-bottom: 16px; }
+.dash-focus { margin: 14px 0 4px; padding: 13px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.dash-focus legend { padding: 0 5px; font-size: 12px; font-weight: 750; color: var(--ink); }
+.dash-focus__options { display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: 7px; margin-top: 10px; }
+.dash-focus__option { min-height: 44px; padding: 8px 10px; display: flex; align-items: center; gap: 8px; text-align: left; border: 1px solid var(--border); border-radius: 11px; color: var(--ink-soft); }
+.dash-focus__option.active { border-color: var(--brand); background: var(--brand-soft); color: var(--brand); }
+.dash-focus__option span:last-child { color: var(--ink); font-size: 12px; font-weight: 650; line-height: 1.25; }
+.dash-config-list { display: flex; flex-direction: column; margin-top: 10px; }
+.dash-config-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 0; border-bottom: 1px solid var(--border-soft);
+  flex-wrap: wrap;
+}
+.dash-config-row:last-child { border-bottom: none; }
+.dash-config-row--off .dash-config-row__text { opacity: 0.5; }
+.dash-config-row__moves { display: flex; flex-direction: column; gap: 2px; flex-shrink: 0; }
+.dash-config-row__moves .icon-btn { width: 34px; height: 22px; border-radius: var(--radius-xs); }
+.dash-config-row__text { flex: 1; min-width: 0; }
+.dash-config-row__label {
+  margin: 0; font-size: 13.5px; font-weight: 650; color: var(--ink);
+  display: flex; align-items: center; gap: 7px; flex-wrap: wrap; letter-spacing: -0.012em;
+}
+.dash-config-row__hint { margin: 3px 0 0; font-size: 12px; color: var(--ink-soft); line-height: 1.45; }
+.dash-config-row__lock { color: var(--ink-faint); flex-shrink: 0; display: flex; }
+.dash-config-tag {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--ink-faint); background: var(--paper-alt);
+  border-radius: 999px; padding: 2px 7px;
+}
+
+/* ---- Tela "Recursos" ---- */
+.all-search { display: flex; align-items: center; gap: 8px; }
+.all-search .input { flex: 1; min-width: 0; }
+.all-search__icon { color: var(--ink-faint); flex-shrink: 0; }
+
+.tool-link--rich { align-items: flex-start; gap: 12px; }
+.tool-link__icon { color: var(--brand); display: flex; padding-top: 1px; flex-shrink: 0; }
+.tool-link__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.tool-link__label { font-size: 14px; font-weight: 650; color: var(--ink); }
+.tool-link__desc { font-size: 12px; font-weight: 500; color: var(--ink-soft); line-height: 1.45; }
+.tool-link--rich .tool-link__chevron { align-self: center; }
+
+/* ---- Regras de categorização ---- */
+.rule-list { display: flex; flex-direction: column; margin-top: 10px; }
+.rule-row {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 11px 0; border-bottom: 1px solid var(--border-soft);
+}
+.rule-row:last-child { border-bottom: none; }
+.rule-row--off .rule-row__text, .rule-row--off .icon-bubble { opacity: 0.45; }
+.rule-row__text { flex: 1; min-width: 140px; }
+.rule-row__pattern {
+  margin: 0; font-size: 13.5px; font-weight: 650; color: var(--ink);
+  word-break: break-word; letter-spacing: -0.012em;
+}
+.rule-row__meta { margin: 3px 0 0; font-size: 12px; color: var(--ink-soft); line-height: 1.45; }
+.rule-row__error {
+  margin: 5px 0 0; font-size: 12px; font-weight: 600; color: var(--negative);
+  display: flex; align-items: center; gap: 5px; line-height: 1.4;
+}
+.rule-row__confirm { flex-basis: 100%; margin: 6px 0 0; font-size: 12px; color: var(--negative); font-weight: 600; }
+.rule-row__select { flex-basis: 100%; height: 40px; font-size: 13px; }
+.rule-row--builtin { align-items: flex-start; }
+
+.rule-form {
+  border: 1px solid var(--border-soft); border-radius: var(--radius-sm);
+  padding: 14px; margin: 12px 0; background: var(--paper-alt);
+}
+.rule-form .field:first-child { margin-top: 0; }
+
+.rule-test-result {
+  display: flex; align-items: center; gap: 11px; margin-top: 12px;
+  border: 1px solid var(--border-soft); border-radius: var(--radius-sm); padding: 12px;
+}
+.rule-test-result--miss { color: var(--ink-soft); }
+.rule-test-result__text { min-width: 0; }
+.rule-test-result__cat { margin: 0; font-size: 14px; font-weight: 700; color: var(--ink); }
+.rule-test-result__rule { margin: 3px 0 0; font-size: 12px; color: var(--ink-soft); line-height: 1.45; }
+
+.inline-note {
+  display: flex; align-items: center; gap: 10px; margin-top: 12px;
+  border: 1px solid var(--border-soft); border-radius: var(--radius-sm);
+  padding: 11px 12px; font-size: 13px; color: var(--ink-soft); line-height: 1.45;
+}
+.inline-note b { color: var(--ink); }
+
+.rule-preview-list { display: flex; flex-direction: column; margin-top: 8px; }
+.rule-preview-row {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+  padding: 7px 0; border-bottom: 1px solid var(--border-soft); font-size: 12.5px;
+}
+.rule-preview-row:last-child { border-bottom: none; }
+.rule-preview-row__desc { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rule-preview-row__to { color: var(--brand); font-weight: 650; flex-shrink: 0; }
+
+/* ==================================================================
+   AJUSTES EM TÓPICOS
+   ------------------------------------------------------------------
+   A linha fechada é a unidade de leitura da tela: ícone, assunto e o
+   valor atual do ajuste. O painel aberto reaproveita os cartões que já
+   existiam, então aqui só tiramos a moldura deles para não desenhar
+   uma borda dentro da outra.
+   ================================================================== */
+.settings-topics { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+
+.settings-topic { border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); overflow: hidden; }
+.settings-topic--open { border-color: color-mix(in srgb, var(--brand) 40%, var(--border)); box-shadow: var(--shadow-sm); }
+.settings-topic__heading { margin: 0; font-size: inherit; font-weight: inherit; }
+
+.settings-topic__toggle {
+  width: 100%; min-height: 60px; padding: 12px 14px;
+  display: flex; align-items: center; gap: 12px; text-align: left;
+  background: transparent; border: 0; color: var(--ink); cursor: pointer;
+}
+.settings-topic__icon {
+  flex: 0 0 auto; width: 36px; height: 36px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--brand-soft); color: var(--brand);
+}
+.settings-topic__text { min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; gap: 2px; }
+.settings-topic__label { font-size: 14px; font-weight: 700; color: var(--ink); }
+/* O resumo pode ser longo (datas, dois valores). Uma linha só, cortada com
+   reticências: duas linhas fariam as alturas das linhas variarem entre si. */
+.settings-topic__summary {
+  font-size: 12.5px; color: var(--ink-faint); line-height: 1.35;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.settings-topic__chevron { flex: 0 0 auto; color: var(--ink-faint); transition: transform var(--dur) var(--ease); }
+.settings-topic--open .settings-topic__chevron { transform: rotate(180deg); }
+.settings-topic--open .settings-topic__icon { background: var(--brand); color: var(--paper); }
+
+.settings-topic__panel { padding: 0 12px 12px; }
+/* Os cartões internos perdem a moldura: quem desenha a caixa agora é o tópico. */
+.settings-topic__panel .card {
+  border: 0; box-shadow: none; background: transparent;
+  padding: 4px 2px 0; margin: 0; border-radius: 0;
+}
+.settings-topic__panel .card + .card { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border-soft); }
+.settings-topic__panel .card:hover { transform: none; box-shadow: none; }
+
+/* ==================================================================
+   AJUSTES: CARTÃO DE DESTINO
+   ------------------------------------------------------------------
+   Categoria não é um tópico daqui: é uma tela. O cartão empresta a
+   moldura e o medalhão do tópico para pertencer à mesma pilha, mas o
+   chevron aponta para o lado, não para baixo: a diferença entre
+   "isto abre aqui" e "isto te leva embora" tem de ser lida antes do
+   toque. O cartão inteiro é o alvo; não há nada dentro dele para
+   configurar que justifique um segundo alvo menor.
+   ================================================================== */
+.settings-destination {
+  width: 100%; display: block; text-align: left;
+  padding: 14px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--card); color: var(--ink); cursor: pointer;
+  box-shadow: var(--shadow-xs);
+  transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease),
+              transform var(--dur-fast) var(--ease);
+}
+.settings-destination:hover {
+  border-color: color-mix(in srgb, var(--brand) 40%, var(--border));
+  box-shadow: var(--shadow-sm);
+}
+.settings-destination:active { transform: scale(0.995); }
+
+/* Alinhado pelo topo: com a descrição em duas ou três linhas, um medalhão
+   centralizado verticalmente flutua no meio do parágrafo em vez de marcar
+   onde o assunto começa. */
+.settings-destination__head { display: flex; align-items: flex-start; gap: 12px; }
+.settings-destination__icon {
+  flex: 0 0 auto; width: 36px; height: 36px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--brand-soft); color: var(--brand);
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.settings-destination:hover .settings-destination__icon { background: var(--brand); color: var(--paper); }
+.settings-destination__text { min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; gap: 3px; }
+.settings-destination__title { font-size: 14px; font-weight: 700; letter-spacing: -0.012em; }
+.settings-destination__sub { font-size: 12.5px; color: var(--ink-faint); line-height: 1.45; }
+.settings-destination__chevron {
+  flex: 0 0 auto; align-self: center; color: var(--ink-faint);
+  transition: transform var(--dur) var(--ease);
+}
+.settings-destination:hover .settings-destination__chevron { transform: translateX(3px); }
+
+/* Quatro números pequenos em vez de uma frase: dois por linha no
+   telefone, os quatro em fila quando há largura. */
+.settings-destination__stats {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px; margin-top: 14px;
+}
+.settings-destination__stat {
+  min-width: 0; padding: 10px 12px; border-radius: var(--radius-xs);
+  border: 1px solid var(--border-soft);
+  background: linear-gradient(165deg, var(--card-alt), var(--paper));
+}
+.settings-destination__stat-label {
+  display: block; font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--ink-faint); line-height: 1.3;
+}
+.settings-destination__stat-value {
+  display: block; margin-top: 5px;
+  font-family: var(--font-num); font-variant-numeric: tabular-nums;
+  font-size: 17px; font-weight: 600; letter-spacing: -0.022em; line-height: 1.15;
+}
+.settings-destination__stat-value small {
+  font-family: var(--font-body); font-size: 11.5px; font-weight: 600;
+  color: var(--ink-faint); letter-spacing: 0;
+}
+.settings-destination__stat--alert {
+  border-color: color-mix(in srgb, var(--negative) 32%, var(--border));
+  background: var(--negative-soft);
+}
+.settings-destination__stat--alert .settings-destination__stat-label,
+.settings-destination__stat--alert .settings-destination__stat-value { color: var(--negative); }
+
+.settings-destination__foot {
+  display: block; margin-top: 12px; padding-top: 11px;
+  border-top: 1px solid var(--border-soft);
+  font-size: 12px; color: var(--ink-soft); line-height: 1.5;
+}
+
+@media (min-width: 520px) {
+  .settings-destination__stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-topic__chevron,
+  .settings-destination,
+  .settings-destination__chevron { transition: none; }
+}
+
+@media (max-width: 420px) {
+  .dash-config-row { gap: 9px; }
+  .dash-config-row__hint { display: none; }
+  .rule-row__select { height: 44px; }
+  .settings-topic__toggle { padding: 11px 12px; gap: 10px; }
+  .settings-topic__icon { width: 32px; height: 32px; }
+  /* Numa tela estreita a linha única virava "Alvo de 6 meses · nenhuma meta
+     escol...", que é justamente onde o resumo deixa de resumir. Duas linhas
+     cabem e as alturas continuam iguais entre si. */
+  .settings-topic__summary {
+    white-space: normal;
+    display: -webkit-box; -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2; line-clamp: 2;
+  }
+  .settings-destination { padding: 12px; }
+  .settings-destination__icon { width: 32px; height: 32px; }
+}

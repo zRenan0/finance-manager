@@ -1,0 +1,192 @@
+/* ==================================================================
+   30. PATRIMÔNIO (Módulo 3)
+   ------------------------------------------------------------------
+   Cadastro de bens/dívidas, evolução mensal e comparação anual.
+   Como nas seções anteriores, só acréscimos: a cor de cada bloco vem
+   de `--tone`/inline injetado pelo JS a partir da classe do item.
+   ================================================================== */
+
+/* ---- Composição no painel principal ---- */
+.wealth-bar {
+  display: flex; gap: 3px; height: 8px; border-radius: 999px;
+  overflow: hidden; margin: 16px 0 4px;
+  background: rgba(255,255,255,0.14);
+}
+.wealth-bar__seg { transition: flex var(--dur-slow) var(--ease); min-width: 4px; }
+
+.wealth-legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 8px; margin-top: 16px; }
+.wealth-legend__item {
+  display: flex; align-items: center; gap: 10px; min-width: 0;
+  background: rgba(255,255,255,0.09);
+  border: 1px solid rgba(255,255,255,0.13);
+  border-radius: var(--radius-sm); padding: 10px 12px;
+}
+.wealth-legend__text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.wealth-legend__label { font-size: 11.5px; font-weight: 650; color: rgba(255,255,255,0.92); }
+/* Duas linhas em vez de uma cortada: numa tela de 320px a nota terminava em
+   "Saldo dos seus lançamentos até hoj..." e a explicação se perdia. O limite
+   de duas linhas mantém a altura dos itens previsível. */
+.wealth-legend__note {
+  font-size: 10.5px; color: rgba(255,255,255,0.6); line-height: 1.4;
+  overflow: hidden;
+  display: -webkit-box; -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2; line-clamp: 2;
+}
+.wealth-legend__item b {
+  font-family: var(--font-num); font-variant-numeric: tabular-nums;
+  font-size: 12.5px; font-weight: 650; white-space: nowrap; color: #fff;
+}
+.wealth-legend__item--neg b { color: #ffd9d3; }
+
+/* ---- Seletor de classe no formulário ---- */
+.class-picker { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 4px; }
+.class-chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-family: inherit; font-size: 12.5px; font-weight: 600;
+  color: var(--ink-soft); background: var(--card-alt);
+  border: 1px solid var(--border); border-radius: 999px;
+  padding: 8px 14px; cursor: pointer; min-height: 40px;
+  transition: all var(--dur-fast) var(--ease);
+}
+.class-chip svg { color: var(--tone); flex-shrink: 0; }
+.class-chip:hover { border-color: color-mix(in srgb, var(--tone) 40%, var(--border)); }
+.class-chip.active {
+  background: color-mix(in srgb, var(--tone) 11%, transparent);
+  border-color: color-mix(in srgb, var(--tone) 42%, transparent);
+  color: var(--ink);
+}
+
+/* ---- Interruptor "já está nos lançamentos" ---- */
+.toggle-row {
+  display: flex; align-items: flex-start; gap: 11px; width: 100%;
+  text-align: left; font-family: inherit; cursor: pointer;
+  background: var(--card-alt); border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm); padding: 13px 14px; margin-top: 4px;
+  transition: border-color var(--dur-fast) var(--ease);
+}
+.toggle-row:hover { border-color: var(--border); }
+.toggle-row__box {
+  flex-shrink: 0; width: 20px; height: 20px; border-radius: 6px;
+  border: 1.5px solid var(--border); background: var(--card);
+  display: grid; place-items: center; color: #fff; margin-top: 1px;
+  transition: all var(--dur-fast) var(--ease);
+}
+.toggle-row__box.active { background: var(--brand); border-color: var(--brand); }
+.toggle-row__text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.toggle-row__text b { font-size: 12.5px; font-weight: 650; color: var(--ink); }
+.toggle-row__text span { font-size: 11.5px; color: var(--ink-soft); line-height: 1.5; }
+
+.form-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; flex-wrap: wrap; }
+.form-actions .btn { flex: 1 1 auto; min-width: 130px; }
+
+/* ---- Controle segmentado (janela do gráfico) ---- */
+.seg-control {
+  display: inline-flex; gap: 2px; padding: 3px; flex-shrink: 0;
+  background: var(--paper-alt); border-radius: 999px;
+}
+.seg-control__btn {
+  font-family: inherit; font-size: 11.5px; font-weight: 650;
+  color: var(--ink-soft); background: none; border: none;
+  border-radius: 999px; padding: 7px 13px; cursor: pointer; min-height: 34px;
+  transition: all var(--dur-fast) var(--ease);
+}
+.seg-control__btn.active { background: var(--card); color: var(--ink); box-shadow: var(--shadow-xs); }
+
+/* ---- Gráfico de evolução ---- */
+.wealth-chart__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.wealth-chart { display: block; width: 100%; height: 170px; }
+.wealth-axis {
+  display: flex; justify-content: space-between; gap: 2px; margin-top: 2px;
+  font-size: 10.5px; font-weight: 600; color: var(--ink-faint);
+}
+.wealth-axis > span { flex: 1; text-align: center; min-width: 0; overflow: hidden; }
+.wealth-axis > span.is-current { color: var(--brand); font-weight: 700; }
+
+.wealth-deltas { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 9px; margin-top: 16px; }
+.wealth-delta {
+  background: var(--card-alt); border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm); padding: 11px 12px;
+  display: flex; flex-direction: column; gap: 4px; min-width: 0;
+}
+.wealth-delta__label { font-size: 11px; color: var(--ink-soft); font-weight: 600; }
+.wealth-delta__value {
+  font-family: var(--font-num); font-variant-numeric: tabular-nums;
+  font-size: 15px; font-weight: 650; letter-spacing: -0.02em;
+}
+
+/* ---- Comparação anual ---- */
+.year-bars { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
+.year-bar { display: grid; grid-template-columns: 62px minmax(0, 1fr) auto; align-items: center; gap: 10px; }
+.year-bar__label { font-size: 11.5px; font-weight: 650; color: var(--ink-soft); }
+.year-bar.is-current .year-bar__label { color: var(--brand); }
+.year-bar__track { height: 9px; border-radius: 999px; background: var(--paper-alt); overflow: hidden; }
+.year-bar__fill { height: 100%; border-radius: 999px; transition: width var(--dur-slow) var(--ease); }
+.year-bar__value {
+  font-family: var(--font-num); font-variant-numeric: tabular-nums;
+  font-size: 12.5px; font-weight: 650; white-space: nowrap;
+}
+
+/* ---- Distribuição ---- */
+.alloc-list { display: flex; flex-direction: column; gap: 9px; }
+.alloc-row { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.alloc-row__label { flex: 1; font-size: 12.5px; color: var(--ink-soft); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.alloc-row__pct {
+  font-family: var(--font-num); font-variant-numeric: tabular-nums;
+  font-size: 11.5px; font-weight: 650; color: var(--ink-faint); flex-shrink: 0;
+}
+.alloc-row b {
+  font-family: var(--font-num); font-variant-numeric: tabular-nums;
+  font-size: 12.5px; font-weight: 650; white-space: nowrap; flex-shrink: 0;
+}
+
+/* ---- Listas de bens ---- */
+.wealth-group__head { display: flex; align-items: center; gap: 11px; margin-bottom: 14px; }
+.wealth-group__title { flex: 1; min-width: 0; }
+.wealth-group__total {
+  font-family: var(--font-num); font-variant-numeric: tabular-nums;
+  font-size: 16px; font-weight: 650; letter-spacing: -0.02em; white-space: nowrap;
+}
+
+.asset-list { display: flex; flex-direction: column; }
+.asset-row { border-top: 1px solid var(--border-soft); padding: 12px 0; }
+.asset-row:first-child { border-top: none; padding-top: 0; }
+.asset-row:last-child { padding-bottom: 0; }
+.asset-row__main { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.asset-row__info { flex: 1 1 160px; min-width: 0; }
+.asset-row__name {
+  font-size: 13.5px; font-weight: 650; margin: 0; letter-spacing: -0.012em;
+  display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+}
+.asset-row__tag {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--ink-faint); background: var(--paper-alt);
+  border-radius: 999px; padding: 2px 8px;
+}
+.asset-row__note { font-size: 11.5px; color: var(--ink-faint); margin: 3px 0 0; line-height: 1.45; }
+.asset-row__values { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; flex-shrink: 0; }
+.asset-row__value {
+  font-family: var(--font-num); font-variant-numeric: tabular-nums;
+  font-size: 14px; font-weight: 650; white-space: nowrap;
+}
+.asset-row__value.is-muted { color: var(--ink-faint); font-weight: 600; }
+.asset-row__delta { font-size: 10.5px; font-weight: 650; white-space: nowrap; }
+.asset-row__actions { display: flex; gap: 2px; flex-shrink: 0; }
+
+.asset-row__update, .asset-row__confirm {
+  margin-top: 12px; padding: 13px 14px;
+  background: var(--card-alt); border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  animation: fadeSlide var(--dur) var(--ease) both;
+}
+.asset-row__confirm > span { font-size: 12.5px; color: var(--ink-soft); line-height: 1.55; display: block; }
+.asset-row__update .form-actions, .asset-row__confirm .form-actions { margin-top: 12px; }
+
+@media (max-width: 519px) {
+  .asset-row__actions { width: 100%; justify-content: flex-end; }
+  .year-bar { grid-template-columns: 54px minmax(0, 1fr) auto; }
+  .form-actions .btn { min-width: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wealth-bar__seg, .year-bar__fill { transition: none; }
+  .asset-row__update, .asset-row__confirm { animation: none; }
+}

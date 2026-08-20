@@ -1,0 +1,75 @@
+/* Central de movimentações, revisão e procedência. */
+.page-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:16px; }
+.page-heading .page-title { margin-bottom:3px; }
+.page-subtitle { margin:0; color:var(--ink-faint); font-size:var(--text-sm); }
+.movement-view-tabs { max-width:420px; margin-bottom:16px; }
+.movement-review { padding:0; overflow:hidden; }
+.movement-review__header { width:100%; min-height:68px; display:grid; grid-template-columns:42px 1fr 24px; align-items:center; gap:12px; padding:12px 16px; border:0; background:transparent; color:var(--ink); text-align:left; cursor:pointer; }
+.movement-review__header > span:nth-child(2) { display:flex; flex-direction:column; gap:2px; }
+.movement-review__header small { color:var(--ink-faint); font-weight:400; }
+.review-count { width:38px; height:38px; display:grid; place-items:center; border-radius:50%; background:color-mix(in srgb, var(--goal) 16%, transparent); color:var(--goal); font-weight:800; }
+.movement-review__body { border-top:1px solid var(--border); padding:4px 16px 12px; }
+.review-issue { display:grid; grid-template-columns:38px minmax(0, 1fr) auto; align-items:center; gap:12px; padding:14px 0; border-bottom:1px solid var(--border); }
+.review-issue:last-child { border-bottom:0; }
+.review-issue__icon { width:36px; height:36px; display:grid; place-items:center; border-radius:10px; background:var(--surface-soft); color:var(--goal); }
+.review-issue__copy { min-width:0; display:flex; flex-direction:column; gap:2px; }
+.review-issue__copy span, .review-issue__copy small { color:var(--ink-faint); }
+.review-issue__copy small { font-size:var(--text-xs); }
+.review-issue__actions { display:flex; align-items:center; justify-content:flex-end; gap:6px; flex-wrap:wrap; }
+.review-category { min-width:190px; }
+/* `minmax(0, 1fr)` e não `minmax(220px, 1fr)`: com o mínimo em 220px a busca
+   se recusava a encolher e, num aparelho de 320px, o botão "Filtros" saía
+   pela borda do cartão cortado ao meio. A busca é quem cede. */
+.movement-filters { display:grid; grid-template-columns:minmax(0, 1fr) auto; gap:10px; align-items:center; }
+.movement-search { margin:0; }
+.movement-search .icon-btn { min-width:44px; min-height:44px; }
+.movement-filter-toggle { min-height:44px; }
+.movement-filters__advanced { display:none; grid-column:1 / -1; grid-template-columns:repeat(4, minmax(150px, 1fr)) auto; gap:10px; align-items:end; padding-top:2px; }
+.movement-filters--open .movement-filters__advanced { display:grid; }
+.movement-filters__advanced .input { min-height:44px; }
+.movement-periods { margin-top:14px; overflow-x:auto; }
+.movement-periods .segmented__option { min-width:max-content; min-height:44px; }
+.movement-dates { margin-top:12px; }
+.movement-summary { display:grid; grid-template-columns:repeat(4, 1fr); gap:10px; margin:14px 0; }
+.movement-summary__item { min-width:0; display:flex; flex-direction:column; gap:3px; padding:12px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--surface-soft); }
+.movement-summary__item span { color:var(--ink-faint); font-size:var(--text-xs); }
+.movement-summary__item b { overflow-wrap:anywhere; }
+.movement-bulk { position:sticky; top:8px; z-index:5; display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:10px 0; padding:10px; border:1px solid color-mix(in srgb, var(--brand) 35%, var(--border)); border-radius:var(--radius-sm); background:var(--surface); box-shadow:var(--shadow-sm); }
+.movement-bulk .input { width:auto; min-width:180px; min-height:44px; }
+.movement-day { margin-top:18px; }
+.movement-day > h2 { margin:0 0 6px; color:var(--ink-faint); font-size:var(--text-xs); font-weight:700; }
+.movement-row { display:grid; grid-template-columns:32px 40px minmax(0, 1fr) auto 44px; align-items:center; gap:9px; min-height:64px; border-top:1px solid var(--border); transition:background 140ms ease; }
+.movement-row--selected { background:color-mix(in srgb, var(--brand) 7%, transparent); }
+.movement-check { width:32px; height:44px; display:grid; place-items:center; }
+.movement-check input { width:19px; height:19px; accent-color:var(--brand); }
+.movement-check--empty { pointer-events:none; }
+.movement-row__main { min-width:0; min-height:54px; display:flex; flex-direction:column; align-items:flex-start; justify-content:center; gap:2px; border:0; background:transparent; color:var(--ink); text-align:left; cursor:pointer; }
+.movement-row__main .tx-title, .movement-row__main .tx-meta { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.movement-origin { display:inline-flex; align-items:center; gap:4px; color:var(--ink-faint); font-size:var(--text-xs); }
+.movement-row > .icon-btn { min-width:44px; min-height:44px; }
+.movement-detail__facts { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:8px 0 18px; }
+.movement-detail__facts div { padding:10px; border-radius:var(--radius-sm); background:var(--surface-soft); }
+.movement-detail__facts dt { color:var(--ink-faint); font-size:var(--text-xs); }
+.movement-detail__facts dd { margin:3px 0 0; overflow-wrap:anywhere; }
+.movement-history { list-style:none; margin:10px 0 0; padding:0; }
+.movement-history li { display:grid; grid-template-columns:14px 1fr; gap:8px; padding:7px 0; }
+.movement-history__dot { width:9px; height:9px; margin-top:5px; border-radius:50%; background:var(--brand); }
+.movement-history li div { display:flex; flex-direction:column; gap:2px; }
+.movement-history small { color:var(--ink-faint); }
+
+@media (max-width: 760px) {
+  .page-heading { align-items:center; }
+  .page-heading .btn { min-width:44px; }
+  .movement-summary { grid-template-columns:1fr 1fr; }
+  .movement-filters__advanced { grid-template-columns:1fr; }
+  .review-issue { grid-template-columns:38px minmax(0, 1fr); align-items:start; }
+  .review-issue__actions { grid-column:1 / -1; justify-content:stretch; }
+  .review-issue__actions .btn, .review-category { flex:1; min-width:0; min-height:44px; }
+  .movement-row { grid-template-columns:28px 36px minmax(0, 1fr) 44px; gap:6px; }
+  .movement-row > .tx-amount { grid-column:3; justify-self:start; margin-top:-12px; padding-bottom:6px; }
+  .movement-row > .icon-btn { grid-column:4; grid-row:1 / span 2; }
+  .movement-row__main { grid-column:3; }
+  .movement-detail__facts { grid-template-columns:1fr; }
+  .movement-bulk { bottom:76px; top:auto; }
+  .movement-bulk .input, .movement-bulk .btn { flex:1 1 100%; }
+}

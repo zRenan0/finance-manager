@@ -1,0 +1,151 @@
+/* ==================================================================
+   28. DASHBOARD PREMIUM (Módulo 1)
+   ------------------------------------------------------------------
+   Componentes novos da tela inicial. Nenhuma classe existente foi
+   redefinida aqui; apenas acréscimos, para não alterar telas antigas.
+   ================================================================== */
+
+/* ---- Saudação ---- */
+.dash-greeting { min-width: 0; }
+.dash-greeting__hello {
+  display: inline-flex; align-items: center; gap: 7px; margin: 0;
+  font-size: 12.5px; font-weight: 650; color: var(--ink-soft);
+  letter-spacing: -0.005em;
+}
+.dash-greeting__icon { color: var(--goal); flex-shrink: 0; }
+
+/* ---- Chip de economia no painel principal ---- */
+.hero-chip--save { background: rgba(255,255,255,0.16); }
+.hero-chip--save .hero-chip__value { color: #dcfff2; }
+.hero-chip--warn { background: rgba(255,255,255,0.13); }
+.hero-chip--warn .hero-chip__value { color: #ffe3dd; }
+
+/* ---- Score financeiro ---- */
+.card--score { display: flex; flex-direction: column; }
+.score-head { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+.score-head__text { min-width: 0; }
+.score-gauge { position: relative; flex-shrink: 0; display: grid; place-items: center; }
+.score-gauge svg { position: absolute; inset: 0; }
+.score-gauge circle { transition: stroke-dasharray var(--dur-slow) var(--ease); }
+.score-gauge__value {
+  font-family: var(--font-num); font-variant-numeric: tabular-nums;
+  font-size: 26px; font-weight: 600; letter-spacing: -0.03em; line-height: 1;
+}
+.score-level {
+  font-family: var(--font-display); font-size: 17px; font-weight: 600;
+  margin: 3px 0 0; letter-spacing: -0.02em; line-height: 1.1;
+}
+.score-note { font-size: 12px; color: var(--ink-soft); margin: 4px 0 0; line-height: 1.45; }
+
+.score-reasons { display: flex; flex-direction: column; gap: 9px; }
+.score-reason { display: flex; align-items: flex-start; gap: 9px; }
+.score-reason__mark { flex-shrink: 0; display: flex; margin-top: 1px; }
+.score-reason__text { font-size: 12.5px; color: var(--ink-soft); line-height: 1.5; }
+
+.score-pillars {
+  margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border-soft);
+  display: flex; flex-direction: column; gap: 12px;
+}
+.score-pillar__head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+.score-pillar__label {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12.5px; font-weight: 600; color: var(--ink); min-width: 0;
+}
+.score-pillar__label svg { flex-shrink: 0; color: var(--ink-faint); }
+.score-pillar__points {
+  font-family: var(--font-num); font-variant-numeric: tabular-nums;
+  font-size: 12px; font-weight: 700; flex-shrink: 0;
+}
+.score-pillar__advice { font-size: 11.5px; color: var(--ink-faint); margin: 6px 0 0; line-height: 1.5; }
+
+.score-toggle {
+  margin-top: auto; padding-top: 14px; background: none; border: none; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  font-family: inherit; font-size: 12.5px; font-weight: 650; color: var(--brand);
+  min-height: 44px; width: 100%;
+}
+.score-toggle:active { transform: scale(0.98); }
+.score-toggle svg { transition: transform var(--dur) var(--ease); }
+
+/* ---- Patrimônio ---- */
+.networth-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.networth-value {
+  font-family: var(--font-num); font-variant-numeric: tabular-nums;
+  font-size: clamp(24px, 6vw, 31px); font-weight: 600; letter-spacing: -0.03em;
+  margin: 4px 0 0; line-height: 1.05;
+}
+.sparkline { display: block; width: 100%; height: 60px; margin-top: 6px; }
+.networth-axis {
+  display: flex; justify-content: space-between; gap: 4px; margin-top: 2px;
+  font-size: 10.5px; font-weight: 600; color: var(--ink-faint); letter-spacing: 0.02em;
+}
+.networth-legend {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  gap: 10px; margin-top: 14px;
+}
+.networth-legend__item {
+  display: flex; align-items: center; gap: 8px; min-width: 0;
+  background: var(--card-alt); border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm); padding: 9px 11px;
+}
+.networth-legend__label { flex: 1; font-size: 11.5px; color: var(--ink-soft); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.networth-legend__item b {
+  font-family: var(--font-num); font-variant-numeric: tabular-nums;
+  font-size: 12.5px; font-weight: 650; white-space: nowrap;
+}
+
+/* ---- Cartões compactos (reserva, meta, contas) ---- */
+.mini-card__head { display: flex; align-items: center; gap: 11px; margin-bottom: 12px; }
+.mini-card__head > div { min-width: 0; flex: 1; }
+.mini-card__sub { font-size: 11.5px; font-weight: 650; margin: 3px 0 0; color: var(--ink-soft); }
+.mini-card__value {
+  font-family: var(--font-num); font-variant-numeric: tabular-nums;
+  font-size: clamp(20px, 5vw, 24px); font-weight: 600; letter-spacing: -0.028em;
+  margin: 0 0 10px; line-height: 1.1;
+}
+.mini-card__value-of { font-size: 13px; font-weight: 500; color: var(--ink-faint); letter-spacing: -0.01em; }
+.mini-card__note { font-size: 12px; color: var(--ink-soft); margin: 10px 0 0; line-height: 1.55; }
+.mini-card__note b { color: var(--ink); font-weight: 650; }
+.card--reserve .btn, .card--goal-featured .btn { margin-top: 12px; }
+
+/* ---- Próximas contas ---- */
+.bill-list { display: flex; flex-direction: column; }
+.bill-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 0; border-bottom: 1px solid var(--border-soft);
+}
+.bill-row:last-child { border-bottom: none; }
+.bill-row__info { flex: 1; min-width: 0; }
+.bill-row__label {
+  font-size: 13.5px; font-weight: 600; margin: 0; letter-spacing: -0.012em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.bill-row__inst { font-size: 11px; font-weight: 600; color: var(--ink-faint); }
+.bill-row__meta { font-size: 11px; font-weight: 600; margin: 2px 0 0; }
+.bill-row__amount {
+  font-family: var(--font-num); font-variant-numeric: tabular-nums;
+  font-size: 13px; font-weight: 650; flex-shrink: 0; white-space: nowrap;
+}
+.card--upcoming .btn { margin-top: 12px; }
+
+/* ---- Resumo inteligente ---- */
+.summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.summary-item {
+  display: flex; align-items: flex-start; gap: 11px;
+  background: color-mix(in srgb, var(--tone) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tone) 18%, transparent);
+  border-radius: var(--radius-sm); padding: 12px 13px;
+  transition: transform var(--dur-fast) var(--ease);
+}
+.summary-item__icon { color: var(--tone); flex-shrink: 0; display: flex; margin-top: 1px; }
+.summary-item__text { font-size: 12.5px; color: var(--ink); margin: 0; line-height: 1.55; }
+
+@media (pointer: fine) {
+  .summary-item:hover { transform: translateY(-1px); }
+}
+
+/* ---- Cartões compactos ficam com altura uniforme na linha ---- */
+.card--reserve, .card--goal-featured, .card--upcoming, .card--score {
+  display: flex; flex-direction: column;
+}
+.card--reserve .mini-card__note, .card--goal-featured .mini-card__note { flex: 1; }

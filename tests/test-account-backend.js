@@ -1,0 +1,227 @@
+"use strict";
+
+const fs = require("fs");
+const path = require("path");
+const crypto = require("crypto");
+const ROOT = path.join(__dirname, "..");
+const read = (file) => fs.readFileSync(path.join(ROOT, file), "utf8");
+const schema = require(path.join(ROOT, "netlify/functions/_shared/finance-schema"));
+const http = require(path.join(ROOT, "netlify/functions/_shared/http"));
+const api = require(path.join(ROOT, "netlify/functions/_shared/supabase-rest"));
+
+let pass = 0, fail = 0;
+function check(label, condition, detail) {
+  if (condition) { pass++; console.log(`  ✓ ${label}`); }
+  else { fail++; console.log(`  ✗ ${label}${detail == null ? "" : `: ${detail}`}`); }
+}
+function event(method, action, body, extraHeaders) {
+  return {
+    httpMethod: method, path: `/api/account/${action}`, queryStringParameters: { action },
+    headers: { origin: "https://cofre.test", host: "cofre.test", "x-forwarded-proto": "https", "x-device-id": "device-test-1234", ...(extraHeaders || {}) },
+    body: body == null ? null : JSON.stringify(body),
+  };
+}
+
+async function main() {
+  console.log("\n1. Validação financeira no servidor");
+  const base = schema.emptySnapshot();
+  check("snapshot mínimo usa o schema atual", schema.validateSnapshot(base).version === 22);
+  const changed = schema.applyChanges(base, { puts: { transactions: [{ id: "tx-1", type: "expense", amount: 10, date: "2026-08-12" }] }, deletes: {}, settings: { theme: "dark" } });
+  check("alteração aceita coleção e configuração conhecidas", changed.transactions.length === 1 && changed.theme === "dark");
+  let unknown = null;
+  try { schema.validateSnapshot({ ...base, access_token: "segredo" }); } catch (error) { unknown = error.code; }
+  check("token e campo desconhecido são recusados", unknown === "invalid_financial_data", unknown);
+  let duplicate = null;
+  try { schema.validateSnapshot({ ...base, transactions: [{ id: "x", type: "expense", amount: 1, date: "2026-08-12" }, { id: "x", type: "expense", amount: 2, date: "2026-08-12" }] }); } catch (error) { duplicate = error.code; }
+  check("identificador repetido é recusado", duplicate === "invalid_financial_data", duplicate);
+  let badAmount = null;
+  try { schema.validateSnapshot({ ...base, transactions: [{ id: "tx-2", type: "expense", amount: "10", date: "2026-08-12" }] }); } catch (error) { badAmount = error.code; }
+  check("valor financeiro com tipo errado é recusado", badAmount === "invalid_financial_data", badAmount);
+  let polluted = null;
+  try { schema.validateSnapshot(JSON.parse('{"version":22,"transactions":[],"categories":[],"goals":[],"assets":[],"theme":{"constructor":{"x":1}}}')); } catch (error) { polluted = error.code; }
+  check("chaves perigosas são recusadas", polluted === "invalid_financial_data", polluted);
+
+  console.log("\n2. Sessão em cookie protegido");
+  process.env.SUPABASE_URL = "https://project.supabase.co";
+  process.env.SUPABASE_PUBLISHABLE_KEY = "public-test";
+  process.env.SUPABASE_SERVICE_ROLE_KEY = "service-test";
+  process.env.ALLOWED_ORIGIN = "https://cofre.test";
+  const originalAuth = { ...api.auth };
+  const originalDb = api.db;
+  api.auth.signIn = async (email) => ({ access_token: "access-secret", refresh_token: "refresh-secret", expires_in: 3600, user: { id: "00000000-0000-4000-8000-000000000001", email } });
+  api.auth.user = async () => ({ id: "00000000-0000-4000-8000-000000000001", email: "pessoa@example.com" });
+  api.db = async (route, options) => route.includes("cofre_devices?") && (!options || options.method === undefined) ? [] : null;
+  delete require.cache[require.resolve(path.join(ROOT, "netlify/functions/account"))];
+  const account = require(path.join(ROOT, "netlify/functions/account"));
+  const login = await account.handler(event("POST", "login", { email: "pessoa@example.com", password: "senha-segura-123" }));
+  const cookies = login.multiValueHeaders && login.multiValueHeaders["Set-Cookie"] || [];
+  const loginBody = JSON.parse(login.body);
+  check("login não devolve tokens no JSON", login.statusCode === 200 && !/access-secret|refresh-secret/.test(login.body));
+  check("cookies são HttpOnly, Secure e SameSite", cookies.length === 3 && cookies.every((value) => /HttpOnly/.test(value) && /Secure/.test(value) && /SameSite=Lax/.test(value)));
+  check("resposta expõe somente estado e email", loginBody.authenticated === true && loginBody.email === "pessoa@example.com");
+  const denied = await account.handler(event("POST", "login", { email: "pessoa@example.com", password: "senha-segura-123" }, { origin: "https://attacker.test" }));
+  check("origem externa é bloqueada", denied.statusCode === 403, denied.statusCode);
+  const missingDevice = await account.handler(event("GET", "session", null, { cookie: "cofre_access=access-secret" }));
+  check("sessão sem segredo do dispositivo é bloqueada", missingDevice.statusCode === 403 && (missingDevice.multiValueHeaders["Set-Cookie"] || []).length === 4, missingDevice.statusCode);
+
+  console.log("\n3. Operações incrementais no backend financeiro");
+  const deviceSecret = "device-secret-for-test";
+  const secretHash = crypto.createHash("sha256").update(deviceSecret).digest("hex");
+  const cookieHeader = `cofre_access=access-secret; cofre_refresh=refresh-secret; cofre_device=${deviceSecret}`;
+  let rpcResult = { status: "applied", revision: 7, applied: 1 };
+  let rpcOptions = null;
+  let opsRows = [];
+  api.db = async (route, options) => {
+    if (route.startsWith("cofre_devices?")) return [{ device_id: "device-test-1234", secret_hash: secretHash, revoked_at: null }];
+    if (route.startsWith("cofre_sync_state?")) return [{ revision: 7 }];
+    if (route.startsWith("cofre_sync_ops?")) return opsRows;
+    if (route === "rpc/cofre_apply_ops") { rpcOptions = options; return [rpcResult]; }
+    return null;
+  };
+  delete require.cache[require.resolve(path.join(ROOT, "netlify/functions/sync"))];
+  const sync = require(path.join(ROOT, "netlify/functions/sync"));
+  const mutationId = "123e4567-e89b-42d3-a456-426614174000";
+  const rev = "001787000000000.000001.device-test-1234";
+  const syncEvent = (ops, headers, body) => ({
+    httpMethod: "POST", path: "/api/sync/changes", queryStringParameters: { action: "changes" },
+    headers: {
+      origin: "https://cofre.test", host: "cofre.test", "x-forwarded-proto": "https", cookie: cookieHeader,
+      "x-device-id": "device-test-1234", "x-sync-protocol": "2", "idempotency-key": mutationId, ...(headers || {}),
+    },
+    body: JSON.stringify({ protocol: 2, mutationId, since: "0", ops, ...(body || {}) }),
+  });
+
+  const put = { entity: "transactions", entityId: "tx-1", op: "put", rev, payload: { id: "tx-1", type: "expense", amount: 10, date: "2026-08-12" } };
+  const applied = await sync.handler(syncEvent([put]));
+  check("gravação válida devolve nova revisão", applied.statusCode === 200 && JSON.parse(applied.body).revision === "7", applied.body);
+  check("gravação atômica usa somente a credencial do servidor", rpcOptions && rpcOptions.service === true && rpcOptions.body.p_user_id === "00000000-0000-4000-8000-000000000001");
+  check("o servidor recebe operações, não a base inteira", rpcOptions && Array.isArray(rpcOptions.body.p_ops) && rpcOptions.body.p_ops.length === 1);
+
+  // Repetir a MESMA mutação não pode gravar de novo nem inventar revisão.
+  rpcResult = { status: "replayed", revision: 7, applied: 0 };
+  const replay = await sync.handler(syncEvent([put]));
+  check("repetição devolve a revisão original sem regravar", replay.statusCode === 200 && JSON.parse(replay.body).applied === 0, replay.body);
+
+  // Mesmo identificador com conteúdo diferente é ataque ou bug: 409.
+  rpcResult = { status: "idempotency_mismatch", revision: 7, applied: 0 };
+  const mismatch = await sync.handler(syncEvent([put]));
+  check("mutação repetida com outro conteúdo é recusada", mismatch.statusCode === 409, mismatch.statusCode);
+
+  // Aparelho revogado não grava, mesmo com cookie válido.
+  rpcResult = { status: "device_revoked", revision: 0, applied: 0 };
+  const revoked = await sync.handler(syncEvent([put]));
+  check("aparelho revogado é bloqueado", revoked.statusCode === 403, revoked.statusCode);
+  rpcResult = { status: "applied", revision: 8, applied: 1 };
+
+  const wrongKey = await sync.handler(syncEvent([put], { "idempotency-key": "different" }));
+  check("cabeçalho e mutationId precisam coincidir", wrongKey.statusCode === 400, wrongKey.statusCode);
+
+  // Operação malformada é recusada ANTES de chegar ao banco.
+  const semRev = await sync.handler(syncEvent([{ ...put, rev: "ontem" }]));
+  check("operação sem marca válida é recusada", semRev.statusCode === 400, semRev.statusCode);
+  const entidadeInvalida = await sync.handler(syncEvent([{ ...put, entity: "auth" }]));
+  check("coleção fora do schema é recusada", entidadeInvalida.statusCode === 400, entidadeInvalida.statusCode);
+  const idDivergente = await sync.handler(syncEvent([{ ...put, entityId: "tx-2" }]));
+  check("id da operação precisa bater com o do registro", idDivergente.statusCode === 400, idDivergente.statusCode);
+
+  // Leitura por cursor: é isto que substitui o snapshot inteiro por ciclo.
+  opsRows = [
+    { seq: 8, entity: "transactions", entity_id: "tx-9", op: "put", rev, payload: { id: "tx-9", type: "expense", amount: 5, date: "2026-08-13" } },
+    { seq: 9, entity: "transactions", entity_id: "tx-8", op: "delete", rev, payload: null },
+  ];
+  const pull = await sync.handler({
+    httpMethod: "GET", path: "/api/sync/changes", queryStringParameters: { action: "changes", since: "7", limit: "50" },
+    headers: { host: "cofre.test", "x-forwarded-proto": "https", cookie: cookieHeader, "x-device-id": "device-test-1234", "x-sync-protocol": "2" },
+  });
+  const pullBody = JSON.parse(pull.body);
+  check("leitura incremental devolve as operações do cursor", pull.statusCode === 200 && pullBody.ops.length === 2, pull.body);
+  check("exclusão viaja como operação própria", pullBody.ops[1].op === "delete" && pullBody.ops[1].payload === undefined);
+  check("cursor avança para a última seq lida", pullBody.cursor === "9", pullBody.cursor);
+
+  const cursorInvalido = await sync.handler({
+    httpMethod: "GET", path: "/api/sync/changes", queryStringParameters: { action: "changes", since: "-1" },
+    headers: { host: "cofre.test", "x-forwarded-proto": "https", cookie: cookieHeader, "x-device-id": "device-test-1234", "x-sync-protocol": "2" },
+  });
+  check("cursor inválido é recusado", cursorInvalido.statusCode === 400, cursorInvalido.statusCode);
+
+  // Protocolo 1 não grava mais: aceitar a base inteira desfaria exclusões que
+  // o log já registrou.
+  const legado = await sync.handler({
+    httpMethod: "PUT", path: "/api/sync/snapshot", queryStringParameters: { action: "snapshot" },
+    headers: { origin: "https://cofre.test", host: "cofre.test", "x-forwarded-proto": "https", cookie: cookieHeader, "x-device-id": "device-test-1234", "x-sync-protocol": "1", "idempotency-key": mutationId, "if-match": "0" },
+    body: JSON.stringify({ protocol: 1, baseRevision: "0", mutationId, data: schema.emptySnapshot() }),
+  });
+  check("gravação por snapshot inteiro é recusada", legado.statusCode === 409 && JSON.parse(legado.body).code === "protocol_upgrade_required", legado.body);
+
+  console.log("\n4. Integração estática");
+  const authSource = read("js/auth.js");
+  const accountScreen = read("js/screens/account.js");
+  const migration = [
+    read("supabase/migrations/202608120001_accounts_finance.sql"),
+    read("supabase/migrations/202608180001_sync_oplog.sql"),
+  ].join("\n");
+  check("frontend usa cookies e não localStorage para token", /credentials: "include"/.test(authSource) && !/access_token|refresh_token/.test(authSource));
+  check("exclusão de conta exige senha e confirmação", /auth-delete-password/.test(accountScreen) && /APAGAR CONTA/.test(accountScreen));
+  check("RLS e função atômica estão na migração", /enable row level security/.test(migration) && /for update/.test(migration) && /cofre_mutations/.test(migration));
+  check("segredo do dispositivo não pode ser lido pelo usuário", /secret_hash text not null/.test(migration) && !/grant select \([^\n]*secret_hash/.test(migration));
+  check("função de gravação não é executável pelo usuário", /grant execute[^\n]+to service_role/.test(migration) && /revoke all[^\n]+authenticated/.test(migration));
+  check("chave de serviço não aparece no frontend", !read("js/modules/app.generated.js").includes("SUPABASE_SERVICE_ROLE_KEY"));
+  check("service worker nunca guarda respostas de conta ou sincronização", /url\.pathname\.indexOf\("\/api\/"\) === 0/.test(read("service-worker.js")));
+  // O log de operações precisa das mesmas garantias que o snapshot antigo tinha.
+  check("log de operações tem RLS ligada", /alter table public\.cofre_sync_ops enable row level security/.test(migration));
+  check("usuário autenticado não escreve direto no log", /revoke all on public\.cofre_sync_state[\s\S]*?from authenticated/.test(migration));
+  check("uma linha viva por registro mantém o log compactado", /create unique index[\s\S]*?cofre_sync_ops \(user_id, entity, entity_id\)/.test(migration));
+  check("exclusão da conta revoga os aparelhos", /cofre_purge_account/.test(migration) && /update public\.cofre_devices set revoked_at = now\(\)/.test(migration));
+  check("apagar tudo grava lápide em vez de sumir com as linhas", /cofre_reset_data/.test(migration) && /'delete'/.test(migration));
+  check("função nova de gravação não é executável pelo usuário", /revoke all on function public\.cofre_apply_ops[\s\S]*?from public, anon, authenticated/.test(migration));
+  check("checkpoint mantém apenas as versões recentes", /cofre_create_checkpoint/.test(migration) && /order by c2\.created_at desc limit/.test(migration));
+
+  console.log("\n5. Exclusão da conta apaga servidor e aparelhos");
+  {
+    // Apagar só o usuário do Auth e confiar no cascade deixa uma janela aberta:
+    // um aparelho com ciclo de sincronização em andamento grava depois da
+    // exclusão e os dados voltam a existir. A purga revoga os aparelhos ANTES,
+    // e só então o usuário do Auth é removido.
+    const chamadas = [];
+    let purgaFalha = false;
+    api.db = async (route) => {
+      chamadas.push(route);
+      if (route.startsWith("cofre_devices?")) return [{ device_id: "device-test-1234", secret_hash: secretHash, revoked_at: null }];
+      if (route === "rpc/cofre_purge_account") {
+        if (purgaFalha) throw new Error("banco fora do ar");
+        return [{ status: "purged", removed_ops: 12, removed_devices: 3 }];
+      }
+      return null;
+    };
+    let apagouUsuario = false;
+    api.auth.deleteUser = async () => { apagouUsuario = true; return {}; };
+    api.auth.signIn = async () => ({ access_token: "access-secret", refresh_token: "refresh-secret", expires_in: 3600, user: { id: "00000000-0000-4000-8000-000000000001", email: "pessoa@example.com" } });
+
+    const apagar = await account.handler(event("POST", "delete", { password: "senha-segura-123", confirmation: "APAGAR CONTA" }, { cookie: cookieHeader }));
+    const corpo = JSON.parse(apagar.body);
+    check("exclusão devolve sucesso", apagar.statusCode === 200 && corpo.deleted === true, apagar.body);
+    check("a purga do servidor é chamada", chamadas.includes("rpc/cofre_purge_account"));
+    check("o usuário do Auth também é apagado", apagouUsuario === true);
+    check("o que foi removido é informado", corpo.removed && corpo.removed.operations === 12 && corpo.removed.devices === 3, JSON.stringify(corpo.removed));
+    check("a sessão é encerrada nos cookies", (apagar.multiValueHeaders["Set-Cookie"] || []).length > 0);
+
+    // Se a purga falhar, o usuário NÃO pode ser apagado: sobraria uma conta sem
+    // dono com os dados dentro dela.
+    apagouUsuario = false;
+    purgaFalha = true;
+    const falha = await account.handler(event("POST", "delete", { password: "senha-segura-123", confirmation: "APAGAR CONTA" }, { cookie: cookieHeader }));
+    check("falha na purga não apaga o usuário", falha.statusCode >= 400 && apagouUsuario === false, falha.statusCode);
+    check("a falha explica que nada foi removido", /purge_failed/.test(falha.body), falha.body);
+    purgaFalha = false;
+
+    // A confirmação por texto continua obrigatória.
+    const semConfirmacao = await account.handler(event("POST", "delete", { password: "senha-segura-123", confirmation: "apagar" }, { cookie: cookieHeader }));
+    check("sem a frase exata, nada é apagado", semConfirmacao.statusCode === 400, semConfirmacao.statusCode);
+  }
+
+  Object.assign(api.auth, originalAuth); api.db = originalDb;
+  console.log(`\n${fail ? "FALHAS ENCONTRADAS" : "TODOS OS TESTES PASSARAM"}: ${pass} ok, ${fail} falha(s)`);
+  process.exit(fail ? 1 : 0);
+}
+
+main().catch((error) => { console.error(error); process.exit(1); });

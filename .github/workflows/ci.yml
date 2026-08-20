@@ -1,0 +1,73 @@
+name: Verificação
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Baixar código
+        uses: actions/checkout@v4
+
+      - name: Preparar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # `npm ci` respeita o package-lock.json e falha quando ele está fora de
+      # sincronia. Com `npm install`, a CI podia rodar contra uma árvore de
+      # dependências diferente da testada localmente, e um teste verde aqui não
+      # dizia nada sobre o que seria publicado.
+      - name: Instalar dependências
+        run: npm ci
+
+      # Análise estática antes dos testes: erro de sintaxe ou variável não
+      # declarada aparece em segundos, sem esperar a suíte inteira.
+      - name: Análise estática
+        run: npm run lint
+
+      - name: Testes com cobertura
+        run: npm run test:coverage
+
+      - name: Verificar publicação
+        run: npm run check:build && npm run check:release && npm run build:dist
+
+      - name: Guardar relatório de cobertura
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cobertura
+          path: coverage/
+          retention-days: 7
+          if-no-files-found: warn
+
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Baixar código
+        uses: actions/checkout@v4
+
+      - name: Preparar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm ci
+
+      # Os três motores. Um bug de IndexedDB ou de Web Locks costuma aparecer em
+      # apenas um deles, e o app é local-first: o motor É a plataforma.
+      - name: Instalar navegadores de teste
+        run: npx playwright install --with-deps chromium firefox webkit
+
+      - name: Executar fluxos no navegador
+        run: npm run test:browser

@@ -1,0 +1,263 @@
+"use strict";
+
+// check-deploy.js; confere uma publicação JÁ NO AR.
+//
+// POR QUE ELE EXISTE
+//
+// Tudo que se pode provar lendo o repositório já é provado por `npm test`,
+// `npm run check:release` e `npm run build:dist`. Sobra exatamente uma coisa
+// que NENHUM deles alcança: o roteamento da Vercel.
+//
+// A Vercel consulta o sistema de arquivos ANTES das reescritas. Por isso o
+// build publica o aplicativo como `app.html` e falha de propósito se um
+// `dist/index.html` reaparecer: enquanto esse arquivo não existir, as duas
+// reescritas de `vercel.json` valem e `/` entrega a página comercial. Só que
+// nada disso é observável fora de uma publicação de verdade, porque depende
+// também da configuração do PROJETO no painel (pasta de saída, framework,
+// variáveis de ambiente).
+//
+// Este script faz as requisições e diz o que está errado. Ele não substitui
+// as outras verificações; ele cobre o que elas não podem cobrir.
+//
+// Como usar:
+//
+//     node scripts/check-deploy.js https://o-endereco-da-publicacao
+//
+// Sem argumento, ele usa DEPLOY_URL. Sem nenhum dos dois, explica e sai.
+
+const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
+
+const ROOT = path.join(__dirname, "..");
+
+let ok = 0;
+let fail = 0;
+let warn = 0;
+function check(label, condition, extra) {
+  if (condition) { ok++; console.log(`  ok    ${label}`); }
+  else { fail++; console.log(`  FALHA ${label}${extra == null ? "" : `: ${extra}`}`); }
+}
+function aviso(label, extra) {
+  warn++;
+  console.log(`  aviso ${label}${extra == null ? "" : `: ${extra}`}`);
+}
+
+const alvo = (process.argv[2] || process.env.DEPLOY_URL || "").trim().replace(/\/+$/, "");
+if (!alvo) {
+  console.error([
+    "",
+    "Informe o endereço da publicação:",
+    "",
+    "    node scripts/check-deploy.js https://o-endereco-da-publicacao",
+    "",
+    "Serve tanto para produção quanto para uma pré-visualização. As duas",
+    "precisam passar: a pré-visualização é onde um erro de roteamento deve",
+    "aparecer, e não no domínio que já está recebendo gente.",
+    "",
+  ].join("\n"));
+  process.exit(2);
+}
+
+let base;
+try {
+  base = new URL(alvo);
+  if (base.protocol !== "https:" && base.protocol !== "http:") throw new Error("esquema");
+} catch (_) {
+  console.error(`Endereço inválido: ${alvo}`);
+  process.exit(2);
+}
+
+// `redirect: "manual"` é obrigatório aqui. Seguir desvio automaticamente
+// esconderia justamente o defeito que se procura: uma reescrita que virou
+// redirecionamento (o endereço na barra muda) parece funcionar quando o
+// cliente segue sozinho.
+// O tempo limite não é zelo: uma publicação que não responde precisa REPROVAR,
+// e não travar quem está conferindo (ou o job de integração contínua) para
+// sempre. `fetch` não tem prazo próprio.
+const PRAZO_MS = Number(process.env.DEPLOY_TIMEOUT_MS) || 15000;
+
+async function pegar(caminho, options = {}) {
+  const url = new URL(caminho, base).toString();
+  const controle = new AbortController();
+  const relogio = setTimeout(() => controle.abort(), PRAZO_MS);
+  try {
+    const res = await fetch(url, {
+      redirect: "manual",
+      headers: { "User-Agent": "cofre-check-deploy", ...(options.headers || {}) },
+      method: options.method || "GET",
+      body: options.body,
+      signal: controle.signal,
+    });
+    const corpo = options.method === "HEAD" ? "" : await res.text();
+    return { url, status: res.status, headers: res.headers, corpo };
+  } catch (erro) {
+    const motivo = erro && erro.name === "AbortError" ? `sem resposta em ${PRAZO_MS}ms` : (erro && erro.message) || "falha de rede";
+    return { url, status: 0, headers: new Headers(), corpo: "", erro: motivo };
+  } finally {
+    clearTimeout(relogio);
+  }
+}
+
+const CSP_ESPERADA = [
+  "default-src 'self'", "script-src 'self'", "script-src-attr 'none'",
+  "style-src 'self'", "style-src-attr 'none'", "frame-ancestors 'none'",
+  "object-src 'none'", "base-uri 'self'",
+];
+
+async function main() {
+  console.log(`\nConferindo ${base.origin}\n`);
+
+  /* ---------------------------------------------------------------- *
+   * 1. A RAIZ ENTREGA A PÁGINA COMERCIAL
+   * ---------------------------------------------------------------- */
+  console.log("1. A raiz do domínio");
+  const raiz = await pegar("/");
+  check("a raiz responde 200", raiz.status === 200, raiz.status);
+  const raizEhLanding = /<body class="lp"/.test(raiz.corpo);
+  const raizEhApp = /id="app"/.test(raiz.corpo);
+  check("a raiz entrega a página comercial", raizEhLanding && !raizEhApp,
+    raizEhApp ? "entregou o APLICATIVO; ver a nota no fim" : "não reconheci a página");
+
+  /* ---------------------------------------------------------------- *
+   * 2. /index.html ENTREGA O APLICATIVO, POR REESCRITA
+   * ---------------------------------------------------------------- */
+  console.log("\n2. O aplicativo em /index.html");
+  const app = await pegar("/index.html");
+  check("/index.html responde 200 sem desvio", app.status === 200,
+    `${app.status}${app.headers.get("location") ? ` -> ${app.headers.get("location")}` : ""}`);
+  check("/index.html entrega o aplicativo", /id="app"/.test(app.corpo) && !/<body class="lp"/.test(app.corpo));
+
+  // É REESCRITA, NÃO DESVIO. Se a plataforma respondesse 30x para /app.html,
+  // o endereço mudaria na barra, o `start_url` do manifesto passaria a
+  // divergir do endereço real e a chave "index.html" do cache do service
+  // worker deixaria de casar com a navegação.
+  check("/index.html não vira desvio para app.html",
+    app.status !== 301 && app.status !== 302 && app.status !== 307 && app.status !== 308,
+    app.headers.get("location"));
+
+  // Os MESMOS BYTES do index.html do repositório. É o que garante que o
+  // aplicativo não regrediu na publicação.
+  const local = fs.readFileSync(path.join(ROOT, "index.html"));
+  const sha = (buf) => crypto.createHash("sha256").update(buf).digest("hex");
+  const shaLocal = sha(local);
+  const shaRemoto = sha(Buffer.from(app.corpo, "utf8"));
+  check("/index.html entrega os mesmos bytes do repositório", shaLocal === shaRemoto,
+    `local ${shaLocal.slice(0, 16)} != publicado ${shaRemoto.slice(0, 16)}`);
+
+  /* ---------------------------------------------------------------- *
+   * 3. O NOME INTERNO NÃO É ENDEREÇO PÚBLICO
+   * ---------------------------------------------------------------- */
+  console.log("\n3. O nome de arquivo interno");
+  const appHtml = await pegar("/app.html");
+  // Ele responde, e tudo bem: é o destino da reescrita. O que não pode
+  // acontecer é ele aparecer em link, canonical ou email. Fica registrado
+  // para quem estiver conferindo.
+  aviso("/app.html responde (esperado: é o destino da reescrita)", appHtml.status);
+
+  /* ---------------------------------------------------------------- *
+   * 4. CABEÇALHOS DE SEGURANÇA EM TODA RESPOSTA
+   * ---------------------------------------------------------------- */
+  console.log("\n4. Cabeçalhos de segurança");
+  for (const [nome, resposta] of [["a raiz", raiz], ["/index.html", app]]) {
+    const csp = resposta.headers.get("content-security-policy");
+    check(`${nome} traz Content-Security-Policy`, !!csp, "ausente");
+    if (csp) {
+      const faltando = CSP_ESPERADA.filter((parte) => !csp.includes(parte));
+      check(`${nome}: a política tem todas as diretivas esperadas`, faltando.length === 0, faltando.join("; "));
+    }
+    check(`${nome} traz X-Content-Type-Options`, resposta.headers.get("x-content-type-options") === "nosniff",
+      resposta.headers.get("x-content-type-options"));
+    check(`${nome} traz X-Frame-Options`, resposta.headers.get("x-frame-options") === "DENY",
+      resposta.headers.get("x-frame-options"));
+  }
+
+  /* ---------------------------------------------------------------- *
+   * 5. AS FUNÇÕES RESPONDEM
+   * ---------------------------------------------------------------- *
+   * O que se procura aqui é 404 (a reescrita de `/api/account/:action*` não
+   * chegou, ou a função não foi publicada) e 500 (a Vercel não rastreou o
+   * `require("../netlify/functions/...")` e a função subiu sem o backend).
+   * ---------------------------------------------------------------- */
+  console.log("\n5. As funções do backend");
+  const sessao = await pegar("/api/account/session");
+  check("/api/account/session não responde 404", sessao.status !== 404,
+    "404: a reescrita de /api/account/:action* não chegou, ou a função não foi publicada");
+  check("/api/account/session não responde 500", sessao.status !== 500,
+    "500: provável falha ao carregar netlify/functions/account.js (rastreio de require)");
+  check("/api/account/session devolve JSON",
+    /application\/json/.test(String(sessao.headers.get("content-type") || "")),
+    sessao.headers.get("content-type"));
+  check("a resposta não vaza rastro de pilha", !/ at .*\.js:\d+/.test(sessao.corpo));
+
+  let corpoSessao = null;
+  try { corpoSessao = JSON.parse(sessao.corpo); } catch (_) {}
+  if (corpoSessao && corpoSessao.configured === false) {
+    aviso("o backend de contas responde, mas está SEM CONFIGURAR",
+      "faltam SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY ou SUPABASE_SERVICE_ROLE_KEY no painel");
+  } else if (corpoSessao && corpoSessao.configured === true) {
+    check("o backend de contas está configurado", true);
+  }
+
+  /* ---------------------------------------------------------------- *
+   * 6. ALLOWED_ORIGIN
+   * ---------------------------------------------------------------- *
+   * O erro mais caro da migração, e o mais silencioso: `ALLOWED_ORIGIN`
+   * apontando para o domínio antigo faz TODA chamada de conta e de
+   * sincronização voltar 403 `origin_denied`. A rota GET de sessão não passa
+   * por `assertSameOrigin`, então ela responde normalmente e o problema só
+   * aparece quando alguém tenta entrar. É por isso que a conferência precisa
+   * de um POST.
+   * ---------------------------------------------------------------- */
+  console.log("\n6. ALLOWED_ORIGIN");
+  const login = await pegar("/api/account/login", {
+    method: "POST",
+    headers: { Origin: base.origin, "Content-Type": "application/json" },
+  });
+  let corpoLogin = null;
+  try { corpoLogin = JSON.parse(login.corpo); } catch (_) {}
+  const negado = login.status === 403 && corpoLogin && corpoLogin.code === "origin_denied";
+  check("a própria origem da publicação é aceita pelas funções", !negado,
+    `403 origin_denied: ALLOWED_ORIGIN não inclui ${base.origin}. Deixe a variável VAZIA para o código cair na própria origem, ou acrescente este endereço.`);
+  if (!negado && corpoLogin && corpoLogin.code) {
+    aviso("o login recusou por outro motivo (esperado: o corpo estava vazio)", corpoLogin.code);
+  }
+
+  /* ---------------------------------------------------------------- *
+   * 7. O QUE NÃO PODE ESTAR NO AR
+   * ---------------------------------------------------------------- */
+  console.log("\n7. O que o build não publica");
+  for (const caminho of [
+    "/tests/run-all.js",
+    "/docs/BACKEND_SETUP.md",
+    "/supabase/migrations",
+    "/scripts/build-dist.js",
+    "/package.json",
+  ]) {
+    const res = await pegar(caminho);
+    check(`${caminho} não está publicado`, res.status === 404 || res.status === 403, res.status);
+  }
+
+  console.log(`\n${fail ? "FALHAS ENCONTRADAS" : "PUBLICAÇÃO CONFERIDA"}: ${ok} ok, ${fail} falha(s), ${warn} aviso(s)`);
+  if (!raizEhLanding && raizEhApp) {
+    console.log([
+      "",
+      "A RAIZ ABRIU NO APLICATIVO.",
+      "",
+      "Isso não vem do build: ele falha de propósito se gerar dist/index.html.",
+      "Confira a configuração do projeto no painel da Vercel:",
+      "",
+      "  * Output Directory precisa ser `dist`;",
+      "  * Framework Preset precisa ser `Other` (um preset pode ignorar as",
+      "    reescritas do vercel.json);",
+      "  * Root Directory precisa ser a raiz do repositório.",
+      "",
+    ].join("\n"));
+  }
+  process.exit(fail ? 1 : 0);
+}
+
+main().catch((erro) => {
+  console.error(`\nNão foi possível conferir a publicação: ${erro.message}`);
+  process.exit(1);
+});

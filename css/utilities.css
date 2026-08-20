@@ -1,0 +1,456 @@
+/* ==================================================================
+   26. CELULAR PEQUENO (<= 380px)
+   ================================================================== */
+@media (max-width: 380px) {
+  .chip-grid { grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); gap: 7px; }
+  .installments-grid { grid-template-columns: repeat(auto-fill, minmax(48px, 1fr)); }
+  .health-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  /* Uma coluna, não duas: em 320px duas pastilhas deixam 64px para o rótulo,
+     e as palavras não cabem. "ENTRADAS" saía como "ENTRADA / S" e
+     "COMPROMETIMENTO DA RENDA" como "COMPROMETIMENT / O DA RENDA". O painel
+     fica mais alto no aparelho pequeno; nenhuma palavra parte ao meio. */
+  .hero-chips { grid-template-columns: minmax(0, 1fr); }
+  .settings-actions .btn { min-width: 100%; }
+  .quick-entry-btn__label { display: none; }
+  .quick-entry-btn { padding: 0 14px; }
+  .bottom-nav__item, .bottom-nav__fab-wrap { font-size: 11px; }
+  .qr-actions .btn, .nlp-actions .btn { min-width: 100%; }
+}
+
+/* ==================================================================
+   26b. MÓDULO 6. ACESSIBILIDADE, ESQUELETO E GAMIFICAÇÃO
+   ------------------------------------------------------------------
+   Três blocos que compartilham a mesma disciplina do resto da folha:
+   nenhuma cor solta (tudo sai dos tokens), nenhuma animação que não
+   respeite `prefers-reduced-motion` e nenhum estado só de cor; todo
+   sinal tem também forma, ícone ou texto.
+   ================================================================== */
+
+/* ---------- Acessibilidade ---------- */
+
+/* Atalho para saltar a navegação. Invisível até receber foco pelo
+   teclado; a primeira Tab da página revela o botão. */
+.skip-link {
+  position: fixed; top: 10px; left: 10px; z-index: 999;
+  transform: translateY(-160%);
+  padding: 11px 17px; border-radius: var(--radius-sm);
+  background: var(--brand); color: #fff;
+  font-size: 13px; font-weight: 700; text-decoration: none;
+  box-shadow: var(--shadow-md);
+  transition: transform var(--dur) var(--ease);
+}
+.skip-link:focus, .skip-link:focus-visible { transform: translateY(0); }
+
+/* Região de anúncio para leitores de tela. O toast é decorativo
+   (`aria-hidden`); a mensagem real vive aqui, fora do fluxo visual. */
+.sr-live {
+  position: absolute; width: 1px; height: 1px;
+  margin: -1px; padding: 0; overflow: hidden;
+  clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+
+/* O alvo do skip-link não deve ganhar contorno ao receber foco
+   programático; quem clicou não pediu uma moldura na tela inteira. */
+.main-content:focus { outline: none; }
+.main-content:focus-visible { box-shadow: none; }
+
+/* Foco visível também sobre superfícies escuras (painel esmeralda e
+   navegação inferior), onde o anel esmeralda desaparece. */
+.card--hero :focus-visible,
+.bottom-nav :focus-visible,
+.celebrate-card :focus-visible {
+  box-shadow: 0 0 0 3px rgba(255,255,255,0.55);
+}
+
+/* Alvos de toque: mínimo de 44px em ponteiro grosso, sem alterar o
+   desenho em desktop. */
+@media (pointer: coarse) {
+  button:not(.switch), input, select, textarea { min-height: 44px; }
+  button:not(.switch) { min-width: 44px; }
+  .switch {
+    height: 44px; background: transparent; box-shadow: none;
+  }
+  .switch::before {
+    content: ""; position: absolute; inset: 9px 0; border-radius: 999px;
+    background: var(--border); box-shadow: inset 0 1px 2px rgba(11,21,18,0.12);
+    transition: background var(--dur) var(--ease);
+  }
+  .switch.active { background: transparent; }
+  .switch.active::before { background: var(--brand); }
+  .switch__knob { top: 12px; }
+}
+
+/* ---------- Esqueleto de carregamento ---------- */
+/* Silhueta com a MESMA geometria do dashboard: o conteúdo preenche o
+   contorno em vez de empurrá-lo (nenhum salto de layout no boot). */
+.sk {
+  --sk-a: color-mix(in srgb, var(--ink) 7%, transparent);
+  --sk-b: color-mix(in srgb, var(--ink) 12%, transparent);
+  border-radius: var(--radius-xs);
+  background: linear-gradient(90deg, var(--sk-a) 25%, var(--sk-b) 37%, var(--sk-a) 63%);
+  background-size: 400% 100%;
+  animation: skShimmer 1.4s var(--ease-inout) infinite;
+}
+.card--hero .sk { --sk-a: rgba(255,255,255,0.14); --sk-b: rgba(255,255,255,0.26); }
+
+.sk-card { display: flex; flex-direction: column; gap: 12px; }
+.sk-row { display: flex; gap: 10px; flex-wrap: wrap; }
+
+.sk--line  { height: 13px; width: 100%; }
+.sk--w120  { width: 132px; }
+.sk--w90   { width: 92px; }
+.sk--w70   { width: 62%; }
+.sk--title { height: 26px; width: 220px; max-width: 80%; border-radius: var(--radius-xs); }
+.sk--hero  { height: 42px; width: 240px; max-width: 78%; border-radius: var(--radius-sm); }
+.sk--chip  { height: 58px; flex: 1 1 140px; border-radius: var(--radius-sm); }
+.sk--bar   { height: 10px; width: 100%; border-radius: 999px; }
+.sk--ring  { height: 92px; width: 92px; border-radius: 50%; }
+
+@keyframes skShimmer {
+  from { background-position: 100% 50%; }
+  to   { background-position: 0 50%; }
+}
+
+/* ---------- Nível e XP ---------- */
+.level-ring { flex-shrink: 0; }
+.level-ring__arc { transition: stroke-dasharray var(--dur-slow) var(--ease); }
+.level-ring__num {
+  font-family: var(--font-num); font-size: 27px; font-weight: 700;
+  font-variant-numeric: tabular-nums; letter-spacing: -0.02em;
+}
+.level-ring__cap { font-size: 7.5px; font-weight: 700; letter-spacing: 0.18em; opacity: 0.62; }
+
+.level-head { display: flex; align-items: center; gap: 15px; margin-top: 4px; }
+.level-head__text { min-width: 0; }
+.level-name {
+  margin: 0; font-family: var(--font-display);
+  font-size: 19px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.15;
+}
+.level-sub { margin: 3px 0 0; font-size: 12px; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.level-next { margin: 6px 0 0; font-size: 12.5px; color: var(--ink-soft); display: flex; align-items: center; gap: 6px; }
+.level-next b { color: var(--ink); font-variant-numeric: tabular-nums; }
+
+.level-bar {
+  height: 8px; border-radius: 999px; overflow: hidden; margin-top: 14px;
+  background: color-mix(in srgb, var(--ink) 9%, transparent);
+}
+.level-bar--lg { height: 10px; }
+.level-bar--on-dark { background: rgba(255,255,255,0.2); }
+.level-bar--on-dark .level-bar__fill { background: var(--brand-glow); }
+.level-bar__fill {
+  display: block; height: 100%; border-radius: 999px;
+  transition: width var(--dur-slow) var(--ease);
+}
+
+.level-streak {
+  margin: 12px 0 0; font-size: 12.5px; color: var(--ink-soft);
+  display: flex; align-items: center; gap: 7px;
+  padding: 9px 11px; border-radius: var(--radius-xs);
+  background: var(--brand-soft);
+}
+.level-streak b { color: var(--ink); }
+.level-streak svg { color: var(--brand); flex-shrink: 0; }
+
+.level-next-goal { margin-top: 14px; padding-top: 13px; border-top: 1px solid var(--border-soft); }
+.level-next-goal__label {
+  margin: 0 0 9px; font-size: 10.5px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-faint);
+}
+
+/* Painel de nível na tela de conquistas (sobre o esmeralda). */
+.level-hero__main { display: flex; align-items: center; gap: clamp(16px, 4vw, 26px); position: relative; z-index: 2; }
+.level-hero__text { min-width: 0; flex: 1; }
+.level-hero__name {
+  margin: 6px 0 0; font-family: var(--font-display);
+  font-size: clamp(24px, 6vw, 32px); font-weight: 700;
+  letter-spacing: -0.03em; line-height: 1.05; color: #fff;
+}
+.level-hero__sub { margin: 7px 0 0; font-size: 12.5px; opacity: 0.82; font-variant-numeric: tabular-nums; }
+.level-hero__next { margin: 9px 0 0; font-size: 12.5px; opacity: 0.9; }
+.level-hero__next b { font-variant-numeric: tabular-nums; }
+
+.level-hero__chips {
+  position: relative; z-index: 2;
+  display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px;
+}
+.level-tier-chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 8px 12px; border-radius: 999px;
+  background: rgba(255,255,255,0.13);
+  border: 1px solid rgba(255,255,255,0.16);
+  font-size: 11.5px;
+}
+.level-tier-chip b { font-family: var(--font-num); font-variant-numeric: tabular-nums; font-weight: 700; }
+.level-tier-chip span:last-child { opacity: 0.8; }
+.level-tier-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+/* ---------- Conquistas ---------- */
+.ach-filters { display: flex; flex-wrap: wrap; gap: 7px; margin: 12px 0 4px; }
+.ach-filter-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 36px; padding: 0 13px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--card);
+  font-size: 12px; font-weight: 600; color: var(--ink-soft);
+  transition: border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease),
+              background var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+}
+.ach-filter-chip:hover { border-color: color-mix(in srgb, var(--brand) 40%, var(--border)); }
+.ach-filter-chip:active { transform: scale(0.96); }
+.ach-filter-chip.active {
+  background: var(--brand); border-color: var(--brand); color: #fff;
+  box-shadow: var(--shadow-sm);
+}
+
+.ach-group { margin-top: 20px; }
+.ach-group:first-of-type { margin-top: 14px; }
+.ach-group__head { display: flex; align-items: center; gap: 11px; margin-bottom: 11px; }
+.ach-group__icon {
+  width: 32px; height: 32px; border-radius: 10px; flex-shrink: 0;
+  display: grid; place-items: center;
+  background: var(--brand-soft); color: var(--brand);
+}
+.ach-group__text { min-width: 0; flex: 1; display: flex; flex-direction: column; }
+.ach-group__text b { font-size: 13.5px; letter-spacing: -0.01em; }
+.ach-group__text span { font-size: 11.5px; color: var(--ink-faint); }
+.ach-group__count {
+  font-family: var(--font-num); font-variant-numeric: tabular-nums;
+  font-size: 12px; font-weight: 700; color: var(--ink-soft); flex-shrink: 0;
+}
+
+.ach-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 9px; }
+@media (min-width: 560px) { .ach-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1100px) { .ach-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+
+.ach-badge {
+  display: flex; align-items: flex-start; gap: 12px; text-align: left;
+  padding: 13px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--card-alt);
+  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease),
+              transform var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+.ach-badge:hover { box-shadow: var(--shadow-sm); border-color: color-mix(in srgb, var(--brand) 30%, var(--border)); }
+.ach-badge:active { transform: scale(0.985); }
+.ach-badge--done { background: var(--card); }
+.ach-badge--open { border-color: color-mix(in srgb, var(--brand) 45%, var(--border)); box-shadow: var(--shadow-sm); }
+.ach-badge--compact { padding: 11px; background: var(--card); }
+
+/* A medalha trancada fica dessaturada e com o contorno tracejado; o
+   estado não depende só da cor (daltonismo) nem só do ícone. */
+.ach-badge__medal {
+  position: relative; flex-shrink: 0;
+  width: 42px; height: 42px; border-radius: 13px;
+  display: grid; place-items: center;
+  color: var(--ach-color);
+  background: color-mix(in srgb, var(--ach-color) 13%, transparent);
+  border: 1.5px dashed color-mix(in srgb, var(--ach-color) 32%, transparent);
+  opacity: 0.72;
+  transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+.ach-badge--compact .ach-badge__medal { width: 36px; height: 36px; border-radius: 11px; }
+.ach-badge--done .ach-badge__medal {
+  opacity: 1; border-style: solid;
+  border-color: color-mix(in srgb, var(--ach-color) 42%, transparent);
+  box-shadow: 0 2px 10px -4px color-mix(in srgb, var(--ach-color) 60%, transparent);
+}
+.ach-badge__check {
+  position: absolute; right: -4px; bottom: -4px;
+  width: 17px; height: 17px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--positive); color: #fff;
+  border: 2px solid var(--card);
+}
+
+.ach-badge__body { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.ach-badge__name { font-size: 13px; font-weight: 650; letter-spacing: -0.01em; line-height: 1.25; }
+.ach-badge__meta { display: flex; align-items: center; gap: 8px; font-size: 10.5px; font-weight: 700; }
+.ach-tier { text-transform: uppercase; letter-spacing: 0.08em; }
+.ach-xp {
+  font-family: var(--font-num); font-variant-numeric: tabular-nums;
+  color: var(--ink-faint); font-weight: 700;
+}
+.ach-badge__done {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 11px; color: var(--positive); font-weight: 600; margin-top: 2px;
+}
+.ach-badge__hint { font-size: 11px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.ach-badge__desc {
+  font-size: 11.5px; color: var(--ink-soft); line-height: 1.45;
+  margin-top: 5px; padding-top: 7px; border-top: 1px solid var(--border-soft);
+}
+
+.ach-progress {
+  display: block; height: 5px; border-radius: 999px; margin-top: 3px;
+  background: color-mix(in srgb, var(--ink) 9%, transparent); overflow: hidden;
+}
+.ach-progress__fill { display: block; height: 100%; border-radius: 999px; transition: width var(--dur-slow) var(--ease); }
+
+.ach-recent { display: flex; flex-direction: column; gap: 3px; margin-top: 8px; }
+.ach-recent__row { display: flex; align-items: center; gap: 10px; padding: 8px 0; }
+.ach-recent__row + .ach-recent__row { border-top: 1px solid var(--border-soft); }
+.ach-recent__medal {
+  width: 28px; height: 28px; border-radius: 9px; flex-shrink: 0;
+  display: grid; place-items: center;
+  color: var(--ach-color);
+  background: color-mix(in srgb, var(--ach-color) 14%, transparent);
+}
+.ach-recent__text { min-width: 0; flex: 1; display: flex; flex-direction: column; }
+.ach-recent__text b { font-size: 12.5px; font-weight: 650; letter-spacing: -0.01em; }
+.ach-recent__text span { font-size: 11px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+
+/* ---------- Celebração ---------- */
+/* Aparece uma vez, no desbloqueio, e sai com qualquer clique.
+   Comemoração que precisa ser fechada com precisão vira interrupção. */
+.celebrate-overlay {
+  position: fixed; inset: 0; z-index: 120;
+  display: grid; place-items: center; padding: 20px;
+  background: color-mix(in srgb, var(--brand-deep) 72%, transparent);
+  backdrop-filter: blur(7px); -webkit-backdrop-filter: blur(7px);
+  animation: overlayIn var(--dur) var(--ease) both;
+}
+.celebrate-card {
+  position: relative; overflow: hidden;
+  width: min(400px, 100%); text-align: center; color: #fff;
+  padding: 30px 24px calc(24px + env(safe-area-inset-bottom, 0px));
+  border-radius: var(--radius-lg);
+  background:
+    radial-gradient(120% 130% at 50% -10%, color-mix(in srgb, var(--brand-glow) 55%, transparent), transparent 60%),
+    linear-gradient(160deg, var(--brand-deep), var(--brand-dark) 55%, var(--brand));
+  box-shadow: var(--shadow-lg), inset 0 1px 0 rgba(255,255,255,0.18);
+  animation: celebrateIn 520ms var(--ease) both;
+}
+/* Raios em cone, girando devagar: dá vida ao cartão sem confete
+   (partículas custam quadros e não sobrevivem a `reduced-motion`). */
+.celebrate-rays {
+  position: absolute; inset: -50%; z-index: 0; opacity: 0.16;
+  background: repeating-conic-gradient(from 0deg at 50% 38%,
+    #fff 0deg 7deg, transparent 7deg 20deg);
+  animation: celebrateSpin 22s linear infinite;
+}
+.celebrate-card > *:not(.celebrate-rays) { position: relative; z-index: 1; }
+
+.celebrate-medal {
+  width: 74px; height: 74px; margin: 0 auto 16px;
+  border-radius: 24px; display: grid; place-items: center;
+  color: #fff;
+  background: color-mix(in srgb, var(--ach-color) 55%, rgba(255,255,255,0.12));
+  border: 2px solid rgba(255,255,255,0.4);
+  box-shadow: 0 10px 30px -10px rgba(0,0,0,0.6);
+  animation: celebratePop 620ms var(--ease) both 90ms;
+}
+.celebrate-kicker {
+  margin: 0; font-size: 10.5px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.14em; opacity: 0.82;
+}
+.celebrate-title {
+  margin: 8px 0 0; font-family: var(--font-display);
+  font-size: 23px; font-weight: 700; letter-spacing: -0.025em; line-height: 1.15;
+}
+.celebrate-desc { margin: 9px 0 0; font-size: 13px; opacity: 0.86; line-height: 1.5; }
+.celebrate-xp {
+  margin: 14px 0 0; font-family: var(--font-num);
+  font-size: 19px; font-weight: 700; font-variant-numeric: tabular-nums;
+  color: var(--brand-glow);
+}
+.celebrate-more { margin: 8px 0 0; font-size: 11.5px; opacity: 0.75; line-height: 1.5; }
+.celebrate-actions { display: flex; flex-direction: column; gap: 9px; margin-top: 20px; }
+.celebrate-actions .btn {
+  background: rgba(255,255,255,0.14); border: 1px solid rgba(255,255,255,0.22); color: #fff;
+}
+.celebrate-actions .btn--primary { background: #fff; color: var(--brand-deep); border-color: #fff; }
+
+@keyframes celebrateIn {
+  from { opacity: 0; transform: translateY(24px) scale(0.94); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes celebratePop {
+  0%   { opacity: 0; transform: scale(0.4) rotate(-14deg); }
+  62%  { opacity: 1; transform: scale(1.1) rotate(4deg); }
+  100% { opacity: 1; transform: none; }
+}
+@keyframes celebrateSpin { to { transform: rotate(360deg); } }
+
+/* Movimento reduzido: os raios são puro enfeite e param por completo. */
+@media (prefers-reduced-motion: reduce) {
+  .celebrate-rays { display: none; }
+  .sk { animation: none; background: var(--sk-a); }
+}
+
+/* ==================================================================
+   27. MOVIMENTO REDUZIDO E IMPRESSÃO
+   ================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@media print {
+  .side-nav, .bottom-nav, .toast, .modal-overlay,
+  .celebrate-overlay, .skip-link, .sr-live { display: none !important; }
+  .main-content { margin: 0; padding: 0; }
+  body::before { display: none; }
+  .card { box-shadow: none; break-inside: avoid; }
+}
+
+/* ==================================================================
+   CONTAS, CARTÕES E CONCILIAÇÃO
+   ================================================================== */
+.account-toolbar { display: flex; gap: 8px; flex-wrap: wrap; }
+.account-hero { margin: 0; }
+.accounts-grid { grid-template-columns: minmax(0, 1fr); }
+.account-editor { display: grid; gap: 14px; border-color: color-mix(in srgb, var(--brand) 28%, var(--border)); }
+.account-list { display: grid; gap: 8px; }
+.account-row {
+  display: grid; grid-template-columns: auto minmax(0,1fr) auto auto; align-items: center; gap: 11px;
+  padding: 12px 0; border-bottom: 1px solid var(--border-soft);
+}
+.account-row:last-child { border-bottom: 0; }
+.account-row.is-archived, .account-card-item.is-archived { opacity: .62; }
+.account-mark {
+  --account-color: var(--brand); width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center;
+  color: var(--account-color); background: color-mix(in srgb, var(--account-color) 13%, var(--card)); flex: 0 0 auto;
+}
+.account-row__info { display: grid; gap: 2px; }
+.account-row__info b { font-size: 14px; }
+.account-row__info span { color: var(--ink-faint); font-size: 11.5px; }
+.account-row__value { font-family: var(--font-num); font-size: 14px; white-space: nowrap; }
+.account-row__actions { display: flex; align-items: center; gap: 2px; margin-left: auto; }
+.account-reconcile { grid-column: 1 / -1; padding: 12px; border-radius: var(--radius-sm); background: var(--card-alt); }
+.account-reconcile__line { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.account-reconcile__line .input { flex: 1 1 150px; }
+.account-card-item { display: grid; gap: 13px; margin-bottom: 12px; }
+.account-card-head { display: flex; align-items: center; gap: 11px; }
+.account-card-head > div:nth-child(2) { flex: 1; }
+.account-stats { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }
+.account-stats > div { background: var(--card-alt); border: 1px solid var(--border-soft); border-radius: var(--radius-xs); padding: 10px; display: grid; gap: 3px; }
+.account-stats span { color: var(--ink-faint); font-size: 10.5px; }
+.account-stats b { font-family: var(--font-num); font-size: 13px; }
+.statement-list { display: grid; gap: 7px; }
+.statement-row { display: grid; grid-template-columns: minmax(0,1fr) auto auto; align-items: center; gap: 10px; padding-top: 9px; border-top: 1px solid var(--border-soft); }
+.statement-row > span { display: grid; gap: 2px; }
+.statement-row small { color: var(--ink-faint); font-size: 10.5px; }
+.statement-row > strong { font-family: var(--font-num); font-size: 13px; white-space: nowrap; }
+.legacy-balance { display: flex; gap: 9px; margin-top: 12px; padding: 11px; border-radius: var(--radius-xs); color: var(--goal); background: var(--goal-soft); }
+.legacy-balance span { display: grid; gap: 2px; }
+.legacy-balance small { color: var(--ink-soft); font-size: 11px; }
+
+@media (max-width: 519px) {
+  .account-row { grid-template-columns: auto minmax(0,1fr) auto; }
+  .account-row__actions { grid-column: 2 / -1; margin-left: 0; justify-content: flex-end; }
+  .account-stats { grid-template-columns: 1fr; }
+  .statement-row { grid-template-columns: minmax(0,1fr) auto; }
+  .statement-row .btn { grid-column: 1 / -1; width: 100%; }
+}
+
+@media (min-width: 1180px) {
+  .accounts-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+}
+
+/* Folha do "Retrospectiva": conteúdo centrado, sem barulho ao redor. */
+.modal-sheet--wrapped { text-align: center; }
+.modal-sheet--wrapped .modal-header { text-align: left; }
+.split-bar-row { min-width: 0; }

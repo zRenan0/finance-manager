@@ -1,0 +1,295 @@
+/* ==================================================================
+   CENTRAL DE CATEGORIAS
+   ------------------------------------------------------------------
+   Três lentes sobre a mesma lista (Estrutura, Grupos, Tetos) e um
+   editor em folha. A hierarquia é desenhada com um trilho vertical
+   contínuo, não com um "›" na frente do nome: a linha diz de quem a
+   subcategoria depende sem gastar uma palavra.
+   ================================================================== */
+
+/* ---------- Panorama ---------- */
+.cat-overview__bar { margin-top: 16px; }
+.cat-overview__seg { display: block; height: 100%; }
+.cat-overview__seg--necessidade,
+.cat-overview__dot--necessidade { background: var(--brand); }
+.cat-overview__seg--desejo,
+.cat-overview__dot--desejo { background: var(--goal); }
+.cat-overview__seg--futuro,
+.cat-overview__dot--futuro { background: var(--positive); }
+
+.cat-overview__legend { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 12px; }
+.cat-overview__legend-item { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; }
+.cat-overview__legend-item b { font-weight: 650; color: var(--ink); }
+.cat-overview__legend-item small { color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.cat-overview__dot { width: 9px; height: 9px; border-radius: 999px; flex-shrink: 0; }
+
+.cat-overview__stats {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 12px; margin-top: 16px;
+  border: 1px solid var(--border-soft); border-radius: var(--radius-sm); padding: 14px;
+  background: linear-gradient(165deg, var(--card-alt), var(--paper));
+}
+.cat-overview__stats span { display: block; font-size: 11px; color: var(--ink-faint); font-weight: 650; }
+.cat-overview__stats b { display: block; margin-top: 4px; font-family: var(--font-num); font-size: 16px; font-weight: 600; letter-spacing: -0.02em; }
+.cat-overview__stats b.is-over { color: var(--negative); }
+
+/* ---------- Barra de ferramentas ---------- */
+.cat-toolbar__top { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.cat-search { position: relative; flex: 1 1 220px; display: flex; align-items: center; }
+.cat-search__icon { position: absolute; left: 14px; color: var(--ink-faint); pointer-events: none; }
+.cat-search .input { padding-right: 44px; }
+.cat-search__clear { position: absolute; right: 6px; width: 30px; height: 30px; }
+.cat-toolbar__new { flex: 0 0 auto; }
+.cat-toolbar__views { margin-top: 12px; }
+.cat-toolbar__views .segmented__option {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-size: 13px;
+}
+.cat-toolbar .field-hint { margin-top: 10px; }
+
+/* ---------- Lente 1: estrutura ---------- */
+.cat-tree { padding-top: 6px; padding-bottom: 6px; }
+.cat-node { border-bottom: 1px solid var(--border-soft); padding: 6px 0; }
+.cat-node:last-child { border-bottom: none; }
+.cat-node__head { display: flex; align-items: center; gap: 6px; }
+.cat-node__main {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px;
+  padding: 12px 10px; margin: 0 -10px; border-radius: var(--radius-sm); text-align: left;
+  transition: background var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+}
+.cat-node__main:hover { background: var(--paper); }
+.cat-node__main:active { transform: scale(0.995); }
+.cat-node__text { flex: 1; min-width: 0; }
+.cat-node__name {
+  display: block; font-size: 14.5px; font-weight: 650; letter-spacing: -0.012em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cat-node__meta { display: flex; align-items: center; gap: 7px; margin-top: 5px; flex-wrap: wrap; }
+.cat-node__count { font-size: 11px; color: var(--ink-faint); font-weight: 600; }
+.cat-node__values { text-align: right; flex-shrink: 0; }
+.cat-node__values b {
+  display: block; font-family: var(--font-num); font-size: 14px; font-weight: 600;
+  font-variant-numeric: tabular-nums; letter-spacing: -0.015em;
+}
+.cat-node__values small { display: block; margin-top: 3px; font-size: 11px; color: var(--ink-faint); }
+.cat-node__toggle {
+  width: 34px; height: 34px; border-radius: 999px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; color: var(--ink-faint);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), transform var(--dur) var(--ease);
+}
+.cat-node__toggle:hover { background: var(--paper-alt); color: var(--ink); }
+.cat-node.is-open .cat-node__toggle:not(.cat-node__toggle--add) { transform: rotate(180deg); }
+/* O "+" de uma categoria sem subcategorias fica discreto, nunca invisível: no
+   celular não existe hover, e um atalho que só aparece no mouse não existe. */
+.cat-node__toggle--add { opacity: 0.45; }
+.cat-node:hover .cat-node__toggle--add,
+.cat-node__toggle--add:hover,
+.cat-node__toggle--add:focus-visible { opacity: 1; }
+
+/* O trilho: uma linha que desce do ícone do pai e prende visualmente as filhas. */
+.cat-node__children { position: relative; margin: 2px 0 8px 19px; padding-left: 21px; }
+.cat-node__children::before {
+  content: ""; position: absolute; left: 0; top: -2px; bottom: 18px; width: 2px;
+  border-radius: 2px; background: var(--border);
+}
+.cat-child {
+  position: relative; display: flex; align-items: center; gap: 11px; width: 100%;
+  padding: 9px 10px; margin: 0 -10px 0 0; border-radius: var(--radius-xs); text-align: left;
+  transition: background var(--dur-fast) var(--ease);
+}
+.cat-child:hover { background: var(--paper); }
+.cat-child__rail {
+  position: absolute; left: -21px; top: 50%; width: 15px; height: 2px;
+  border-radius: 2px; background: var(--border);
+}
+.cat-child__text { flex: 1; min-width: 0; }
+.cat-child__name {
+  display: block; font-size: 13.5px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cat-child__meta { display: flex; align-items: center; gap: 6px; margin-top: 4px; flex-wrap: wrap; }
+.cat-child__budget { font-size: 10.5px; color: var(--ink-faint); font-weight: 600; }
+.cat-child__value {
+  flex-shrink: 0; font-family: var(--font-num); font-size: 13px; font-weight: 600;
+  font-variant-numeric: tabular-nums; color: var(--ink-soft);
+}
+.cat-child__value.is-over { color: var(--negative); }
+.cat-node__add {
+  display: inline-flex; align-items: center; gap: 7px; margin-top: 6px;
+  padding: 8px 12px; border-radius: 999px;
+  border: 1px dashed var(--border); color: var(--ink-faint);
+  font-size: 12px; font-weight: 650;
+  transition: border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+.cat-node__add:hover { border-style: solid; border-color: var(--brand); color: var(--brand-dark); background: var(--brand-soft); }
+
+.cat-bar { display: flex; align-items: center; gap: 9px; padding: 0 0 8px; }
+.cat-bar .progress { flex: 1; height: 5px; }
+.cat-bar__text {
+  font-size: 10.5px; font-weight: 700; font-variant-numeric: tabular-nums;
+  flex-shrink: 0; white-space: nowrap;
+}
+
+/* Etiqueta de grupo: a mesma peça aparece na árvore, nas listas e no editor. */
+.cat-tag {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 8px; border-radius: 999px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.02em; white-space: nowrap;
+}
+.cat-tag svg { flex-shrink: 0; }
+/* Num aparelho de 320px a linha da categoria distribui ícone, nome, etiqueta
+   de grupo, valor e o botão de expandir em 256px, e sobravam 90px para o
+   nome: "Investimentos" já saía cortado, e a etiqueta "Necessidades" furava
+   a borda do cartão. Apertar as folgas devolve uns 20px ao nome. */
+@media (max-width: 360px) {
+  .cat-tag { padding: 3px 6px; font-size: 9.5px; letter-spacing: 0; gap: 3px; }
+  .cat-node__head { gap: 2px; }
+  .cat-node__main { gap: 9px; padding-left: 6px; padding-right: 6px; margin: 0 -6px; }
+  .cat-node__name { font-size: 13.5px; }
+}
+.cat-tag--necessidade { background: var(--brand-soft); color: var(--brand-dark); }
+.cat-tag--desejo { background: var(--goal-soft); color: var(--goal); }
+.cat-tag--futuro { background: var(--positive-soft); color: var(--positive); }
+
+/* ---------- Lente 2: grupos ---------- */
+.cat-group-card__head { display: flex; align-items: center; gap: 12px; }
+.cat-group-card__text { flex: 1; min-width: 0; }
+.cat-group-card__icon--necessidade { background: var(--brand-soft); color: var(--brand-dark); }
+.cat-group-card__icon--desejo { background: var(--goal-soft); color: var(--goal); }
+.cat-group-card__icon--futuro { background: var(--positive-soft); color: var(--positive); }
+.cat-group-card__pct {
+  font-family: var(--font-num); font-size: 17px; font-weight: 600;
+  font-variant-numeric: tabular-nums; letter-spacing: -0.02em; flex-shrink: 0;
+}
+.cat-group-card__pct.is-over { color: var(--negative); }
+
+.cat-group-list { display: flex; flex-direction: column; margin-top: 12px; }
+.cat-group-row {
+  display: flex; align-items: center; gap: 11px; width: 100%;
+  padding: 10px; margin: 0 -10px; border-radius: var(--radius-xs);
+  border-bottom: 1px solid var(--border-soft); text-align: left;
+  transition: background var(--dur-fast) var(--ease);
+}
+.cat-group-row:last-child { border-bottom: none; }
+.cat-group-row:hover { background: var(--paper); }
+.cat-group-row__text { flex: 1; min-width: 0; }
+.cat-group-row__name {
+  display: block; font-size: 13.5px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cat-group-row__path {
+  display: block; margin-top: 3px; font-size: 11px; color: var(--ink-faint);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cat-group-row__value {
+  flex-shrink: 0; font-family: var(--font-num); font-size: 13px; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.cat-group-row__chevron { color: var(--ink-faint); flex-shrink: 0; transition: transform var(--dur) var(--ease); }
+.cat-group-row:hover .cat-group-row__chevron { transform: translateX(3px); }
+
+/* ---------- Lente 3: tetos ---------- */
+.cat-budget-list { display: flex; flex-direction: column; margin-top: 12px; }
+.cat-budget-row { padding: 12px 0; border-bottom: 1px solid var(--border-soft); }
+.cat-budget-row:last-child { border-bottom: none; }
+.cat-budget-row--child { margin-left: 16px; padding-left: 14px; border-left: 2px solid var(--border); }
+.cat-budget-row--child:last-child { border-bottom: none; }
+.cat-budget-row__main { display: flex; align-items: center; gap: 11px; }
+.cat-budget-row__text { flex: 1; min-width: 0; }
+.cat-budget-row__name {
+  display: block; font-size: 13.5px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cat-budget-row__meta {
+  display: block; margin-top: 3px; font-size: 11px; color: var(--ink-faint);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cat-budget-row__input { display: flex; align-items: center; gap: 6px; flex: 0 0 132px; }
+.cat-budget-row__input span { font-size: 12px; color: var(--ink-faint); font-weight: 650; }
+.cat-budget-row__input .input { flex: 1; min-width: 0; font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.cat-budget-row .cat-bar { padding: 8px 0 0; }
+.cat-budget-row .cat-budget-suggest { margin-top: 9px; white-space: normal; }
+
+/* ---------- Editor em folha ---------- */
+.cat-editor .modal-header { align-items: flex-start; }
+.cat-editor__field { margin-top: 18px; }
+.cat-editor__money { display: flex; align-items: center; gap: 8px; }
+.cat-editor__money span { font-size: 13px; color: var(--ink-faint); font-weight: 650; }
+
+.cat-parent-picker { display: flex; flex-wrap: wrap; gap: 7px; }
+.cat-parent-option {
+  display: inline-flex; align-items: center; gap: 7px;
+  height: 38px; padding: 0 13px; border-radius: 11px;
+  border: 1px solid var(--border); background: var(--card);
+  font-size: 12.5px; font-weight: 600; color: var(--ink-soft);
+  box-shadow: var(--shadow-xs);
+  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease),
+              color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+}
+.cat-parent-option:active { transform: scale(0.96); }
+.cat-parent-option.active { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-dark); }
+.cat-parent-option__dot { width: 9px; height: 9px; border-radius: 999px; flex-shrink: 0; }
+
+.cat-group-choice { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.cat-group-choice__option {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  min-height: 62px; padding: 10px 6px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--card); color: var(--ink-soft);
+  font-size: 11.5px; font-weight: 650; text-align: center; line-height: 1.2;
+  box-shadow: var(--shadow-xs);
+  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease),
+              color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+}
+.cat-group-choice__option:active { transform: scale(0.96); }
+.cat-group-choice__option.active { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-dark); }
+
+.cat-icon-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(46px, 1fr)); gap: 7px;
+  background: var(--paper); border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm); padding: 11px;
+  max-height: 168px; overflow-y: auto;
+}
+.cat-icon-option {
+  width: 100%; aspect-ratio: 1; border-radius: 11px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--card); border: 1px solid var(--border); color: var(--ink-soft);
+  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease),
+              color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+}
+.cat-icon-option:active { transform: scale(0.92); }
+.cat-icon-option.active { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-dark); }
+
+.cat-color-row { display: flex; flex-wrap: wrap; gap: 9px; }
+.cat-color-option {
+  width: 30px; height: 30px; border-radius: 999px; border: 2px solid transparent;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 8%, transparent), var(--sheen);
+  transition: transform var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+.cat-color-option:hover { transform: scale(1.12); }
+.cat-color-option.active { border-color: var(--ink); transform: scale(1.1); }
+
+.cat-editor__danger {
+  margin-top: 18px; padding: 14px; border-radius: var(--radius-sm);
+  background: var(--negative-soft);
+  border: 1px solid color-mix(in srgb, var(--negative) 26%, transparent);
+}
+.cat-editor__danger-title {
+  display: flex; align-items: center; gap: 7px; margin: 0;
+  font-size: 13px; font-weight: 700; color: var(--negative);
+}
+.cat-editor__danger-text { margin: 7px 0 0; font-size: 12px; color: var(--ink-soft); line-height: 1.5; }
+.cat-editor__danger-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.cat-editor__danger-actions .btn { flex: 1 1 auto; }
+
+.cat-editor__actions { display: flex; align-items: center; gap: 9px; margin-top: 22px; flex-wrap: wrap; }
+.cat-editor__actions .btn--primary { flex: 1 1 160px; }
+.cat-editor__delete { margin-right: auto; color: var(--negative); }
+.cat-editor__delete:hover { background: var(--negative-soft); color: var(--negative); }
+
+@media (max-width: 520px) {
+  .cat-toolbar__new { flex: 1 1 100%; }
+  .cat-node__values { text-align: right; }
+  .cat-budget-row__main { flex-wrap: wrap; }
+  .cat-budget-row__input { flex: 1 1 100%; }
+  .cat-editor__actions .btn { flex: 1 1 100%; }
+  .cat-editor__delete { margin-right: 0; order: 3; }
+}

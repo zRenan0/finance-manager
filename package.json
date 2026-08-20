@@ -1,0 +1,28 @@
+{
+  "name": "cofre-organizador-financeiro",
+  "version": "0.29.0",
+  "private": true,
+  "description": "Organizador financeiro local-first em HTML, CSS e JavaScript",
+  "scripts": {
+    "start": "node scripts/serve.js",
+    "start:dist": "node scripts/build-dist.js && node scripts/serve.js --dist",
+    "build": "node scripts/build-app-module.js",
+    "build:dist": "node scripts/build-app-module.js && node scripts/build-dist.js",
+    "check:build": "node scripts/build-app-module.js --check",
+    "test": "node tests/run-all.js",
+    "test:browser": "node tests/browser/run-browser.js",
+    "test:landing": "node tests/browser/run-landing.js",
+    "check:release": "node scripts/check-release.js",
+    "check:deploy": "node scripts/check-deploy.js",
+    "verify:release": "npm run check:build && npm test && npm run check:release && npm run build:dist",
+    "lint": "node scripts/lint.js",
+    "test:coverage": "node scripts/coverage.js"
+  },
+  "devDependencies": {
+    "playwright": "^1.55.0"
+  },
+  "engines": {
+    "node": "22.x"
+  },
+  "license": "UNLICENSED"
+}

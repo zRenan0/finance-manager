@@ -1,0 +1,16 @@
+{
+  "name": "Finanças | Controle Financeiro Pessoal",
+  "short_name": "Finanças",
+  "description": "Controle seus gastos, renda e metas financeiras de forma simples e rápida.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#EFF2F0",
+  "theme_color": "#0B6B5C",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

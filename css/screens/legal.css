@@ -1,0 +1,50 @@
+/* Privacidade e limites. Aparência de registro conferido, dentro do sistema Cofre. */
+.legal-status { position:relative; overflow:hidden; }
+.legal-status::before { content:""; position:absolute; inset:0 auto 0 0; width:4px; background:var(--goal); }
+.legal-status--ok::before { background:var(--positive); }
+.legal-status .status-badge { flex:0 0 auto; }
+
+.legal-facts { display:grid; gap:10px; margin:16px 0; }
+.legal-facts p { display:grid; grid-template-columns:20px minmax(0,1fr); gap:9px; align-items:start; margin:0; color:var(--ink-soft); font-size:13px; line-height:1.55; }
+.legal-facts svg { color:var(--brand); margin-top:2px; }
+.legal-copy { display:grid; gap:12px; color:var(--ink-soft); font-size:13px; line-height:1.65; }
+.legal-copy p { margin:0; }
+.legal-copy b { color:var(--ink); }
+
+/* Termo e definição: controlador, retenção e direitos são pares rótulo/valor,
+   então o par vai em <dl> em vez de parágrafo, e o leitor de tela anuncia a
+   relação. Uma coluna só, para não quebrar em 320 px. */
+.legal-subhead { margin:18px 0 6px; color:var(--ink); font-size:13px; font-weight:700; }
+.legal-subhead:first-child { margin-top:0; }
+.legal-list { display:grid; gap:11px; margin:12px 0 0; }
+.legal-list > div { display:grid; gap:3px; padding-bottom:11px; border-bottom:1px solid var(--border); }
+.legal-list > div:last-child { padding-bottom:0; border-bottom:none; }
+.legal-list dt { color:var(--ink); font-size:12.5px; font-weight:700; line-height:1.45; }
+.legal-list dd { margin:0; color:var(--ink-soft); font-size:12.5px; line-height:1.55; overflow-wrap:anywhere; }
+.legal-law { color:var(--ink-faint); font-size:11px; font-weight:600; white-space:nowrap; }
+.legal-self { color:var(--positive); font-weight:600; }
+.legal-pending { color:var(--goal); font-weight:600; }
+
+.financial-notice {
+  display:grid; grid-template-columns:22px minmax(0,1fr); gap:11px; align-items:start;
+  margin-top:var(--gap); padding:15px 17px; color:var(--ink-soft);
+  border:1px solid color-mix(in srgb,var(--goal) 28%,var(--border)); border-left:4px solid var(--goal);
+  border-radius:var(--radius-sm); background:color-mix(in srgb,var(--goal-soft) 42%,var(--card));
+  box-shadow:var(--shadow-xs);
+}
+.financial-notice > svg { color:var(--goal); margin-top:2px; }
+.financial-notice p { margin:0; font-size:13px; line-height:1.55; }
+.financial-notice small { display:block; margin-top:7px; color:var(--ink-faint); font-size:11px; }
+.financial-notice .source-links { margin-top:7px; }
+
+.onb-legal-summary { margin-top:14px; border:1px solid var(--border); border-radius:var(--radius-sm); padding:0 13px; background:var(--card-alt); }
+.onb-legal-summary summary { min-height:44px; display:flex; align-items:center; cursor:pointer; color:var(--ink); font-size:13px; font-weight:700; }
+.onb-legal-summary p { margin:0 0 13px; color:var(--ink-soft); font-size:12.5px; line-height:1.55; }
+.legal-consent { display:grid; grid-template-columns:22px minmax(0,1fr); gap:10px; align-items:start; margin-top:14px; color:var(--ink); font-size:13px; line-height:1.5; cursor:pointer; }
+.legal-consent input { width:20px; height:20px; margin:0; accent-color:var(--brand); }
+
+@media (max-width:540px) {
+  .financial-notice { padding:14px; }
+  .legal-status .settings-row-header { align-items:flex-start; }
+  .button-row > .btn { flex:1 1 100%; }
+}

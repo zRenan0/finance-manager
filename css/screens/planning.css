@@ -1,0 +1,306 @@
+/* ==================================================================
+   31. CALENDÁRIO, PREVISÃO E METAS (Módulo 4)
+   ------------------------------------------------------------------
+   Só acréscimos. A regra visual desta seção: FATO e PREVISÃO nunca
+   compartilham o mesmo tratamento; o realizado é sólido, o previsto
+   é vazado. Nenhuma regra aqui decide se um número é bom ou ruim;
+   a cor chega por `--tone` injetado pelo JS.
+   ================================================================== */
+
+/* ---- Navegação de mês no cabeçalho ---- */
+.month-nav { display: flex; align-items: center; gap: 4px; }
+.month-nav__label {
+  font-family: var(--font-num); font-variant-numeric: tabular-nums;
+  font-size: 13px; font-weight: 650; min-width: 66px; text-align: center;
+  letter-spacing: -0.01em;
+}
+
+/* ---- Realizado x previsto no painel do mês ---- */
+.cal-split { margin-top: 16px; display: grid; gap: 6px; }
+.cal-split__row {
+  display: flex; align-items: center; gap: 10px;
+  background: rgba(255,255,255,0.09);
+  border: 1px solid rgba(255,255,255,0.13);
+  border-radius: var(--radius-sm); padding: 9px 12px;
+  font-size: 12.5px;
+}
+.cal-split__row span:not(.cal-split__dot) { flex: 1; min-width: 0; }
+.cal-split__row b {
+  font-family: var(--font-num); font-variant-numeric: tabular-nums;
+  font-size: 13px; font-weight: 650; white-space: nowrap;
+}
+.cal-split__dot { width: 9px; height: 9px; border-radius: 3px; flex-shrink: 0; }
+.cal-split__dot--done { background: currentColor; opacity: 0.9; }
+.cal-split__dot--planned { background: transparent; border: 1.5px dashed currentColor; opacity: 0.8; }
+.cal-late-note {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 600; margin: 12px 0 0;
+}
+
+/* ---- Grade do mês ---- */
+.cal-grid {
+  display: grid; grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px; margin-top: 4px;
+}
+.cal-weekday {
+  text-align: center; font-size: 10.5px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--ink-faint); padding-bottom: 6px;
+}
+.cal-day {
+  position: relative; aspect-ratio: 1 / 1; min-height: 44px;
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 5px 2px 2px;
+  background: var(--card-alt); border: 1px solid transparent;
+  border-radius: var(--radius-xs); cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+  overflow: hidden;
+}
+.cal-day:hover { background: var(--paper-alt); }
+.cal-day:active { transform: scale(0.96); }
+.cal-day--out {
+  aspect-ratio: 1 / 1; min-height: 44px;
+  display: flex; align-items: flex-start; justify-content: center;
+  padding-top: 5px; font-size: 11.5px; color: var(--border);
+  font-family: var(--font-num);
+}
+.cal-day__num {
+  font-family: var(--font-num); font-variant-numeric: tabular-nums;
+  font-size: 12.5px; font-weight: 600; color: var(--ink-soft); line-height: 1;
+  position: relative; z-index: 2;
+}
+.cal-day.has-events .cal-day__num { color: var(--ink); font-weight: 700; }
+.cal-day.is-today { border-color: var(--brand); background: var(--brand-soft); }
+.cal-day.is-today .cal-day__num { color: var(--brand-dark); font-weight: 800; }
+.cal-day.is-selected { border-color: var(--ink); box-shadow: var(--ring); }
+.cal-day.is-late { border-color: var(--negative); }
+
+/* Barra do gasto do dia: sólida quando já lançado, vazada quando é previsão. */
+.cal-day__bar {
+  position: absolute; left: 50%; bottom: 4px; transform: translateX(-50%);
+  width: 60%; border-radius: 3px;
+  background: color-mix(in srgb, var(--brand) 48%, transparent);
+  transition: height var(--dur-slow) var(--ease); z-index: 1;
+}
+.cal-day__bar.is-planned {
+  background: repeating-linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--goal) 42%, transparent) 0 3px,
+    transparent 3px 6px
+  );
+  border: 1px dashed color-mix(in srgb, var(--goal) 55%, transparent);
+}
+.cal-day.is-late .cal-day__bar { background: color-mix(in srgb, var(--negative) 45%, transparent); }
+.cal-day__in {
+  position: absolute; top: 5px; right: 5px;
+  width: 5px; height: 5px; border-radius: 50%;
+  background: var(--positive); z-index: 2;
+}
+
+.cal-legend {
+  display: flex; flex-wrap: wrap; gap: 12px; margin-top: 14px;
+  font-size: 11px; color: var(--ink-faint);
+}
+.cal-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.cal-legend__swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.cal-legend__swatch--done { background: color-mix(in srgb, var(--brand) 48%, transparent); }
+.cal-legend__swatch--planned { border: 1px dashed var(--goal); background: color-mix(in srgb, var(--goal) 20%, transparent); }
+.cal-legend__swatch--in { background: var(--positive); border-radius: 50%; }
+.cal-legend__swatch--late { background: color-mix(in srgb, var(--negative) 50%, transparent); }
+
+/* ---- Dias mais pesados ---- */
+.cal-heavy { margin-top: 18px; border-top: 1px solid var(--border-soft); padding-top: 14px; }
+.cal-heavy__row {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 9px 0; border: none; background: none; cursor: pointer;
+  border-top: 1px solid var(--border-soft); text-align: left;
+}
+.cal-heavy__row:first-of-type { border-top: none; }
+.cal-heavy__date {
+  font-family: var(--font-num); font-variant-numeric: tabular-nums;
+  font-size: 12.5px; font-weight: 700; min-width: 44px;
+}
+.cal-heavy__count { flex: 1; min-width: 0; font-size: 11.5px; color: var(--ink-faint); }
+.cal-heavy__row b {
+  font-family: var(--font-num); font-variant-numeric: tabular-nums;
+  font-size: 13px; font-weight: 650; white-space: nowrap;
+}
+
+/* ---- Painel do dia ---- */
+.bill-row--planned { opacity: 0.86; }
+.bill-row--planned .bill-row__label { font-weight: 600; }
+.cal-day-total {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-soft);
+  font-size: 12.5px; color: var(--ink-soft);
+}
+.cal-day-total b {
+  font-family: var(--font-num); font-variant-numeric: tabular-nums;
+  font-size: 15px; font-weight: 700;
+}
+
+/* ---- Previsão ---- */
+.horizon-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0 12px; }
+.horizon-chip {
+  border: 1px solid var(--border); background: var(--card);
+  border-radius: 999px; padding: 7px 13px; cursor: pointer;
+  font-size: 12px; font-weight: 600; color: var(--ink-soft);
+  min-height: 34px;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+.horizon-chip:hover { border-color: var(--brand); color: var(--brand); }
+.horizon-chip.active { background: var(--brand); border-color: var(--brand); color: #fff; }
+
+.forecast-value {
+  font-family: var(--font-num); font-variant-numeric: tabular-nums;
+  font-size: clamp(24px, 6.5vw, 32px); font-weight: 700;
+  letter-spacing: -0.03em; margin: 0;
+}
+.forecast-note { font-size: 12px; color: var(--ink-faint); margin: 4px 0 0; line-height: 1.5; }
+.forecast-alert {
+  display: flex; align-items: flex-start; gap: 8px;
+  margin: 14px 0 0; padding: 11px 13px;
+  background: var(--negative-soft); border-radius: var(--radius-sm);
+  font-size: 12.5px; color: var(--negative); line-height: 1.5;
+}
+.forecast-alert svg { flex-shrink: 0; margin-top: 1px; }
+.forecast-chart-wrap { margin-top: 16px; }
+.forecast-assumptions { margin-top: 18px; border-top: 1px solid var(--border-soft); padding-top: 14px; }
+.forecast-list { margin: 0; padding-left: 18px; }
+.forecast-list li { font-size: 12px; color: var(--ink-soft); line-height: 1.6; margin-bottom: 4px; }
+
+/* Faixa compacta do Dashboard */
+.forecast-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; }
+.forecast-strip__main { flex: 1 1 200px; min-width: 0; }
+.forecast-strip__side { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.forecast-strip__side .horizon-chips { margin: 0; }
+.forecast-strip__stats { display: flex; gap: 12px; }
+.forecast-strip__stats span {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-family: var(--font-num); font-variant-numeric: tabular-nums;
+  font-size: 12px; font-weight: 650; color: var(--ink-soft); white-space: nowrap;
+}
+
+/* ---- Planejamento anual ---- */
+.annual-summary {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px; margin: 14px 0;
+}
+.annual-summary > div {
+  background: var(--card-alt); border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm); padding: 11px 13px;
+}
+.annual-summary__label { display: block; font-size: 11px; color: var(--ink-faint); margin-bottom: 3px; }
+.annual-summary b {
+  font-family: var(--font-num); font-variant-numeric: tabular-nums;
+  font-size: 16px; font-weight: 700;
+}
+.annual-list { display: flex; flex-direction: column; }
+.annual-row {
+  display: flex; align-items: center; gap: 11px;
+  padding: 11px 0; border-top: 1px solid var(--border-soft); min-width: 0;
+}
+.annual-row:first-child { border-top: none; }
+.annual-row.is-past { opacity: 0.45; }
+.annual-row.is-current { background: var(--brand-soft); border-radius: var(--radius-xs); padding-left: 8px; padding-right: 8px; }
+.annual-row__month {
+  font-family: var(--font-num); font-size: 10.5px; font-weight: 800;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--ink-faint); min-width: 30px; flex-shrink: 0;
+}
+.annual-row__info { flex: 1 1 140px; min-width: 0; }
+.annual-row__name { font-size: 13px; font-weight: 650; margin: 0; letter-spacing: -0.01em; }
+.annual-row__note { font-size: 11.5px; color: var(--ink-faint); margin: 2px 0 0; line-height: 1.45; }
+.annual-row__value {
+  font-family: var(--font-num); font-variant-numeric: tabular-nums;
+  font-size: 13px; font-weight: 650; text-align: right;
+  flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end;
+}
+.annual-row__from { font-size: 10.5px; font-weight: 500; color: var(--ink-faint); font-family: var(--font-body); }
+
+/* ---- Metas: modelos, status e os três números ---- */
+.goal-templates { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 8px; margin-top: 14px; }
+.goal-template {
+  display: flex; align-items: center; gap: 10px; text-align: left;
+  background: var(--card-alt); border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm); padding: 11px 12px; cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+.goal-template:hover { border-color: var(--goal); background: var(--goal-soft); }
+.goal-template__text { display: flex; flex-direction: column; min-width: 0; }
+.goal-template__text b { font-size: 13px; font-weight: 650; }
+.goal-template__text span { font-size: 11.5px; color: var(--ink-faint); line-height: 1.45; }
+
+.goal-header__actions { display: flex; gap: 2px; flex-shrink: 0; }
+.goal-status {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; font-weight: 700; margin-top: 4px;
+}
+.goal-remaining { font-size: 12px; color: var(--ink-soft); margin: 0; line-height: 1.5; }
+
+.goal-numbers {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 8px; margin-top: 14px;
+}
+.goal-number {
+  background: var(--card-alt); border: 1px solid var(--border-soft);
+  border-radius: var(--radius-xs); padding: 9px 10px; min-width: 0;
+}
+.goal-number__label {
+  display: block; font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.04em; color: var(--ink-faint); margin-bottom: 3px;
+}
+.goal-number b {
+  display: block; font-family: var(--font-num); font-variant-numeric: tabular-nums;
+  font-size: 14px; font-weight: 700; letter-spacing: -0.02em;
+}
+.goal-number__hint { display: block; font-size: 10.5px; color: var(--ink-faint); margin-top: 2px; line-height: 1.35; }
+
+.goal-eta {
+  display: flex; align-items: flex-start; gap: 7px;
+  font-size: 12px; color: var(--ink-soft); margin: 12px 0 0; line-height: 1.5;
+}
+.goal-eta svg { flex-shrink: 0; margin-top: 2px; }
+.goal-eta.is-late { color: var(--negative); }
+.goal-spark { margin-top: 14px; }
+
+/* ---- Viabilidade do plano ---- */
+.plan-verdict { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+.plan-meter {
+  height: 8px; border-radius: 999px; background: var(--paper-alt);
+  overflow: hidden; margin: 14px 0 12px;
+}
+.plan-meter__fill { height: 100%; border-radius: 999px; transition: width var(--dur-slow) var(--ease); }
+.plan-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-bottom: 12px; }
+.plan-cell {
+  background: var(--card-alt); border: 1px solid var(--border-soft);
+  border-radius: var(--radius-xs); padding: 10px 12px; min-width: 0;
+}
+.plan-cell span { display: block; font-size: 11px; color: var(--ink-faint); margin-bottom: 3px; }
+.plan-cell b {
+  font-family: var(--font-num); font-variant-numeric: tabular-nums;
+  font-size: 15px; font-weight: 700; letter-spacing: -0.02em;
+}
+
+@media (max-width: 519px) {
+  /* A célula quadrada não cabe: com sete colunas num aparelho de 320px a
+     trilha vale 34px, e o `aspect-ratio` combinado com a altura mínima
+     empurrava a célula para 40px, estourando a grade. Aqui ela pode ser
+     mais alta do que larga. */
+  .cal-day, .cal-day--out { aspect-ratio: auto; min-height: 40px; }
+  .cal-grid { gap: 3px; }
+  .forecast-strip__side { width: 100%; justify-content: space-between; }
+  .annual-row__note { display: none; }
+}
+/* O mínimo de 44px que vale para qualquer botão em ponteiro grosso não pode
+   valer aqui: a grade do mês distribui sete colunas iguais, e num aparelho de
+   320px a trilha vale 34px. Cada célula empurrava a seguinte e a última saía
+   pela borda do cartão. A altura mínima continua respondendo pelo alvo de
+   toque. */
+@media (pointer: coarse) {
+  .cal-grid .cal-day, .cal-grid .cal-day--out { min-width: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cal-day, .cal-day__bar, .plan-meter__fill, .horizon-chip { transition: none; }
+}

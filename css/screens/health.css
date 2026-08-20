@@ -1,0 +1,175 @@
+/* ==================================================================
+   29. SAÚDE FINANCEIRA (Módulo 2)
+   ------------------------------------------------------------------
+   Tela de diagnóstico. Toda cor vem da variável local `--tone`, que o
+   JS injeta a partir do status do indicador; nenhuma regra aqui
+   decide se algo é bom ou ruim. Nada foi redefinido: só acréscimos.
+   ================================================================== */
+
+/* ---- Cabeçalho do diagnóstico ---- */
+.card--health-hero {
+  position: relative;
+  overflow: hidden;
+  border-color: color-mix(in srgb, var(--tone) 26%, var(--border));
+  background:
+    radial-gradient(120% 140% at 100% 0%, color-mix(in srgb, var(--tone) 9%, transparent) 0%, transparent 62%),
+    var(--card);
+}
+.card--health-hero::before {
+  content: "";
+  position: absolute; inset: 0 0 auto 0; height: 3px;
+  background: linear-gradient(90deg, var(--tone), color-mix(in srgb, var(--tone) 22%, transparent));
+}
+.health-hero__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+  align-items: center;
+}
+.health-hero__gauge { display: grid; justify-items: center; gap: 2px; }
+.health-hero__gauge-label {
+  font-family: var(--font-display); font-size: 14px; font-weight: 650;
+  letter-spacing: -0.015em; margin: 8px 0 0;
+}
+.health-hero__gauge-note { font-size: 11px; color: var(--ink-faint); margin: 1px 0 0; font-weight: 600; }
+.health-hero__text { min-width: 0; }
+.health-hero__eyebrow {
+  display: inline-flex; align-items: center; gap: 7px; margin: 0;
+  font-size: 11.5px; font-weight: 700; color: var(--tone);
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.health-hero__eyebrow svg { flex-shrink: 0; }
+.health-hero__title {
+  font-family: var(--font-display); font-size: clamp(19px, 4.6vw, 25px);
+  font-weight: 600; letter-spacing: -0.028em; line-height: 1.18;
+  margin: 9px 0 0;
+}
+.health-hero__desc { font-size: 13px; color: var(--ink-soft); line-height: 1.6; margin: 8px 0 0; }
+
+.health-chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 14px; }
+.health-chip {
+  display: inline-flex; align-items: baseline; gap: 5px;
+  font-size: 11.5px; font-weight: 600; color: var(--ink-soft);
+  background: color-mix(in srgb, var(--tone) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tone) 22%, transparent);
+  border-radius: 999px; padding: 5px 11px;
+}
+.health-chip b {
+  font-family: var(--font-num); font-variant-numeric: tabular-nums;
+  font-size: 12.5px; font-weight: 700; color: var(--tone);
+}
+
+/* ---- Cartão de indicador ---- */
+.card--indicator { display: flex; flex-direction: column; }
+.indicator__head { display: flex; align-items: center; gap: 11px; margin-bottom: 14px; }
+.indicator__head-text { min-width: 0; flex: 1; }
+.indicator__status { font-size: 11.5px; font-weight: 700; margin: 3px 0 0; letter-spacing: 0.01em; }
+.indicator__value {
+  font-family: var(--font-num); font-variant-numeric: tabular-nums;
+  font-size: clamp(26px, 6.5vw, 32px); font-weight: 600;
+  letter-spacing: -0.035em; line-height: 1; margin: 0;
+}
+.indicator__value--empty { color: var(--ink-faint); }
+.indicator__caption { font-size: 11.5px; color: var(--ink-faint); font-weight: 600; margin: 6px 0 0; }
+
+.indicator__meter {
+  position: relative; height: 7px; border-radius: 999px;
+  background: var(--paper-alt); overflow: hidden; margin: 13px 0 0;
+}
+.indicator__meter-fill {
+  height: 100%; border-radius: 999px;
+  transition: width var(--dur-slow) var(--ease);
+}
+.indicator__mark {
+  position: absolute; top: -2px; width: 2px; height: 11px;
+  background: color-mix(in srgb, var(--ink) 34%, transparent);
+  border-radius: 1px; transform: translateX(-1px);
+}
+
+.indicator__desc { font-size: 12.5px; color: var(--ink-soft); line-height: 1.6; margin: 13px 0 0; }
+
+.indicator__advice {
+  display: flex; align-items: flex-start; gap: 9px; margin-top: 13px;
+  background: color-mix(in srgb, var(--tone) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tone) 18%, transparent);
+  border-radius: var(--radius-sm); padding: 12px 13px;
+}
+.indicator__advice > div { min-width: 0; flex: 1; }
+.indicator__advice-icon { color: var(--tone); flex-shrink: 0; margin-top: 2px; }
+.indicator__advice-text { font-size: 12.5px; color: var(--ink); line-height: 1.6; margin: 0; }
+/* O botão do conselho mora numa caixa estreita dentro de um cartão que já é
+   uma coluna da grade. "Cadastrar carteira" não cabe numa linha lá, e o
+   `nowrap` + altura fixa do `.btn` fazia o rótulo furar a borda. Aqui ele
+   quebra, e a altura passa a ser mínima em vez de fixa. */
+.indicator__advice .btn {
+  margin-top: 10px; max-width: 100%;
+  height: auto; min-height: 38px; padding: 8px 14px;
+  white-space: normal; text-align: center;
+}
+
+.indicator__more {
+  margin-top: auto; padding-top: 14px; background: none; border: none; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  font-family: inherit; font-size: 12px; font-weight: 650; color: var(--ink-faint);
+  min-height: 40px; width: 100%;
+  transition: color var(--dur-fast) var(--ease);
+}
+.indicator__more:hover { color: var(--brand); }
+.indicator__more:active { transform: scale(0.985); }
+.indicator__method {
+  border-top: 1px solid var(--border-soft); padding-top: 12px;
+  animation: fadeSlide var(--dur) var(--ease) both;
+}
+.indicator__method p { font-size: 12px; color: var(--ink-soft); line-height: 1.6; margin: 0; }
+.indicator__benchmark { color: var(--ink-faint) !important; margin-top: 7px !important; font-weight: 600; }
+
+@keyframes fadeSlide {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ---- Plano de ação ---- */
+.health-sub { font-size: 12.5px; color: var(--ink-soft); line-height: 1.55; margin: -4px 0 0; }
+.plan-list { list-style: none; margin: 16px 0 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.plan-item {
+  display: flex; align-items: flex-start; gap: 12px;
+  background: var(--card-alt);
+  border: 1px solid var(--border-soft);
+  border-left: 3px solid var(--tone);
+  border-radius: var(--radius-sm);
+  padding: 13px 14px;
+  transition: transform var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+.plan-item__num {
+  flex-shrink: 0; width: 24px; height: 24px; border-radius: 8px;
+  display: grid; place-items: center;
+  font-family: var(--font-num); font-variant-numeric: tabular-nums;
+  font-size: 12px; font-weight: 700; color: var(--tone);
+  background: color-mix(in srgb, var(--tone) 13%, transparent);
+}
+.plan-item__body { min-width: 0; flex: 1; }
+.plan-item__label {
+  display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin: 0;
+  font-size: 13px; font-weight: 650; letter-spacing: -0.012em;
+}
+.plan-item__label svg { color: var(--tone); flex-shrink: 0; }
+.plan-item__tag {
+  font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--tone); background: color-mix(in srgb, var(--tone) 11%, transparent);
+  border-radius: 999px; padding: 2px 8px;
+}
+.plan-item__text { font-size: 12.5px; color: var(--ink-soft); line-height: 1.6; margin: 6px 0 0; }
+.plan-item__body .btn { margin-top: 10px; }
+
+@media (pointer: fine) {
+  .plan-item:hover { transform: translateX(2px); box-shadow: var(--shadow-xs); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .indicator__meter-fill { transition: none; }
+  .indicator__method { animation: none; }
+}
+
+/* ---- Desktop: gabarito do cabeçalho ---- */
+@media (min-width: 560px) {
+  .health-hero__grid { grid-template-columns: auto minmax(0, 1fr); gap: 24px; }
+}

@@ -1,0 +1,18 @@
+/* Ponto único de entrada. A ordem mantém a cascata anterior. */
+@import url("base.css");
+@import url("layout.css");
+@import url("components.css");
+@import url("utilities.css");
+@import url("screens/dashboard.css");
+@import url("screens/health.css");
+@import url("screens/wealth.css");
+@import url("screens/planning.css");
+@import url("screens/investments.css");
+@import url("screens/intelligence.css");
+@import url("screens/notifications-onboarding.css");
+@import url("screens/personalization.css");
+@import url("screens/categories.css");
+@import url("screens/movements.css");
+@import url("screens/transparency-assistant-sources.css");
+@import url("screens/legal.css");
+@import url("screens/account.css");

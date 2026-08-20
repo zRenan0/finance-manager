@@ -1,0 +1,337 @@
+/* ==================================================================
+   Finanças. Design System "Cofre"
+   ------------------------------------------------------------------
+   Direção: banco privado, não planilha. Materiais emprestados do mundo
+   do dinheiro: verniz esmeralda de cofre, latão, papel de razão
+   contábil e a gravação fina de cédula. Os números têm personalidade
+   (Space Grotesk, algarismos tabulares); o texto corrido é invisível
+   de propósito (Inter). Toda a ousadia mora num lugar só: o painel
+   de saldo.
+   ------------------------------------------------------------------
+   Regra estrutural desta folha: nenhuma classe usada pelo JS foi
+   removida ou renomeada. Só valores, camadas e novos componentes.
+   ================================================================== */
+
+/* ==================================================================
+   1. TOKENS
+   ================================================================== */
+/* ==================================================================
+   FONTES LOCAIS
+   ------------------------------------------------------------------
+   O app carregava Inter e Space Grotesk de `fonts.googleapis.com`. Num
+   aplicativo cuja proposta é manter os dados no aparelho, isso enviava o
+   IP do usuário a um terceiro em toda abertura, sem constar da política
+   de privacidade; deixava a primeira carga offline sem fonte; e obrigava
+   a CSP a liberar dois domínios externos.
+
+   As duas famílias são resolvidas SÓ por `local()`, e é uma decisão, não
+   uma pendência. O `url("../fonts/...woff2")` que existia aqui apontava
+   para arquivo que nunca esteve no repositório: quem não tivesse a família
+   instalada pagava duas requisições 404 por abertura, recebia a página de
+   erro em HTML no lugar de um WOFF2, e caía na pilha do sistema mesmo
+   assim. Ou seja: o custo era real e o resultado, nenhum.
+
+   Sem `url()`, quem tem Inter ou Space Grotesk instaladas continua vendo
+   as duas; quem não tem cai na pilha do sistema declarada logo abaixo, que
+   é a mesma escolha da página comercial (ver css/landing.css). Em nenhum
+   dos casos sai requisição, nem para terceiro nem para arquivo ausente.
+
+   PARA VOLTAR ÀS FONTES DO PROJETO: coloque os WOFF2 licenciados em
+   `fonts/` e devolva o `url()` ao fim de cada `src` (ver fonts/README.md).
+
+   `font-display: swap` fica: ele volta a valer no dia em que houver
+   arquivo para baixar.
+   ================================================================== */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: local("Inter"), local("Inter Regular");
+}
+@font-face {
+  font-family: "Space Grotesk";
+  font-style: normal;
+  font-weight: 500 700;
+  font-display: swap;
+  src: local("Space Grotesk"), local("Space Grotesk Medium");
+}
+
+:root {
+  /* --- Tinta e papel --- */
+  --ink:         #0B1512;
+  --ink-soft:    #55655F;
+  --ink-faint:   #5B6B65;
+  --paper:       #EFF2F0;
+  --paper-alt:   #E5EAE7;
+  --card:        #FFFFFF;
+  --card-alt:    #FAFBFA;
+  --border:      #E2E8E5;
+  --border-soft: #EDF1EF;
+
+  /* --- Marca (esmeralda de cofre) --- */
+  --brand:       #0B6B5C;
+  --brand-dark:  #064B40;
+  --brand-deep:  #03302A;
+  --brand-glow:  #18A98C;
+  --brand-soft:  #E2EFEB;
+
+  /* --- Sinais --- */
+  --positive:      #0E8A6E;
+  --positive-soft: #E1F2EC;
+  --negative:      #BE443B;
+  --negative-soft: #FBEAE7;
+  --goal:          #A9791F;   /* latão */
+  --goal-soft:     #F7EFDC;
+
+  /* --- Elevação em camadas (nunca uma sombra só) --- */
+  --shadow-xs: 0 1px 1px rgba(11,21,18,0.03), 0 1px 2px rgba(11,21,18,0.04);
+  --shadow:    0 1px 2px rgba(11,21,18,0.04), 0 2px 6px rgba(11,21,18,0.05);
+  --shadow-sm: 0 1px 2px rgba(11,21,18,0.04), 0 2px 6px rgba(11,21,18,0.05);
+  --shadow-md: 0 2px 4px rgba(11,21,18,0.04), 0 10px 24px -6px rgba(11,21,18,0.12);
+  --shadow-lg: 0 4px 8px rgba(11,21,18,0.05), 0 22px 48px -12px rgba(11,21,18,0.18);
+  --shadow-brand: 0 2px 6px rgba(6,75,64,0.18), 0 12px 28px -10px rgba(6,75,64,0.38);
+  --sheen: inset 0 1px 0 rgba(255,255,255,0.85);
+  --ring: 0 0 0 3px color-mix(in srgb, var(--brand) 22%, transparent);
+
+  /* --- Raios --- */
+  --radius-xs: 9px;
+  --radius-sm: 13px;
+  --radius:    18px;
+  --radius-lg: 24px;
+  --radius-xl: 30px;
+
+  /* --- Ritmo vertical --- */
+  --stack:   16px;
+  --gap:     14px;
+  /* No toque, o FAB cresce para 44px e leva a doca a 90px. Os 9px entre a
+     doca e a borda também fazem parte da área que nada pode ocupar. */
+  --nav-h:   calc(100px + env(safe-area-inset-bottom, 0px));
+  --side-w:  240px;
+
+  /* --- Movimento --- */
+  --ease:        cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-inout:  cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast:    140ms;
+  --dur:         240ms;
+  --dur-slow:    420ms;
+
+  /* --- Tipografia --- */
+  --font-display: "Space Grotesk", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-num:     "Space Grotesk", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-body:    "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+
+  /* --- Atmosfera da página --- */
+  --wash-a: color-mix(in srgb, var(--brand) 8%, transparent);
+  --wash-b: color-mix(in srgb, var(--goal) 7%, transparent);
+  --glass:  color-mix(in srgb, var(--card) 78%, transparent);
+}
+
+/* Central de Dívidas */
+.debt-editor { border-color:color-mix(in srgb,var(--negative) 22%,var(--border)); }
+.debt-details { margin:8px 0 16px; border:1px solid var(--border); border-radius:14px; padding:0 14px; }
+.debt-details summary { cursor:pointer; padding:14px 0; color:var(--ink); font-weight:700; }
+.debt-details[open] summary { margin-bottom:4px; border-bottom:1px solid var(--border); }
+.debt-rate-row,.debt-extra-row { display:grid; grid-template-columns:minmax(0,1fr) minmax(120px,.55fr); gap:8px; }
+.debt-extra-row { grid-template-columns:minmax(0,1fr) auto; }
+.debt-plan-summary,.debt-facts { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin:16px 0; }
+.debt-plan-summary>div,.debt-facts>div,.debt-compare>div { padding:12px; border:1px solid var(--border); border-radius:12px; background:var(--card-alt); }
+.debt-plan-summary span,.debt-facts span,.debt-compare span { display:block; color:var(--ink-faint); font-size:.75rem; margin-bottom:5px; }
+.debt-plan-summary b,.debt-facts b,.debt-compare b { color:var(--ink); font-size:.92rem; }
+.debt-timeline { display:grid; gap:7px; margin:16px 0; }
+.debt-timeline__row { display:grid; grid-template-columns:52px minmax(0,1fr) 74px; align-items:center; gap:8px; color:var(--ink-faint); font-size:.7rem; }
+.debt-timeline__row>div { height:7px; border-radius:999px; background:var(--border); overflow:hidden; }
+.debt-timeline__row i { display:block; height:100%; border-radius:inherit; background:var(--negative); }
+.debt-timeline__row b { text-align:right; color:var(--ink-soft); }
+.debt-compare { display:grid; gap:10px; margin:14px 0; }
+.debt-compare small { display:block; color:var(--ink-faint); margin-top:3px; }
+.debt-list { display:grid; gap:10px; margin-top:14px; }
+.debt-row { border:1px solid var(--border); border-radius:14px; overflow:hidden; }
+.debt-row.is-open { border-color:color-mix(in srgb,var(--negative) 32%,var(--border)); }
+.debt-row__main { width:100%; display:grid; grid-template-columns:34px minmax(0,1fr) auto 18px; gap:10px; align-items:center; padding:14px; color:inherit; text-align:left; background:transparent; border:0; cursor:pointer; }
+.debt-rank { display:grid; place-items:center; width:30px; height:30px; border-radius:10px; background:color-mix(in srgb,var(--negative) 12%,transparent); color:var(--negative); font-weight:800; }
+.debt-row__text b,.debt-row__text small,.debt-row__values b,.debt-row__values small { display:block; }
+.debt-row__text small,.debt-row__values small { color:var(--ink-faint); font-size:.74rem; margin-top:3px; }
+.debt-row__values { text-align:right; }
+.debt-row__detail { padding:0 14px 14px 58px; border-top:1px solid var(--border); }
+.debt-payment-history { margin:12px 0; }
+.debt-payment-history>div { display:flex; justify-content:space-between; padding:7px 0; border-bottom:1px solid var(--border); font-size:.82rem; }
+.inline-alert { margin:12px 0; padding:10px 12px; border-radius:10px; background:color-mix(in srgb,var(--brand) 9%,transparent); color:var(--ink-soft); font-size:.78rem; line-height:1.45; }
+.inline-alert--warn { background:color-mix(in srgb,var(--goal) 13%,transparent); color:var(--ink); }
+.inline-alert--danger { background:color-mix(in srgb,var(--negative) 12%,transparent); color:var(--negative); }
+@media (max-width:700px) {
+  .debt-plan-summary,.debt-facts { grid-template-columns:1fr; }
+  .debt-row__main { grid-template-columns:30px minmax(0,1fr) 16px; }
+  .debt-row__values { grid-column:2; text-align:left; }
+  .debt-row__detail { padding-left:14px; }
+  .debt-rate-row { grid-template-columns:1fr; }
+}
+
+[data-theme="dark"] {
+  --ink:         #E8EFEC;
+  --ink-soft:    #93A29C;
+  --ink-faint:   #9AA9A3;
+  --paper:       #070C0B;
+  --paper-alt:   #141C1A;
+  --card:        #101816;
+  --card-alt:    #16201D;
+  --border:      #253028;
+  --border-soft: #1B2421;
+
+  --brand:       #1FB394;
+  --brand-dark:  #0E7A66;
+  --brand-deep:  #04231E;
+  --brand-glow:  #2FD6AF;
+  --brand-soft:  rgba(31,179,148,0.15);
+
+  --positive:      #27C79A;
+  --positive-soft: rgba(39,199,154,0.15);
+  --negative:      #E9736A;
+  --negative-soft: rgba(233,115,106,0.15);
+  --goal:          #D9AB57;
+  --goal-soft:     rgba(217,171,87,0.15);
+
+  --shadow-xs: 0 1px 2px rgba(0,0,0,0.4);
+  --shadow:    0 1px 2px rgba(0,0,0,0.4), 0 2px 8px rgba(0,0,0,0.3);
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.4), 0 2px 8px rgba(0,0,0,0.3);
+  --shadow-md: 0 2px 6px rgba(0,0,0,0.45), 0 12px 28px -8px rgba(0,0,0,0.6);
+  --shadow-lg: 0 6px 14px rgba(0,0,0,0.5), 0 28px 56px -14px rgba(0,0,0,0.75);
+  --shadow-brand: 0 2px 8px rgba(0,0,0,0.5), 0 14px 32px -12px rgba(31,179,148,0.35);
+  --sheen: inset 0 1px 0 rgba(255,255,255,0.055);
+  --ring: 0 0 0 3px color-mix(in srgb, var(--brand) 30%, transparent);
+
+  --wash-a: color-mix(in srgb, var(--brand) 13%, transparent);
+  --wash-b: color-mix(in srgb, var(--goal) 8%, transparent);
+  --glass:  color-mix(in srgb, var(--card) 74%, transparent);
+}
+
+/* ==================================================================
+   2. RESET E BASE
+   ================================================================== */
+* { box-sizing: border-box; min-width: 0; }
+html, body { margin: 0; padding: 0; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-size: 16px;
+  line-height: 1.45;
+  letter-spacing: -0.005em;
+  overflow-x: hidden;
+  overflow-wrap: break-word;
+  font-feature-settings: "cv05" 1, "ss03" 1;
+}
+
+/* Atmosfera: dois banhos radiais fixos. Dá profundidade ao fundo sem
+   custar uma imagem nem atrapalhar a leitura. */
+body::before {
+  content: "";
+  position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(58vw 46vh at 8% -6%, var(--wash-a), transparent 68%),
+    radial-gradient(52vw 40vh at 104% 8%, var(--wash-b), transparent 66%),
+    radial-gradient(70vw 50vh at 50% 108%, var(--wash-a), transparent 72%);
+}
+
+button, input, select, textarea { font-family: inherit; font-size: inherit; color: inherit; }
+button { cursor: pointer; background: none; border: none; }
+img, svg { display: block; }
+a { color: inherit; }
+::selection { background: color-mix(in srgb, var(--brand) 24%, transparent); }
+
+/* Foco visível e discreto; obrigatório, nunca feio. */
+:focus { outline: none; }
+:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+  border-radius: var(--radius-xs);
+}
+
+/* Barras de rolagem finas (desktop) */
+@media (pointer: fine) {
+  * { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+  *::-webkit-scrollbar { width: 10px; height: 10px; }
+  *::-webkit-scrollbar-track { background: transparent; }
+  *::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--ink) 16%, transparent);
+    border-radius: 999px; border: 3px solid transparent; background-clip: content-box;
+  }
+  *::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--ink) 28%, transparent); background-clip: content-box; }
+}
+
+#app { min-height: 100vh; min-height: 100dvh; }
+
+/* ==================================================================
+   3. LAYOUT
+   ================================================================== */
+.main-content {
+  padding-top: env(safe-area-inset-top, 10px);
+  /* A tela já deixa 30px depois do último bloco. Somados a estes 40px, eles
+     passam os 66px ocupados pelo vão e pelo lançador acima da doca. */
+  padding-bottom: calc(var(--nav-h) + 40px);
+  min-height: 100vh;
+  min-height: 100dvh;
+  width: 100%;
+}
+
+/* `.screen` é uma pilha com ritmo próprio: acabam os cartões colados e
+   as margens improvisadas. Filhos vazios somem para não abrir buraco. */
+.screen {
+  max-width: 1120px; margin: 0 auto;
+  padding: clamp(16px, 4.4vw, 26px) clamp(15px, 4.4vw, 22px) 30px;
+  width: 100%;
+  display: flex; flex-direction: column;
+  gap: var(--stack);
+}
+/* Blocos condicionais (ex.: o slot de avisos do formulário) chegam vazios;
+   sem isto, cada um abriria um vão fantasma na pilha. Restrito a <div>
+   para nunca esconder um campo de formulário, que é "vazio" no CSS. */
+.screen > div:empty { display: none; }
+.screen--narrow { max-width: 600px; }
+.span-mt { margin-top: 0; }
+
+.screen-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 0; gap: 12px; flex-wrap: wrap;
+}
+.screen > h1.page-title { margin: 0 !important; }
+.screen-header > div:first-child { flex: 1 1 200px; min-width: 0; }
+
+.eyebrow {
+  font-size: 11.5px; font-weight: 700; color: var(--ink-faint); margin: 0;
+  text-transform: uppercase; letter-spacing: 0.1em;
+  display: inline-flex; align-items: center; gap: 8px;
+}
+.eyebrow::before {
+  content: ""; width: 16px; height: 2px; border-radius: 2px;
+  background: linear-gradient(90deg, var(--brand), transparent);
+}
+.page-title {
+  font-family: var(--font-display);
+  font-size: clamp(23px, 5.6vw, 30px);
+  font-weight: 600; margin: 4px 0 0;
+  letter-spacing: -0.028em; line-height: 1.15;
+}
+.card-title {
+  font-size: 14.5px; font-weight: 700; margin: 0 0 11px;
+  letter-spacing: -0.012em; color: var(--ink);
+}
+.card-subtitle { font-size: 12.5px; color: var(--ink-soft); margin: -5px 0 13px; line-height: 1.55; }
+.footnote { font-size: 12px; color: var(--ink-faint); text-align: center; margin: 4px 0 0; line-height: 1.6; }
+/* Falha de inicialização visível mesmo quando o módulo principal não abre. */
+.boot-error {
+  width: min(100% - 32px, 560px);
+  margin: 12vh auto 0;
+  padding: 24px;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+
+.boot-error h1 { margin: 0 0 8px; font-size: 1.35rem; }
+.boot-error p { margin: 0 0 18px; color: var(--ink-soft); }

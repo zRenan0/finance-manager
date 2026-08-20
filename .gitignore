@@ -1,0 +1,16 @@
+.DS_Store
+Thumbs.db
+node_modules/
+.netlify/
+coverage/
+dist/
+*.log
+.env
+.env.*
+!.env.example
+
+# Ajustes de permissao do Claude Code sao por maquina, nao por projeto.
+.claude/settings.local.json
+
+# Capturas geradas por `npm run test:landing`; nascem de novo a cada execucao.
+tests/browser/screenshots/
