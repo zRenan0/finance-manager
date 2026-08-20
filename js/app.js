@@ -863,7 +863,7 @@ function renderShell() {
     <a class="skip-link" href="#conteudo" data-action="skip-to-content">Ir para o conteúdo</a>
     ${renderSideNav()}
     <main class="main-content" id="conteudo" tabindex="-1">
-      ${(!state.storageOk && !state.storageWarningDismissed) ? renderStorageWarning() : ""}
+      ${(!state.booting && !state.storageOk && !state.storageWarningDismissed) ? renderStorageWarning() : ""}
       ${state.booting ? renderDashboardSkeleton() : renderScreen()}
     </main>
     ${renderBottomNav()}
@@ -917,7 +917,7 @@ function renderStorageWarning() {
     ${svgIcon("alertTriangle", 18)}
     <div class="storage-warning__text">
       <strong>Seus dados não estão sendo salvos neste navegador.</strong>
-      <span>Isso costuma acontecer em modo anônimo/privado, com cookies bloqueados, ou ao abrir o arquivo direto sem hospedar. Acesse pelo link publicado (Netlify) em uma aba normal.</span>
+      <span>O navegador fechou o banco local. Recarregue a página; se o aviso voltar, feche as outras abas do app. Em janela anônima ou com armazenamento bloqueado nada é gravado mesmo.</span>
     </div>
     <button class="icon-btn" data-action="dismiss-storage-warning" aria-label="Fechar aviso de armazenamento">${svgIcon("x", 16)}</button>
   </div>`;
@@ -1606,6 +1606,14 @@ async function init() {
   FinanceStore.onError(() => {
     state.storageOk = false;
     notify("Não foi possível salvar os dados neste navegador");
+  });
+  // ...e o caminho de volta. Sem ele, um único erro passageiro deixava o alarme
+  // aceso pelo resto da sessão, mesmo com as gravações já normalizadas.
+  FinanceStore.onRecover(() => {
+    const ok = isStorageAvailable();
+    if (ok === state.storageOk) return;
+    state.storageOk = ok;
+    render();
   });
 
   // ---- Roteamento ----

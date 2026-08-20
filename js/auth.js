@@ -59,6 +59,7 @@ async function applyAccountScope(userId) {
   if (typeof CloudSync !== "undefined") CloudSync.disable();
 
   state.data = await switchStorageScope(desired);
+  state.storageOk = isStorageAvailable();
   // Tudo que a tela guardava era daquele escopo: seleção, formulário aberto,
   // rascunho de importação, pré-visualização de backup. Nada disso vale para a
   // conta que entrou agora.

@@ -3323,6 +3323,8 @@ class IndexedDBAdapter extends StorageAdapter {
   constructor(scope) {
     super();
     this.db = null;
+    this.closed = false;
+    this.reopening = null;
     this.scope = normalizeStorageScope(scope);
     this.dbName = scopedName(DB_NAME, this.scope);
   }
@@ -3396,6 +3398,22 @@ class IndexedDBAdapter extends StorageAdapter {
   // Só entram na transação os stores que REALMENTE existem neste banco. Sem esse
   // filtro, um navegador que tenha falhado no upgrade para v2 quebraria toda a
   // leitura com NotFoundError em vez de apenas ficar sem a coleção nova.
+  // A conexão pode cair POR FORA do app: outra aba subindo a versão do banco
+  // (`onversionchange`) ou o próprio navegador fechando o handle sob pressão de
+  // armazenamento (`onclose`). Os dois casos zeravam `this.db` e nada reabria:
+  // dali em diante toda gravação estourava "Banco de dados não inicializado", o
+  // app acusava armazenamento indisponível e o que fosse digitado só existia no
+  // espelho, e some no recarregamento. Reabrir sob demanda é o conserto.
+  async _ensure() {
+    if (this.db) return true;
+    if (this.closed) throw new Error("Banco de dados fechado");
+    if (!this.reopening) {
+      this.reopening = this.init().finally(() => { this.reopening = null; });
+    }
+    await this.reopening;
+    return true;
+  }
+
   _existing(stores) {
     if (!this.db) return [];
     return stores.filter((n) => this.db.objectStoreNames.contains(n));
@@ -3429,6 +3447,7 @@ class IndexedDBAdapter extends StorageAdapter {
   }
 
   async readAll() {
+    await this._ensure();
     const tx = this._tx(ALL_STORES, "readonly");
     const hasAssets = this._has(STORE_ASSETS);
     const [transactions, categories, goals, assets, settingsRows] = await Promise.all([
@@ -3445,6 +3464,7 @@ class IndexedDBAdapter extends StorageAdapter {
 
   // changeSet: { puts: {store: [records]}, deletes: {store: [ids]}, settings: {k:v} }
   async writeChanges(changeSet) {
+    await this._ensure();
     const tx = this._tx(ALL_STORES, "readwrite");
     COLLECTIONS.forEach((name) => {
       if (!this._has(name)) return;
@@ -3460,6 +3480,7 @@ class IndexedDBAdapter extends StorageAdapter {
   }
 
   async replaceAll(data) {
+    await this._ensure();
     const tx = this._tx(ALL_STORES, "readwrite");
     this._existing(ALL_STORES).forEach((s) => tx.objectStore(s).clear());
     data.transactions.forEach((t) => tx.objectStore(STORE_TX).put(t));
@@ -3471,6 +3492,7 @@ class IndexedDBAdapter extends StorageAdapter {
   }
 
   async clearAll() {
+    await this._ensure();
     const tx = this._tx(ALL_STORES, "readwrite");
     this._existing(ALL_STORES).forEach((s) => tx.objectStore(s).clear());
     return this._done(tx);
@@ -3478,6 +3500,7 @@ class IndexedDBAdapter extends StorageAdapter {
 
   // ---- Consultas indexadas (usadas por relatórios) ----
   async queryByIndex(storeName, indexName, value) {
+    await this._ensure();
     const tx = this._tx([storeName], "readonly");
     const idx = tx.objectStore(storeName).index(indexName);
     return new Promise((resolve, reject) => {
@@ -3492,6 +3515,7 @@ class IndexedDBAdapter extends StorageAdapter {
   // porque perder uma entrada da fila custa uma reenvio; perder o dado custa o
   // lançamento do usuário.
   async outboxAppend(entries) {
+    await this._ensure();
     if (!this._has(STORE_OUTBOX) || !entries.length) return true;
     const tx = this._tx([STORE_OUTBOX], "readwrite");
     const store = tx.objectStore(STORE_OUTBOX);
@@ -3500,6 +3524,7 @@ class IndexedDBAdapter extends StorageAdapter {
   }
 
   async outboxRead(limit) {
+    await this._ensure();
     if (!this._has(STORE_OUTBOX)) return [];
     const tx = this._tx([STORE_OUTBOX], "readonly");
     const all = await this._getAll(tx.objectStore(STORE_OUTBOX));
@@ -3508,6 +3533,7 @@ class IndexedDBAdapter extends StorageAdapter {
   }
 
   async outboxDrop(seqs) {
+    await this._ensure();
     if (!this._has(STORE_OUTBOX) || !seqs.length) return true;
     const tx = this._tx([STORE_OUTBOX], "readwrite");
     const store = tx.objectStore(STORE_OUTBOX);
@@ -3516,6 +3542,7 @@ class IndexedDBAdapter extends StorageAdapter {
   }
 
   async outboxClear() {
+    await this._ensure();
     if (!this._has(STORE_OUTBOX)) return true;
     const tx = this._tx([STORE_OUTBOX], "readwrite");
     tx.objectStore(STORE_OUTBOX).clear();
@@ -3526,6 +3553,7 @@ class IndexedDBAdapter extends StorageAdapter {
   // aberto, segura upgrades e mantém uma referência viva aos dados da conta
   // que acabou de sair.
   close() {
+    this.closed = true;
     try { if (this.db) this.db.close(); } catch (e) { /* já fechado */ }
     this.db = null;
   }
@@ -3935,6 +3963,7 @@ const FinanceStore = (() => {
   const tabListeners = [];         // avisados quando outra aba grava
   let outboxEnabled = false;       // só enfileira quando há conta ligada
   const errorListeners = [];
+  const recoveryListeners = [];
 
   // Impressão digital por REFERÊNCIA: se o objeto não foi substituído, ele não
   // mudou (o app usa atualização imutável). Só serializamos quando a referência
@@ -3948,6 +3977,15 @@ const FinanceStore = (() => {
     const fp = JSON.stringify(rec);
     fingerprints.set(rec, fp);
     return fp;
+  }
+
+  // O aviso "seus dados não estão sendo salvos" ficava preso: nada avisava a
+  // tela quando a gravação voltava a funcionar. Um soluço passageiro (uma
+  // transação abortada, a conexão reaberta) condenava a sessão inteira ao alarme.
+  function markHealthy() {
+    if (healthy) return;
+    healthy = true;
+    recoveryListeners.forEach((fn) => { try { fn(); } catch (e) {} });
   }
 
   function emitError(err) {
@@ -4557,7 +4595,7 @@ const FinanceStore = (() => {
             snapshot.lastPersistAt = stamp;
             await adapter.writeChanges(cs);
             lastPersisted = target;
-            healthy = true;
+            markHealthy();
             announceWrite();
             settle(true);
           } catch (err) {
@@ -4620,7 +4658,7 @@ const FinanceStore = (() => {
     try {
       await adapter.replaceAll(snapshot);
       lastPersisted = shallowSnapshot(snapshot);
-      healthy = true;
+      markHealthy();
       queueOps(semente.ops);
       return true;
     } catch (err) { emitError(err); return false; }
@@ -4869,6 +4907,7 @@ const FinanceStore = (() => {
     hasMirror: () => mirrorEnabled,
     adapterName: () => (adapter ? adapter.name : "memory"),
     onError: (fn) => { errorListeners.push(fn); },
+    onRecover: (fn) => { recoveryListeners.push(fn); },
   };
 })();
 
@@ -5892,6 +5931,7 @@ async function applyAccountScope(userId) {
   if (typeof CloudSync !== "undefined") CloudSync.disable();
 
   state.data = await switchStorageScope(desired);
+  state.storageOk = isStorageAvailable();
   // Tudo que a tela guardava era daquele escopo: seleção, formulário aberto,
   // rascunho de importação, pré-visualização de backup. Nada disso vale para a
   // conta que entrou agora.
@@ -13390,7 +13430,7 @@ async function requestStructuredAnalysis(data, monthKey, options) {
     if (err && err.name === "AbortError") {
       throw new InsightError("TIMEOUT", "A análise demorou demais para responder. Tente de novo em instantes.");
     }
-    throw new InsightError("NETWORK", "Não foi possível falar com o serviço de análise. Verifique sua conexão e se a função foi publicada no Netlify.");
+    throw new InsightError("NETWORK", "Não foi possível falar com o serviço de análise. Verifique sua conexão e se a função foi publicada.");
   } finally {
     clearTimeout(timer);
   }
@@ -13398,8 +13438,8 @@ async function requestStructuredAnalysis(data, monthKey, options) {
 
 function messageForCode(code, status) {
   switch (code) {
-    case "NO_API_KEY": return "A chave da IA ainda não foi configurada no Netlify (variável ANTHROPIC_API_KEY).";
-    case "BAD_KEY": return "A chave da IA foi recusada. Confira a variável ANTHROPIC_API_KEY no painel do Netlify.";
+    case "NO_API_KEY": return "A chave da IA ainda não foi configurada na hospedagem (variável ANTHROPIC_API_KEY).";
+    case "BAD_KEY": return "A chave da IA foi recusada. Confira a variável ANTHROPIC_API_KEY no painel da hospedagem.";
     case "RATE_LIMIT": return "Muitas análises em pouco tempo. Espere alguns instantes e tente de novo.";
     case "TIMEOUT": return "A análise demorou demais para responder. Tente de novo em instantes.";
     case "NOT_ENOUGH_DATA": return "Ainda não há dados suficientes neste mês para gerar uma análise.";
@@ -27794,7 +27834,7 @@ function renderShell() {
     <a class="skip-link" href="#conteudo" data-action="skip-to-content">Ir para o conteúdo</a>
     ${renderSideNav()}
     <main class="main-content" id="conteudo" tabindex="-1">
-      ${(!state.storageOk && !state.storageWarningDismissed) ? renderStorageWarning() : ""}
+      ${(!state.booting && !state.storageOk && !state.storageWarningDismissed) ? renderStorageWarning() : ""}
       ${state.booting ? renderDashboardSkeleton() : renderScreen()}
     </main>
     ${renderBottomNav()}
@@ -27848,7 +27888,7 @@ function renderStorageWarning() {
     ${svgIcon("alertTriangle", 18)}
     <div class="storage-warning__text">
       <strong>Seus dados não estão sendo salvos neste navegador.</strong>
-      <span>Isso costuma acontecer em modo anônimo/privado, com cookies bloqueados, ou ao abrir o arquivo direto sem hospedar. Acesse pelo link publicado (Netlify) em uma aba normal.</span>
+      <span>O navegador fechou o banco local. Recarregue a página; se o aviso voltar, feche as outras abas do app. Em janela anônima ou com armazenamento bloqueado nada é gravado mesmo.</span>
     </div>
     <button class="icon-btn" data-action="dismiss-storage-warning" aria-label="Fechar aviso de armazenamento">${svgIcon("x", 16)}</button>
   </div>`;
@@ -28537,6 +28577,14 @@ async function init() {
   FinanceStore.onError(() => {
     state.storageOk = false;
     notify("Não foi possível salvar os dados neste navegador");
+  });
+  // ...e o caminho de volta. Sem ele, um único erro passageiro deixava o alarme
+  // aceso pelo resto da sessão, mesmo com as gravações já normalizadas.
+  FinanceStore.onRecover(() => {
+    const ok = isStorageAvailable();
+    if (ok === state.storageOk) return;
+    state.storageOk = ok;
+    render();
   });
 
   // ---- Roteamento ----

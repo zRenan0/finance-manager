@@ -415,7 +415,7 @@ async function requestStructuredAnalysis(data, monthKey, options) {
     if (err && err.name === "AbortError") {
       throw new InsightError("TIMEOUT", "A análise demorou demais para responder. Tente de novo em instantes.");
     }
-    throw new InsightError("NETWORK", "Não foi possível falar com o serviço de análise. Verifique sua conexão e se a função foi publicada no Netlify.");
+    throw new InsightError("NETWORK", "Não foi possível falar com o serviço de análise. Verifique sua conexão e se a função foi publicada.");
   } finally {
     clearTimeout(timer);
   }
@@ -423,8 +423,8 @@ async function requestStructuredAnalysis(data, monthKey, options) {
 
 function messageForCode(code, status) {
   switch (code) {
-    case "NO_API_KEY": return "A chave da IA ainda não foi configurada no Netlify (variável ANTHROPIC_API_KEY).";
-    case "BAD_KEY": return "A chave da IA foi recusada. Confira a variável ANTHROPIC_API_KEY no painel do Netlify.";
+    case "NO_API_KEY": return "A chave da IA ainda não foi configurada na hospedagem (variável ANTHROPIC_API_KEY).";
+    case "BAD_KEY": return "A chave da IA foi recusada. Confira a variável ANTHROPIC_API_KEY no painel da hospedagem.";
     case "RATE_LIMIT": return "Muitas análises em pouco tempo. Espere alguns instantes e tente de novo.";
     case "TIMEOUT": return "A análise demorou demais para responder. Tente de novo em instantes.";
     case "NOT_ENOUGH_DATA": return "Ainda não há dados suficientes neste mês para gerar uma análise.";
