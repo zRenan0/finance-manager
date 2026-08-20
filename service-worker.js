@@ -19,7 +19,7 @@
 // e so o novo na seguinte. Essa primeira visita e exatamente a que importa: e a
 // do clique no link do email. Promover a versao troca o balde inteiro de uma
 // vez, e a rede de seguranca vale desde o primeiro acesso.
-const VERSION = "v51";
+const VERSION = "v52";
 const CACHE_NAME = "financas-cache-" + VERSION;
 // A PÁGINA COMERCIAL TEM CACHE PRÓPRIO.
 //

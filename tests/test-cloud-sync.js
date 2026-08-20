@@ -323,6 +323,129 @@ const lancar = (a, tx) => a.run(`FinanceStore.persist({ ...FinanceStore.snapshot
     check("uso sem conta não gera fila de envio", fila.length === 0, JSON.stringify(fila).slice(0, 100));
   }
 
+  console.log("\n9. A base anterior à conta sobe na primeira volta");
+  {
+    // O caso que fazia o segundo aparelho ver a conta vazia: quem já usava o
+    // app antes de entrar na conta (ou usou enquanto o servidor estava fora do
+    // ar) nunca gerou operação, porque a fila só recebe DIFERENÇA.
+    const servidor = servidorFalso();
+    const storage = fakeLocalStorage({ cofre_device_id: "device-aparelho-a01" });
+    const ctx = carregar(servidor.handler(servidor), storage);
+    ctx.run(`accountDeviceId = () => "device-aparelho-a01";`);
+    await ctx.run(`FinanceStore.init(new LocalStorageAdapter("u_ana"), { scope: "u_ana" })`);
+    ctx.run(`FinanceStore.persist({ ...FinanceStore.snapshot(), monthlyIncome: 4200,
+      transactions: [{ id: "tx-antigo", type: "expense", amount: 55, date: "2026-07-10", categoryId: "lazer" }] })`);
+    await ctx.run("FinanceStore.flush()");
+    check("antes da conta, nada é enfileirado", (await ctx.run("FinanceStore.outboxRead(0)")).length === 0);
+
+    ctx.run(`CloudSync.configure({ readLocal: () => FinanceStore.snapshot(),
+      applyRemote: (d) => { __ultimo = d; FinanceStore.persist(d); }, onStatus: () => {} })`);
+    await ctx.run("CloudSync.enable()");
+
+    check("o lançamento anterior à conta chegou ao servidor", servidor.linhas.has("transactions tx-antigo"));
+    check("a renda anterior à conta também subiu", servidor.linhas.has("settings monthlyIncome"));
+    const fila = await ctx.run("FinanceStore.outboxRead(0)");
+    check("a fila esvazia depois de semear", fila.length === 0, JSON.stringify(fila).slice(0, 120));
+
+    const b = await ligarAparelho(servidor, "device-aparelho-b02");
+    check("o segundo aparelho vê o lançamento antigo", b.run(`FinanceStore.snapshot().transactions.some((t) => t.id === "tx-antigo")`));
+    check("e vê a mesma renda", b.run("FinanceStore.snapshot().monthlyIncome") === 4200, b.run("FinanceStore.snapshot().monthlyIncome"));
+
+    // Semear é uma vez só: a volta seguinte não pode reenviar a base inteira.
+    const ultimoAntes = servidor.recebidos.length;
+    await ctx.run("CloudSync.syncNow()");
+    const ultimo = servidor.recebidos[servidor.recebidos.length - 1];
+    check("a volta seguinte não reenvia a base",
+      servidor.recebidos.length === ultimoAntes || ((ultimo && ultimo.ops) || []).length === 0,
+      JSON.stringify(((ultimo && ultimo.ops) || [])).slice(0, 160));
+  }
+
+  console.log("\n10. Aparelho novo e vazio não apaga o que o outro tem");
+  {
+    // A semeadura de um aparelho recém-conectado não pode anunciar o padrão de
+    // fábrica como notícia: com marca nova ele venceria, e zeraria a renda e a
+    // categoria renomeada do outro aparelho.
+    const servidor = servidorFalso();
+    const a = await ligarAparelho(servidor, "device-aparelho-a01");
+    a.run(`FinanceStore.persist({ ...FinanceStore.snapshot(), monthlyIncome: 7300,
+      categories: FinanceStore.snapshot().categories.map((c) => c.id === "lazer" ? { ...c, name: "Diversão" } : c) })`);
+    await flush(a);
+    await a.run("CloudSync.syncNow()");
+
+    const b = await ligarAparelho(servidor, "device-aparelho-b02");
+    check("o aparelho novo recebeu a renda", b.run("FinanceStore.snapshot().monthlyIncome") === 7300, b.run("FinanceStore.snapshot().monthlyIncome"));
+    check("e recebeu a categoria renomeada",
+      b.run(`(FinanceStore.snapshot().categories.find((c) => c.id === "lazer") || {}).name`) === "Diversão");
+
+    await a.run("CloudSync.syncNow()");
+    check("o primeiro aparelho continua com a renda", a.run("FinanceStore.snapshot().monthlyIncome") === 7300, a.run("FinanceStore.snapshot().monthlyIncome"));
+    check("e continua com a categoria renomeada",
+      a.run(`(FinanceStore.snapshot().categories.find((c) => c.id === "lazer") || {}).name`) === "Diversão",
+      a.run(`(FinanceStore.snapshot().categories.find((c) => c.id === "lazer") || {}).name`));
+  }
+
+  console.log("\n11. Restaurar backup propaga para os outros aparelhos");
+  {
+    // `replaceAll` troca a base inteira sem passar pelo diff. Sem enfileirar
+    // nada, a restauração valia só no aparelho que a fez, e a descida seguinte
+    // podia até desfazê-la.
+    const servidor = servidorFalso();
+    const a = await ligarAparelho(servidor, "device-aparelho-a01");
+    lancar(a, { id: "tx-fica", type: "expense", amount: 10, date: "2026-08-10", categoryId: "lazer" });
+    await flush(a);
+    lancar(a, { id: "tx-sai", type: "expense", amount: 90, date: "2026-08-11", categoryId: "lazer" });
+    await flush(a);
+    await a.run("CloudSync.syncNow()");
+
+    const b = await ligarAparelho(servidor, "device-aparelho-b02");
+    check("B recebeu os dois lançamentos", b.run("FinanceStore.snapshot().transactions.length") === 2, b.run("FinanceStore.snapshot().transactions.length"));
+
+    // Restauração de um backup que só tem o primeiro lançamento.
+    await a.run(`FinanceStore.replaceAll({ ...FinanceStore.snapshot(),
+      transactions: FinanceStore.snapshot().transactions.filter((t) => t.id === "tx-fica") })`);
+    await a.run("CloudSync.syncNow()");
+    check("a restauração virou exclusão no servidor", (servidor.linhas.get("transactions tx-sai") || {}).op === "delete",
+      JSON.stringify(servidor.linhas.get("transactions tx-sai") || {}).slice(0, 120));
+
+    await b.run("CloudSync.syncNow()");
+    check("B ficou com o mesmo conteúdo de A",
+      b.run(`FinanceStore.snapshot().transactions.map((t) => t.id).join(",")`) === "tx-fica",
+      b.run(`FinanceStore.snapshot().transactions.map((t) => t.id).join(",")`));
+
+    await a.run("CloudSync.syncNow()");
+    check("e o lançamento restaurado não volta", a.run("FinanceStore.snapshot().transactions.length") === 1, a.run("FinanceStore.snapshot().transactions.length"));
+  }
+
+  console.log("\n12. Registro sem marca ganha uma, e ela vai para o disco");
+  {
+    // Backup restaurado antes de existir conta chega sem marca de relógio. A
+    // semeadura precisa cunhar uma, mandar, e GRAVAR: se a marca ficasse só na
+    // memória, o carregamento seguinte traria o registro sem marca de novo e
+    // ele perderia uma disputa que deveria vencer.
+    const servidor = servidorFalso();
+    const storage = fakeLocalStorage({ cofre_device_id: "device-aparelho-a01" });
+    const ctx = carregar(servidor.handler(servidor), storage);
+    ctx.run(`accountDeviceId = () => "device-aparelho-a01";`);
+    await ctx.run(`FinanceStore.init(new LocalStorageAdapter("u_ana"), { scope: "u_ana" })`);
+    await ctx.run(`FinanceStore.replaceAll({ ...FinanceStore.snapshot(),
+      transactions: [{ id: "tx-sem-marca", type: "expense", amount: 33, date: "2026-08-12", categoryId: "lazer" }] })`);
+    check("o registro entrou sem marca", ctx.run(`FinanceStore.syncRevOf(FinanceStore.snapshot().transactions[0])`) === "",
+      ctx.run(`FinanceStore.syncRevOf(FinanceStore.snapshot().transactions[0])`));
+
+    ctx.run(`CloudSync.configure({ readLocal: () => FinanceStore.snapshot(),
+      applyRemote: (d) => { __ultimo = d; FinanceStore.persist(d); }, onStatus: () => {} })`);
+    await ctx.run("CloudSync.enable()");
+
+    check("o registro sem marca chegou ao servidor", servidor.linhas.has("transactions tx-sem-marca"));
+    check("e ganhou marca deste aparelho",
+      /^\d{15}\.\d{6}\.device-aparelho-a01$/.test(ctx.run(`FinanceStore.syncRevOf(FinanceStore.snapshot().transactions[0])`)),
+      ctx.run(`FinanceStore.syncRevOf(FinanceStore.snapshot().transactions[0])`));
+
+    // O que importa: a marca tem de estar no BANCO, nao so no snapshot em memoria.
+    const gravado = await ctx.run(`FinanceStore.reload().then((d) => FinanceStore.syncRevOf(d.transactions[0]))`);
+    check("a marca foi gravada no banco", /^\d{15}\.\d{6}\./.test(String(gravado)), String(gravado));
+  }
+
   await espera(10);
   console.log(`\n${fail === 0 ? "TODOS OS TESTES PASSARAM" : "FALHAS ENCONTRADAS"}: ${ok} ok, ${fail} falha(s)\n`);
   process.exit(fail === 0 ? 0 : 1);

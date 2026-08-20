@@ -35,12 +35,16 @@ const CLOUD_SYNC_RETRY_MS = 30000;        // nova tentativa após falha de rede
 const CLOUD_SYNC_BATCH = 400;             // operações por requisição (servidor aceita 500)
 const CLOUD_SYNC_PAGE = 500;              // operações por página na descida
 const CLOUD_SYNC_MAX_PAGES = 200;         // trava de segurança contra cursor que não anda
+const CLOUD_SYNC_POLL_MS = 60000;         // volta periódica enquanto o app está à vista
 const CLOUD_CURSOR_KEY = "cofre_sync_cursor";
+const CLOUD_SEED_KEY = "cofre_sync_seeded";
 
 const CloudSync = (() => {
   let adapter = null;
   let pendingTimer = null;
   let retryTimer = null;
+  let pollTimer = null;
+  let cicloMexeu = false;          // esta volta enviou ou aplicou alguma coisa
   let running = false;
   let scope = "guest";
   let hooks = { applyRemote: null, readLocal: null };
@@ -56,8 +60,13 @@ const CloudSync = (() => {
     queued: 0,              // operações ainda não enviadas
   };
 
-  function setState(patch) {
+  // `silencioso` existe por causa da volta periódica: `onStatus` redesenha o
+  // aplicativo inteiro, e uma volta que não encontrou nada não pode reconstruir
+  // a tela do usuário de minuto em minuto. O estado é atualizado do mesmo
+  // jeito; só o aviso é poupado.
+  function setState(patch, silencioso) {
     state = { ...state, ...patch };
+    if (silencioso) return;
     listeners.forEach((fn) => { try { fn(state); } catch (e) { /* ouvinte quebrado não derruba o ciclo */ } });
   }
 
@@ -81,6 +90,29 @@ const CloudSync = (() => {
   function writeCursor(value) {
     if (!/^\d{1,18}$/.test(String(value || ""))) return;
     try { localStorage.setItem(cursorKey(), String(value)); } catch (e) { /* cota cheia */ }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Semeadura: a base que já estava no aparelho antes do primeiro ciclo
+  // ---------------------------------------------------------------------------
+  // A fila só recebe o que MUDA depois que a conta liga. Quem usou o app antes
+  // de criar a conta, restaurou um backup, ou usou enquanto o servidor estava
+  // fora do ar, tinha uma base inteira que nunca virou operação: o aparelho
+  // ficava cheio, o servidor vazio, e o segundo aparelho entrava na conta e via
+  // tudo zerado. Pior, sem sinal de erro: a fila estava mesmo vazia, então a
+  // tela dizia "Tudo sincronizado".
+  //
+  // A semeadura roda UMA vez por conta neste aparelho, depois da primeira
+  // descida completa - depois, para não empurrar uma versão velha por cima do
+  // que o outro aparelho escreveu; e a marca de cada registro decide o resto.
+  function seedKey() { return `${CLOUD_SEED_KEY}__${scope}`; }
+
+  function alreadySeeded() {
+    try { return localStorage.getItem(seedKey()) === "1"; } catch (e) { return false; }
+  }
+
+  function markSeeded() {
+    try { localStorage.setItem(seedKey(), "1"); } catch (e) { /* cota cheia */ }
   }
 
   // ---------------------------------------------------------------------------
@@ -116,16 +148,16 @@ const CloudSync = (() => {
     if (!ops.length) return false;
     const result = FinanceStore.applyRemoteOps(ops);
     if (!result.changed) return false;
+    cicloMexeu = true;
     // `applyRemote` grava, redesenha e reavalia conquistas e avisos, como se o
     // próprio usuário tivesse feito a alteração; porque, em outro aparelho, foi.
     hooks.applyRemote(result.data);
     return true;
   }
 
-  async function cycle() {
-    let cursor = readCursor();
-
-    // ---- Subida: esvazia a fila em lotes ----
+  // ---- Subida: esvazia a fila em lotes ----
+  async function upload(from) {
+    let cursor = from;
     let guard = 0;
     for (;;) {
       const queued = await FinanceStore.outboxRead(0);
@@ -135,6 +167,7 @@ const CloudSync = (() => {
 
       const compact = compactOutbox(queued);
       const batch = compact.slice(0, CLOUD_SYNC_BATCH);
+      if (batch.length) cicloMexeu = true;
       const result = await adapter.push(batch.map(toWireOp), cursor);
 
       // Só remove da fila DEPOIS da confirmação do servidor. Se a rede cair no
@@ -157,8 +190,12 @@ const CloudSync = (() => {
       writeCursor(cursor);
       if (batch.length >= compact.length && !result.hasMore) break;
     }
+    return cursor;
+  }
 
-    // ---- Descida: páginas até alcançar o servidor ----
+  // ---- Descida: páginas até alcançar o servidor ----
+  async function download(from) {
+    let cursor = from;
     for (let page = 0; page < CLOUD_SYNC_MAX_PAGES; page++) {
       const result = await adapter.pull(cursor, CLOUD_SYNC_PAGE);
       await applyIncoming(result.ops);
@@ -166,6 +203,34 @@ const CloudSync = (() => {
       cursor = result.cursor;
       writeCursor(cursor);
       if (!result.hasMore || !advanced) break;
+    }
+    return cursor;
+  }
+
+  async function cycle() {
+    let cursor = readCursor();
+    cursor = await upload(cursor);
+    cursor = await download(cursor);
+
+    // ---- Semeadura ----
+    // Roda DEPOIS da descida, e por isso é segura: o que o outro aparelho já
+    // escreveu está aqui, com marca, e a semeadura reapresenta cada registro
+    // com a marca que ele tem. O servidor guarda a vencedora, então nada velho
+    // derruba nada novo.
+    //
+    // A segunda condição é a rede de segurança que faltava: cursor zerado
+    // depois de uma descida completa significa servidor sem NENHUMA operação.
+    // Se este aparelho tem base e o servidor não tem nada, semear de novo é o
+    // certo, mesmo que a marca de "já semeado" esteja gravada - foi o caso de
+    // quem sincronizou antes de as tabelas existirem no banco.
+    const servidorVazio = String(cursor) === "0" && !!(FinanceStore.snapshot().transactions || []).length;
+    if (!alreadySeeded() || servidorVazio) {
+      const semeadas = await FinanceStore.seedOutbox();
+      markSeeded();
+      if (semeadas > 0) {
+        cursor = await upload(cursor);
+        cursor = await download(cursor);
+      }
     }
   }
 
@@ -183,20 +248,25 @@ const CloudSync = (() => {
     return ran;
   }
 
-  async function runSync() {
+  async function runSync(quieto) {
     if (!adapter || running || !hooks.readLocal || !hooks.applyRemote) return false;
     if (offline()) { setState({ phase: "offline", pending: true }); return false; }
 
     running = true;
-    setState({ phase: "syncing", error: null, errorCode: null });
+    cicloMexeu = false;
+    const eraSincronizado = state.phase === "synced";
+    if (!quieto) setState({ phase: "syncing", error: null, errorCode: null });
     try {
       const ran = await withLock(cycle);
       if (ran === false) { setState({ phase: "idle", pending: true }); return false; }
       const queued = await FinanceStore.outboxRead(0);
+      // Volta periódica que não achou nada e não mudou nada visível não avisa
+      // ninguém: para o usuário, a tela continua exatamente como estava.
+      const semNovidade = !!quieto && !cicloMexeu && eraSincronizado && queued.length === 0;
       setState({
         phase: "synced", lastSyncAt: new Date().toISOString(),
         pending: queued.length > 0, queued: queued.length, error: null, errorCode: null,
-      });
+      }, semNovidade);
       return true;
     } catch (error) {
       return handleFailure(error);
@@ -248,6 +318,35 @@ const CloudSync = (() => {
   function scheduleRetry() {
     clearTimeout(retryTimer);
     retryTimer = setTimeout(() => { if (state.enabled) runSync(); }, CLOUD_SYNC_RETRY_MS);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Volta periódica
+  // ---------------------------------------------------------------------------
+  // O motor só tinha gatilho de SAÍDA: alteração local, volta da rede, retorno
+  // à aba com fila pendente. Faltava o de ENTRADA, e a falta aparecia na
+  // situação mais comum de todas: com o app aberto nos dois aparelhos, quem
+  // lançava no celular não via nada mudar no computador. A tela do computador
+  // já estava "sincronizada" - não tinha nada para mandar - e ninguém ia
+  // buscar o que havia chegado. Só recarregar a página resolvia.
+  //
+  // Uma volta por minuto, e só com o app à vista, cobre isso sem gastar
+  // bateria em segundo plano nem somar requisição com a aba escondida.
+  function appVisivel() {
+    return typeof document === "undefined" || document.visibilityState !== "hidden";
+  }
+
+  function startPolling() {
+    stopPolling();
+    if (typeof setInterval !== "function") return;
+    pollTimer = setInterval(() => {
+      if (!state.enabled || running || offline() || !appVisivel()) return;
+      runSync(true);
+    }, CLOUD_SYNC_POLL_MS);
+  }
+
+  function stopPolling() {
+    if (pollTimer !== null) { clearInterval(pollTimer); pollTimer = null; }
   }
 
   // ---------------------------------------------------------------------------
@@ -386,6 +485,7 @@ const CloudSync = (() => {
     }
     FinanceStore.setOutboxEnabled(true);
     setState({ enabled: true, phase: "idle", error: null, errorCode: null });
+    startPolling();
     await runSync();
     return true;
   }
@@ -393,6 +493,7 @@ const CloudSync = (() => {
   function disable() {
     clearTimeout(pendingTimer);
     clearTimeout(retryTimer);
+    stopPolling();
     adapter = null;
     // A fila NÃO é apagada: ela é o que ainda não chegou ao servidor. Apagar
     // aqui perderia lançamentos feitos offline logo antes de sair.
@@ -412,8 +513,12 @@ const CloudSync = (() => {
   if (typeof window !== "undefined") {
     window.addEventListener("online", () => { if (state.enabled) syncNow(); });
     if (typeof document !== "undefined") {
+      // Voltar ao app busca o que chegou, TENDO OU NÃO fila para mandar. A
+      // condição antiga (`state.pending`) só deixava passar quem tinha algo a
+      // enviar, que é exatamente o aparelho que NÃO precisava do gatilho: quem
+      // ficou parado é quem está desatualizado.
       document.addEventListener("visibilitychange", () => {
-        if (state.enabled && document.visibilityState === "visible" && state.pending) syncNow();
+        if (state.enabled && document.visibilityState === "visible") syncNow();
       });
     }
   }

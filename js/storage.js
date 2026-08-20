@@ -2650,6 +2650,143 @@ const FinanceStore = (() => {
     adapter.outboxAppend(ops.map((op) => ({ ...op, queuedAt: Date.now() }))).catch(() => {});
   }
 
+  // ---------------------------------------------------------------------------
+  // SEMEADURA: o que já existia aqui antes de a sincronização entrar em cena
+  // ---------------------------------------------------------------------------
+  // A fila só recebe DIFERENÇA. `stampChangeSet` compara a gravação com a
+  // anterior e enfileira o que mudou; base parada não gera operação nenhuma.
+  //
+  // Isso deixava um buraco grande e silencioso. Quem já tinha meses de uso
+  // quando ligou a conta, quem restaurou um backup, quem trouxe os dados de
+  // visitante, ou quem usou o app enquanto o servidor estava fora do ar, não
+  // produziu diferença nenhuma DEPOIS disso: a base inteira ficou invisível
+  // para o servidor. E nada em tela denunciava, porque a fila estava mesmo
+  // vazia e o cartão dizia "Tudo sincronizado". O outro aparelho entrava na
+  // mesma conta e via uma conta vazia, para sempre.
+  //
+  // A semeadura fecha o buraco reapresentando a base ao servidor. Ela NÃO
+  // inventa marca: usa a que o registro já carrega, e só cunha uma nova para o
+  // que nunca passou por uma gravação local (backup restaurado, dados
+  // adotados). Como a marca viaja junto e o servidor guarda a VENCEDORA,
+  // ignorando marca menor ou igual, reapresentar é inofensivo mesmo quando o
+  // outro aparelho já escreveu algo mais novo no mesmo registro.
+  const SYNC_STORE_BY_FIELD = {
+    transactions: STORE_TX, categories: STORE_CAT, goals: STORE_GOALS, assets: STORE_ASSETS,
+  };
+
+  // `restamp` distingue os dois usos: semear reapresenta com a marca que já
+  // existe; substituir a base inteira (restaurar backup, adotar visitante) é
+  // uma declaração nova, e por isso cunha marca nova para tudo.
+  // O VAZIO DE UM APARELHO NOVO NÃO É NOTÍCIA.
+  //
+  // Toda instalação nasce com as mesmas categorias iniciais e com as
+  // configurações no padrão. Se um celular recém-conectado anunciasse isso com
+  // marca nova, ele venceria por ser o mais recente e apagaria, no computador,
+  // a categoria renomeada e a renda preenchida. Por isso o que ainda está
+  // exatamente como veio de fábrica fica de fora da semeadura: não há nada a
+  // contar, e o silêncio preserva o que o outro aparelho tem.
+  function igualAoPadrao(valor, padrao) {
+    if (padrao === undefined) return false;
+    try { return JSON.stringify(valor) === JSON.stringify(padrao); }
+    catch (e) { return false; }
+  }
+
+  function semNovidade(rec, modelo) {
+    if (!modelo) return false;
+    const limpo = { ...rec };
+    delete limpo.syncRev;
+    return igualAoPadrao(limpo, modelo);
+  }
+
+  function collectSyncOps(restamp) {
+    const ops = [];
+    const stamped = {};
+    // Na substituição da base inteira a comparação com o padrão não vale: ali o
+    // usuário DECLAROU o estado, inclusive quando ele coincide com o de fábrica.
+    const padrao = restamp ? null : defaultData();
+    const modelos = {};
+    GRAVEYARD_COLLECTIONS.forEach((field) => {
+      modelos[field] = padrao ? indexById(padrao[field] || []) : new Map();
+    });
+    GRAVEYARD_COLLECTIONS.forEach((field) => {
+      (snapshot[field] || []).forEach((rec) => {
+        if (!rec || !rec.id) return;
+        let rev = restamp ? "" : normalizeSyncRev(rec.syncRev);
+        if (!rev) {
+          if (semNovidade(rec, modelos[field].get(rec.id))) return;
+          rev = SyncClock.tick();
+          rec.syncRev = rev;
+          const store = SYNC_STORE_BY_FIELD[field];
+          (stamped[store] = stamped[store] || []).push(rec);
+        }
+        ops.push({ entity: field, entityId: rec.id, op: "put", rev, payload: rec });
+      });
+    });
+    SETTING_KEYS.forEach((key) => {
+      if (SYNC_SKIP_SETTINGS.has(key)) return;
+      if (snapshot[key] === undefined) return;
+      let rev = restamp ? "" : normalizeSyncRev(settingRevs[key]);
+      if (!rev) {
+        if (padrao && igualAoPadrao(snapshot[key], padrao[key])) return;
+        rev = SyncClock.tick();
+        settingRevs[key] = rev;
+      }
+      ops.push({ entity: "settings", entityId: key, op: "put", rev, payload: snapshot[key] });
+    });
+    // Exclusões feitas AQUI enquanto não havia para onde mandar. As de outro
+    // aparelho ficam de fora pelo mesmo motivo de `stampChangeSet`: reenviar a
+    // exclusão alheia seria reivindicá-la como nossa.
+    const grave = normalizeGraveyard(snapshot.graveyard);
+    GRAVEYARD_COLLECTIONS.forEach((field) => {
+      Object.keys(grave[field] || {}).forEach((id) => {
+        const rev = normalizeSyncRev((grave[field][id] || {}).rev);
+        const parsed = rev ? SyncClock.parse(rev) : null;
+        if (!parsed || parsed.device !== SyncClock.device()) return;
+        ops.push({ entity: field, entityId: id, op: "delete", rev });
+      });
+    });
+    saveClockState();
+    return { ops, stamped };
+  }
+
+  // Marca cunhada na semeadura precisa CHEGAR AO DISCO. Se ficasse só em
+  // memória, o carregamento seguinte traria o registro sem marca de novo e ele
+  // perderia uma disputa que deveria vencer. `lastPersisted` não é tocado de
+  // propósito: ele é a base do diff, e adiantá-lo aqui esconderia da gravação
+  // seguinte uma alteração ainda não salva.
+  async function persistStamps(stamped) {
+    const stores = Object.keys(stamped);
+    if (!stores.length || !adapter) return;
+    const changeSet = { puts: {}, deletes: {}, settings: {} };
+    stores.forEach((name) => { changeSet.puts[name] = stamped[name]; });
+    try { await adapter.writeChanges(changeSet); }
+    catch (err) { emitError(err); }
+  }
+
+  // Devolve quantas operações entraram na fila, para o motor decidir se vale
+  // uma volta de envio a mais.
+  async function seedOutbox() {
+    if (!outboxEnabled || !adapter) return 0;
+    const { ops, stamped } = collectSyncOps(false);
+    if (!ops.length) return 0;
+    await persistStamps(stamped);
+    await outboxAppend(ops.map((op) => ({ ...op, queuedAt: Date.now() })));
+    return ops.length;
+  }
+
+  // Troca da base inteira: o que sumiu precisa de lápide, senão volta do outro
+  // aparelho na primeira descida. A marca é nova porque restaurar é um ato de
+  // agora, não a repetição do passado.
+  function stampReplacement(previous) {
+    GRAVEYARD_COLLECTIONS.forEach((field) => {
+      const vivos = indexById(snapshot[field] || []);
+      const ids = (((previous && previous[field]) || []).map((rec) => (rec && rec.id) || ""))
+        .filter((id) => id && !vivos.has(id));
+      if (ids.length) snapshot.graveyard = withTombstones(snapshot.graveyard, field, ids);
+    });
+    return collectSyncOps(true);
+  }
+
   function computeChangeSet(prev, next) {
     const changeSet = { puts: {}, deletes: {}, settings: {} };
     let dirty = false;
@@ -2976,14 +3113,23 @@ const FinanceStore = (() => {
     const normalized = migrate(data);
     // Guarda o estado anterior para permitir desfazer um restore acidental.
     try { localStorage.setItem(undoKey(), JSON.stringify({ savedAt: Date.now(), data: snapshot })); } catch (e) {}
+    const anterior = snapshot;
     normalized.lastPersistAt = Date.now();
     snapshot = normalized;
+    // A TROCA DA BASE INTEIRA TAMBÉM PRECISA VIAJAR.
+    //
+    // Este caminho não passa pelo diff de `persist`, então restaurar um backup,
+    // desfazer uma restauração ou adotar os dados de visitante mudava só este
+    // aparelho. Nos outros, nada acontecia; e como o servidor continuava com a
+    // base velha, a descida seguinte podia até desfazer o que foi restaurado.
+    const semente = outboxEnabled ? stampReplacement(anterior) : { ops: [] };
     writeMirror(snapshot, true);
     if (!adapter) return false;
     try {
-      await adapter.replaceAll(normalized);
-      lastPersisted = shallowSnapshot(normalized);
+      await adapter.replaceAll(snapshot);
+      lastPersisted = shallowSnapshot(snapshot);
       healthy = true;
+      queueOps(semente.ops);
       return true;
     } catch (err) { emitError(err); return false; }
   }
@@ -3214,6 +3360,10 @@ const FinanceStore = (() => {
     outboxRead,
     outboxDrop,
     outboxClear,
+    // Reapresenta ao servidor a base que já estava neste aparelho. Ver o bloco
+    // "SEMEADURA" acima: sem isto, quem começou a usar antes de ligar a conta
+    // nunca subia nada, e o segundo aparelho via a conta vazia.
+    seedOutbox,
     // Enfileirar só faz sentido com conta ligada; o motor de sincronização
     // liga e desliga junto com a sessão.
     setOutboxEnabled: (value) => { outboxEnabled = !!value; },

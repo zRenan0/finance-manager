@@ -1,5 +1,56 @@
 # Histórico de versões
 
+## 0.29.3
+
+Os dois aparelhos passaram a mostrar os mesmos valores. Duas falhas somadas
+faziam a conta parecer sincronizada sem estar: a base que já existia no
+aparelho nunca subia, e quem ficava com o app aberto nunca descia nada.
+
+### A base anterior à conta agora sobe
+
+- **Semeadura na primeira volta.** A fila de envio só recebia DIFERENÇA: ela é
+  montada comparando a gravação com a anterior. Quem já usava o app antes de
+  criar a conta, restaurou um backup, ou usou enquanto o servidor estava fora
+  do ar, não produzia diferença nenhuma depois disso, e a base inteira ficava
+  invisível para o servidor. O segundo aparelho entrava na mesma conta e via
+  tudo zerado.
+- **E nada denunciava.** O cartão da conta dizia "Tudo sincronizado", porque a
+  fila estava mesmo vazia. Não havia erro para mostrar; havia ausência.
+- **A semeadura roda depois da descida, e só uma vez por conta no aparelho.**
+  Ela não inventa marca: reapresenta cada registro com a que ele já tem, e o
+  servidor continua guardando a vencedora. Só cunha marca nova para o que nunca
+  passou por uma gravação local. Se o servidor estiver sem nenhuma operação e o
+  aparelho tiver base, ela roda de novo - é o caso de quem tentou sincronizar
+  antes de as tabelas existirem no banco.
+- **O padrão de fábrica fica de fora.** Um celular recém-conectado tem as mesmas
+  categorias iniciais e as configurações zeradas de qualquer instalação.
+  Anunciar isso com marca nova faria ele vencer e apagar, no computador, a
+  categoria renomeada e a renda preenchida. O que ainda está como veio de
+  fábrica não é notícia, e o silêncio preserva o que o outro aparelho tem.
+- **Restaurar backup também viaja.** `replaceAll` troca a base inteira sem
+  passar pelo diff, então restaurar um backup, desfazer uma restauração ou
+  adotar os dados de visitante mudava só o aparelho que fez. Agora cada registro
+  recebe marca nova e o que sumiu vira lápide, como já acontecia ao restaurar
+  uma versão guardada na nuvem.
+
+### Com o app aberto, o outro aparelho aparece sozinho
+
+- **Volta periódica de um minuto.** O motor só tinha gatilho de saída: alteração
+  local, volta da rede, retorno à aba COM fila pendente. Faltava o de entrada.
+  Com o app aberto nos dois lados, quem lançava no celular não via nada mudar no
+  computador até recarregar a página. A volta só acontece com o app à vista,
+  para não gastar bateria em segundo plano, e não redesenha a tela quando não
+  encontra novidade.
+- **Voltar ao app busca o que chegou.** A condição antiga (`state.pending`) só
+  deixava passar o aparelho que tinha algo a enviar, que é justamente o que não
+  precisava do gatilho: quem ficou parado é quem está desatualizado.
+
+### Testes
+
+- `tests/test-cloud-sync.js` ganhou três cenários: a base anterior à conta
+  chegando ao segundo aparelho, o aparelho novo e vazio que não pode apagar o
+  que o outro tem, e a restauração de backup propagando a exclusão.
+
 ## 0.29.2
 
 O link do email de confirmação passou a apontar para o domínio do produto, em

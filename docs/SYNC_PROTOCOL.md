@@ -84,8 +84,57 @@ não ao número de edições.
 3. A mesma resposta traz o que os outros aparelhos fizeram desde o cursor.
 4. Se ainda houver páginas, o cliente continua com `GET /changes?since=...`.
 5. O cursor é gravado por escopo (`cofre_sync_cursor__u_<id>`).
+6. Terminada a descida, o aparelho **semeia** se ainda não semeou nesta conta.
 
 Não há mais `409` de documento inteiro, porque não há mais documento inteiro.
+
+### Semeadura
+
+A fila só recebe **diferença**: ela nasce da comparação entre a gravação e a
+anterior. Uma base parada não gera operação nenhuma. Isso deixava invisível para
+o servidor tudo que já existia no aparelho antes de a sincronização começar a
+funcionar: quem usou o app antes de criar a conta, quem restaurou um backup, e
+quem usou enquanto o servidor estava fora do ar. Nada disso dava erro, porque
+não havia erro; havia ausência.
+
+A semeadura (`FinanceStore.seedOutbox`) reapresenta a base ao servidor:
+
+- roda **depois da descida**, para nunca empurrar uma versão velha por cima do
+  que o outro aparelho escreveu;
+- **não inventa marca**: usa a que o registro já carrega, e só cunha uma nova
+  para o que nunca passou por uma gravação local;
+- **ignora o que está como veio de fábrica** (categorias iniciais intocadas,
+  configurações no padrão). Um aparelho recém-conectado que anunciasse o próprio
+  vazio com marca nova venceria por ser o mais recente, e apagaria no outro a
+  categoria renomeada e a renda preenchida;
+- **acontece uma vez por conta e por aparelho** (`cofre_sync_seeded__<escopo>`),
+  e mais uma vez sempre que o servidor estiver sem nenhuma operação e o aparelho
+  tiver base - o caso de quem tentou sincronizar antes de as tabelas existirem.
+
+Reapresentar é barato e seguro: a marca viaja junto e o servidor guarda a
+vencedora, ignorando marca menor ou igual.
+
+A troca da base inteira (`replaceAll`: restaurar backup, desfazer restauração,
+adotar dados de visitante) também enfileira. Ali a marca é **nova** para tudo, e
+o que sumiu vira lápide: restaurar é declarar o estado de agora, e a declaração
+precisa vencer no outro aparelho em vez de ser desfeita por ele na volta
+seguinte.
+
+### Quando o ciclo roda
+
+| Gatilho | Quando |
+|---------|--------|
+| alteração local | 4 s depois da última gravação (rajada vira um envio só) |
+| volta da rede | evento `online` |
+| retorno ao app | `visibilitychange`, tendo ou não fila para enviar |
+| volta periódica | a cada 60 s, **só** com o app à vista |
+| nova tentativa | 30 s depois de uma falha de rede |
+
+A volta periódica existe porque os outros gatilhos são todos de **saída**. Sem
+ela, dois aparelhos abertos ao mesmo tempo nunca ficavam iguais: quem estava
+parado não tinha o que enviar e ninguém ia buscar o que havia chegado. Ela não
+avisa a interface quando não encontra novidade, para não reconstruir a tela de
+minuto em minuto.
 
 ### Uma aba por vez
 
