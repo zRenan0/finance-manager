@@ -2169,6 +2169,21 @@ function cloudMutationId() {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
+// Corpo de erro do próprio servidor, lido sem confiar em nada: uma resposta de
+// erro pode não ser JSON (página de erro da hospedagem, por exemplo), e uma
+// falha ao ler não pode virar outra falha por cima da primeira.
+async function cloudErrorBody(res) {
+  try {
+    const texto = await res.text();
+    if (!texto || texto.length > 8192) return {};
+    const dados = JSON.parse(texto);
+    if (!dados || typeof dados !== "object") return {};
+    const code = typeof dados.code === "string" && /^[a-z0-9_]{1,40}$/.test(dados.code) ? dados.code : null;
+    const message = typeof dados.message === "string" && dados.message.length <= 300 ? dados.message : null;
+    return { code, message };
+  } catch (e) { return {}; }
+}
+
 class CloudSyncError extends Error {
   constructor(message, code, status) {
     super(message);
@@ -2264,8 +2279,23 @@ class CloudAdapter extends StorageAdapter {
     }
 
     if (res.status === 409) throw new CloudSyncConflictError(res.headers && res.headers.get ? res.headers.get("x-sync-revision") : null);
-    if (res.status === 401 || res.status === 403) throw new CloudSyncError("A sessão de sincronização expirou.", "session_expired", res.status);
-    if (!res.ok) throw new CloudSyncError(`O servidor de sincronização recusou a operação (${res.status}).`, "server_error", res.status);
+    if (!res.ok) {
+      // A RAZÃO DA FALHA VEM NO CORPO, E ERA JOGADA FORA.
+      //
+      // O servidor deste app responde erro com `{ code, message }` escrito para
+      // o usuário. Aqui só se olhava para o número do status, então "faltam as
+      // tabelas no banco", "origem recusada" e "email não confirmado" viravam a
+      // mesma frase sem conteúdo, e a tela mostrava "Sincronização com falha"
+      // sem nunca dizer a falha.
+      const detalhe = await cloudErrorBody(res);
+      if (res.status === 401 || res.status === 403) {
+        // O código continua sendo um dos DOIS que o motor sabe tratar (parar em
+        // vez de insistir); só a frase passa a ser a de verdade.
+        const codigo = detalhe.code === "device_revoked" ? "device_revoked" : "session_expired";
+        throw new CloudSyncError(detalhe.message || "A sessão de sincronização expirou.", codigo, res.status);
+      }
+      throw new CloudSyncError(detalhe.message || `O servidor de sincronização recusou a operação (${res.status}).`, detalhe.code || "server_error", res.status);
+    }
     if (res.status === 204) return null;
 
     const contentType = String(res.headers && res.headers.get ? res.headers.get("content-type") : "").toLowerCase();

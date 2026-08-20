@@ -220,6 +220,15 @@ const CloudSync = (() => {
       setState({ phase: "error", error: "Atualize o aplicativo para voltar a sincronizar.", errorCode: code });
       return false;
     }
+    // Problema de INSTALAÇÃO não se resolve sozinho em 30 segundos. Tentar de
+    // novo em laço só esconde a causa e gasta bateria; a mensagem do servidor
+    // já diz o que falta fazer, e o botão da tela refaz a tentativa na hora em
+    // que a pessoa quiser.
+    if (code === "schema_missing" || code === "not_configured" || code === "origin_denied") {
+      disable();
+      setState({ phase: "error", error: (error && error.message) || "A sincronização não está configurada neste servidor.", errorCode: code });
+      return false;
+    }
     if (code === "network_error" || code === "timeout" || code === "upstream_unavailable") {
       setState({ phase: "offline", pending: true, error: null, errorCode: code });
       scheduleRetry();
@@ -256,6 +265,15 @@ const CloudSync = (() => {
     if (!state.enabled) return Promise.resolve(false);
     clearTimeout(pendingTimer);
     return runSync();
+  }
+
+  // O botão "tentar de novo" da tela de conta. Quando o motor está ligado, é um
+  // ciclo. Quando ele PAROU por erro (sessão morta, migração faltando), é uma
+  // nova tentativa de ligar; era exatamente aí que a tela não oferecia botão
+  // nenhum e a única saída conhecida era recarregar a página.
+  function retry() {
+    if (state.enabled) return syncNow();
+    return enable();
   }
 
   // ---------------------------------------------------------------------------
@@ -353,7 +371,17 @@ const CloudSync = (() => {
       const code = (error && error.code) || "unavailable";
       // Site publicado sem o backend configurado não é erro do usuário; é só
       // um recurso que não existe naquela instalação.
-      setState({ enabled: false, phase: code === "not_configured" ? "disabled" : "error", errorCode: code, error: null });
+      //
+      // Nos DEMAIS casos a mensagem do servidor é guardada. Ela era descartada
+      // (`error: null`), e por isso a tela dizia "Sincronização com falha" e
+      // parava por aí: quem estava vendo não tinha como saber se era a sessão,
+      // a rede ou uma migração que faltou rodar no banco.
+      setState({
+        enabled: false,
+        phase: code === "not_configured" ? "disabled" : "error",
+        errorCode: code,
+        error: code === "not_configured" ? null : ((error && error.message) || "Não foi possível ligar a sincronização."),
+      });
       return false;
     }
     FinanceStore.setOutboxEnabled(true);
@@ -396,6 +424,7 @@ const CloudSync = (() => {
     disable,
     schedule,
     syncNow,
+    retry,
     resetRemote,
     createCheckpoint,
     listCheckpoints,

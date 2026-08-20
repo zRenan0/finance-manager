@@ -21,6 +21,10 @@ function accountDeviceLabel() {
 function freshAccountState() {
   return {
     loading: true, configured: null, authenticated: false, email: "", userId: "", mode: "login", busy: false, error: "", message: "",
+    // Email cadastrado que ainda espera confirmação. Enquanto ele existe, a
+    // tela mostra o cartão de "confirmação pendente" com o botão de reenvio;
+    // antes disto, quem não recebia o email não tinha para onde ir.
+    pendingEmail: "",
     form: { email: "", password: "", newPassword: "", deletePassword: "", deleteText: "" }, devices: [],
   };
 }
@@ -149,6 +153,7 @@ const AccountAPI = (() => {
   return {
     session: () => request("session"), register: (body) => request("register", { method: "POST", body }),
     login: (body) => request("login", { method: "POST", body }), recover: (body) => request("recover", { method: "POST", body }),
+    resend: (email) => request("resend", { method: "POST", body: { email } }),
     exchange: (code) => request("exchange", { method: "POST", body: { code } }), logout: () => request("logout", { method: "POST", body: {} }),
     password: (password) => request("password", { method: "POST", body: { password } }), devices: () => request("devices"),
     revokeDevice: (deviceId) => request("revoke-device", { method: "POST", body: { deviceId } }),
@@ -175,6 +180,10 @@ async function refreshAccountSession() {
     state.account.email = result.email || "";
     state.account.userId = result.userId || "";
     state.account.loading = false;
+    // O servidor devolve a sessão pendente em vez de simplesmente negar: é
+    // assim que a tela sabe oferecer o reenvio para o endereço certo.
+    if (result.pendingConfirmation) state.account.pendingEmail = result.email || state.account.pendingEmail;
+    else if (state.account.authenticated) state.account.pendingEmail = "";
     if (state.account.authenticated) {
       try {
         const devices = await AccountAPI.devices();
@@ -218,27 +227,88 @@ async function refreshAccountSession() {
   render();
 }
 
+// ------------------------------------------------------------------------------
+// O RETORNO DO LINK DO EMAIL
+// ------------------------------------------------------------------------------
+// O endereço pode voltar de duas formas, e antes só a primeira era entendida:
+//
+//   ?code=...                     fluxo PKCE, o caminho normal deste app;
+//   ?error=...&error_code=...     o Supabase recusou o link (expirado, já usado),
+//                                 na query ou depois do `#`.
+//
+// A segunda caía em "O link não trouxe um código válido", que não diz nem o
+// que houve nem o que fazer. Um link expirado precisa dizer que expirou.
+//
+// Este aplicativo NÃO lê credencial nenhuma do endereço: a sessão vive em
+// cookie HttpOnly, emitido pelo servidor. O que se procura aqui é só o aviso
+// de erro. Ver a checagem "frontend usa cookies" em tests/test-account-backend.js.
+//
+// O `#` também é onde mora a ROTA do aplicativo (`#/conta-e-acesso`). Um hash
+// que começa com barra é rota, nunca retorno de email.
+function authCallbackError() {
+  const bruto = String(location.hash || "");
+  if (!bruto || bruto.startsWith("#/")) return "";
+  let params;
+  try { params = new URLSearchParams(bruto.slice(1)); } catch (_) { return ""; }
+  return params.get("error_code") || params.get("error") || "";
+}
+
+// O que o Supabase manda no endereço quando recusa o link. Traduzir aqui evita
+// jogar o código cru do provedor na cara de quem só queria entrar.
+function authLinkErrorMessage(codigo) {
+  if (/expired/i.test(codigo)) return "Este link expirou. Peça um novo pela tela de conta.";
+  if (/access_denied|used|invalid/i.test(codigo)) return "Este link não vale mais. Ele pode já ter sido usado.";
+  return "O link não trouxe um código válido.";
+}
+
 async function bootstrapAccount() {
   const params = new URLSearchParams(location.search || "");
   const code = params.get("code");
   const callback = params.get("auth_callback");
+  const recuperacao = callback === "recovery";
+  const erroNaQuery = params.get("error_code") || params.get("error") || "";
+  const erroNoHash = authCallbackError();
+  let consumiu = false;
+
   if (code) {
+    consumiu = true;
     try {
       const result = await AccountAPI.exchange(code);
       state.account.authenticated = true;
       state.account.email = result.email || "";
+      state.account.pendingEmail = "";
       state.account.mode = result.purpose === "recovery" ? "password" : "login";
       state.account.message = result.purpose === "recovery" ? "Defina uma nova senha para concluir a recuperação." : "Email confirmado. Sua conta está pronta.";
-      state.tab = "account";
-      if (typeof NavHistory !== "undefined") NavHistory.replace("account", [], 0);
-    } catch (error) { state.account.error = error.message; state.tab = "account"; }
-    params.delete("code"); params.delete("auth_callback");
-    const query = params.toString();
-    history.replaceState(history.state, "", `${location.pathname}${query ? `?${query}` : ""}${location.hash || ""}`);
+    } catch (error) {
+      // `verifier_missing` NÃO é link quebrado: é link aberto em outro
+      // navegador. No cadastro, o email já foi confirmado do lado do servidor
+      // antes de chegar aqui, então a notícia é boa e o passo seguinte é
+      // entrar. Na recuperação não dá para seguir: a nova senha precisa do
+      // navegador que pediu.
+      if (error.code === "verifier_missing" && !recuperacao) {
+        state.account.message = "Email confirmado. Entre com seu email e senha para continuar.";
+        state.account.pendingEmail = "";
+      } else if (error.code === "verifier_missing") {
+        state.account.error = "Abra o link de recuperação no mesmo navegador em que você o pediu, ou peça um novo.";
+      } else state.account.error = error.message;
+    }
+  } else if (erroNaQuery || erroNoHash) {
+    consumiu = true;
+    state.account.error = authLinkErrorMessage(erroNaQuery || erroNoHash);
   } else if (callback) {
+    consumiu = true;
     state.account.error = "O link não trouxe um código válido.";
+  }
+
+  if (consumiu) {
     state.tab = "account";
     if (typeof NavHistory !== "undefined") NavHistory.replace("account", [], 0);
+    ["code", "auth_callback", "error", "error_code", "error_description"].forEach((chave) => params.delete(chave));
+    const query = params.toString();
+    // O hash só é limpo quando ERA aviso de erro do link. Limpar sempre
+    // apagaria a rota do aplicativo, que também mora depois do `#`.
+    const hash = erroNoHash ? "" : (location.hash || "");
+    history.replaceState(history.state, "", `${location.pathname}${query ? `?${query}` : ""}${hash}`);
   }
   await refreshAccountSession();
 }
@@ -267,16 +337,40 @@ async function accountSubmit(kind) {
     form.password = "";
     if (kind === "recover") state.account.message = "Se o email estiver cadastrado, você receberá um link de recuperação.";
     else if (kind === "password") { state.account.message = "Senha atualizada."; state.account.mode = "login"; form.newPassword = ""; }
-    else if (result.confirmationRequired) state.account.message = "Confira seu email para confirmar o cadastro.";
-    else { state.account.authenticated = !!result.authenticated; state.account.email = result.email || form.email; state.account.message = kind === "register" ? "Conta criada." : "Acesso confirmado."; }
+    else if (result.confirmationRequired) {
+      // A FRASE PRECISA COBRIR OS DOIS DESFECHOS.
+      //
+      // Dizia só "Confira seu email para confirmar o cadastro". Para um
+      // endereço que JÁ TEM CONTA o Supabase devolve exatamente esta mesma
+      // resposta, de propósito, e nenhum email sai. Quem caía nesse caso ficava
+      // esperando para sempre uma mensagem que nunca ia chegar. Agora a tela
+      // diz as duas saídas, sem revelar qual delas é a sua.
+      state.account.pendingEmail = result.email || form.email;
+      state.account.message = "Se este email ainda não tinha conta, o link de confirmação foi enviado. Se já tinha, entre com sua senha.";
+    } else { state.account.authenticated = !!result.authenticated; state.account.email = result.email || form.email; state.account.pendingEmail = ""; state.account.message = kind === "register" ? "Conta criada." : "Acesso confirmado."; }
     state.account.busy = false;
     await refreshAccountSession();
   } catch (error) {
     // Também no erro: senha errada continua sendo senha, e a tentativa seguinte
     // é digitada do zero.
     form.password = "";
+    // Entrar com email não confirmado deixa de ser recusa muda: a tela passa a
+    // mostrar o cartão de confirmação pendente, com o reenvio à mão.
+    if (error.code === "email_not_confirmed") state.account.pendingEmail = form.email;
     accountSetBusy(false, error.message);
   }
+}
+
+async function accountResend() {
+  const alvo = state.account.pendingEmail || state.account.form.email;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(alvo)) { showFormErrors({ "account-email": "Informe um email válido." }, "Revise os dados da conta."); return; }
+  accountSetBusy(true, "");
+  try {
+    await AccountAPI.resend(alvo);
+    state.account.pendingEmail = alvo;
+    state.account.message = "Se este email tiver um cadastro esperando confirmação, o link foi reenviado. Veja também a caixa de spam.";
+    accountSetBusy(false, "");
+  } catch (error) { accountSetBusy(false, error.message); }
 }
 
 async function accountLogout() {

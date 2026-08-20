@@ -12,6 +12,16 @@ const DEVICE_SECRET = "cofre_device";
 const RATE_WINDOW_SECONDS = 10 * 60;
 const RATE_MAX_ATTEMPTS = 30;
 
+// O COOKIE DO FLUXO PRECISA DURAR O QUE O LINK DURA.
+//
+// Eram 10 minutos. O link que o Supabase manda por email vale 24 horas, e é
+// esse cookie que guarda o verificador PKCE sem o qual o código do link não
+// vira sessão. Resultado: quem abrisse o email 11 minutos depois (ou seja,
+// quase todo mundo) recebia "Link expirado ou inválido" para um link que
+// ainda estava perfeitamente válido do outro lado. O prazo agora acompanha o
+// do provedor.
+const VERIFIER_MAX_AGE = 60 * 60 * 24;
+
 function actionOf(event) {
   const fromQuery = event && event.queryStringParameters && event.queryStringParameters.action;
   if (fromQuery) return String(fromQuery).split("/")[0];
@@ -57,6 +67,27 @@ function pkce() {
   const challenge = crypto.createHash("sha256").update(verifier).digest("base64url");
   return { verifier, challenge };
 }
+// EMAIL CONFIRMADO É PRÉ-REQUISITO DE SESSÃO, NÃO DECORAÇÃO.
+//
+// O backend nunca olhava para isto. A tela dizia "Confira seu email para
+// confirmar o cadastro" e, logo em seguida, `login` entregava a sessão do
+// mesmo jeito: a confirmação existia só na frase. Quem decidia era o Supabase,
+// e a decisão dele mudava com uma chave do painel que o aplicativo não vê.
+//
+// `confirmed_at` é o campo antigo e `email_confirmed_at` o atual; um projeto
+// com auto-confirmação preenche os dois no cadastro, então esta checagem não
+// atrapalha quem escolheu não exigir confirmação.
+function emailConfirmed(user) {
+  return !!(user && (user.email_confirmed_at || user.confirmed_at));
+}
+
+function requireConfirmedEmail(user) {
+  if (emailConfirmed(user)) return;
+  throw Object.assign(new Error("Este email ainda não foi confirmado. Abra o link que enviamos ou peça um novo."), {
+    statusCode: 403, code: "email_not_confirmed",
+  });
+}
+
 function sessionCookies(event, session) {
   return [cookie(ACCESS, session.access_token, event, { maxAge: Math.min(Number(session.expires_in) || 3600, 3600) }), cookie(REFRESH, session.refresh_token, event, { maxAge: 60 * 60 * 24 * 30 })];
 }
@@ -103,6 +134,9 @@ async function touchDevice(userId, event, allowCreate = false) {
 async function requireSession(event) {
   const session = await sessionOf(event);
   if (!session) throw Object.assign(new Error("Sua sessão expirou"), { statusCode: 401, code: "session_expired" });
+  // Vale para tudo que exige sessão, inclusive a sincronização: dados de uma
+  // conta não confirmada não sobem para o servidor.
+  requireConfirmedEmail(session.user);
   const device = await touchDevice(session.user.id, event, false);
   session.cookies.push(...device.cookies);
   return session;
@@ -116,37 +150,76 @@ async function handler(event) {
     if (!cfg.configured) return json(200, { ok: true, configured: false, authenticated: false });
     if (method !== "GET") assertSameOrigin(event);
     // Limite compartilhado entre instâncias e persistido (ver _shared/rate-limit.js).
-    if (["register", "login", "recover", "exchange", "password", "delete"].includes(action)) {
+    if (["register", "login", "recover", "resend", "exchange", "password", "delete"].includes(action)) {
       await rateLimit.enforce(event, { bucket: "conta", limit: RATE_MAX_ATTEMPTS, windowSeconds: RATE_WINDOW_SECONDS });
     }
 
     if (action === "session" && method === "GET") {
       const session = await sessionOf(event);
       if (!session) return json(200, { ok: true, configured: true, authenticated: false }, { cookies: clearSession(event) });
+      // Sessão de email não confirmado não é sessão. Só recusar no `login`
+      // deixaria passar o que já tivesse sido emitido antes desta regra.
+      if (!emailConfirmed(session.user)) {
+        return json(200, { ok: true, configured: true, authenticated: false, pendingConfirmation: true, email: session.user.email || "" }, { cookies: clearSession(event) });
+      }
       const device = await touchDevice(session.user.id, event, false);
       return json(200, { ok: true, configured: true, authenticated: true, email: session.user.email || "", userId: session.user.id, deviceId: device.deviceId }, { cookies: [...session.cookies, ...device.cookies] });
     }
     if (action === "register" && method === "POST") {
       const body = readJson(event, 16 * 1024); const flow = pkce();
-      const result = await api.auth.signUp(emailOf(body.email), passwordOf(body.password), appCallbackUrl(event, "signup"), flow.challenge);
-      const cookies = [cookie(VERIFIER, `signup:${flow.verifier}`, event, { maxAge: 600 })];
+      const email = emailOf(body.email);
+      const result = await api.auth.signUp(email, passwordOf(body.password), appCallbackUrl(event, "signup"), flow.challenge);
+      const cookies = [cookie(VERIFIER, `signup:${flow.verifier}`, event, { maxAge: VERIFIER_MAX_AGE })];
       if (result.access_token) { const device = await touchDevice(result.user.id, event, true); cookies.push(...sessionCookies(event, result), ...device.cookies); }
-      return json(200, { ok: true, configured: true, authenticated: !!result.access_token, confirmationRequired: !result.access_token, email: result.user && result.user.email || "", userId: result.user && result.user.id || "" }, { cookies });
+      // `email` volta do que foi PEDIDO, não do que o Supabase devolveu: para
+      // um endereço que já tem conta ele responde com um usuário fabricado, e
+      // é esse endereço que a tela precisa para oferecer o reenvio.
+      return json(200, { ok: true, configured: true, authenticated: !!result.access_token, confirmationRequired: !result.access_token, email: result.access_token && result.user ? (result.user.email || email) : email, userId: result.access_token && result.user ? result.user.id || "" : "" }, { cookies });
     }
     if (action === "login" && method === "POST") {
       const body = readJson(event, 16 * 1024); const result = await api.auth.signIn(emailOf(body.email), passwordOf(body.password));
+      requireConfirmedEmail(result.user);
       const device = await touchDevice(result.user.id, event, true);
       return json(200, { ok: true, configured: true, authenticated: true, email: result.user.email || "", userId: result.user.id, deviceId: device.deviceId }, { cookies: [...sessionCookies(event, result), ...device.cookies] });
     }
     if (action === "recover" && method === "POST") {
       const body = readJson(event, 16 * 1024); const flow = pkce();
       try { await api.auth.recover(emailOf(body.email), appCallbackUrl(event, "recovery"), flow.challenge); } catch (_) {}
-      return json(200, { ok: true, sent: true }, { cookies: [cookie(VERIFIER, `recovery:${flow.verifier}`, event, { maxAge: 600 })] });
+      return json(200, { ok: true, sent: true }, { cookies: [cookie(VERIFIER, `recovery:${flow.verifier}`, event, { maxAge: VERIFIER_MAX_AGE })] });
+    }
+    // REENVIAR A CONFIRMAÇÃO.
+    //
+    // Sem esta rota não havia saída para o email que não chega: cadastrar de
+    // novo devolve a mesma resposta opaca que o Supabase dá para endereço já
+    // existente, e nenhum link novo sai. A falha de ENVIO sobe (é ela que diz
+    // "o SMTP não está configurado"); o que não sobe é o que revelaria se o
+    // endereço tem conta.
+    if (action === "resend" && method === "POST") {
+      const body = readJson(event, 16 * 1024); const flow = pkce();
+      const email = emailOf(body.email);
+      const cookies = [cookie(VERIFIER, `signup:${flow.verifier}`, event, { maxAge: VERIFIER_MAX_AGE })];
+      try { await api.auth.resend(email, appCallbackUrl(event, "signup"), flow.challenge); }
+      catch (error) {
+        // "já confirmado" e "não existe" saem com a MESMA resposta de sucesso
+        // que o envio de verdade: a diferença entre as duas é exatamente o que
+        // transformaria esta rota em sonda de quem tem conta aqui.
+        if (!error || (error.code !== "already_confirmed" && error.code !== "user_not_found")) throw error;
+      }
+      return json(200, { ok: true, sent: true }, { cookies });
     }
     if (action === "exchange" && method === "POST") {
       const body = readJson(event, 16 * 1024); const stored = String(cookiesOf(event)[VERIFIER] || "");
       const at = stored.indexOf(":");
-      if (at < 1 || !body.code) throw Object.assign(new Error("Link expirado ou inválido"), { statusCode: 400, code: "invalid_callback" });
+      if (!body.code) throw Object.assign(new Error("O link não trouxe um código válido."), { statusCode: 400, code: "invalid_callback" });
+      // SEM O COOKIE, O LINK NÃO FALHOU: ELE FOI ABERTO EM OUTRO LUGAR.
+      //
+      // O verificador PKCE vive neste navegador. Abrir o email no celular
+      // depois de cadastrar no computador é o caso comum, e o servidor do
+      // Supabase JÁ confirmou o email antes de redirecionar para cá. Dizer
+      // "link expirado" ali é falso e manda a pessoa pedir outro link que
+      // também não vai resolver. Quem trata a diferença entre cadastro e
+      // recuperação é a tela, que conhece o `auth_callback` do endereço.
+      if (at < 1) throw Object.assign(new Error("Este link foi aberto em outro navegador."), { statusCode: 400, code: "verifier_missing" });
       const purpose = stored.slice(0, at); const result = await api.auth.exchange(String(body.code).slice(0, 2048), stored.slice(at + 1));
       const device = await touchDevice(result.user.id, event, true);
       return json(200, { ok: true, authenticated: true, purpose, email: result.user.email || "", userId: result.user.id }, { cookies: [...sessionCookies(event, result), ...device.cookies, clearCookie(VERIFIER, event)] });

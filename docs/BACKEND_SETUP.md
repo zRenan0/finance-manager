@@ -13,14 +13,59 @@ Consequência prática: **sem as variáveis do Supabase configuradas, as anális
 ## 1. Criar o projeto no Supabase
 
 1. Crie um projeto separado para cada ambiente.
-2. Execute a migração `supabase/migrations/202608120001_accounts_finance.sql` no editor SQL.
+2. Execute **todas** as migrações de `supabase/migrations/`, no editor SQL, **em ordem de nome**:
+
+   | Arquivo | O que cria | O que quebra sem ele |
+   | --- | --- | --- |
+   | `202608120001_accounts_finance.sql` | `cofre_devices`, `cofre_mutations`, snapshots | Entrar e criar conta. |
+   | `202608180001_sync_oplog.sql` | `cofre_sync_state`, `cofre_sync_ops`, checkpoints e as funções `cofre_apply_ops` / `cofre_reset_data` / `cofre_purge_account` | **A sincronização inteira**, e o apagar conta. |
+   | `202608180002_rate_limit.sql` | `cofre_rate_hit` | O limite de tentativas compartilhado (cai num limite pior, por instância). |
+
+   **Rodar só a primeira é o erro mais fácil de cometer aqui**, e ele não aparece na tela de entrar: login e cadastro funcionam, porque o que eles usam é `cofre_devices`. Quem falha é a sincronização, e antes ela só sabia dizer "Sincronização com falha". Hoje ela repete o motivo que veio do banco ("o projeto está sem as tabelas desta função"), mas conferir aqui continua sendo mais barato que descobrir depois.
+
+   Para conferir sem sair do editor SQL do Supabase:
+
+   ```sql
+   select table_name from information_schema.tables
+   where table_schema = 'public' and table_name like 'cofre_%'
+   order by table_name;
+   ```
+
+   Precisam aparecer, no mínimo: `cofre_devices`, `cofre_sync_state`, `cofre_sync_ops`, `cofre_sync_checkpoints`, `cofre_sync_checkpoint_rows`.
 3. Em Authentication → URL Configuration, cadastre como URLs de redirecionamento `https://SEU-DOMINIO/index.html?auth_callback=signup` e `https://SEU-DOMINIO/index.html?auth_callback=recovery`.
 
    **O `/index.html` não é decoração.** A raiz do domínio serve a página comercial (ver as reescritas em `vercel.json`), e quem troca o `code` do email por uma sessão é `bootstrapAccount()`, que só existe dentro do pacote carregado pelo `index.html`. Um endereço terminando em `/` faz o link do email abrir o folheto: o código expira sem ser usado e o cadastro nunca conclui.
 
    Se a lista já tinha as versões com `/?auth_callback=...`, pode apagá-las. Os links que já saíram carregam o endereço gravado na hora do envio, então remover a entrada antiga não quebra nenhum deles; e a página comercial reencaminha esses links para o aplicativo por conta própria (ver `js/landing-boot.js`).
-4. Mantenha a confirmação de email ativa em produção.
-5. Configure os modelos de email com o domínio real do produto antes de receber usuários externos.
+4. Mantenha a confirmação de email ativa em produção (Authentication → Providers → Email → *Confirm email*).
+5. **Configure um SMTP próprio antes de convidar qualquer pessoa** (Project Settings → Authentication → SMTP Settings).
+
+   O serviço de email embutido do Supabase **não serve para produção**, e a forma como ele falha é a pior possível: silenciosa. Ele tem teto de poucas mensagens por hora e **só entrega para endereços de quem é membro da organização do projeto**. Para qualquer outro endereço, o Supabase aceita o cadastro, responde `200`, e o email simplesmente não sai. Do lado do aplicativo o cadastro parece ter dado certo; do lado da pessoa, nada chega. Nunca.
+
+   Serve qualquer provedor com SMTP (Resend, Postmark, SendGrid, Amazon SES, Zoho). O que importa é que o domínio remetente seja seu e tenha SPF e DKIM, senão o que sair vai cair em spam.
+
+   **Quando o email não chegar, teste nesta ordem.** As duas primeiras causas são muito mais comuns que a terceira, e as três produzem exatamente a mesma tela:
+
+   1. **O endereço já tinha conta.** Cadastre com um endereço *novo em folha*. Um endereço já cadastrado recebe a mesma resposta de sucesso e nenhum email (ver a seção 1.1); insistir nele não adianta nunca.
+   2. **O log do provedor de email.** Se não existe registro de envio lá, o Supabase nunca chegou a mandar, e o problema é o item 1 ou a credencial de SMTP. Se existe, o email saiu e a questão é entrega ou spam.
+   3. **A credencial de SMTP.** É o único campo que o painel não deixa reler. Uma chave errada ou revogada só aparece como falha de envio.
+
+   Sintomas de que o SMTP está faltando ou recusando:
+
+   - o cadastro responde certo e o email nunca chega, inclusive no spam;
+   - reenviar a confirmação responde certo e também não chega;
+   - com esta versão, o erro do envio deixa de ficar mudo e a tela mostra "O servidor não conseguiu enviar o email. Confira a configuração de SMTP do Supabase.";
+   - no painel, Authentication → Logs registra `Error sending confirmation email`.
+6. Configure os modelos de email com o domínio real do produto antes de receber usuários externos.
+
+## 1.1 O que o aplicativo faz com a confirmação
+
+Vale saber para não confundir sintoma com causa:
+
+- **Enquanto o email não é confirmado, não há sessão.** `login`, `session` e tudo que exige sessão (inclusive a sincronização) respondem `403 email_not_confirmed`. Antes, quem decidia isso era só o Supabase, e a tela pedia confirmação sem que nada dependesse dela.
+- **Cadastrar um email que já tem conta devolve a mesma resposta de um cadastro novo.** É o Supabase que faz isso, de propósito, para não virar sonda de quem tem conta. Nenhum email sai nesse caso. Por isso a tela diz as duas saídas ("se ainda não tinha conta, o link foi enviado; se já tinha, entre com sua senha") e oferece **Reenviar confirmação**.
+- **O link vale 24 horas** e o cookie do fluxo PKCE agora acompanha esse prazo. Ele era de 10 minutos, o que fazia um link válido morrer sozinho para quem abrisse o email um pouco mais tarde.
+- **Abrir o link em outro navegador ou celular confirma o email do mesmo jeito** (quem confirma é o servidor do Supabase, antes de redirecionar), mas não deixa a sessão pronta ali, porque o verificador PKCE mora no navegador que começou. Nesse caso a tela diz "Email confirmado. Entre com seu email e senha para continuar." em vez do antigo e falso "Link expirado ou inválido".
 
 As leituras usam RLS e vinculam os registros ao `auth.uid()` da sessão. Cada navegador recebe também um segredo próprio em cookie HttpOnly. O hash desse segredo não pode ser lido pelo usuário autenticado. A gravação só pode ser chamada pela função do servidor, que informa o usuário já validado, confere o dispositivo, trava a revisão e registra a chave da operação na mesma transação.
 

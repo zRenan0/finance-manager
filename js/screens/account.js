@@ -23,6 +23,28 @@ function accountGuestForm() {
   </div>`;
 }
 
+// Cartão de confirmação pendente.
+//
+// Ele existe porque não havia saída para o email que não chega: a tela dizia
+// "Confira seu email", o email não vinha, e não havia botão nenhum para pedir
+// outro. Reenviar exigia cadastrar de novo, o que devolve a mesma resposta
+// opaca do servidor e não dispara link nenhum para quem já tem conta.
+function accountPendingCard() {
+  const a = state.account;
+  if (!a.pendingEmail || a.authenticated) return "";
+  return `<div class="card account-sync account-pending">
+    <div class="account-sync__head">
+      <span class="account-sync__icon account-sync__icon--idle">${svgIcon("clock", 18)}</span>
+      <div>
+        <p class="card-title">Confirmação de email pendente</p>
+        <p class="card-subtitle">O link de confirmação vai para ${escapeHtml(a.pendingEmail)}. Enquanto ele não for aberto, esta conta não entra e não sincroniza.</p>
+        <p class="field-hint">O link vale 24 horas. Se ele não aparecer, procure na caixa de spam antes de pedir outro.</p>
+      </div>
+    </div>
+    <button class="btn btn--secondary btn--sm" data-action="account-resend" ${a.busy ? "disabled" : ""}>${svgIcon("refresh", 15)} Reenviar confirmação</button>
+  </div>`;
+}
+
 function accountDeviceDate(value) {
   const date = new Date(value || "");
   return Number.isNaN(date.getTime()) ? "data indisponível" : date.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
@@ -47,16 +69,27 @@ function accountSyncCard() {
   const view = ACCOUNT_SYNC_VIEW[phase] || ACCOUNT_SYNC_VIEW.idle;
   const quando = sync.lastSyncAt ? accountDeviceDate(sync.lastSyncAt) : null;
   const detalhe = sync.error || view.note;
+  // A frase que tranquiliza NÃO pode ocupar o lugar da que explica. Quando o
+  // servidor manda o motivo, os dois aparecem: o motivo em cima, a garantia de
+  // que nada se perdeu embaixo. Antes, um excluía o outro, e no caso de falha o
+  // motivo era exatamente o que sumia.
+  const garantia = phase === "error" && sync.error ? view.note : "";
+  // Falha precisa de saída. O botão só existia com o motor LIGADO, e a falha
+  // que mais acontece (ligar e não conseguir) desliga o motor: sobrava
+  // recarregar a página, sem nada na tela dizendo isso.
+  const podeTentar = sync.enabled || phase === "error";
   return `<div class="card account-sync">
     <div class="account-sync__head">
       <span class="account-sync__icon account-sync__icon--${escapeHtml(phase)}">${svgIcon(view.icon, 18)}</span>
       <div>
         <p class="card-title">${escapeHtml(view.title)}</p>
         ${detalhe ? `<p class="card-subtitle">${escapeHtml(detalhe)}</p>` : ""}
+        ${garantia ? `<p class="field-hint">${escapeHtml(garantia)}</p>` : ""}
         ${quando ? `<p class="field-hint">Última sincronização: ${escapeHtml(quando)}</p>` : ""}
+        ${phase === "error" && sync.errorCode ? `<p class="field-hint">Código da falha: ${escapeHtml(sync.errorCode)}</p>` : ""}
       </div>
     </div>
-    ${sync.enabled ? `<button class="btn btn--secondary btn--sm" data-action="account-sync-now" ${sync.phase === "syncing" ? "disabled" : ""}>${svgIcon("refresh", 15)} Sincronizar agora</button>` : ""}
+    ${podeTentar ? `<button class="btn btn--secondary btn--sm" data-action="account-sync-now" ${sync.phase === "syncing" ? "disabled" : ""}>${svgIcon("refresh", 15)} ${sync.enabled ? "Sincronizar agora" : "Tentar de novo"}</button>` : ""}
   </div>`;
 }
 
@@ -81,6 +114,7 @@ function accountSignedIn() {
 function renderAccountScreen() {
   const status = accountStatusCard();
   return `<div class="screen screen--narrow">${renderBackHeader("Conta e acesso")}${status}
+    ${state.account.configured === false || state.account.loading ? "" : accountPendingCard()}
     ${state.account.configured === false || state.account.loading ? "" : (state.account.authenticated ? accountSignedIn() : accountGuestForm())}
     ${state.account.error ? `<div class="form-error-summary" role="alert">${svgIcon("alertTriangle", 16)} ${escapeHtml(state.account.error)}</div>` : ""}
     ${state.account.message ? `<div class="account-message" role="status">${svgIcon("checkCircle", 16)} ${escapeHtml(state.account.message)}</div>` : ""}

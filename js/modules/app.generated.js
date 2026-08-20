@@ -1387,7 +1387,7 @@ if (typeof module !== "undefined" && module.exports) {
 const SAFE_ERROR_STORAGE_KEY = "financas_safe_errors_v1";
 const SAFE_ERROR_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const SAFE_ERROR_LIMIT = 50;
-const SAFE_ERROR_APP_VERSION = "0.29.0";
+const SAFE_ERROR_APP_VERSION = "0.29.1";
 const SAFE_ERROR_AREAS = new Set(["app", "storage", "backup", "import", "sync", "ai", "qr", "events"]);
 const SAFE_ERROR_CODES = new Set([
   "unexpected", "app_init", "storage_init", "storage_read", "storage_write", "storage_delete",
@@ -3661,6 +3661,21 @@ function cloudMutationId() {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
+// Corpo de erro do próprio servidor, lido sem confiar em nada: uma resposta de
+// erro pode não ser JSON (página de erro da hospedagem, por exemplo), e uma
+// falha ao ler não pode virar outra falha por cima da primeira.
+async function cloudErrorBody(res) {
+  try {
+    const texto = await res.text();
+    if (!texto || texto.length > 8192) return {};
+    const dados = JSON.parse(texto);
+    if (!dados || typeof dados !== "object") return {};
+    const code = typeof dados.code === "string" && /^[a-z0-9_]{1,40}$/.test(dados.code) ? dados.code : null;
+    const message = typeof dados.message === "string" && dados.message.length <= 300 ? dados.message : null;
+    return { code, message };
+  } catch (e) { return {}; }
+}
+
 class CloudSyncError extends Error {
   constructor(message, code, status) {
     super(message);
@@ -3756,8 +3771,23 @@ class CloudAdapter extends StorageAdapter {
     }
 
     if (res.status === 409) throw new CloudSyncConflictError(res.headers && res.headers.get ? res.headers.get("x-sync-revision") : null);
-    if (res.status === 401 || res.status === 403) throw new CloudSyncError("A sessão de sincronização expirou.", "session_expired", res.status);
-    if (!res.ok) throw new CloudSyncError(`O servidor de sincronização recusou a operação (${res.status}).`, "server_error", res.status);
+    if (!res.ok) {
+      // A RAZÃO DA FALHA VEM NO CORPO, E ERA JOGADA FORA.
+      //
+      // O servidor deste app responde erro com `{ code, message }` escrito para
+      // o usuário. Aqui só se olhava para o número do status, então "faltam as
+      // tabelas no banco", "origem recusada" e "email não confirmado" viravam a
+      // mesma frase sem conteúdo, e a tela mostrava "Sincronização com falha"
+      // sem nunca dizer a falha.
+      const detalhe = await cloudErrorBody(res);
+      if (res.status === 401 || res.status === 403) {
+        // O código continua sendo um dos DOIS que o motor sabe tratar (parar em
+        // vez de insistir); só a frase passa a ser a de verdade.
+        const codigo = detalhe.code === "device_revoked" ? "device_revoked" : "session_expired";
+        throw new CloudSyncError(detalhe.message || "A sessão de sincronização expirou.", codigo, res.status);
+      }
+      throw new CloudSyncError(detalhe.message || `O servidor de sincronização recusou a operação (${res.status}).`, detalhe.code || "server_error", res.status);
+    }
     if (res.status === 204) return null;
 
     const contentType = String(res.headers && res.headers.get ? res.headers.get("content-type") : "").toLowerCase();
@@ -5674,6 +5704,10 @@ function accountDeviceLabel() {
 function freshAccountState() {
   return {
     loading: true, configured: null, authenticated: false, email: "", userId: "", mode: "login", busy: false, error: "", message: "",
+    // Email cadastrado que ainda espera confirmação. Enquanto ele existe, a
+    // tela mostra o cartão de "confirmação pendente" com o botão de reenvio;
+    // antes disto, quem não recebia o email não tinha para onde ir.
+    pendingEmail: "",
     form: { email: "", password: "", newPassword: "", deletePassword: "", deleteText: "" }, devices: [],
   };
 }
@@ -5802,6 +5836,7 @@ const AccountAPI = (() => {
   return {
     session: () => request("session"), register: (body) => request("register", { method: "POST", body }),
     login: (body) => request("login", { method: "POST", body }), recover: (body) => request("recover", { method: "POST", body }),
+    resend: (email) => request("resend", { method: "POST", body: { email } }),
     exchange: (code) => request("exchange", { method: "POST", body: { code } }), logout: () => request("logout", { method: "POST", body: {} }),
     password: (password) => request("password", { method: "POST", body: { password } }), devices: () => request("devices"),
     revokeDevice: (deviceId) => request("revoke-device", { method: "POST", body: { deviceId } }),
@@ -5828,6 +5863,10 @@ async function refreshAccountSession() {
     state.account.email = result.email || "";
     state.account.userId = result.userId || "";
     state.account.loading = false;
+    // O servidor devolve a sessão pendente em vez de simplesmente negar: é
+    // assim que a tela sabe oferecer o reenvio para o endereço certo.
+    if (result.pendingConfirmation) state.account.pendingEmail = result.email || state.account.pendingEmail;
+    else if (state.account.authenticated) state.account.pendingEmail = "";
     if (state.account.authenticated) {
       try {
         const devices = await AccountAPI.devices();
@@ -5871,27 +5910,88 @@ async function refreshAccountSession() {
   render();
 }
 
+// ------------------------------------------------------------------------------
+// O RETORNO DO LINK DO EMAIL
+// ------------------------------------------------------------------------------
+// O endereço pode voltar de duas formas, e antes só a primeira era entendida:
+//
+//   ?code=...                     fluxo PKCE, o caminho normal deste app;
+//   ?error=...&error_code=...     o Supabase recusou o link (expirado, já usado),
+//                                 na query ou depois do `#`.
+//
+// A segunda caía em "O link não trouxe um código válido", que não diz nem o
+// que houve nem o que fazer. Um link expirado precisa dizer que expirou.
+//
+// Este aplicativo NÃO lê credencial nenhuma do endereço: a sessão vive em
+// cookie HttpOnly, emitido pelo servidor. O que se procura aqui é só o aviso
+// de erro. Ver a checagem "frontend usa cookies" em tests/test-account-backend.js.
+//
+// O `#` também é onde mora a ROTA do aplicativo (`#/conta-e-acesso`). Um hash
+// que começa com barra é rota, nunca retorno de email.
+function authCallbackError() {
+  const bruto = String(location.hash || "");
+  if (!bruto || bruto.startsWith("#/")) return "";
+  let params;
+  try { params = new URLSearchParams(bruto.slice(1)); } catch (_) { return ""; }
+  return params.get("error_code") || params.get("error") || "";
+}
+
+// O que o Supabase manda no endereço quando recusa o link. Traduzir aqui evita
+// jogar o código cru do provedor na cara de quem só queria entrar.
+function authLinkErrorMessage(codigo) {
+  if (/expired/i.test(codigo)) return "Este link expirou. Peça um novo pela tela de conta.";
+  if (/access_denied|used|invalid/i.test(codigo)) return "Este link não vale mais. Ele pode já ter sido usado.";
+  return "O link não trouxe um código válido.";
+}
+
 async function bootstrapAccount() {
   const params = new URLSearchParams(location.search || "");
   const code = params.get("code");
   const callback = params.get("auth_callback");
+  const recuperacao = callback === "recovery";
+  const erroNaQuery = params.get("error_code") || params.get("error") || "";
+  const erroNoHash = authCallbackError();
+  let consumiu = false;
+
   if (code) {
+    consumiu = true;
     try {
       const result = await AccountAPI.exchange(code);
       state.account.authenticated = true;
       state.account.email = result.email || "";
+      state.account.pendingEmail = "";
       state.account.mode = result.purpose === "recovery" ? "password" : "login";
       state.account.message = result.purpose === "recovery" ? "Defina uma nova senha para concluir a recuperação." : "Email confirmado. Sua conta está pronta.";
-      state.tab = "account";
-      if (typeof NavHistory !== "undefined") NavHistory.replace("account", [], 0);
-    } catch (error) { state.account.error = error.message; state.tab = "account"; }
-    params.delete("code"); params.delete("auth_callback");
-    const query = params.toString();
-    history.replaceState(history.state, "", `${location.pathname}${query ? `?${query}` : ""}${location.hash || ""}`);
+    } catch (error) {
+      // `verifier_missing` NÃO é link quebrado: é link aberto em outro
+      // navegador. No cadastro, o email já foi confirmado do lado do servidor
+      // antes de chegar aqui, então a notícia é boa e o passo seguinte é
+      // entrar. Na recuperação não dá para seguir: a nova senha precisa do
+      // navegador que pediu.
+      if (error.code === "verifier_missing" && !recuperacao) {
+        state.account.message = "Email confirmado. Entre com seu email e senha para continuar.";
+        state.account.pendingEmail = "";
+      } else if (error.code === "verifier_missing") {
+        state.account.error = "Abra o link de recuperação no mesmo navegador em que você o pediu, ou peça um novo.";
+      } else state.account.error = error.message;
+    }
+  } else if (erroNaQuery || erroNoHash) {
+    consumiu = true;
+    state.account.error = authLinkErrorMessage(erroNaQuery || erroNoHash);
   } else if (callback) {
+    consumiu = true;
     state.account.error = "O link não trouxe um código válido.";
+  }
+
+  if (consumiu) {
     state.tab = "account";
     if (typeof NavHistory !== "undefined") NavHistory.replace("account", [], 0);
+    ["code", "auth_callback", "error", "error_code", "error_description"].forEach((chave) => params.delete(chave));
+    const query = params.toString();
+    // O hash só é limpo quando ERA aviso de erro do link. Limpar sempre
+    // apagaria a rota do aplicativo, que também mora depois do `#`.
+    const hash = erroNoHash ? "" : (location.hash || "");
+    history.replaceState(history.state, "", `${location.pathname}${query ? `?${query}` : ""}${hash}`);
   }
   await refreshAccountSession();
 }
@@ -5920,16 +6020,40 @@ async function accountSubmit(kind) {
     form.password = "";
     if (kind === "recover") state.account.message = "Se o email estiver cadastrado, você receberá um link de recuperação.";
     else if (kind === "password") { state.account.message = "Senha atualizada."; state.account.mode = "login"; form.newPassword = ""; }
-    else if (result.confirmationRequired) state.account.message = "Confira seu email para confirmar o cadastro.";
-    else { state.account.authenticated = !!result.authenticated; state.account.email = result.email || form.email; state.account.message = kind === "register" ? "Conta criada." : "Acesso confirmado."; }
+    else if (result.confirmationRequired) {
+      // A FRASE PRECISA COBRIR OS DOIS DESFECHOS.
+      //
+      // Dizia só "Confira seu email para confirmar o cadastro". Para um
+      // endereço que JÁ TEM CONTA o Supabase devolve exatamente esta mesma
+      // resposta, de propósito, e nenhum email sai. Quem caía nesse caso ficava
+      // esperando para sempre uma mensagem que nunca ia chegar. Agora a tela
+      // diz as duas saídas, sem revelar qual delas é a sua.
+      state.account.pendingEmail = result.email || form.email;
+      state.account.message = "Se este email ainda não tinha conta, o link de confirmação foi enviado. Se já tinha, entre com sua senha.";
+    } else { state.account.authenticated = !!result.authenticated; state.account.email = result.email || form.email; state.account.pendingEmail = ""; state.account.message = kind === "register" ? "Conta criada." : "Acesso confirmado."; }
     state.account.busy = false;
     await refreshAccountSession();
   } catch (error) {
     // Também no erro: senha errada continua sendo senha, e a tentativa seguinte
     // é digitada do zero.
     form.password = "";
+    // Entrar com email não confirmado deixa de ser recusa muda: a tela passa a
+    // mostrar o cartão de confirmação pendente, com o reenvio à mão.
+    if (error.code === "email_not_confirmed") state.account.pendingEmail = form.email;
     accountSetBusy(false, error.message);
   }
+}
+
+async function accountResend() {
+  const alvo = state.account.pendingEmail || state.account.form.email;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(alvo)) { showFormErrors({ "account-email": "Informe um email válido." }, "Revise os dados da conta."); return; }
+  accountSetBusy(true, "");
+  try {
+    await AccountAPI.resend(alvo);
+    state.account.pendingEmail = alvo;
+    state.account.message = "Se este email tiver um cadastro esperando confirmação, o link foi reenviado. Veja também a caixa de spam.";
+    accountSetBusy(false, "");
+  } catch (error) { accountSetBusy(false, error.message); }
 }
 
 async function accountLogout() {
@@ -6201,6 +6325,15 @@ const CloudSync = (() => {
       setState({ phase: "error", error: "Atualize o aplicativo para voltar a sincronizar.", errorCode: code });
       return false;
     }
+    // Problema de INSTALAÇÃO não se resolve sozinho em 30 segundos. Tentar de
+    // novo em laço só esconde a causa e gasta bateria; a mensagem do servidor
+    // já diz o que falta fazer, e o botão da tela refaz a tentativa na hora em
+    // que a pessoa quiser.
+    if (code === "schema_missing" || code === "not_configured" || code === "origin_denied") {
+      disable();
+      setState({ phase: "error", error: (error && error.message) || "A sincronização não está configurada neste servidor.", errorCode: code });
+      return false;
+    }
     if (code === "network_error" || code === "timeout" || code === "upstream_unavailable") {
       setState({ phase: "offline", pending: true, error: null, errorCode: code });
       scheduleRetry();
@@ -6237,6 +6370,15 @@ const CloudSync = (() => {
     if (!state.enabled) return Promise.resolve(false);
     clearTimeout(pendingTimer);
     return runSync();
+  }
+
+  // O botão "tentar de novo" da tela de conta. Quando o motor está ligado, é um
+  // ciclo. Quando ele PAROU por erro (sessão morta, migração faltando), é uma
+  // nova tentativa de ligar; era exatamente aí que a tela não oferecia botão
+  // nenhum e a única saída conhecida era recarregar a página.
+  function retry() {
+    if (state.enabled) return syncNow();
+    return enable();
   }
 
   // ---------------------------------------------------------------------------
@@ -6334,7 +6476,17 @@ const CloudSync = (() => {
       const code = (error && error.code) || "unavailable";
       // Site publicado sem o backend configurado não é erro do usuário; é só
       // um recurso que não existe naquela instalação.
-      setState({ enabled: false, phase: code === "not_configured" ? "disabled" : "error", errorCode: code, error: null });
+      //
+      // Nos DEMAIS casos a mensagem do servidor é guardada. Ela era descartada
+      // (`error: null`), e por isso a tela dizia "Sincronização com falha" e
+      // parava por aí: quem estava vendo não tinha como saber se era a sessão,
+      // a rede ou uma migração que faltou rodar no banco.
+      setState({
+        enabled: false,
+        phase: code === "not_configured" ? "disabled" : "error",
+        errorCode: code,
+        error: code === "not_configured" ? null : ((error && error.message) || "Não foi possível ligar a sincronização."),
+      });
       return false;
     }
     FinanceStore.setOutboxEnabled(true);
@@ -6377,6 +6529,7 @@ const CloudSync = (() => {
     disable,
     schedule,
     syncNow,
+    retry,
     resetRemote,
     createCheckpoint,
     listCheckpoints,
@@ -24556,6 +24709,28 @@ function accountGuestForm() {
   </div>`;
 }
 
+// Cartão de confirmação pendente.
+//
+// Ele existe porque não havia saída para o email que não chega: a tela dizia
+// "Confira seu email", o email não vinha, e não havia botão nenhum para pedir
+// outro. Reenviar exigia cadastrar de novo, o que devolve a mesma resposta
+// opaca do servidor e não dispara link nenhum para quem já tem conta.
+function accountPendingCard() {
+  const a = state.account;
+  if (!a.pendingEmail || a.authenticated) return "";
+  return `<div class="card account-sync account-pending">
+    <div class="account-sync__head">
+      <span class="account-sync__icon account-sync__icon--idle">${svgIcon("clock", 18)}</span>
+      <div>
+        <p class="card-title">Confirmação de email pendente</p>
+        <p class="card-subtitle">O link de confirmação vai para ${escapeHtml(a.pendingEmail)}. Enquanto ele não for aberto, esta conta não entra e não sincroniza.</p>
+        <p class="field-hint">O link vale 24 horas. Se ele não aparecer, procure na caixa de spam antes de pedir outro.</p>
+      </div>
+    </div>
+    <button class="btn btn--secondary btn--sm" data-action="account-resend" ${a.busy ? "disabled" : ""}>${svgIcon("refresh", 15)} Reenviar confirmação</button>
+  </div>`;
+}
+
 function accountDeviceDate(value) {
   const date = new Date(value || "");
   return Number.isNaN(date.getTime()) ? "data indisponível" : date.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
@@ -24580,16 +24755,27 @@ function accountSyncCard() {
   const view = ACCOUNT_SYNC_VIEW[phase] || ACCOUNT_SYNC_VIEW.idle;
   const quando = sync.lastSyncAt ? accountDeviceDate(sync.lastSyncAt) : null;
   const detalhe = sync.error || view.note;
+  // A frase que tranquiliza NÃO pode ocupar o lugar da que explica. Quando o
+  // servidor manda o motivo, os dois aparecem: o motivo em cima, a garantia de
+  // que nada se perdeu embaixo. Antes, um excluía o outro, e no caso de falha o
+  // motivo era exatamente o que sumia.
+  const garantia = phase === "error" && sync.error ? view.note : "";
+  // Falha precisa de saída. O botão só existia com o motor LIGADO, e a falha
+  // que mais acontece (ligar e não conseguir) desliga o motor: sobrava
+  // recarregar a página, sem nada na tela dizendo isso.
+  const podeTentar = sync.enabled || phase === "error";
   return `<div class="card account-sync">
     <div class="account-sync__head">
       <span class="account-sync__icon account-sync__icon--${escapeHtml(phase)}">${svgIcon(view.icon, 18)}</span>
       <div>
         <p class="card-title">${escapeHtml(view.title)}</p>
         ${detalhe ? `<p class="card-subtitle">${escapeHtml(detalhe)}</p>` : ""}
+        ${garantia ? `<p class="field-hint">${escapeHtml(garantia)}</p>` : ""}
         ${quando ? `<p class="field-hint">Última sincronização: ${escapeHtml(quando)}</p>` : ""}
+        ${phase === "error" && sync.errorCode ? `<p class="field-hint">Código da falha: ${escapeHtml(sync.errorCode)}</p>` : ""}
       </div>
     </div>
-    ${sync.enabled ? `<button class="btn btn--secondary btn--sm" data-action="account-sync-now" ${sync.phase === "syncing" ? "disabled" : ""}>${svgIcon("refresh", 15)} Sincronizar agora</button>` : ""}
+    ${podeTentar ? `<button class="btn btn--secondary btn--sm" data-action="account-sync-now" ${sync.phase === "syncing" ? "disabled" : ""}>${svgIcon("refresh", 15)} ${sync.enabled ? "Sincronizar agora" : "Tentar de novo"}</button>` : ""}
   </div>`;
 }
 
@@ -24614,6 +24800,7 @@ function accountSignedIn() {
 function renderAccountScreen() {
   const status = accountStatusCard();
   return `<div class="screen screen--narrow">${renderBackHeader("Conta e acesso")}${status}
+    ${state.account.configured === false || state.account.loading ? "" : accountPendingCard()}
     ${state.account.configured === false || state.account.loading ? "" : (state.account.authenticated ? accountSignedIn() : accountGuestForm())}
     ${state.account.error ? `<div class="form-error-summary" role="alert">${svgIcon("alertTriangle", 16)} ${escapeHtml(state.account.error)}</div>` : ""}
     ${state.account.message ? `<div class="account-message" role="status">${svgIcon("checkCircle", 16)} ${escapeHtml(state.account.message)}</div>` : ""}
@@ -25074,8 +25261,11 @@ function onClick(e) {
       break;
     case "account-mode": state.account.mode = value === "register" || value === "recover" ? value : "login"; state.account.error = ""; state.account.message = ""; render(); break;
     case "account-submit": accountSubmit(value); break;
+    case "account-resend": accountResend(); break;
     case "account-refresh": refreshAccountSession(); break;
-    case "account-sync-now": if (typeof CloudSync !== "undefined") CloudSync.syncNow(); break;
+    // `retry` e não `syncNow`: quando o motor parou por erro, sincronizar
+    // agora não faz nada, e é justamente nesse estado que o botão aparece.
+    case "account-sync-now": if (typeof CloudSync !== "undefined") CloudSync.retry(); break;
     case "account-logout": accountLogout(); break;
     case "account-revoke":
       requestConfirmation({ title: "Revogar acesso deste dispositivo?", message: "A sessão desse dispositivo deixará de acessar sua conta.", confirmLabel: "Revogar acesso", tone: "danger", onConfirm: () => accountRevoke(id) });

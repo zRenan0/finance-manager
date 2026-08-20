@@ -93,10 +93,17 @@ function json(statusCode, body, options = {}) {
   return response;
 }
 
+// Erro de servidor não conta o que aconteceu: rastro de pilha e texto de
+// provedor não podem ir para a rede. A exceção é explícita e nomeada: um erro
+// que o próprio backend construiu, com frase escrita para o usuário, pode
+// marcar `exposeMessage` e atravessar. É o que permite dizer "o servidor não
+// conseguiu enviar o email" em vez de "não foi possível concluir a operação",
+// que é a mesma frase para dez causas diferentes e não ajuda ninguém.
 function safeFailure(error) {
   const known = error && error.code;
   const statusCode = Number(error && error.statusCode) || 500;
-  const message = statusCode >= 500 ? "Não foi possível concluir a operação." : (error.message || "Requisição inválida.");
+  const exposta = !!(error && error.exposeMessage && error.message);
+  const message = statusCode >= 500 && !exposta ? "Não foi possível concluir a operação." : (error.message || "Requisição inválida.");
   return json(statusCode, { ok: false, code: known || "server_error", message });
 }
 

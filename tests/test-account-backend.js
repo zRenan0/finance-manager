@@ -48,8 +48,10 @@ async function main() {
   process.env.ALLOWED_ORIGIN = "https://cofre.test";
   const originalAuth = { ...api.auth };
   const originalDb = api.db;
-  api.auth.signIn = async (email) => ({ access_token: "access-secret", refresh_token: "refresh-secret", expires_in: 3600, user: { id: "00000000-0000-4000-8000-000000000001", email } });
-  api.auth.user = async () => ({ id: "00000000-0000-4000-8000-000000000001", email: "pessoa@example.com" });
+  api.auth.signIn = async (email) => ({ access_token: "access-secret", refresh_token: "refresh-secret", expires_in: 3600, user: { id: "00000000-0000-4000-8000-000000000001", email, email_confirmed_at: "2026-08-01T12:00:00Z" } });
+  // `email_confirmed_at` presente porque a sessão passou a exigi-lo: conta sem
+  // email confirmado não entra e não sincroniza. Ver test-account-confirmation.js.
+  api.auth.user = async () => ({ id: "00000000-0000-4000-8000-000000000001", email: "pessoa@example.com", email_confirmed_at: "2026-08-01T12:00:00Z" });
   api.db = async (route, options) => route.includes("cofre_devices?") && (!options || options.method === undefined) ? [] : null;
   delete require.cache[require.resolve(path.join(ROOT, "netlify/functions/account"))];
   const account = require(path.join(ROOT, "netlify/functions/account"));
@@ -195,7 +197,7 @@ async function main() {
     };
     let apagouUsuario = false;
     api.auth.deleteUser = async () => { apagouUsuario = true; return {}; };
-    api.auth.signIn = async () => ({ access_token: "access-secret", refresh_token: "refresh-secret", expires_in: 3600, user: { id: "00000000-0000-4000-8000-000000000001", email: "pessoa@example.com" } });
+    api.auth.signIn = async () => ({ access_token: "access-secret", refresh_token: "refresh-secret", expires_in: 3600, user: { id: "00000000-0000-4000-8000-000000000001", email: "pessoa@example.com", email_confirmed_at: "2026-08-01T12:00:00Z" } });
 
     const apagar = await account.handler(event("POST", "delete", { password: "senha-segura-123", confirmation: "APAGAR CONTA" }, { cookie: cookieHeader }));
     const corpo = JSON.parse(apagar.body);

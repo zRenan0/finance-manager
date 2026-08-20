@@ -155,8 +155,15 @@ async function main() {
   const fonte = read("netlify/functions/account.js");
   check("o servidor não monta mais o retorno para a raiz",
     !/siteOrigin\(event\)\}\/\?auth_callback/.test(fonte));
-  check("os dois fluxos passam pela mesma montagem",
-    (fonte.match(/appCallbackUrl\(event, "(?:signup|recovery)"\)/g) || []).length === 2);
+  // São TRÊS os fluxos que mandam link por email: cadastro, recuperação e
+  // reenvio da confirmação. O número é conferido de propósito: um fluxo novo
+  // que monte o endereço à mão reprova aqui em vez de sair silenciosamente
+  // apontando para a raiz do domínio, que é o defeito que este arquivo existe
+  // para impedir.
+  check("os três fluxos passam pela mesma montagem",
+    (fonte.match(/appCallbackUrl\(event, "(?:signup|recovery)"\)/g) || []).length === 3);
+  check("o reenvio da confirmação também usa a montagem",
+    /action === "resend"[\s\S]*?appCallbackUrl\(event, "signup"\)/.test(fonte));
   check("a montagem aponta para o aplicativo",
     /return `\$\{siteOrigin\(event\)\}\/index\.html\?auth_callback=\$\{purpose\}`/.test(fonte));
 

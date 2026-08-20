@@ -1,5 +1,69 @@
 # Histórico de versões
 
+## 0.29.1
+
+Correção do cadastro por email e do diagnóstico da sincronização. Três defeitos
+que se combinavam: o email não chegava, a confirmação não valia nada, e a falha
+de sincronização não dizia a causa.
+
+### A confirmação de email passou a valer
+
+- **Conta sem email confirmado não entra e não sincroniza.** O servidor nunca
+  olhava para `email_confirmed_at`: a tela pedia a confirmação e, logo depois,
+  entrar funcionava do mesmo jeito. Quem decidia era uma chave do painel do
+  Supabase que o aplicativo não enxerga, então a mesma versão do código se
+  comportava de dois jeitos opostos conforme o projeto. Agora `login`, `session`
+  e tudo que exige sessão respondem `403 email_not_confirmed` enquanto a
+  confirmação não acontecer.
+- **Existe como reenviar a confirmação.** Não havia saída para o email que não
+  chega: cadastrar de novo devolve a mesma resposta opaca que o Supabase dá
+  para endereço já cadastrado, e nenhum link novo sai. A tela de conta passou a
+  ter um cartão de confirmação pendente com o botão de reenvio.
+- **A frase do cadastro cobre os dois desfechos.** Dizia só "Confira seu email
+  para confirmar o cadastro". Para um endereço que já tem conta, essa mesma
+  resposta vem sem que nenhum email seja enviado, e a pessoa ficava esperando
+  para sempre. Agora a tela diz as duas saídas sem revelar qual delas é a sua.
+
+### O link do email parou de morrer sozinho
+
+- **O cookie do fluxo PKCE durava 10 minutos; o link do email dura 24 horas.**
+  Quem abrisse o email um pouco mais tarde recebia "Link expirado ou inválido"
+  para um link ainda perfeitamente válido. O prazo agora acompanha o do provedor.
+- **Abrir o link no celular deixou de virar erro falso.** O email é confirmado
+  pelo servidor do Supabase antes do redirecionamento; o que não vem junto é a
+  sessão, porque o verificador PKCE mora no navegador que começou. A tela agora
+  diz "Email confirmado. Entre com seu email e senha para continuar." em vez de
+  acusar um link quebrado que não está quebrado.
+- **Link expirado ou já usado é dito como tal**, na query ou depois do `#`.
+
+### O erro do Supabase chega traduzido, não apagado
+
+- Todo `4xx` virava a mesma frase, "A operação foi recusada.". Isso apagava
+  justamente a informação que resolve o problema: falha de SMTP, teto de envio
+  de email, senha errada e migração não aplicada chegavam idênticos. A tradução
+  é uma lista fechada; o que não está nela continua genérico, para não vazar
+  detalhe interno do provedor.
+- **A falha de envio de email passou a ser dizível.** É o caso mais comum de "o
+  email não chega" (SMTP ausente, ou o serviço embutido do Supabase, que só
+  entrega para membros da organização do projeto).
+
+### A sincronização diz por que falhou
+
+- **A razão da falha vinha no corpo da resposta e era jogada fora.** O cliente
+  só olhava o número do status, então a tela mostrava "Sincronização com falha"
+  e parava aí. Agora repete o motivo que o servidor mandou, mostra o código da
+  falha e oferece **Tentar de novo**, botão que só existia com o motor ligado,
+  justamente o estado que a falha mais comum desliga.
+- **Migração não aplicada é reconhecida pelo nome.** Rodar só a primeira
+  migração é o erro mais fácil de cometer na instalação, e ele não aparece na
+  tela de entrar: login e cadastro funcionam, porque usam outra tabela. A falha
+  agora diz que faltam as tabelas e aponta `supabase/migrations`.
+- Erro de instalação parou de ser retentado a cada 30 segundos, o que só
+  escondia a causa.
+- `docs/BACKEND_SETUP.md` passou a listar as **três** migrações obrigatórias,
+  com o que quebra sem cada uma, e a exigir SMTP próprio antes de convidar
+  qualquer pessoa.
+
 ## 0.29.0
 
 Auditoria de preparação para o beta público. Esta versão corrige defeitos que

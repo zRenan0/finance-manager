@@ -207,8 +207,11 @@ function onClick(e) {
       break;
     case "account-mode": state.account.mode = value === "register" || value === "recover" ? value : "login"; state.account.error = ""; state.account.message = ""; render(); break;
     case "account-submit": accountSubmit(value); break;
+    case "account-resend": accountResend(); break;
     case "account-refresh": refreshAccountSession(); break;
-    case "account-sync-now": if (typeof CloudSync !== "undefined") CloudSync.syncNow(); break;
+    // `retry` e não `syncNow`: quando o motor parou por erro, sincronizar
+    // agora não faz nada, e é justamente nesse estado que o botão aparece.
+    case "account-sync-now": if (typeof CloudSync !== "undefined") CloudSync.retry(); break;
     case "account-logout": accountLogout(); break;
     case "account-revoke":
       requestConfirmation({ title: "Revogar acesso deste dispositivo?", message: "A sessão desse dispositivo deixará de acessar sua conta.", confirmLabel: "Revogar acesso", tone: "danger", onConfirm: () => accountRevoke(id) });
