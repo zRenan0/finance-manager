@@ -1229,3 +1229,16 @@
   .hero-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .hero-action--primary { grid-column: 1 / -1; }
 }
+
+/* Aviso na revisão da importação: lançamentos anteriores à abertura da conta
+   entram nas análises mas não no saldo. Tom de atenção, não de erro: nada
+   está errado, só precisa ser dito antes de o usuário estranhar o saldo. */
+.import-notice {
+  display:flex; gap:10px; align-items:flex-start;
+  margin:10px 0 2px; padding:11px 13px;
+  border:1px solid color-mix(in srgb, var(--goal) 30%, transparent);
+  background:var(--goal-soft); border-radius:10px;
+}
+.import-notice > svg { flex:0 0 auto; margin-top:1px; color:var(--goal); }
+.import-notice b { display:block; font-size:13px; line-height:1.35; color:var(--ink); }
+.import-notice span { display:block; margin-top:3px; font-size:12px; line-height:1.45; color:var(--ink-soft); }

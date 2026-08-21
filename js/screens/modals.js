@@ -85,9 +85,25 @@ function renderMovementDetailModal() {
   </div>`;
 }
 
+// UMA DATA PURA NÃO TEM HORA, E NÃO É UTC.
+//
+// Esta função recebe dois formatos: carimbos completos (`createdAt`,
+// `updatedAt`, `changeLog[].at`) e datas puras (`lastMovementAt`, que guarda o
+// `date` do lançamento). `new Date("2026-08-20")` é lido como meia-noite UTC e,
+// em qualquer fuso brasileiro, volta um dia: o lançamento de 20/08 aparecia
+// como "19/08/2026, 21:00". A hora, além de deslocada, era inventada: o campo
+// nunca teve hora. Agora data pura é formatada como data, e só carimbo completo
+// mostra horário. O meio-dia local preserva o dia em qualquer fuso, inclusive
+// nas viradas de horário de verão.
 function formatMovementTimestamp(value) {
-  const date = new Date(value || "");
-  return Number.isNaN(date.getTime()) ? "Data não disponível" : date.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+  const bruto = String(value == null ? "" : value).trim();
+  if (!bruto) return "Data não disponível";
+  const somenteData = /^\d{4}-\d{2}-\d{2}$/.test(bruto);
+  const date = new Date(somenteData ? `${bruto}T12:00:00` : bruto);
+  if (Number.isNaN(date.getTime())) return "Data não disponível";
+  return somenteData
+    ? date.toLocaleDateString("pt-BR", { dateStyle: "short" })
+    : date.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
 }
 
 function renderReviewCardPaymentModal() {

@@ -364,7 +364,24 @@ const AccountAPI = (() => {
         body: o.body === undefined ? undefined : JSON.stringify(o.body),
       });
     } catch (_) { throw new Error("Não foi possível acessar o serviço de conta."); }
-    if (response.status === 404 && path === "session") return { ok: true, configured: false, authenticated: false };
+    // AUSÊNCIA DE BACKEND NÃO É ERRO DO USUÁRIO.
+    //
+    // Publicação estática, o servidor de desenvolvimento (`npm start`) e portais
+    // de Wi-Fi respondem `/api/*` com o HTML do próprio aplicativo e status 200.
+    // O `404` já era tratado; o `200 text/html` não era, caía no erro genérico e
+    // a tela de conta abria com alerta vermelho antes de o usuário digitar
+    // qualquer coisa. Resposta sem JSON significa que não há serviço de conta
+    // aqui, que é o "modo local", estado que a tela já sabe apresentar.
+    const tipoConteudo = String(response.headers.get("content-type") || "");
+    const respostaEhJson = tipoConteudo.indexOf("json") !== -1;
+    if (path === "session" && (response.status === 404 || !respostaEhJson)) {
+      return { ok: true, configured: false, authenticated: false };
+    }
+    if (!respostaEhJson) {
+      const semServico = new Error("O serviço de conta não está disponível nesta publicação.");
+      semServico.code = "account_unavailable";
+      throw semServico;
+    }
     const payload = await response.json().catch(() => null);
     if (!response.ok || !payload || payload.ok === false) {
       const error = new Error(payload && payload.message || "Não foi possível concluir a operação.");
@@ -426,7 +443,12 @@ async function refreshAccountSession() {
     state.account.loading = false;
     state.account.configured = true;
     state.account.authenticated = false;
-    state.account.error = error.message;
+    // Esta consulta é automática: roda ao abrir o aplicativo, sem ninguém pedir.
+    // Falha aqui não descreve nada que o usuário tenha feito, e um alerta
+    // vermelho na abertura da tela só destrói a confiança em quem ia se
+    // cadastrar. O formulário continua disponível; se a tentativa real de
+    // entrar falhar, aí sim o erro aparece, com a causa certa e na hora certa.
+    state.account.error = "";
   }
 
   // O banco carregado precisa ser o da sessão ANTES de qualquer sincronização;

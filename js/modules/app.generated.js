@@ -6897,7 +6897,24 @@ const AccountAPI = (() => {
         body: o.body === undefined ? undefined : JSON.stringify(o.body),
       });
     } catch (_) { throw new Error("Não foi possível acessar o serviço de conta."); }
-    if (response.status === 404 && path === "session") return { ok: true, configured: false, authenticated: false };
+    // AUSÊNCIA DE BACKEND NÃO É ERRO DO USUÁRIO.
+    //
+    // Publicação estática, o servidor de desenvolvimento (`npm start`) e portais
+    // de Wi-Fi respondem `/api/*` com o HTML do próprio aplicativo e status 200.
+    // O `404` já era tratado; o `200 text/html` não era, caía no erro genérico e
+    // a tela de conta abria com alerta vermelho antes de o usuário digitar
+    // qualquer coisa. Resposta sem JSON significa que não há serviço de conta
+    // aqui, que é o "modo local", estado que a tela já sabe apresentar.
+    const tipoConteudo = String(response.headers.get("content-type") || "");
+    const respostaEhJson = tipoConteudo.indexOf("json") !== -1;
+    if (path === "session" && (response.status === 404 || !respostaEhJson)) {
+      return { ok: true, configured: false, authenticated: false };
+    }
+    if (!respostaEhJson) {
+      const semServico = new Error("O serviço de conta não está disponível nesta publicação.");
+      semServico.code = "account_unavailable";
+      throw semServico;
+    }
     const payload = await response.json().catch(() => null);
     if (!response.ok || !payload || payload.ok === false) {
       const error = new Error(payload && payload.message || "Não foi possível concluir a operação.");
@@ -6959,7 +6976,12 @@ async function refreshAccountSession() {
     state.account.loading = false;
     state.account.configured = true;
     state.account.authenticated = false;
-    state.account.error = error.message;
+    // Esta consulta é automática: roda ao abrir o aplicativo, sem ninguém pedir.
+    // Falha aqui não descreve nada que o usuário tenha feito, e um alerta
+    // vermelho na abertura da tela só destrói a confiança em quem ia se
+    // cadastrar. O formulário continua disponível; se a tentativa real de
+    // entrar falhar, aí sim o erro aparece, com a causa certa e na hora certa.
+    state.account.error = "";
   }
 
   // O banco carregado precisa ser o da sessão ANTES de qualquer sincronização;
@@ -8445,6 +8467,15 @@ function buildDataSourcesModel(data) {
       lastMovementAt: related.map((entry) => String(entry.date || "")).filter(Boolean).sort().pop() || null,
       reconciledAt: account.reconciledAt || null,
       pendingCount: pending.length,
+      // Movimentos anteriores à abertura ficam FORA do saldo de propósito (ver
+      // `accountTransactionCents` em js/accounts.js): o saldo inicial informado
+      // já embute tudo que veio antes dele, e somar de novo seria contar duas
+      // vezes. A regra é correta, mas era invisível: quem importava o extrato
+      // do mês via a despesa entrar em todo lugar e o saldo não se mexer.
+      // Contar aqui é o que permite dizer isso na tela.
+      beforeOpeningCount: account.openingDate
+        ? related.filter((entry) => String(entry.date || "") < String(account.openingDate)).length
+        : 0,
     };
   });
   const cardStats = (data.creditCards || []).map((card) => {
@@ -19461,6 +19492,22 @@ function renderHeroCard(m) {
   const saved = m.month.savings;
   const savedTone = saved >= 0 ? "hero-chip--save" : "hero-chip--warn";
   const accounts = accountsSummary(state.data, todayIso());
+
+  // OS TRÊS CHIPS PRECISAM FECHAR A CONTA ENTRE SI.
+  //
+  // Antes, "Receitas do mês" vinha de `effectiveIncome` (renda DECLARADA, que
+  // projeta o mês inteiro) enquanto "Economia do mês" vinha de `savings`
+  // (renda REALIZADA menos gastos). Lado a lado, no mesmo cartão, davam
+  // R$ 5.420 − R$ 214,90 = −R$ 214,90, e quem fizesse a conta de cabeça
+  // concluía, com razão, que o aplicativo estava errado.
+  //
+  // Agora os três saem da MESMA base, a realizada: receitas lançadas menos
+  // despesas lançadas é exatamente a economia exibida. A renda declarada não
+  // some da tela; vira a linha de aviso abaixo, que é o lugar honesto dela
+  // enquanto o dinheiro não entrou de verdade.
+  const rendaLancada = m.month.incomeRealized;
+  const rendaPrevista = m.month.renda.planned;
+  const rendaAReceber = m.month.partial ? subMoney(rendaPrevista, rendaLancada) : 0;
   return `<div class="card card--hero span-3">
     <div class="hero-glow"></div>
     <div class="hero-label-row"><p class="hero-label">${accounts.hasAccounts ? "Saldo em contas" : "Saldo calculado pelo histórico"}</p>${renderCalculationButton("accounts-balance")}</div>
@@ -19469,8 +19516,11 @@ function renderHeroCard(m) {
     ${m.worth.goals > 0 || m.worth.invested > 0
       ? `<p class="hero-reserved">${svgIcon("piggy", 14)} ${fmtBRL(addMoney(m.worth.goals, m.worth.invested))} em metas e investimentos (patrimônio, à parte deste saldo)</p>`
       : ""}
+    ${rendaAReceber > 0
+      ? `<p class="hero-reserved">${svgIcon("calendar", 14)} ${fmtBRL(rendaAReceber)} de renda declarada ainda não lançada neste mês</p>`
+      : ""}
     <div class="hero-chips">
-      <div class="hero-chip hero-chip--in">${svgIcon("arrowUpRight", 17)}<div><span class="hero-chip__label">Receitas do mês</span><span class="hero-chip__value">${fmtBRL(m.month.income)}</span></div></div>
+      <div class="hero-chip hero-chip--in">${svgIcon("arrowUpRight", 17)}<div><span class="hero-chip__label">Receitas do mês</span><span class="hero-chip__value">${fmtBRL(rendaLancada)}</span></div></div>
       <div class="hero-chip hero-chip--out">${svgIcon("arrowDownRight", 17)}<div><span class="hero-chip__label">Despesas do mês</span><span class="hero-chip__value">${fmtBRL(m.month.expense)}</span></div></div>
       <div class="hero-chip ${savedTone}">${svgIcon(saved >= 0 ? "piggy" : "alertTriangle", 17)}<div><span class="hero-chip__label">Economia do mês</span><span class="hero-chip__value">${fmtBRL(saved)}</span></div></div>
     </div>
@@ -19800,6 +19850,17 @@ function renderBudgetHealth(refDate, isCurrentMonth, monthExpense, fixedSpent, v
   const income = effectiveIncome(state.data, mKey);
   const remaining = subMoney(income, monthExpense);
 
+  // Este cartão é de PLANEJAMENTO: ele responde "do que você espera receber,
+  // quanto ainda dá para gastar", e por isso usa a renda declarada mesmo antes
+  // de ela cair na conta. O cartão do saldo, logo acima, responde outra coisa
+  // ("o que de fato entrou menos o que saiu"). Os dois números são corretos e
+  // diferentes: o defeito era chamar os dois de sobra sem dizer a base. Com a
+  // renda ainda não lançada, os rótulos passam a dizer `prevista`.
+  const baseRenda = incomeBasis(state.data, mKey);
+  const rendaPrevista = baseRenda.partial && baseRenda.planned > baseRenda.realized;
+  const rotuloRenda = rendaPrevista ? "Renda prevista" : "Renda";
+  const rotuloSobra = rendaPrevista ? "Sobra prevista" : "Sobra";
+
   if (income <= 0) {
     return `<div class="card card--dashed span-3 banner-inline">
       ${svgIcon("shieldCheck", 34, "banner-inline__icon")}
@@ -19846,10 +19907,10 @@ function renderBudgetHealth(refDate, isCurrentMonth, monthExpense, fixedSpent, v
       <span class="status-badge" data-ui-css="background:color-mix(in srgb, ${status.color} 16%, transparent); color:${status.color}">${svgIcon(status.icon, 13)}${status.label}</span>
     </div>
     <div class="health-grid">
-      <div class="health-stat"><span>Renda</span><b>${fmtBRL(income)}</b></div>
+      <div class="health-stat"><span>${rotuloRenda}</span><b>${fmtBRL(income)}</b></div>
       <div class="health-stat"><span>Gastos fixos</span><b>${fmtBRL(fixedSpent)}</b></div>
       <div class="health-stat"><span>Esporádicos</span><b>${fmtBRL(variableSpent)}</b></div>
-      <div class="health-stat"><span>Sobra</span><b data-ui-css="color:${remaining >= 0 ? "var(--positive)" : "var(--negative)"}">${fmtBRL(remaining)}</b></div>
+      <div class="health-stat"><span>${rotuloSobra}</span><b data-ui-css="color:${remaining >= 0 ? "var(--positive)" : "var(--negative)"}">${fmtBRL(remaining)}</b></div>
     </div>
     <div class="progress"><div class="progress__fill" data-ui-css="width:${clamp(safePct(monthExpense, income), 0, 100)}%; background:${status.color}"></div></div>
     <p class="health-note">${note}</p>
@@ -20071,10 +20132,11 @@ function renderTransferForm() {
 
 function renderAccountRow(a, sourceStats) {
   const reconciling = state.accountsUi.reconcileId === a.id;
-  const stats = sourceStats || { movementCount:0, lastMovementAt:null, reconciledAt:a.reconciledAt, pendingCount:0 };
+  const stats = sourceStats || { movementCount:0, lastMovementAt:null, reconciledAt:a.reconciledAt, pendingCount:0, beforeOpeningCount:0 };
+  const foraDoSaldo = stats.beforeOpeningCount || 0;
   return `<div class="account-row ${a.archived ? "is-archived" : ""}">
     <span class="account-mark" data-ui-css="--account-color:${a.color}">${svgIcon(a.type === "dinheiro" ? "wallet" : "bank",18)}</span>
-    <div class="account-row__info"><b>${escapeHtml(a.name)}</b><span>${ACCOUNT_TYPE_LABELS[a.type] || "Conta"}${a.archived ? ", arquivada" : ""}</span><small>${stats.movementCount} ${stats.movementCount === 1 ? "movimentação" : "movimentações"} · última ${stats.lastMovementAt ? formatMovementTimestamp(stats.lastMovementAt) : "não registrada"}</small><small>Conferida: ${stats.reconciledAt ? formatMovementTimestamp(stats.reconciledAt) : "nunca"}${stats.pendingCount ? ` · ${stats.pendingCount} ${stats.pendingCount === 1 ? "pendência" : "pendências"}` : ""}</small></div>
+    <div class="account-row__info"><b>${escapeHtml(a.name)}</b><span>${ACCOUNT_TYPE_LABELS[a.type] || "Conta"}${a.archived ? ", arquivada" : ""}</span><small>${stats.movementCount} ${stats.movementCount === 1 ? "movimentação" : "movimentações"} · última ${stats.lastMovementAt ? formatMovementTimestamp(stats.lastMovementAt) : "não registrada"}</small><small>Conferida: ${stats.reconciledAt ? formatMovementTimestamp(stats.reconciledAt) : "nunca"}${stats.pendingCount ? ` · ${stats.pendingCount} ${stats.pendingCount === 1 ? "pendência" : "pendências"}` : ""}</small>${foraDoSaldo ? `<small class="account-row__note">${svgIcon("info",12)} ${foraDoSaldo} ${foraDoSaldo === 1 ? "lançamento é anterior" : "lançamentos são anteriores"} à abertura em ${fmtDateFull(a.openingDate)} e ${foraDoSaldo === 1 ? "não entra" : "não entram"} neste saldo</small>` : ""}</div>
     <strong class="account-row__value">${fmtBRL(a.balance)}</strong>
     <div class="account-row__actions"><button class="icon-btn" data-action="account-reconcile-open" data-id="${a.id}" aria-label="Conciliar ${escapeHtml(a.name)}">${svgIcon("refresh",15)}</button><button class="icon-btn" data-action="account-edit" data-id="${a.id}" aria-label="Editar ${escapeHtml(a.name)}">${svgIcon("pencil",15)}</button><button class="icon-btn" data-action="account-archive" data-id="${a.id}" aria-label="${a.archived ? "Reativar" : "Arquivar"} ${escapeHtml(a.name)}">${svgIcon(a.archived ? "checkCircle" : "archive",15)}</button></div>
     ${reconciling ? `<div class="account-reconcile"><label class="field__label" for="reconcile-balance-input">Saldo visto no banco hoje</label><div class="account-reconcile__line"><input id="reconcile-balance-input" class="input" data-field="reconcile-value" value="${escapeHtml(state.accountsUi.reconcileValue)}" inputmode="decimal" placeholder="0,00" /><button class="btn btn--primary btn--sm" data-action="account-reconcile-save" data-id="${a.id}">Conciliar</button><button class="btn btn--ghost btn--sm" data-action="account-reconcile-cancel">Cancelar</button></div></div>` : ""}
@@ -24533,12 +24595,32 @@ function renderImportScreen() {
 function renderImportReview(rows) {
   const included = rows.filter((r) => r.include);
   const totalIn = included.reduce((s, r) => s + r.amount, 0);
+
+  // A DATA DE ABERTURA DA CONTA MORDE MAIS FORTE AQUI.
+  //
+  // O extrato vem com o mês inteiro, quase sempre com datas anteriores ao dia
+  // em que a conta foi cadastrada. Esses lançamentos entram nas despesas, nos
+  // gráficos e nas categorias, mas ficam de fora do SALDO, porque o saldo
+  // inicial informado no cadastro já os embute, e somar de novo seria contar
+  // duas vezes. A regra é correta; o que faltava era dizê-la. Sem isso o
+  // usuário importa agosto, vê o gasto subir, vê o saldo parado e conclui,
+  // razoavelmente, que a conta do aplicativo está errada.
+  const contaDestino = accountById(state.data, defaultCashAccountId());
+  const aberturaConta = contaDestino ? String(contaDestino.openingDate || "") : "";
+  const anterioresAoSaldo = aberturaConta
+    ? included.filter((r) => String(r.date || "") < aberturaConta).length
+    : 0;
+
   return `<div class="card">
     <div class="settings-row-header">
       <p class="card-title">Revisar lançamentos (${rows.length})</p>
       <button class="icon-btn" data-action="import-cancel" aria-label="Cancelar importação">${svgIcon("x", 16)}</button>
     </div>
     <p class="card-subtitle">${(rows.meta && rows.meta.format ? rows.meta.format.toUpperCase() + " · " : "")}${included.length} selecionados para importar · total ${fmtBRL(totalIn)}. Duplicados já vêm desmarcados${rows.meta && rows.meta.skipped ? ` · ${rows.meta.skipped} linha(s) ignorada(s)` : ""}.</p>
+    ${anterioresAoSaldo ? `<div class="import-notice">${svgIcon("info", 16)}<div>
+      <b>${anterioresAoSaldo} ${anterioresAoSaldo === 1 ? "lançamento é anterior" : "lançamentos são anteriores"} à abertura de ${escapeHtml(contaDestino.name)} em ${fmtDateFull(aberturaConta)}.</b>
+      <span>${anterioresAoSaldo === 1 ? "Ele entra" : "Eles entram"} nas despesas, categorias e gráficos, mas não ${anterioresAoSaldo === 1 ? "altera" : "alteram"} o saldo da conta: o saldo inicial que você informou já inclui esse período. Para que ${anterioresAoSaldo === 1 ? "ele conte" : "eles contem"} no saldo, edite a conta e recue a data de abertura.</span>
+    </div></div>` : ""}
     <div class="import-list">
       ${rows.map((r, idx) => `<div class="import-row ${!r.include ? "import-row--off" : ""}">
         <button class="checkbox ${r.include ? "checked" : ""}" data-action="import-toggle" data-id="${idx}">${r.include ? svgIcon("check", 13) : ""}</button>
@@ -26372,9 +26454,25 @@ function renderMovementDetailModal() {
   </div>`;
 }
 
+// UMA DATA PURA NÃO TEM HORA, E NÃO É UTC.
+//
+// Esta função recebe dois formatos: carimbos completos (`createdAt`,
+// `updatedAt`, `changeLog[].at`) e datas puras (`lastMovementAt`, que guarda o
+// `date` do lançamento). `new Date("2026-08-20")` é lido como meia-noite UTC e,
+// em qualquer fuso brasileiro, volta um dia: o lançamento de 20/08 aparecia
+// como "19/08/2026, 21:00". A hora, além de deslocada, era inventada: o campo
+// nunca teve hora. Agora data pura é formatada como data, e só carimbo completo
+// mostra horário. O meio-dia local preserva o dia em qualquer fuso, inclusive
+// nas viradas de horário de verão.
 function formatMovementTimestamp(value) {
-  const date = new Date(value || "");
-  return Number.isNaN(date.getTime()) ? "Data não disponível" : date.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+  const bruto = String(value == null ? "" : value).trim();
+  if (!bruto) return "Data não disponível";
+  const somenteData = /^\d{4}-\d{2}-\d{2}$/.test(bruto);
+  const date = new Date(somenteData ? `${bruto}T12:00:00` : bruto);
+  if (Number.isNaN(date.getTime())) return "Data não disponível";
+  return somenteData
+    ? date.toLocaleDateString("pt-BR", { dateStyle: "short" })
+    : date.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
 }
 
 function renderReviewCardPaymentModal() {
@@ -28753,22 +28851,58 @@ function attrSelectorValue(v) {
   return String(v).replace(/["\\]/g, "\\$&");
 }
 
+// A CHAVE PRECISA COBRIR BOTÃO, NÃO SÓ CAMPO.
+//
+// `render()` refaz o DOM inteiro a cada interação, e o elemento que tinha o
+// foco deixa de existir. Esta função descreve QUAL era ele de um jeito que
+// sobreviva à reconstrução.
+//
+// Antes ela só sabia responder por `id` e por `data-field`, ou seja, só por
+// campo de formulário. Todo o resto da interface é botão com `data-action` e
+// nenhum dos dois: chip de categoria, forma de pagamento, preset de orçamento,
+// navegação, ícones de linha. Para todos eles a função devolvia `null`,
+// `restoreFocus` saía na primeira linha e o foco caía no `<body>`. Quem usa
+// teclado voltava para o topo da página a cada escolha e precisava tabular a
+// tela inteira de novo.
 function focusKeyOf(el) {
   if (!el) return null;
   if (el.id) return { by: "id", id: el.id };
   const ds = el.dataset || {};
-  if (!ds.field) return null;
-  const sel = `[data-field="${attrSelectorValue(ds.field)}"]` +
-    (ds.id ? `[data-id="${attrSelectorValue(ds.id)}"]` : "");
-  return { by: "selector", sel };
+  if (ds.field) {
+    const sel = `[data-field="${attrSelectorValue(ds.field)}"]` +
+      (ds.id ? `[data-id="${attrSelectorValue(ds.id)}"]` : "");
+    return { by: "selector", sel };
+  }
+
+  const action = ds.action || ds.actionSelect;
+  if (!action) return null;
+  const atributo = ds.action ? "data-action" : "data-action-select";
+  let sel = `[${atributo}="${attrSelectorValue(action)}"]`;
+  // `id`, `value` e `tab` são o que distingue dois botões da mesma ação: a
+  // categoria escolhida, o preset, a aba de destino.
+  if (ds.id) sel += `[data-id="${attrSelectorValue(ds.id)}"]`;
+  if (ds.value) sel += `[data-value="${attrSelectorValue(ds.value)}"]`;
+  if (ds.tab) sel += `[data-tab="${attrSelectorValue(ds.tab)}"]`;
+
+  // Mesmo assim sobram repetidos (vários "Remover" numa lista, por exemplo).
+  // Guardar a posição evita devolver o foco para o irmão errado, que seria
+  // pior do que perdê-lo: o próximo Enter agiria sobre outra linha.
+  let nth = 0;
+  try { nth = document.querySelectorAll(sel).length > 1 ? [...document.querySelectorAll(sel)].indexOf(el) : 0; } catch (e) { nth = 0; }
+  return { by: "selector", sel, nth: nth > 0 ? nth : 0 };
 }
 
 function restoreFocus(key, selStart, selEnd) {
   if (!key) return;
   let el = null;
   try {
-    el = key.by === "id" ? document.getElementById(key.id) : document.querySelector(key.sel);
+    if (key.by === "id") el = document.getElementById(key.id);
+    else if (key.nth) el = document.querySelectorAll(key.sel)[key.nth] || document.querySelector(key.sel);
+    else el = document.querySelector(key.sel);
   } catch (e) { el = null; }
+  // O elemento pode simplesmente não existir mais: apagar uma linha remove o
+  // próprio botão que foi acionado. Aí não há para onde voltar, e insistir num
+  // vizinho seria pior do que deixar o navegador seguir a ordem natural.
   if (!el || typeof el.focus !== "function") return;
   el.focus();
   // `setSelectionRange` lança em input[type=number]; o try/catch mantém o foco
@@ -29833,9 +29967,26 @@ async function init() {
   });
 
   if ("serviceWorker" in navigator) {
-    window.addEventListener("load", () => {
-      navigator.serviceWorker.register("service-worker.js").catch(() => {});
-    });
+    // ESTE TRECHO RODA DEPOIS DO `load`, NÃO ANTES.
+    //
+    // `init()` é `async` e espera o IndexedDB abrir (`await initStorage()`) antes
+    // de chegar aqui. Quando a linha executa, o evento `load` já disparou, e um
+    // listener registrado depois do evento NUNCA roda. O resultado silencioso era
+    // o pior possível: nenhum service worker registrado, nenhum cache criado, e o
+    // aplicativo que se anuncia como offline abrindo em branco sem rede.
+    // O mesmo guard de `readyState` que a inicialização usa mais abaixo resolve.
+    // O `catch` vazio de antes era cúmplice do defeito: mesmo depois de
+    // corrigido o momento da chamada, uma falha de registro continuaria
+    // invisível e o aplicativo seguiria anunciando um modo offline que não
+    // existe. O diagnóstico local já tem lugar para isso.
+    const registrarServiceWorker = () => {
+      navigator.serviceWorker.register("service-worker.js").catch((error) => {
+        if (typeof reportSafeError === "function") reportSafeError("storage", error, "sw_register_failed");
+        console.error("Falha ao registrar o service worker:", error);
+      });
+    };
+    if (document.readyState === "complete") registrarServiceWorker();
+    else window.addEventListener("load", registrarServiceWorker, { once: true });
     // DOIS PACOTES NA MESMA ABA É O PIOR CENÁRIO DA ATUALIZAÇÃO.
     //
     // Quando o service worker novo assume, o HTML que já está na tela continua

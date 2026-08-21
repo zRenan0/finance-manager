@@ -616,22 +616,58 @@ function attrSelectorValue(v) {
   return String(v).replace(/["\\]/g, "\\$&");
 }
 
+// A CHAVE PRECISA COBRIR BOTÃO, NÃO SÓ CAMPO.
+//
+// `render()` refaz o DOM inteiro a cada interação, e o elemento que tinha o
+// foco deixa de existir. Esta função descreve QUAL era ele de um jeito que
+// sobreviva à reconstrução.
+//
+// Antes ela só sabia responder por `id` e por `data-field`, ou seja, só por
+// campo de formulário. Todo o resto da interface é botão com `data-action` e
+// nenhum dos dois: chip de categoria, forma de pagamento, preset de orçamento,
+// navegação, ícones de linha. Para todos eles a função devolvia `null`,
+// `restoreFocus` saía na primeira linha e o foco caía no `<body>`. Quem usa
+// teclado voltava para o topo da página a cada escolha e precisava tabular a
+// tela inteira de novo.
 function focusKeyOf(el) {
   if (!el) return null;
   if (el.id) return { by: "id", id: el.id };
   const ds = el.dataset || {};
-  if (!ds.field) return null;
-  const sel = `[data-field="${attrSelectorValue(ds.field)}"]` +
-    (ds.id ? `[data-id="${attrSelectorValue(ds.id)}"]` : "");
-  return { by: "selector", sel };
+  if (ds.field) {
+    const sel = `[data-field="${attrSelectorValue(ds.field)}"]` +
+      (ds.id ? `[data-id="${attrSelectorValue(ds.id)}"]` : "");
+    return { by: "selector", sel };
+  }
+
+  const action = ds.action || ds.actionSelect;
+  if (!action) return null;
+  const atributo = ds.action ? "data-action" : "data-action-select";
+  let sel = `[${atributo}="${attrSelectorValue(action)}"]`;
+  // `id`, `value` e `tab` são o que distingue dois botões da mesma ação: a
+  // categoria escolhida, o preset, a aba de destino.
+  if (ds.id) sel += `[data-id="${attrSelectorValue(ds.id)}"]`;
+  if (ds.value) sel += `[data-value="${attrSelectorValue(ds.value)}"]`;
+  if (ds.tab) sel += `[data-tab="${attrSelectorValue(ds.tab)}"]`;
+
+  // Mesmo assim sobram repetidos (vários "Remover" numa lista, por exemplo).
+  // Guardar a posição evita devolver o foco para o irmão errado, que seria
+  // pior do que perdê-lo: o próximo Enter agiria sobre outra linha.
+  let nth = 0;
+  try { nth = document.querySelectorAll(sel).length > 1 ? [...document.querySelectorAll(sel)].indexOf(el) : 0; } catch (e) { nth = 0; }
+  return { by: "selector", sel, nth: nth > 0 ? nth : 0 };
 }
 
 function restoreFocus(key, selStart, selEnd) {
   if (!key) return;
   let el = null;
   try {
-    el = key.by === "id" ? document.getElementById(key.id) : document.querySelector(key.sel);
+    if (key.by === "id") el = document.getElementById(key.id);
+    else if (key.nth) el = document.querySelectorAll(key.sel)[key.nth] || document.querySelector(key.sel);
+    else el = document.querySelector(key.sel);
   } catch (e) { el = null; }
+  // O elemento pode simplesmente não existir mais: apagar uma linha remove o
+  // próprio botão que foi acionado. Aí não há para onde voltar, e insistir num
+  // vizinho seria pior do que deixar o navegador seguir a ordem natural.
   if (!el || typeof el.focus !== "function") return;
   el.focus();
   // `setSelectionRange` lança em input[type=number]; o try/catch mantém o foco
@@ -1696,9 +1732,26 @@ async function init() {
   });
 
   if ("serviceWorker" in navigator) {
-    window.addEventListener("load", () => {
-      navigator.serviceWorker.register("service-worker.js").catch(() => {});
-    });
+    // ESTE TRECHO RODA DEPOIS DO `load`, NÃO ANTES.
+    //
+    // `init()` é `async` e espera o IndexedDB abrir (`await initStorage()`) antes
+    // de chegar aqui. Quando a linha executa, o evento `load` já disparou, e um
+    // listener registrado depois do evento NUNCA roda. O resultado silencioso era
+    // o pior possível: nenhum service worker registrado, nenhum cache criado, e o
+    // aplicativo que se anuncia como offline abrindo em branco sem rede.
+    // O mesmo guard de `readyState` que a inicialização usa mais abaixo resolve.
+    // O `catch` vazio de antes era cúmplice do defeito: mesmo depois de
+    // corrigido o momento da chamada, uma falha de registro continuaria
+    // invisível e o aplicativo seguiria anunciando um modo offline que não
+    // existe. O diagnóstico local já tem lugar para isso.
+    const registrarServiceWorker = () => {
+      navigator.serviceWorker.register("service-worker.js").catch((error) => {
+        if (typeof reportSafeError === "function") reportSafeError("storage", error, "sw_register_failed");
+        console.error("Falha ao registrar o service worker:", error);
+      });
+    };
+    if (document.readyState === "complete") registrarServiceWorker();
+    else window.addEventListener("load", registrarServiceWorker, { once: true });
     // DOIS PACOTES NA MESMA ABA É O PIOR CENÁRIO DA ATUALIZAÇÃO.
     //
     // Quando o service worker novo assume, o HTML que já está na tela continua

@@ -36,12 +36,32 @@ function renderImportScreen() {
 function renderImportReview(rows) {
   const included = rows.filter((r) => r.include);
   const totalIn = included.reduce((s, r) => s + r.amount, 0);
+
+  // A DATA DE ABERTURA DA CONTA MORDE MAIS FORTE AQUI.
+  //
+  // O extrato vem com o mês inteiro, quase sempre com datas anteriores ao dia
+  // em que a conta foi cadastrada. Esses lançamentos entram nas despesas, nos
+  // gráficos e nas categorias, mas ficam de fora do SALDO, porque o saldo
+  // inicial informado no cadastro já os embute, e somar de novo seria contar
+  // duas vezes. A regra é correta; o que faltava era dizê-la. Sem isso o
+  // usuário importa agosto, vê o gasto subir, vê o saldo parado e conclui,
+  // razoavelmente, que a conta do aplicativo está errada.
+  const contaDestino = accountById(state.data, defaultCashAccountId());
+  const aberturaConta = contaDestino ? String(contaDestino.openingDate || "") : "";
+  const anterioresAoSaldo = aberturaConta
+    ? included.filter((r) => String(r.date || "") < aberturaConta).length
+    : 0;
+
   return `<div class="card">
     <div class="settings-row-header">
       <p class="card-title">Revisar lançamentos (${rows.length})</p>
       <button class="icon-btn" data-action="import-cancel" aria-label="Cancelar importação">${svgIcon("x", 16)}</button>
     </div>
     <p class="card-subtitle">${(rows.meta && rows.meta.format ? rows.meta.format.toUpperCase() + " · " : "")}${included.length} selecionados para importar · total ${fmtBRL(totalIn)}. Duplicados já vêm desmarcados${rows.meta && rows.meta.skipped ? ` · ${rows.meta.skipped} linha(s) ignorada(s)` : ""}.</p>
+    ${anterioresAoSaldo ? `<div class="import-notice">${svgIcon("info", 16)}<div>
+      <b>${anterioresAoSaldo} ${anterioresAoSaldo === 1 ? "lançamento é anterior" : "lançamentos são anteriores"} à abertura de ${escapeHtml(contaDestino.name)} em ${fmtDateFull(aberturaConta)}.</b>
+      <span>${anterioresAoSaldo === 1 ? "Ele entra" : "Eles entram"} nas despesas, categorias e gráficos, mas não ${anterioresAoSaldo === 1 ? "altera" : "alteram"} o saldo da conta: o saldo inicial que você informou já inclui esse período. Para que ${anterioresAoSaldo === 1 ? "ele conte" : "eles contem"} no saldo, edite a conta e recue a data de abertura.</span>
+    </div></div>` : ""}
     <div class="import-list">
       ${rows.map((r, idx) => `<div class="import-row ${!r.include ? "import-row--off" : ""}">
         <button class="checkbox ${r.include ? "checked" : ""}" data-action="import-toggle" data-id="${idx}">${r.include ? svgIcon("check", 13) : ""}</button>

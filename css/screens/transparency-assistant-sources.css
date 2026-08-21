@@ -85,3 +85,9 @@
   .hero-label-row { align-items:flex-start; }
   .card--hero .calculation-link { min-height:40px; }
 }
+
+/* Aviso de lançamentos fora do saldo por serem anteriores à abertura da conta.
+   Fica na cor de atenção para não se confundir com a metainformação neutra da
+   linha (contagem de movimentos e data da última conferência). */
+.account-row__note { color:var(--goal); display:flex; align-items:flex-start; gap:4px; }
+.account-row__note svg { flex:0 0 auto; margin-top:1px; }

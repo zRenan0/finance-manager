@@ -209,6 +209,22 @@ function renderHeroCard(m) {
   const saved = m.month.savings;
   const savedTone = saved >= 0 ? "hero-chip--save" : "hero-chip--warn";
   const accounts = accountsSummary(state.data, todayIso());
+
+  // OS TRÊS CHIPS PRECISAM FECHAR A CONTA ENTRE SI.
+  //
+  // Antes, "Receitas do mês" vinha de `effectiveIncome` (renda DECLARADA, que
+  // projeta o mês inteiro) enquanto "Economia do mês" vinha de `savings`
+  // (renda REALIZADA menos gastos). Lado a lado, no mesmo cartão, davam
+  // R$ 5.420 − R$ 214,90 = −R$ 214,90, e quem fizesse a conta de cabeça
+  // concluía, com razão, que o aplicativo estava errado.
+  //
+  // Agora os três saem da MESMA base, a realizada: receitas lançadas menos
+  // despesas lançadas é exatamente a economia exibida. A renda declarada não
+  // some da tela; vira a linha de aviso abaixo, que é o lugar honesto dela
+  // enquanto o dinheiro não entrou de verdade.
+  const rendaLancada = m.month.incomeRealized;
+  const rendaPrevista = m.month.renda.planned;
+  const rendaAReceber = m.month.partial ? subMoney(rendaPrevista, rendaLancada) : 0;
   return `<div class="card card--hero span-3">
     <div class="hero-glow"></div>
     <div class="hero-label-row"><p class="hero-label">${accounts.hasAccounts ? "Saldo em contas" : "Saldo calculado pelo histórico"}</p>${renderCalculationButton("accounts-balance")}</div>
@@ -217,8 +233,11 @@ function renderHeroCard(m) {
     ${m.worth.goals > 0 || m.worth.invested > 0
       ? `<p class="hero-reserved">${svgIcon("piggy", 14)} ${fmtBRL(addMoney(m.worth.goals, m.worth.invested))} em metas e investimentos (patrimônio, à parte deste saldo)</p>`
       : ""}
+    ${rendaAReceber > 0
+      ? `<p class="hero-reserved">${svgIcon("calendar", 14)} ${fmtBRL(rendaAReceber)} de renda declarada ainda não lançada neste mês</p>`
+      : ""}
     <div class="hero-chips">
-      <div class="hero-chip hero-chip--in">${svgIcon("arrowUpRight", 17)}<div><span class="hero-chip__label">Receitas do mês</span><span class="hero-chip__value">${fmtBRL(m.month.income)}</span></div></div>
+      <div class="hero-chip hero-chip--in">${svgIcon("arrowUpRight", 17)}<div><span class="hero-chip__label">Receitas do mês</span><span class="hero-chip__value">${fmtBRL(rendaLancada)}</span></div></div>
       <div class="hero-chip hero-chip--out">${svgIcon("arrowDownRight", 17)}<div><span class="hero-chip__label">Despesas do mês</span><span class="hero-chip__value">${fmtBRL(m.month.expense)}</span></div></div>
       <div class="hero-chip ${savedTone}">${svgIcon(saved >= 0 ? "piggy" : "alertTriangle", 17)}<div><span class="hero-chip__label">Economia do mês</span><span class="hero-chip__value">${fmtBRL(saved)}</span></div></div>
     </div>
@@ -548,6 +567,17 @@ function renderBudgetHealth(refDate, isCurrentMonth, monthExpense, fixedSpent, v
   const income = effectiveIncome(state.data, mKey);
   const remaining = subMoney(income, monthExpense);
 
+  // Este cartão é de PLANEJAMENTO: ele responde "do que você espera receber,
+  // quanto ainda dá para gastar", e por isso usa a renda declarada mesmo antes
+  // de ela cair na conta. O cartão do saldo, logo acima, responde outra coisa
+  // ("o que de fato entrou menos o que saiu"). Os dois números são corretos e
+  // diferentes: o defeito era chamar os dois de sobra sem dizer a base. Com a
+  // renda ainda não lançada, os rótulos passam a dizer `prevista`.
+  const baseRenda = incomeBasis(state.data, mKey);
+  const rendaPrevista = baseRenda.partial && baseRenda.planned > baseRenda.realized;
+  const rotuloRenda = rendaPrevista ? "Renda prevista" : "Renda";
+  const rotuloSobra = rendaPrevista ? "Sobra prevista" : "Sobra";
+
   if (income <= 0) {
     return `<div class="card card--dashed span-3 banner-inline">
       ${svgIcon("shieldCheck", 34, "banner-inline__icon")}
@@ -594,10 +624,10 @@ function renderBudgetHealth(refDate, isCurrentMonth, monthExpense, fixedSpent, v
       <span class="status-badge" data-ui-css="background:color-mix(in srgb, ${status.color} 16%, transparent); color:${status.color}">${svgIcon(status.icon, 13)}${status.label}</span>
     </div>
     <div class="health-grid">
-      <div class="health-stat"><span>Renda</span><b>${fmtBRL(income)}</b></div>
+      <div class="health-stat"><span>${rotuloRenda}</span><b>${fmtBRL(income)}</b></div>
       <div class="health-stat"><span>Gastos fixos</span><b>${fmtBRL(fixedSpent)}</b></div>
       <div class="health-stat"><span>Esporádicos</span><b>${fmtBRL(variableSpent)}</b></div>
-      <div class="health-stat"><span>Sobra</span><b data-ui-css="color:${remaining >= 0 ? "var(--positive)" : "var(--negative)"}">${fmtBRL(remaining)}</b></div>
+      <div class="health-stat"><span>${rotuloSobra}</span><b data-ui-css="color:${remaining >= 0 ? "var(--positive)" : "var(--negative)"}">${fmtBRL(remaining)}</b></div>
     </div>
     <div class="progress"><div class="progress__fill" data-ui-css="width:${clamp(safePct(monthExpense, income), 0, 100)}%; background:${status.color}"></div></div>
     <p class="health-note">${note}</p>

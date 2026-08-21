@@ -53,6 +53,15 @@ function buildDataSourcesModel(data) {
       lastMovementAt: related.map((entry) => String(entry.date || "")).filter(Boolean).sort().pop() || null,
       reconciledAt: account.reconciledAt || null,
       pendingCount: pending.length,
+      // Movimentos anteriores à abertura ficam FORA do saldo de propósito (ver
+      // `accountTransactionCents` em js/accounts.js): o saldo inicial informado
+      // já embute tudo que veio antes dele, e somar de novo seria contar duas
+      // vezes. A regra é correta, mas era invisível: quem importava o extrato
+      // do mês via a despesa entrar em todo lugar e o saldo não se mexer.
+      // Contar aqui é o que permite dizer isso na tela.
+      beforeOpeningCount: account.openingDate
+        ? related.filter((entry) => String(entry.date || "") < String(account.openingDate)).length
+        : 0,
     };
   });
   const cardStats = (data.creditCards || []).map((card) => {

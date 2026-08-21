@@ -81,6 +81,26 @@ function servir(base) {
       return;
     }
 
+    // `/api/*` NÃO PODE CAIR NO FALLBACK DO APLICATIVO.
+    //
+    // Sem `vercel dev` as funções não existem aqui. Devolver o `index.html` com
+    // status 200 fazia o cliente receber HTML onde esperava JSON e transformava
+    // "não há backend nesta máquina" em erro genérico na cara de quem abria a
+    // tela de conta. Um 404 em JSON descreve a realidade, e o cliente já sabe
+    // tratá-lo como modo local.
+    const caminhoUrl = String(req.url || "").split("?")[0];
+    if (caminhoUrl.indexOf("/api/") === 0) {
+      const corpo = JSON.stringify({ ok: false, configured: false, code: "api_indisponivel",
+        message: "As funções em /api/* exigem `vercel dev`." });
+      res.writeHead(404, {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+      });
+      res.end(req.method === "HEAD" ? undefined : corpo);
+      return;
+    }
+
     let alvo = ehRaiz(req.url)
       ? path.join(base, "landing.html")
       : resolverSeguro(base, req.url);
