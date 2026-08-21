@@ -86,48 +86,19 @@ const CORS = corsHeaders(ALLOWED_ORIGINS[0] || "*");
 const json = (statusCode, body) => ({ statusCode, headers: CORS, body: JSON.stringify(body) });
 
 // ---- Teto de requisições por conta ----
-// Janela deslizante em memória. A instância da função é efêmera e pode haver
-// várias em paralelo, então isto NÃO é um limite exato; é o que barra o abuso
-// trivial (script raspando o endpoint com uma conta válida) sem depender de
-// banco externo. Um teto global por instância cobre o caso de várias contas
-// coordenadas. O limite forte contra anônimo é a sessão, não este contador.
+// A contagem NÃO mora aqui. Ela vive no banco, compartilhada por todas as
+// instâncias e com janela deslizante (ver _shared/rate-limit.js); estas
+// constantes só dizem QUAL é o teto, e quem cobra é `route()`.
+//
+// Existiu aqui um contador em memória, com `Map` e janela própria. Ele ficou
+// órfão quando a cobrança passou para o banco, e órfão é pior que ausente:
+// alguém abrindo este arquivo para "ajustar o limite" mexeria num código que
+// não roda, ia embora achando que tinha mudado alguma coisa, e o teto de
+// verdade continuaria onde estava.
 const RATE_WINDOW_MS = 10 * 60 * 1000;
 const RATE_PER_USER = Number(process.env.RATE_LIMIT_PER_USER) || Number(process.env.RATE_LIMIT_PER_IP) || 20;
 const RATE_GLOBAL = Number(process.env.RATE_LIMIT_GLOBAL) || 300;
 const MAX_BODY_BYTES = 64 * 1024;
-
-const hits = new Map();   // userId -> array de timestamps
-let globalHits = [];
-
-function pruneHits(list, now) {
-  let i = 0;
-  while (i < list.length && now - list[i] > RATE_WINDOW_MS) i++;
-  return i === 0 ? list : list.slice(i);
-}
-
-function rateLimited(identity) {
-  const now = Date.now();
-  globalHits = pruneHits(globalHits, now);
-  if (globalHits.length >= RATE_GLOBAL) return { limited: true, retryAfter: 60 };
-
-  const key = String(identity || "desconhecido");
-  const list = pruneHits(hits.get(key) || [], now);
-  if (list.length >= RATE_PER_USER) {
-    hits.set(key, list);
-    return { limited: true, retryAfter: Math.ceil((RATE_WINDOW_MS - (now - list[0])) / 1000) };
-  }
-
-  list.push(now);
-  hits.set(key, list);
-  globalHits.push(now);
-
-  // O Map não pode crescer sem fim numa instância de vida longa.
-
-  if (hits.size > 5000) {
-    hits.forEach((v, k) => { if (pruneHits(v, now).length === 0) hits.delete(k); });
-  }
-  return { limited: false };
-}
 
 // ---------- Sanitização defensiva do payload ----------
 const num = (v, max = 1e12) => {

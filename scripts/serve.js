@@ -106,10 +106,18 @@ function servir(base) {
         "Cache-Control": "no-store",
         "X-Content-Type-Options": "nosniff",
         // Mesmos cabeçalhos da publicação, para que um problema de CSP apareça
-        // aqui e não só em produção.
+        // aqui e não só em produção. A exceção é o HSTS, que só vale sobre
+        // HTTPS e, gravado a partir de localhost, prenderia o navegador do
+        // desenvolvedor a um esquema que o servidor local não fala.
+        //
+        // `connect-src` não é mais "qualquer HTTPS". A única saída para fora
+        // do site é a consulta da NFC-e nos portais estaduais (js/qrcode.js),
+        // que já tem lista própria de hosts; o que a política faz é repetir
+        // esse limite onde o navegador consegue impor. Sem isso, qualquer
+        // script injetado teria a rede inteira como destino de exfiltração.
         "Content-Security-Policy": "default-src 'self'; script-src 'self'; script-src-attr 'none'; "
           + "style-src 'self'; style-src-attr 'none'; font-src 'self'; img-src 'self' data: blob:; "
-          + "connect-src 'self' https:; worker-src 'self'; frame-ancestors 'none'; base-uri 'self'; "
+          + "connect-src 'self' https://*.gov.br; worker-src 'self'; frame-ancestors 'none'; base-uri 'self'; "
           + "form-action 'none'; object-src 'none'",
       });
       res.end(req.method === "HEAD" ? undefined : corpo);

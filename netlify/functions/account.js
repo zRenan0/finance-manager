@@ -2,7 +2,7 @@
 
 const crypto = require("crypto");
 const api = require("./_shared/supabase-rest");
-const { headersOf, cookiesOf, siteOrigin, assertSameOrigin, readJson, cookie, clearCookie, json, safeFailure, deviceIdOf } = require("./_shared/http");
+const { headersOf, cookiesOf, canonicalOrigin, assertSameOrigin, readJson, cookie, clearCookie, json, safeFailure, deviceIdOf } = require("./_shared/http");
 const rateLimit = require("./_shared/rate-limit");
 
 const ACCESS = "cofre_access";
@@ -11,6 +11,24 @@ const VERIFIER = "cofre_pkce";
 const DEVICE_SECRET = "cofre_device";
 const RATE_WINDOW_SECONDS = 10 * 60;
 const RATE_MAX_ATTEMPTS = 30;
+
+// TETO POR CONTA, ALÉM DO TETO POR ENDEREÇO.
+//
+// Contar por endereço não protege conta nenhuma. Um ataque distribuído chega
+// com um endereço novo a cada tentativa e nunca encosta naquele teto; e, do
+// outro lado, todo mundo atrás do mesmo CGNAT divide as 30 tentativas sem ter
+// feito nada. O que fecha a porta da força bruta é contar pelo EMAIL, que é o
+// alvo, não pela origem, que é circunstância.
+//
+// O preço é conhecido e aceito: quem souber o email de alguém consegue gastar
+// as tentativas daquela conta e atrasar o dono por alguns minutos. Uma janela
+// curta, que se refaz sozinha, custa isso. Um bloqueio que exige alguém
+// destravar custaria muito mais, e transformaria o incômodo em ataque.
+//
+// O email NÃO é gravado: `rateLimit` faz HMAC com segredo do servidor antes de
+// qualquer coisa chegar ao banco. O balde entra no hash junto, então nem
+// cruzar a mesma conta entre finalidades diferentes a tabela permite.
+const RATE_EMAIL_MAX_ATTEMPTS = 10;
 
 // O COOKIE DO FLUXO PRECISA DURAR O QUE O LINK DURA.
 //
@@ -38,6 +56,15 @@ function passwordOf(value) {
   if (password.length < 10 || password.length > 128) throw Object.assign(new Error("A senha precisa ter entre 10 e 128 caracteres"), { statusCode: 400, code: "invalid_password" });
   return password;
 }
+// Cobra do balde da CONTA. Vem sempre depois de `emailOf`, para o endereço já
+// estar normalizado: senão "Fulano@X.com" e "fulano@x.com" contariam separado e
+// o teto seria contornável só trocando a caixa das letras.
+function limitarPorEmail(event, email) {
+  return rateLimit.enforce(event, {
+    bucket: "conta-email", identity: email,
+    limit: RATE_EMAIL_MAX_ATTEMPTS, windowSeconds: RATE_WINDOW_SECONDS,
+  });
+}
 // O limitador em memória saiu daqui. Ele zerava a cada cold start e não era
 // compartilhado entre instâncias, então o teto real era o configurado
 // multiplicado pelo número de instâncias ativas. Ver `_shared/rate-limit.js`.
@@ -52,15 +79,23 @@ function passwordOf(value) {
 // onde nada acontece: o código expirava sem ser trocado, o cadastro nunca
 // confirmava e a recuperação de senha nunca abria o formulário de nova senha.
 //
-// `siteOrigin()` devolve a origem já sem barra final (ele termina com
-// `.replace(/\/+$/, "")`), então a barra escrita aqui é a única que entra:
-// não há como sair "https://dominio//index.html".
+// A ORIGEM AQUI NÃO PODE VIR DO CABEÇALHO DA REQUISIÇÃO.
+//
+// Este endereço sai daqui dentro de um email assinado por nós. Montá-lo a
+// partir de `Host`/`X-Forwarded-Host` deixava qualquer um pedir, por `curl`,
+// que o provedor mandasse para a vítima um email verdadeiro apontando para o
+// domínio do atacante. Quem decide agora é `canonicalOrigin()`, que só aceita
+// origem já reconhecida pela configuração; ver _shared/http.js.
+//
+// `canonicalOrigin()` devolve a origem já sem barra final (as duas funções que
+// ele consulta terminam com `.replace(/\/+$/, "")`), então a barra escrita
+// aqui é a única que entra: não há como sair "https://dominio//index.html".
 //
 // `/index.html` continua sendo o endereço público do aplicativo. O `app.html`
 // do `dist/` é nome de arquivo interno, destino de uma reescrita, e não pode
 // aparecer em link nenhum.
 function appCallbackUrl(event, purpose) {
-  return `${siteOrigin(event)}/index.html?auth_callback=${purpose}`;
+  return `${canonicalOrigin(event)}/index.html?auth_callback=${purpose}`;
 }
 function pkce() {
   const verifier = crypto.randomBytes(32).toString("base64url");
@@ -135,6 +170,18 @@ async function sessionOf(event) {
 
 function deviceSecretHash(secret) { return crypto.createHash("sha256").update(String(secret)).digest("hex"); }
 
+// `===` em string sai no primeiro byte diferente, e o tempo até sair conta uma
+// parte da resposta. Pela rede isso é ruído quase puro, mas a troca custa uma
+// função e tira o assunto da mesa. O `length` é checado antes porque
+// `timingSafeEqual` LANÇA quando os tamanhos diferem, e aí o vazamento
+// voltaria pela porta da exceção.
+function hashesConferem(a, b) {
+  const x = Buffer.from(String(a || ""), "utf8");
+  const y = Buffer.from(String(b || ""), "utf8");
+  if (x.length !== y.length || !x.length) return false;
+  return crypto.timingSafeEqual(x, y);
+}
+
 async function touchDevice(userId, event, allowCreate = false) {
   const deviceId = deviceIdOf(event);
   const label = String(headersOf(event)["x-device-label"] || "Este dispositivo").replace(/[<>\u0000-\u001f]/g, "").slice(0, 50) || "Este dispositivo";
@@ -143,7 +190,7 @@ async function touchDevice(userId, event, allowCreate = false) {
   const path = `cofre_devices?user_id=eq.${encodeURIComponent(userId)}&device_id=eq.${encodeURIComponent(deviceId)}&select=device_id,secret_hash,revoked_at`;
   const existing = await api.db(path, { service: true });
   const row = existing && existing[0];
-  const matches = !!(row && secret && row.secret_hash === deviceSecretHash(secret));
+  const matches = !!(row && secret && hashesConferem(row.secret_hash, deviceSecretHash(secret)));
   if (!row && !allowCreate) throw Object.assign(new Error("Este dispositivo precisa entrar novamente"), { statusCode: 403, code: "device_unknown" });
   if (row && (!matches || row.revoked_at) && !allowCreate) {
     throw Object.assign(new Error("Este dispositivo teve o acesso revogado"), { statusCode: 403, code: "device_revoked" });
@@ -195,6 +242,7 @@ async function handler(event) {
     if (action === "register" && method === "POST") {
       const body = readJson(event, 16 * 1024); const flow = pkce();
       const email = emailOf(body.email);
+      await limitarPorEmail(event, email);
       const result = await api.auth.signUp(email, passwordOf(body.password), appCallbackUrl(event, "signup"), flow.challenge);
       const cookies = [cookie(VERIFIER, `signup:${flow.verifier}`, event, { maxAge: VERIFIER_MAX_AGE })];
       if (result.access_token) { const device = await touchDevice(result.user.id, event, true); cookies.push(...sessionCookies(event, result), ...device.cookies); }
@@ -204,14 +252,23 @@ async function handler(event) {
       return json(200, { ok: true, configured: true, authenticated: !!result.access_token, confirmationRequired: !result.access_token, email: result.access_token && result.user ? (result.user.email || email) : email, userId: result.access_token && result.user ? result.user.id || "" : "" }, { cookies });
     }
     if (action === "login" && method === "POST") {
-      const body = readJson(event, 16 * 1024); const result = await api.auth.signIn(emailOf(body.email), passwordOf(body.password));
+      const body = readJson(event, 16 * 1024);
+      const email = emailOf(body.email);
+      // ANTES de falar com o provedor: é esta chamada que um ataque de senha
+      // repete, e cada repetição que chega ao Supabase já custou uma ida à rede.
+      await limitarPorEmail(event, email);
+      const result = await api.auth.signIn(email, passwordOf(body.password));
       requireConfirmedEmail(result.user);
       const device = await touchDevice(result.user.id, event, true);
       return json(200, { ok: true, configured: true, authenticated: true, email: result.user.email || "", userId: result.user.id, deviceId: device.deviceId }, { cookies: [...sessionCookies(event, result), ...device.cookies] });
     }
     if (action === "recover" && method === "POST") {
       const body = readJson(event, 16 * 1024); const flow = pkce();
-      try { await api.auth.recover(emailOf(body.email), appCallbackUrl(event, "recovery"), flow.challenge); } catch (_) {}
+      const email = emailOf(body.email);
+      // Teto por endereço de email também aqui: sem ele, esta rota é uma
+      // máquina de encher a caixa de entrada de quem nunca pediu nada.
+      await limitarPorEmail(event, email);
+      try { await api.auth.recover(email, appCallbackUrl(event, "recovery"), flow.challenge); } catch (_) {}
       return json(200, { ok: true, sent: true }, { cookies: [cookie(VERIFIER, `recovery:${flow.verifier}`, event, { maxAge: VERIFIER_MAX_AGE })] });
     }
     // REENVIAR A CONFIRMAÇÃO.
@@ -224,6 +281,7 @@ async function handler(event) {
     if (action === "resend" && method === "POST") {
       const body = readJson(event, 16 * 1024); const flow = pkce();
       const email = emailOf(body.email);
+      await limitarPorEmail(event, email);
       const cookies = [cookie(VERIFIER, `signup:${flow.verifier}`, event, { maxAge: VERIFIER_MAX_AGE })];
       try { await api.auth.resend(email, appCallbackUrl(event, "signup"), flow.challenge); }
       catch (error) {

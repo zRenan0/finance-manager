@@ -165,7 +165,15 @@ async function main() {
   check("o reenvio da confirmação também usa a montagem",
     /action === "resend"[\s\S]*?appCallbackUrl\(event, "signup"\)/.test(fonte));
   check("a montagem aponta para o aplicativo",
-    /return `\$\{siteOrigin\(event\)\}\/index\.html\?auth_callback=\$\{purpose\}`/.test(fonte));
+    /return `\$\{canonicalOrigin\(event\)\}\/index\.html\?auth_callback=\$\{purpose\}`/.test(fonte));
+  // A ORIGEM DESTE ENDEREÇO NÃO PODE SER A DO CABEÇALHO.
+  //
+  // `siteOrigin()` lê `Host`/`X-Forwarded-Host`, que quem chama escolhe. Usá-lo
+  // aqui deixava um `curl` pedir ao provedor um email verdadeiro, com o nosso
+  // remetente, apontando para o domínio de quem pediu. `canonicalOrigin()` só
+  // devolve origem que a configuração já reconhecia (ver _shared/http.js).
+  check("a origem do link não sai de cabeçalho da requisição",
+    !/siteOrigin/.test(fonte));
 
   /* ================================================================ *
    * 4. QUEM CONCLUI O FLUXO SÓ EXISTE NO APLICATIVO

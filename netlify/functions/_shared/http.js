@@ -32,6 +32,30 @@ function allowedOrigins(event) {
   return configured.length ? configured : (own ? [own] : []);
 }
 
+// A ORIGEM QUE PODE ENTRAR NUM LINK DE EMAIL.
+//
+// `siteOrigin()` lê `x-forwarded-host`/`host`, que são cabeçalhos da
+// REQUISIÇÃO. Para responder a quem chamou, tudo bem: errar ali só atrapalha
+// quem mandou o cabeçalho errado. Para montar um endereço que vai SAIR daqui
+// dentro de um email nosso, não: um `curl` com `X-Forwarded-Host: dominio-falso`
+// fazia o provedor enviar um email legítimo, com o nosso remetente e a nossa
+// marca, apontando para o domínio de quem pediu. O PKCE segura o roubo do
+// código em si, mas o phishing já saiu assinado por nós.
+//
+// Aqui a origem só passa se a configuração já a reconhecia. Pré-visualização
+// continua funcionando, porque basta a origem estar em `ALLOWED_ORIGIN`; um
+// host inventado cai para a PRIMEIRA da lista, que é por convenção a canônica.
+//
+// Sem `ALLOWED_ORIGIN` configurada, `allowedOrigins()` devolve a própria
+// origem e o comportamento é exatamente o de antes: publicar sem configurar
+// nada continua funcionando, e quem configura ganha a proteção.
+function canonicalOrigin(event) {
+  const permitidas = allowedOrigins(event);
+  const propria = siteOrigin(event);
+  if (propria && permitidas.indexOf(propria) >= 0) return propria;
+  return permitidas[0] || propria;
+}
+
 function assertSameOrigin(event) {
   const h = headersOf(event);
   const origin = String(h.origin || "").replace(/\/+$/, "");
@@ -118,4 +142,4 @@ function deviceIdOf(event) {
   return value;
 }
 
-module.exports = { MAX_BODY_BYTES, headersOf, cookiesOf, siteOrigin, assertSameOrigin, readJson, cookie, clearCookie, json, safeFailure, deviceIdOf };
+module.exports = { MAX_BODY_BYTES, headersOf, cookiesOf, siteOrigin, canonicalOrigin, assertSameOrigin, readJson, cookie, clearCookie, json, safeFailure, deviceIdOf };

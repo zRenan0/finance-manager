@@ -35,6 +35,27 @@ async function main() {
   check("atributos de evento estão bloqueados", /script-src-attr 'none'/.test(csp));
   check("estilos inline não são permitidos", !/style-src[^;]*'unsafe-inline'/.test(csp) && /style-src-attr 'none'/.test(csp));
 
+  // ONDE UM SCRIPT INJETADO PODERIA MANDAR OS DADOS.
+  //
+  // A política dizia `connect-src 'self' https:`, que é a rede inteira. As
+  // outras diretivas tornam a injeção difícil; esta decidia o que aconteceria
+  // se ela ocorresse mesmo assim, e a resposta era "o extrato sai para
+  // qualquer lugar". A única saída legítima para fora do site é a consulta da
+  // NFC-e (js/qrcode.js), que já valida host por conta própria; aqui o mesmo
+  // limite é repetido onde o navegador consegue impor.
+  const connectSrc = (csp.split(";").map((parte) => parte.trim()).find((parte) => parte.startsWith("connect-src ")) || "");
+  check("existe uma diretiva de conexão", connectSrc.length > 0, csp);
+  check("saída de dados não é qualquer HTTPS", !/\bhttps:(\s|$)/.test(connectSrc), connectSrc);
+  check("a única saída externa é a consulta fiscal", /https:\/\/\*\.gov\.br/.test(connectSrc), connectSrc);
+
+  // Sem HSTS, a primeira visita digitada sem esquema trafega em texto claro e
+  // um downgrade continua possível depois. É o cabeçalho que a plataforma
+  // costuma pôr sozinha — e é exatamente por isso que ninguém repara quando
+  // ela deixa de pôr.
+  const hsts = cabecalho("Strict-Transport-Security");
+  const maxAge = Number((hsts.match(/max-age=(\d+)/) || [])[1] || 0);
+  check("HTTPS fica obrigatório depois da primeira visita", maxAge >= 15552000, hsts || "ausente");
+
   const inlineScripts = [...index.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)]
     .filter((match) => !/\bsrc\s*=/.test(match[1]) && match[2].trim());
   check("index não contém script inline", inlineScripts.length === 0, inlineScripts.length);
@@ -144,6 +165,53 @@ async function main() {
   if (chaveAntiga == null) delete process.env.ANTHROPIC_API_KEY;
   else process.env.ANTHROPIC_API_KEY = chaveAntiga;
   delete require.cache[functionPath];
+
+  console.log("\n5. A origem do link de email não vem do cabeçalho da requisição");
+  // O endereço montado aqui sai dentro de um email assinado por nós. Tirá-lo de
+  // `Host`/`X-Forwarded-Host` permitia que um `curl` pedisse ao provedor um
+  // email verdadeiro, com a nossa marca, apontando para o domínio de quem pediu.
+  const { canonicalOrigin } = require(path.join(ROOT, "netlify/functions/_shared/http.js"));
+  const evento = (headers) => ({ headers });
+  const origemSalva = process.env.ALLOWED_ORIGIN;
+
+  delete process.env.ALLOWED_ORIGIN;
+  check("sem configuração, a própria origem continua valendo",
+    canonicalOrigin(evento({ host: "financas.example", "x-forwarded-proto": "https" })) === "https://financas.example",
+    canonicalOrigin(evento({ host: "financas.example", "x-forwarded-proto": "https" })));
+
+  process.env.ALLOWED_ORIGIN = "https://financas.example,https://previa.financas.example";
+  const forjado = canonicalOrigin(evento({ "x-forwarded-host": "dominio-falso.example", "x-forwarded-proto": "https" }));
+  check("host forjado cai para a origem canônica", forjado === "https://financas.example", forjado);
+  const previa = canonicalOrigin(evento({ host: "previa.financas.example", "x-forwarded-proto": "https" }));
+  check("pré-visualização configurada continua servindo a si mesma", previa === "https://previa.financas.example", previa);
+  check("o link de email usa a origem canônica, não a do cabeçalho",
+    /canonicalOrigin\(event\)/.test(accountSource) && !/siteOrigin\(event\)/.test(accountSource));
+
+  if (origemSalva == null) delete process.env.ALLOWED_ORIGIN;
+  else process.env.ALLOWED_ORIGIN = origemSalva;
+
+  console.log("\n6. A contagem de tentativas não é endereçável por quem tenta");
+  // `x-forwarded-for` é uma lista que os proxies completam. A ponta esquerda é
+  // o que o CLIENTE alegou; lê-la deixava o atacante escolher a própria chave
+  // de contagem e tornava o teto de senha decorativo.
+  const { clientIp } = require(path.join(ROOT, "netlify/functions/_shared/rate-limit.js"));
+  const daPlataforma = clientIp(evento({ "x-vercel-forwarded-for": "203.0.113.9", "x-forwarded-for": "1.2.3.4" }));
+  check("o cabeçalho da plataforma vence a lista encaminhada", daPlataforma === "203.0.113.9", daPlataforma);
+  const daLista = clientIp(evento({ "x-forwarded-for": "1.2.3.4, 203.0.113.9" }));
+  check("a lista encaminhada é lida pela ponta direita", daLista === "203.0.113.9", daLista);
+  const semNada = clientIp(evento({}));
+  check("sem endereço nenhum a contagem ainda acontece", semNada === "desconhecido", semNada);
+
+  // Teto por endereço não protege conta nenhuma contra ataque distribuído: o
+  // alvo é o email, e é por ele que precisa contar.
+  check("a força bruta também é contada por conta", /bucket: "conta-email"/.test(accountSource));
+  check("o teto por conta é cobrado antes de falar com o provedor",
+    /await limitarPorEmail\(event, email\);\s*\n\s*const result = await api\.auth\.signIn/.test(accountSource));
+  // O endereço chega ao balde já normalizado por `emailOf`. Sem isso,
+  // "Fulano@X.com" e "fulano@x.com" contariam separado e o teto cairia só
+  // trocando a caixa das letras.
+  check("o email entra no balde já normalizado",
+    /const email = emailOf\(body\.email\);\s*(\n\s*\/\/[^\n]*)*\s*\n\s*await limitarPorEmail\(event, email\)/.test(accountSource));
 
   console.log(`\n${fail === 0 ? "TODOS OS TESTES PASSARAM" : "FALHAS ENCONTRADAS"} - ${pass} ok, ${fail} falha(s)\n`);
   process.exit(fail === 0 ? 0 : 1);

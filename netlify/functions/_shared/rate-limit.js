@@ -36,11 +36,30 @@ function identityHash(bucket, identity) {
     .digest("hex");
 }
 
+// DE ONDE VEM O ENDEREÇO, E POR QUE A ORDEM IMPORTA.
+//
+// `x-forwarded-for` é uma LISTA que cada proxy vai completando, e a ponta
+// ESQUERDA é a menos confiável de todas: ela é o que o CLIENTE alegou antes de
+// encostar em qualquer proxy nosso. Ler `[0]` entregava a chave da contagem
+// justamente para quem está sendo contado: bastava mandar um endereço
+// diferente a cada tentativa para o teto de senha nunca fechar, e o teto de
+// senha é a única barreira que existe contra força bruta.
+//
+// A ordem agora é: primeiro o cabeçalho que a PLATAFORMA escreve (ela descarta
+// o que vier do cliente com esse nome, então não há o que forjar) e, só se
+// nenhum existir, a lista, pela ponta DIREITA, que é a que o último proxy
+// escreveu.
+//
+// `x-nf-client-connection-ip` é da Netlify e nunca chega na Vercel; ficou
+// porque o backend não é amarrado a plataforma nenhuma (ver api/_adaptar.js).
 function clientIp(event) {
   const h = headersOf(event);
-  return h["x-nf-client-connection-ip"]
-    || String(h["x-forwarded-for"] || "").split(",")[0].trim()
-    || "desconhecido";
+  const daPlataforma = h["x-vercel-forwarded-for"]
+    || h["x-nf-client-connection-ip"]
+    || h["x-real-ip"];
+  if (daPlataforma) return String(daPlataforma).split(",").pop().trim() || "desconhecido";
+  const lista = String(h["x-forwarded-for"] || "").split(",").map((v) => v.trim()).filter(Boolean);
+  return lista.length ? lista[lista.length - 1] : "desconhecido";
 }
 
 function localFallback(bucket, identity, limit, windowMs) {

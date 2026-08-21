@@ -106,6 +106,16 @@ Defina estas variáveis somente no painel da Vercel (Settings → Environment Va
 - `SUPABASE_PUBLISHABLE_KEY`: chave pública do projeto.
 - `SUPABASE_SERVICE_ROLE_KEY`: usada exclusivamente para apagar uma conta após nova autenticação.
 - `ALLOWED_ORIGIN`: origens permitidas, separadas por vírgula. Inclua produção e homologação.
+  **A primeira da lista é a canônica.** Ela é o endereço que entra nos links dos emails de
+  cadastro e de recuperação quando a requisição chega com um host que a lista não reconhece.
+  Coloque a produção primeiro.
+
+  Esta variável deixou de ser opcional em produção. Sem ela, a origem do link de email volta a
+  sair do cabeçalho `Host`/`X-Forwarded-Host` da requisição, e um `curl` com
+  `X-Forwarded-Host: dominio-falso` faz o Supabase enviar para a vítima um email **verdadeiro**,
+  com o seu remetente e a sua marca, apontando para o domínio de quem pediu. Configure também
+  a allowlist de redirect no painel do Supabase (Authentication → URL Configuration), que é a
+  segunda barreira para o mesmo problema.
 
 Não coloque a chave de serviço em arquivo JavaScript, `.env` publicado, backup ou diagnóstico. Depois de alterar variáveis, faça uma nova publicação das funções.
 

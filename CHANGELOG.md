@@ -1,5 +1,69 @@
 # Histórico de versões
 
+## Não publicado
+
+Revisão de segurança feita antes da publicação. Nada aqui muda o que o
+aplicativo faz; muda o que ele permite que façam com ele.
+
+### A força bruta de senha deixou de ter saída fácil
+
+- **A contagem de tentativas não é mais endereçável por quem tenta.** O
+  limitador lia a ponta ESQUERDA de `x-forwarded-for`, que por definição é o que
+  o cliente alegou antes de encostar em qualquer proxy nosso: bastava mandar um
+  endereço diferente a cada tentativa para o teto nunca fechar. Agora vale o
+  cabeçalho que a plataforma escreve (`x-vercel-forwarded-for`) e, na falta
+  dele, a ponta DIREITA da lista, que é a que o último proxy escreveu.
+- **Teto por CONTA, além do teto por endereço.** Contar por endereço não
+  protegia conta nenhuma contra um ataque distribuído, e ainda fazia todo mundo
+  atrás do mesmo CGNAT dividir as mesmas 30 tentativas. `login`, `register`,
+  `recover` e `resend` agora consomem também um balde de 10 tentativas por 10
+  minutos por endereço de email. O email não é gravado: entra como HMAC com
+  segredo do servidor, junto com o nome do balde.
+- No `login` o teto é cobrado **antes** de falar com o Supabase, então a
+  tentativa recusada não custa uma ida à rede.
+
+### O link do email não pode mais ser redirecionado por quem pede
+
+- **A origem do link deixou de sair do cabeçalho da requisição.** `Host` e
+  `X-Forwarded-Host` são escolhidos por quem chama. Um `curl` com
+  `X-Forwarded-Host: dominio-falso` fazia o Supabase enviar para a vítima um
+  email VERDADEIRO, com o nosso remetente e a nossa marca, apontando para o
+  domínio de quem pediu. O PKCE segurava o roubo do código; o phishing já tinha
+  saído assinado por nós.
+- Quem decide agora é `canonicalOrigin()`: só passa origem que `ALLOWED_ORIGIN`
+  já reconhecia, e host inventado cai para a primeira da lista. Pré-visualização
+  continua servindo a si mesma. Sem a variável configurada, o comportamento é o
+  de antes — por isso **`ALLOWED_ORIGIN` deixou de ser opcional em produção**
+  (ver docs/BACKEND_SETUP.md).
+
+### A política de conteúdo fechou a porta de saída
+
+- **`connect-src` deixou de ser "qualquer HTTPS".** As outras diretivas tornam a
+  injeção difícil; esta decidia o que aconteceria se ela ocorresse mesmo assim,
+  e a resposta era "o extrato sai para qualquer lugar do mundo". A única saída
+  legítima do aplicativo é a consulta da NFC-e nos portais estaduais, que já
+  valida host por conta própria; a política passou a repetir esse limite onde o
+  navegador consegue impor: `connect-src 'self' https://*.gov.br`.
+- **HSTS declarado.** Não existia em lugar nenhum do projeto. A plataforma
+  costuma pôr sozinha, e é exatamente por isso que a ausência passava
+  despercebida: ninguém confere o que acredita que vem de graça.
+  `npm run check:deploy` passou a conferir o cabeçalho no site publicado.
+
+  Vale só para o domínio principal: sem `includeSubDomains` e sem `preload`.
+  Os dois ampliam a promessa para terreno que este repositório não conhece, e
+  a assimetria pesa. Ampliar depois é editar uma linha; estreitar exige servir
+  `max-age=0` e esperar cada visitante voltar para receber a correção, um a um.
+
+### Higiene
+
+- **Contador morto removido de `analyze.js`.** O `Map` em memória ficou órfão
+  quando a cobrança passou para o banco, e órfão é pior que ausente: quem
+  abrisse o arquivo para ajustar o limite mexeria num código que não roda e iria
+  embora achando que tinha mudado alguma coisa.
+- **Comparação do segredo do dispositivo em tempo constante** (`timingSafeEqual`
+  em vez de `===`). Pela rede o vazamento é quase ruído puro; a troca custa uma
+  função e tira o assunto da mesa.
+
 ## 0.30.0
 
 Entrar com a mesma conta em dois aparelhos passou a mostrar o mesmo conteúdo.

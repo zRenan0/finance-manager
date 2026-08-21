@@ -106,6 +106,10 @@ const CSP_ESPERADA = [
   "default-src 'self'", "script-src 'self'", "script-src-attr 'none'",
   "style-src 'self'", "style-src-attr 'none'", "frame-ancestors 'none'",
   "object-src 'none'", "base-uri 'self'",
+  // A saída de dados é fechada na política, não só no código: `connect-src`
+  // valendo "qualquer HTTPS" deixava a rede inteira como destino possível de
+  // exfiltração caso um script chegasse a rodar aqui.
+  "connect-src 'self' https://*.gov.br",
 ];
 
 function referenciasDeModulo(codigo) {
@@ -238,6 +242,12 @@ async function main() {
       resposta.headers.get("x-content-type-options"));
     check(`${nome} traz X-Frame-Options`, resposta.headers.get("x-frame-options") === "DENY",
       resposta.headers.get("x-frame-options"));
+    // A plataforma costuma pôr HSTS sozinha, e é justamente por isso que a
+    // ausência passa despercebida: ninguém confere o que acredita que vem de
+    // graça. Meio ano é o piso; abaixo disso o cabeçalho quase não protege.
+    const hsts = resposta.headers.get("strict-transport-security") || "";
+    check(`${nome} traz Strict-Transport-Security`,
+      Number((hsts.match(/max-age=(\d+)/) || [])[1] || 0) >= 15552000, hsts || "ausente");
   }
 
   /* ---------------------------------------------------------------- *

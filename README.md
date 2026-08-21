@@ -399,14 +399,14 @@ Qualquer um que descobrisse a URL gastaria o crédito do dono do site.
   publicação, `localhost`). A resposta ecoa a origem aprovada em vez de `*`.
   Sem a variável, apenas a origem do próprio host é aceita. Requisição sem
   `Origin` é sempre recusada.
-- **Teto por IP** em janela deslizante de 10 minutos (`x-nf-client-connection-ip`),
-  mais um teto global por instância para o caso de muitos IPs. Não é um limite
-  exato — a instância é efêmera —, é o que barra o abuso trivial sem depender de
-  banco externo.
+- **Teto por conta** em janela deslizante de 10 minutos, mais um teto global,
+  os dois persistidos no banco (`cofre_rate_limit`) e compartilhados por todas
+  as instâncias. A identidade é o `user.id` da sessão, não o endereço de rede:
+  endereço é contornável por qualquer botnet doméstica.
 - Corpo acima de 64 KB é recusado **antes** do `JSON.parse`.
 - 429 com `Retry-After`.
 
-Configuráveis por variável de ambiente: `ALLOWED_ORIGIN`, `RATE_LIMIT_PER_IP`
+Configuráveis por variável de ambiente: `ALLOWED_ORIGIN`, `RATE_LIMIT_PER_USER`
 (padrão 20), `RATE_LIMIT_GLOBAL` (padrão 300).
 
 ### 4. Lembrete de backup (grupo novo na central de notificações)
@@ -1606,7 +1606,8 @@ para a tela de conquistas, o esqueleto e os landmarks de acessibilidade.
 2. No painel da Vercel: Settings → Environment Variables → Add
    - Key: `ANTHROPIC_API_KEY`
    - Value: sua chave (começa com `sk-ant-...`)
-   - Opcional para produção e previews: `ALLOWED_ORIGIN` com as origens permitidas separadas por vírgula
+   - **Obrigatório em produção**: `ALLOWED_ORIGIN` com as origens permitidas separadas por vírgula,
+     a de produção primeiro (ver docs/BACKEND_SETUP.md; é ela que decide a origem dos links de email)
 3. Vá em "Deployments" → o deploy mais recente → "Redeploy" para aplicar a variável
 4. Pronto — o botão "Analisar meus gastos" na tela de Análises vai funcionar
 
