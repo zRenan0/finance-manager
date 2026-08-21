@@ -497,9 +497,12 @@ function setData(updater) {
 //
 // A gravação em si é segura contra laço porque o registro já chega marcado por
 // quem o alterou; `stampChangeSet` só reivindica o que foi alterado aqui.
+// O que chegou de fora JÁ ESTÁ GRAVADO quando esta função roda: quem persiste é
+// `FinanceStore.applyRemoteOps`, na mesma transação que confirma a operação
+// remota. Regravar aqui reabriria a janela em que o cursor avançava sem o dado
+// ter chegado ao disco, e ainda faria o aparelho reivindicar a alteração alheia.
 function setDataFromRemote(next) {
   state.data = next;
-  saveData(state.data);
   render();
   idleTask(syncAchievements);
   EventBus.emit(APP_EVENTS.DATA_CHANGED, { data: state.data, origin: "remote" });
@@ -1642,7 +1645,6 @@ async function init() {
   // aparelho, foi ele quem fez.
   if (typeof CloudSync !== "undefined") {
     CloudSync.configure({
-      readLocal: () => state.data,
       applyRemote: (merged) => setDataFromRemote(merged),
       onStatus: () => scheduleRender(render),
     });
@@ -1697,7 +1699,59 @@ async function init() {
     window.addEventListener("load", () => {
       navigator.serviceWorker.register("service-worker.js").catch(() => {});
     });
+    // DOIS PACOTES NA MESMA ABA É O PIOR CENÁRIO DA ATUALIZAÇÃO.
+    //
+    // Quando o service worker novo assume, o HTML que já está na tela continua
+    // pedindo módulos do pacote antigo, que o cache novo já não guarda. A
+    // aba passa a rodar metade de cada versão, e uma gravação em andamento pode
+    // terminar no meio da troca. Ao ver `controllerchange`, perguntamos ao
+    // worker QUAL pacote ele é, terminamos o que estava sendo salvo e só então
+    // recarregamos, uma única vez por pacote.
+    navigator.serviceWorker.addEventListener("controllerchange", () => { handleControllerChange(); });
   }
+}
+
+const APP_RELOAD_GUARD_KEY = "cofre_build_reload";
+
+// O worker responde pelo canal que enviamos, e não pelo `postMessage` da
+// janela: assim a resposta não se confunde com nenhuma outra mensagem, e uma
+// versão antiga que não conheça `GET_BUILD` simplesmente não responde.
+function activeBuildId(worker) {
+  return new Promise((resolve) => {
+    if (!worker || typeof MessageChannel !== "function") { resolve(""); return; }
+    let respondido = false;
+    const concluir = (valor) => { if (!respondido) { respondido = true; resolve(valor); } };
+    try {
+      const canal = new MessageChannel();
+      canal.port1.onmessage = (event) => {
+        const dados = event && event.data;
+        concluir(dados && dados.type === "COFRE_BUILD" ? String(dados.build || "") : "");
+      };
+      worker.postMessage({ type: "GET_BUILD" }, [canal.port2]);
+    } catch (e) { concluir(""); }
+    setTimeout(() => concluir(""), 3000);
+  });
+}
+
+async function handleControllerChange() {
+  const build = await activeBuildId(navigator.serviceWorker.controller);
+  // A guarda é POR PACOTE. Uma guarda booleana impediria a recarga da próxima
+  // atualização; nenhuma guarda deixaria a aba recarregar em laço.
+  let guarda = "";
+  try { guarda = sessionStorage.getItem(APP_RELOAD_GUARD_KEY) || ""; } catch (e) { guarda = ""; }
+  const marca = build || "sem-identidade";
+  if (guarda === marca) return;
+
+  let gravou = false;
+  try { gravou = await FinanceStore.flush(); } catch (e) { gravou = false; }
+  if (!gravou) {
+    // Recarregar agora perderia a gravação que o navegador não confirmou. A
+    // página fica onde está, e o aviso diz o que está pendente.
+    notify("Atualização pendente: os dados ainda estão sendo salvos", "danger");
+    return;
+  }
+  try { sessionStorage.setItem(APP_RELOAD_GUARD_KEY, marca); } catch (e) { /* modo privado */ }
+  location.reload();
 }
 
 if (window.CofreUI && window.CofreUI.test && window.CofreUI.test.enabled) {

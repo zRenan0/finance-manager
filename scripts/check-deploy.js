@@ -31,6 +31,7 @@ const fs = require("fs");
 const path = require("path");
 
 const ROOT = path.join(__dirname, "..");
+const DIST = path.join(ROOT, "dist");
 
 let ok = 0;
 let fail = 0;
@@ -90,11 +91,12 @@ async function pegar(caminho, options = {}) {
       body: options.body,
       signal: controle.signal,
     });
-    const corpo = options.method === "HEAD" ? "" : await res.text();
-    return { url, status: res.status, headers: res.headers, corpo };
+    const bytes = options.method === "HEAD" ? Buffer.alloc(0) : Buffer.from(await res.arrayBuffer());
+    const corpo = bytes.toString("utf8");
+    return { url, status: res.status, headers: res.headers, corpo, bytes };
   } catch (erro) {
     const motivo = erro && erro.name === "AbortError" ? `sem resposta em ${PRAZO_MS}ms` : (erro && erro.message) || "falha de rede";
-    return { url, status: 0, headers: new Headers(), corpo: "", erro: motivo };
+    return { url, status: 0, headers: new Headers(), corpo: "", bytes: Buffer.alloc(0), erro: motivo };
   } finally {
     clearTimeout(relogio);
   }
@@ -106,7 +108,39 @@ const CSP_ESPERADA = [
   "object-src 'none'", "base-uri 'self'",
 ];
 
+function referenciasDeModulo(codigo) {
+  const referencias = new Set();
+  const regras = [
+    /\bimport\s*\(\s*["']([^"']+\.js)["']\s*\)/g,
+    /\b(?:import|export)\s+[^"';\r\n]*?\bfrom\s*["']([^"']+\.js)["']/g,
+    /\bimport\s*["']([^"']+\.js)["']/g,
+  ];
+  regras.forEach((regra) => {
+    for (const resultado of codigo.matchAll(regra)) referencias.add(resultado[1]);
+  });
+  return Array.from(referencias);
+}
+
+function caminhoLocalDeUrl(url) {
+  let relativo;
+  try { relativo = decodeURIComponent(new URL(url).pathname).replace(/^\/+/, ""); }
+  catch (_) { return null; }
+  const absoluto = path.resolve(DIST, ...relativo.split("/"));
+  const prefixo = `${path.resolve(DIST)}${path.sep}`;
+  return absoluto.startsWith(prefixo) ? absoluto : null;
+}
+
+function digestNoNome(url) {
+  const nome = path.posix.basename(new URL(url).pathname);
+  const resultado = nome.match(/\.([a-f0-9]{64})\.js$/);
+  return resultado ? resultado[1] : "";
+}
+
 async function main() {
+  const appLocalPath = path.join(DIST, "app.html");
+  if (!fs.existsSync(appLocalPath)) {
+    throw new Error("dist/app.html não existe. Execute `npm run build:dist` antes da conferência.");
+  }
   console.log(`\nConferindo ${base.origin}  (${procedencia})\n`);
   if (!informado) console.log("Sem argumento, a conferência vai para a produção. Para checar uma pré-visualização, passe o endereço dela.\n");
 
@@ -138,14 +172,46 @@ async function main() {
     app.status !== 301 && app.status !== 302 && app.status !== 307 && app.status !== 308,
     app.headers.get("location"));
 
-  // Os MESMOS BYTES do index.html do repositório. É o que garante que o
-  // aplicativo não regrediu na publicação.
-  const local = fs.readFileSync(path.join(ROOT, "index.html"));
+  // Os MESMOS BYTES do app.html gerado. A comparação usa o pacote que a
+  // Vercel recebe, inclusive as referências com hash e a normalização LF.
+  const local = fs.readFileSync(appLocalPath);
   const sha = (buf) => crypto.createHash("sha256").update(buf).digest("hex");
   const shaLocal = sha(local);
-  const shaRemoto = sha(Buffer.from(app.corpo, "utf8"));
-  check("/index.html entrega os mesmos bytes do repositório", shaLocal === shaRemoto,
+  const shaRemoto = sha(app.bytes);
+  check("/index.html entrega os mesmos bytes de dist/app.html", shaLocal === shaRemoto,
     `local ${shaLocal.slice(0, 16)} != publicado ${shaRemoto.slice(0, 16)}`);
+
+  const entrada = (app.corpo.match(/<script\s+type="module"\s+src="([^"]+)"/) || [])[1] || "";
+  check("o HTML aponta para bootstrap com SHA-256", /^js\/modules\/bootstrap\.[a-f0-9]{64}\.js$/.test(entrada), entrada || "ausente");
+
+  if (entrada) {
+    const fila = [new URL(entrada, new URL("/index.html", base)).toString()];
+    const visitados = new Set();
+    while (fila.length && visitados.size < 50) {
+      const url = fila.shift();
+      if (visitados.has(url)) continue;
+      visitados.add(url);
+
+      const modulo = await pegar(url);
+      const nome = new URL(url).pathname;
+      check(`${nome} responde 200`, modulo.status === 200, modulo.status);
+      const localModulo = caminhoLocalDeUrl(url);
+      check(`${nome} pertence ao pacote dist`, !!localModulo && fs.existsSync(localModulo), localModulo || "fora de dist");
+      if (modulo.status !== 200 || !localModulo || !fs.existsSync(localModulo)) continue;
+
+      const localBytes = fs.readFileSync(localModulo);
+      check(`${nome} tem os bytes gerados`, sha(localBytes) === sha(modulo.bytes),
+        `local ${sha(localBytes).slice(0, 16)} != publicado ${sha(modulo.bytes).slice(0, 16)}`);
+      const hashNome = digestNoNome(url);
+      check(`${nome} traz o SHA-256 do conteúdo no nome`, !!hashNome && hashNome === sha(modulo.bytes), hashNome || "sem hash");
+
+      referenciasDeModulo(modulo.corpo).forEach((referencia) => {
+        const dependencia = new URL(referencia, url);
+        if (dependencia.origin === base.origin) fila.push(dependencia.toString());
+      });
+    }
+    check("o grafo de módulos termina no limite de segurança", fila.length === 0, `${fila.length} referência(s) restante(s)`);
+  }
 
   /* ---------------------------------------------------------------- *
    * 3. O NOME INTERNO NÃO É ENDEREÇO PÚBLICO

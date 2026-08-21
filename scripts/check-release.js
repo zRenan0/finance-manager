@@ -8,10 +8,17 @@ const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
 const pkg = JSON.parse(read("package.json"));
 const failures = [];
 const check = (condition, message) => { if (!condition) failures.push(message); };
+const buildDist = read("scripts/build-dist.js");
+const checkDeploy = read("scripts/check-deploy.js");
+const appSource = read("js/app.js");
 
 check(/^\d+\.\d+\.\d+$/.test(pkg.version), "package.json precisa de versão semântica");
 check(read("CHANGELOG.md").includes(`## ${pkg.version}`), "CHANGELOG.md não contém a versão atual");
 check(/const VERSION = "v\d+";/.test(read("service-worker.js")), "cache do service worker não tem versão explícita");
+const workerVersion = Number((read("service-worker.js").match(/const VERSION = "v(\d+)";/) || [])[1]);
+check(workerVersion >= 53, "cache do service worker não foi promovido para o pacote com hash");
+check(/const BUILD_ID = VERSION;/.test(read("service-worker.js")) && /GET_BUILD/.test(read("service-worker.js")),
+  "service worker não informa qual pacote assumiu o controle");
 check(/const SCHEMA_VERSION = \d+;/.test(read("js/storage.js")), "schema de dados não tem versão explícita");
 check(read("js/safe-errors.js").includes(`const SAFE_ERROR_APP_VERSION = "${pkg.version}";`), "versão do diagnóstico não acompanha o aplicativo");
 check(fs.existsSync(path.join(root, "js/screens/privacy.js")), "central de privacidade ausente");
@@ -26,6 +33,16 @@ check(fs.existsSync(path.join(root, "js/modules/app.generated.js")), "módulo ES
 check(!/\sstyle\s*=/.test(read("index.html")), "index.html contém estilo inline");
 check(fs.existsSync(path.join(root, "tests/browser/run-browser.js")), "suíte de navegador ausente");
 check(Object.prototype.hasOwnProperty.call(pkg.scripts || {}, "test:browser"), "comando de teste de navegador ausente");
+check(/createHash\("sha256"\)/.test(buildDist) && /versionarModulos/.test(buildDist) && /nomeComHash/.test(buildDist),
+  "build de dist não publica módulos identificados pelo SHA-256");
+check(/meta name=\"cofre-build\"/.test(buildDist) && /const BUILD_ID = \"\$\{buildId\}\";/.test(buildDist),
+  "HTML e service worker não recebem o mesmo identificador de pacote");
+check(/replace\(\/\\r\\n\?\/g, \"\\n\"\)/.test(buildDist), "build de dist não normaliza texto para LF");
+check(/path\.join\(DIST, \"app\.html\"\)/.test(checkDeploy) && /referenciasDeModulo/.test(checkDeploy) && /digestNoNome/.test(checkDeploy),
+  "check-deploy não confere dist/app.html e seus módulos com hash");
+check(/controllerchange/.test(appSource) && /FinanceStore\.flush\(\)/.test(appSource)
+  && /sessionStorage/.test(appSource) && /Atualização pendente/.test(appSource),
+  "js/app.js não protege a recarga do novo service worker com flush e guarda por pacote");
 
 // A PÁGINA COMERCIAL É A PORTA DE ENTRADA DO DOMÍNIO.
 //

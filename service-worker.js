@@ -19,7 +19,10 @@
 // e so o novo na seguinte. Essa primeira visita e exatamente a que importa: e a
 // do clique no link do email. Promover a versao troca o balde inteiro de uma
 // vez, e a rede de seguranca vale desde o primeiro acesso.
-const VERSION = "v52";
+// v53: os módulos publicados agora levam o SHA-256 no nome. A troca de
+// controller pode identificar o pacote novo antes de pedir a recarga da aba.
+const VERSION = "v53";
+const BUILD_ID = VERSION;
 const CACHE_NAME = "financas-cache-" + VERSION;
 // A PÁGINA COMERCIAL TEM CACHE PRÓPRIO.
 //
@@ -174,7 +177,16 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("message", (event) => {
-  if (event.data && event.data.type === "SKIP_WAITING") self.skipWaiting();
+  if (!event.data) return;
+  if (event.data.type === "SKIP_WAITING") {
+    self.skipWaiting();
+    return;
+  }
+  if (event.data.type === "GET_BUILD") {
+    const resposta = { type: "COFRE_BUILD", build: BUILD_ID };
+    if (event.ports && event.ports[0]) event.ports[0].postMessage(resposta);
+    else if (event.source && typeof event.source.postMessage === "function") event.source.postMessage(resposta);
+  }
 });
 
 /* ------------------------------------------------------------------ *

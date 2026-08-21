@@ -73,8 +73,13 @@ async function main() {
   let rpcResult = { status: "applied", revision: 7, applied: 1 };
   let rpcOptions = null;
   let opsRows = [];
+  // A versão mínima de escrita é CONFIGURAÇÃO do backend, versionada no banco.
+  // Ela é o que permite a janela de transição: durante ela um cliente 2 continua
+  // gravando; no corte, o mesmo backend passa a recusá-lo com HTTP 426.
+  let syncConfigRow = { server_protocol: 3, minimum_write_protocol: 2 };
   api.db = async (route, options) => {
     if (route.startsWith("cofre_devices?")) return [{ device_id: "device-test-1234", secret_hash: secretHash, revoked_at: null }];
+    if (route.startsWith("cofre_sync_config?")) return syncConfigRow ? [syncConfigRow] : [];
     if (route.startsWith("cofre_sync_state?")) return [{ revision: 7 }];
     if (route.startsWith("cofre_sync_ops?")) return opsRows;
     if (route === "rpc/cofre_apply_ops") { rpcOptions = options; return [rpcResult]; }
@@ -153,7 +158,77 @@ async function main() {
     headers: { origin: "https://cofre.test", host: "cofre.test", "x-forwarded-proto": "https", cookie: cookieHeader, "x-device-id": "device-test-1234", "x-sync-protocol": "1", "idempotency-key": mutationId, "if-match": "0" },
     body: JSON.stringify({ protocol: 1, baseRevision: "0", mutationId, data: schema.emptySnapshot() }),
   });
-  check("gravação por snapshot inteiro é recusada", legado.statusCode === 409 && JSON.parse(legado.body).code === "protocol_upgrade_required", legado.body);
+  check("gravação por snapshot inteiro é recusada", legado.statusCode === 426 && JSON.parse(legado.body).code === "protocol_upgrade_required", legado.body);
+
+  console.log("\n3b. Convivência dos protocolos 2 e 3");
+  {
+    // O backend fala 3 e ECOA a versão do cliente. Sem o eco, o cliente 2
+    // recusaria toda resposta por "protocolo incompatível" no dia da publicação
+    // do backend novo, antes mesmo de o aplicativo novo existir nos aparelhos.
+    const corpo2 = JSON.parse(applied.body);
+    check("cliente 2 recebe o próprio protocolo de volta", corpo2.protocol === 2, corpo2.protocol);
+    check("a resposta anuncia o protocolo do servidor", corpo2.serverProtocol === 3 && corpo2.minimumWriteProtocol === 2, applied.body);
+
+    const evento3 = (ops, body) => ({
+      httpMethod: "POST", path: "/api/sync/changes", queryStringParameters: { action: "changes" },
+      headers: {
+        origin: "https://cofre.test", host: "cofre.test", "x-forwarded-proto": "https", cookie: cookieHeader,
+        "x-device-id": "device-test-1234", "x-sync-protocol": "3", "idempotency-key": mutationId,
+      },
+      body: JSON.stringify({ protocol: 3, mutationId, since: "0", ops, ...(body || {}) }),
+    });
+
+    const conta = { id: "acc-1", name: "Conta", type: "corrente", openingBalance: 0, openingDate: "2026-08-01", color: "#112233" };
+    const porRegistro = await sync.handler(evento3([{ entity: "accounts", entityId: "acc-1", op: "put", rev, payload: conta }]));
+    check("cliente 3 grava conta como entidade própria", porRegistro.statusCode === 200 && JSON.parse(porRegistro.body).protocol === 3, porRegistro.body);
+
+    const listaNo3 = await sync.handler(evento3([{ entity: "settings", entityId: "accounts", op: "put", rev, payload: [conta] }]));
+    check("cliente 3 não pode mandar a lista inteira", listaNo3.statusCode === 400, listaNo3.statusCode);
+
+    const listaNo2 = await sync.handler(syncEvent([{ entity: "settings", entityId: "accounts", op: "put", rev, payload: [conta] }]));
+    check("cliente 2 ainda envia o array durante a transição", listaNo2.statusCode === 200, listaNo2.body);
+
+    // Cabeçalho e corpo precisam falar a MESMA versão: divergir aqui deixaria o
+    // servidor validar com uma regra e gravar com outra.
+    const divergente = await sync.handler({
+      httpMethod: "POST", path: "/api/sync/changes", queryStringParameters: { action: "changes" },
+      headers: {
+        origin: "https://cofre.test", host: "cofre.test", "x-forwarded-proto": "https", cookie: cookieHeader,
+        "x-device-id": "device-test-1234", "x-sync-protocol": "3", "idempotency-key": mutationId,
+      },
+      body: JSON.stringify({ protocol: 2, mutationId, since: "0", ops: [] }),
+    });
+    check("cabeçalho e corpo precisam falar a mesma versão", divergente.statusCode === 400, divergente.statusCode);
+
+    // O corte: escrita abaixo do mínimo vira 426, e não 409. O cliente trata
+    // 409 como conflito de documento e descartaria a fila.
+    syncConfigRow = { server_protocol: 3, minimum_write_protocol: 3 };
+    const cortado = await sync.handler(syncEvent([put]));
+    check("escrita abaixo do mínimo recebe 426", cortado.statusCode === 426 && JSON.parse(cortado.body).code === "protocol_upgrade_required", cortado.body);
+    const leituraAposCorte = await sync.handler({
+      httpMethod: "GET", path: "/api/sync/changes", queryStringParameters: { action: "changes", since: "0", limit: "50" },
+      headers: { host: "cofre.test", "x-forwarded-proto": "https", cookie: cookieHeader, "x-device-id": "device-test-1234", "x-sync-protocol": "2" },
+    });
+    check("leitura do cliente 2 continua permitida depois do corte", leituraAposCorte.statusCode === 200, leituraAposCorte.statusCode);
+    syncConfigRow = { server_protocol: 3, minimum_write_protocol: 2 };
+
+    // Sem a migração aplicada não há configuração, e o servidor precisa dizer
+    // isso com o mesmo código que a tela já sabe explicar.
+    syncConfigRow = null;
+    const semConfig = await sync.handler(syncEvent([put]));
+    check("configuração ausente vira schema_missing", semConfig.statusCode === 503 && JSON.parse(semConfig.body).code === "schema_missing", semConfig.body);
+    syncConfigRow = { server_protocol: 3, minimum_write_protocol: 2 };
+
+    // `remote_changed` é 409 com corpo próprio: o vínculo precisa distinguir
+    // "a conta mudou" de "conflito de documento".
+    rpcResult = { status: "remote_changed", revision: 9, applied: 0 };
+    const mudou = await sync.handler(evento3([{ entity: "accounts", entityId: "acc-1", op: "put", rev, payload: conta }], { expectedRemoteRevision: "0" }));
+    const corpoMudou = JSON.parse(mudou.body);
+    check("conta alterada durante o vínculo devolve remote_changed", mudou.statusCode === 409 && corpoMudou.code === "remote_changed", mudou.body);
+    check("a revisão observada volta no corpo", corpoMudou.revision === "9", mudou.body);
+    check("a revisão esperada chega ao banco", rpcOptions && rpcOptions.body.p_expected_revision === "0", JSON.stringify(rpcOptions && rpcOptions.body.p_expected_revision));
+    rpcResult = { status: "applied", revision: 8, applied: 1 };
+  }
 
   console.log("\n4. Integração estática");
   const authSource = read("js/auth.js");

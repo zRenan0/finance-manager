@@ -90,9 +90,9 @@ async function main() {
 
   const calls = [];
   const queue = [
-    response(200, { protocol: 2, status: "ok", revision: "1" }),
-    response(200, { protocol: 2, status: "ok", revision: "1", ops: [], hasMore: false, cursor: "1" }),
-    response(200, { protocol: 2, status: "applied", revision: "2", applied: 1, ops: [], hasMore: false, cursor: "2" }),
+    response(200, { protocol: 3, serverProtocol: 3, minimumWriteProtocol: 2, status: "ok", revision: "1" }),
+    response(200, { protocol: 3, serverProtocol: 3, minimumWriteProtocol: 2, status: "ok", revision: "1", ops: [], hasMore: false, cursor: "1" }),
+    response(200, { protocol: 3, serverProtocol: 3, minimumWriteProtocol: 2, status: "applied", revision: "2", applied: 1, ops: [], hasMore: false, cursor: "2" }),
   ];
   ctx.__cloudOptions = {
     enabled: true,
@@ -123,7 +123,7 @@ async function main() {
     authMode: "cookie",
     deviceId: "device-cookie-1",
     allowCrossOrigin: true,
-    fetchImpl: async (url, options) => { cookieCalls.push({ url, options }); return response(200, { protocol: 2, status: "ok", revision: "1" }); },
+    fetchImpl: async (url, options) => { cookieCalls.push({ url, options }); return response(200, { protocol: 3, serverProtocol: 3, minimumWriteProtocol: 2, status: "ok", revision: "1" }); },
   };
   const cookieCloud = run("new CloudAdapter(__cookieOptions)");
   await cookieCloud.init();
@@ -145,8 +145,8 @@ async function main() {
   // Recusa do servidor não pode ser engolida: sem erro, o app diria
   // "sincronizado" com a fila cheia.
   const conflictQueue = [
-    response(200, { protocol: 2, status: "ok", revision: "1" }),
-    response(409, { protocol: 2, status: "error", code: "idempotency_mismatch" }),
+    response(200, { protocol: 3, serverProtocol: 3, minimumWriteProtocol: 2, status: "ok", revision: "1" }),
+    response(409, { protocol: 3, serverProtocol: 3, minimumWriteProtocol: 2, status: "error", code: "idempotency_mismatch" }),
   ];
   ctx.__conflictOptions = {
     ...ctx.__cloudOptions,

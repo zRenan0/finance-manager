@@ -9,3 +9,9 @@
 .account-sync__icon--syncing svg{animation:account-sync-spin 1s linear infinite}@keyframes account-sync-spin{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){.account-sync__icon--syncing svg{animation:none}}
 @media(max-width:640px){.account-profile{align-items:stretch;flex-direction:column}.account-device{grid-template-columns:auto 1fr}.account-device .btn{grid-column:1/-1;min-height:44px}.account-sync{align-items:stretch;flex-direction:column}.account-sync .btn{min-height:44px}}
+.account-sync__icon--linked{background:var(--positive-soft);color:var(--positive)}
+.account-sync__icon--pending{background:var(--negative-soft);color:var(--negative)}
+.account-sync__icon--confirm,.account-sync__icon--waiting,.account-sync__icon--dismissed{background:var(--goal-soft);color:var(--goal)}
+.account-sync__icon--checking svg,.account-sync__icon--linking svg{animation:account-sync-spin 1s linear infinite}
+@media(prefers-reduced-motion:reduce){.account-sync__icon--checking svg,.account-sync__icon--linking svg{animation:none}}
+.account-link__actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px}

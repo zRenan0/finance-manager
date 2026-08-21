@@ -4,7 +4,7 @@
 const SAFE_ERROR_STORAGE_KEY = "financas_safe_errors_v1";
 const SAFE_ERROR_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const SAFE_ERROR_LIMIT = 50;
-const SAFE_ERROR_APP_VERSION = "0.29.3";
+const SAFE_ERROR_APP_VERSION = "0.30.0";
 const SAFE_ERROR_AREAS = new Set(["app", "storage", "backup", "import", "sync", "ai", "qr", "events"]);
 const SAFE_ERROR_CODES = new Set([
   "unexpected", "app_init", "storage_init", "storage_read", "storage_write", "storage_delete",

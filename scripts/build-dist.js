@@ -21,6 +21,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 
 const ROOT = path.join(__dirname, "..");
 const DIST = path.join(ROOT, "dist");
@@ -58,6 +59,11 @@ const PASTAS = ["css", "icons", "fonts"];
 // De `js/`, só o que o `index.html` carrega. O resto são as fontes que o build
 // concatena em `app.generated.js`.
 const JS_PUBLICADOS = ["js/boot.js", "js/landing-boot.js", "js/landing.js", "js/modules"];
+const EXTENSOES_TEXTO = new Set([".css", ".html", ".js", ".json", ".map", ".svg", ".txt", ".webmanifest", ".xml"]);
+
+function normalizarLf(texto) {
+  return String(texto).replace(/\r\n?/g, "\n");
+}
 
 function limpar(dir) {
   if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
@@ -77,8 +83,139 @@ function copiar(origem, destino) {
     return total;
   }
   fs.mkdirSync(path.dirname(destino), { recursive: true });
-  fs.copyFileSync(origem, destino);
+  if (EXTENSOES_TEXTO.has(path.extname(origem).toLowerCase())) {
+    fs.writeFileSync(destino, normalizarLf(fs.readFileSync(origem, "utf8")), "utf8");
+  } else {
+    fs.copyFileSync(origem, destino);
+  }
   return 1;
+}
+
+function listarArquivos(dir, base = dir) {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entrada) => {
+    const absoluto = path.join(dir, entrada.name);
+    if (entrada.isDirectory()) return listarArquivos(absoluto, base);
+    return [path.relative(base, absoluto).replace(/\\/g, "/")];
+  });
+}
+
+function sha256(conteudo) {
+  return crypto.createHash("sha256").update(conteudo).digest("hex");
+}
+
+function nomeComHash(arquivo, digest) {
+  const extensao = path.posix.extname(arquivo);
+  return `${arquivo.slice(0, -extensao.length)}.${digest}${extensao}`;
+}
+
+function reescreverImportacoes(conteudo, resolver) {
+  const regras = [
+    /(\bimport\s*\(\s*)(["'])(\.{1,2}\/[^"']+\.js)\2(\s*\))/g,
+    /(\b(?:import|export)\s+[^"';\r\n]*?\bfrom\s*)(["'])(\.{1,2}\/[^"']+\.js)\2/g,
+    /(\bimport\s*)(["'])(\.{1,2}\/[^"']+\.js)\2/g,
+  ];
+  return regras.reduce((atual, regra) => atual.replace(
+    regra,
+    (trecho, antes, aspas, referencia, depois = "") => `${antes}${aspas}${resolver(referencia)}${aspas}${depois}`
+  ), conteudo);
+}
+
+function versionarModulos() {
+  const diretorio = path.join(DIST, "js", "modules");
+  const fontes = listarArquivos(diretorio).filter((arquivo) => arquivo.endsWith(".js"));
+  const conhecidos = new Set(fontes);
+  const prontos = new Map();
+  const processando = new Set();
+
+  function gerar(arquivo) {
+    if (prontos.has(arquivo)) return prontos.get(arquivo);
+    if (processando.has(arquivo)) {
+      throw new Error(`Ciclo entre módulos impede nome por conteúdo: ${arquivo}`);
+    }
+    processando.add(arquivo);
+
+    const absoluto = path.join(diretorio, ...arquivo.split("/"));
+    let conteudo = normalizarLf(fs.readFileSync(absoluto, "utf8"));
+    conteudo = reescreverImportacoes(conteudo, (referencia) => {
+      const destino = path.posix.normalize(path.posix.join(path.posix.dirname(arquivo), referencia));
+      if (!conhecidos.has(destino)) {
+        throw new Error(`Importação ausente em ${arquivo}: ${referencia}`);
+      }
+      const gerado = gerar(destino);
+      let relativa = path.posix.relative(path.posix.dirname(arquivo), gerado.arquivo);
+      if (!relativa.startsWith(".")) relativa = `./${relativa}`;
+      return relativa;
+    });
+
+    const digest = sha256(Buffer.from(conteudo, "utf8"));
+    const publicado = nomeComHash(arquivo, digest);
+    const destino = path.join(diretorio, ...publicado.split("/"));
+    fs.mkdirSync(path.dirname(destino), { recursive: true });
+    fs.writeFileSync(destino, conteudo, "utf8");
+    const resultado = { arquivo: publicado, digest };
+    prontos.set(arquivo, resultado);
+    processando.delete(arquivo);
+    return resultado;
+  }
+
+  fontes.forEach(gerar);
+  fontes.forEach((arquivo) => fs.rmSync(path.join(diretorio, ...arquivo.split("/")), { force: true }));
+  return prontos;
+}
+
+function reescreverPacoteVersionado(modulos) {
+  const bootstrap = modulos.get("bootstrap.js");
+  if (!bootstrap) throw new Error("Módulo obrigatório ausente: js/modules/bootstrap.js");
+
+  const htmlPath = path.join(DIST, "app.html");
+  let html = normalizarLf(fs.readFileSync(htmlPath, "utf8"));
+  const bootstrapFonte = "js/modules/bootstrap.js";
+  const bootstrapPublicado = `js/modules/${bootstrap.arquivo}`;
+  if (!html.includes(`src="${bootstrapFonte}"`)) {
+    throw new Error(`app.html não carrega ${bootstrapFonte}`);
+  }
+  html = html.replace(`src="${bootstrapFonte}"`, `src="${bootstrapPublicado}"`);
+  const buildId = `sha256-${bootstrap.digest}`;
+  if (!/<meta\s+name="cofre-build"\s/.test(html)) {
+    html = html.replace("</head>", `<meta name="cofre-build" content="${buildId}" />\n</head>`);
+  }
+  fs.writeFileSync(htmlPath, normalizarLf(html), "utf8");
+
+  const workerPath = path.join(DIST, "service-worker.js");
+  let worker = normalizarLf(fs.readFileSync(workerPath, "utf8"));
+  modulos.forEach((gerado, fonte) => {
+    const anterior = `js/modules/${fonte}`;
+    const proximo = `js/modules/${gerado.arquivo}`;
+    worker = worker.replaceAll(`"${anterior}"`, `"${proximo}"`);
+    worker = worker.replaceAll(`'${anterior}'`, `'${proximo}'`);
+  });
+  if (!worker.includes("const BUILD_ID = VERSION;")) {
+    throw new Error("service-worker.js não declara BUILD_ID a partir de VERSION");
+  }
+  worker = worker.replace("const BUILD_ID = VERSION;", `const BUILD_ID = "${buildId}";`);
+  const versaoFonte = (worker.match(/const VERSION = "(v\d+)";/) || [])[1];
+  if (!versaoFonte) throw new Error("service-worker.js não possui uma versão de cache válida");
+  worker = worker.replace(
+    `const VERSION = "${versaoFonte}";`,
+    `const VERSION = "${versaoFonte}-${bootstrap.digest}";`
+  );
+
+  const semHash = Array.from(modulos.keys()).filter((fonte) => {
+    const referencia = `js/modules/${fonte}`;
+    return worker.includes(`"${referencia}"`) || worker.includes(`'${referencia}'`);
+  });
+  if (semHash.length) {
+    throw new Error(`service worker ainda aponta para módulo sem hash: ${semHash.join(", ")}`);
+  }
+  const cacheados = new Set(Array.from(worker.matchAll(/["'](js\/modules\/[^"']+\.js)["']/g)).map((resultado) => resultado[1]));
+  const publicados = new Set(Array.from(modulos.values()).map((gerado) => `js/modules/${gerado.arquivo}`));
+  const faltandoNoCache = Array.from(publicados).filter((arquivo) => !cacheados.has(arquivo));
+  const sobrandoNoCache = Array.from(cacheados).filter((arquivo) => !publicados.has(arquivo));
+  if (faltandoNoCache.length || sobrandoNoCache.length) {
+    throw new Error(`Lista de módulos do service worker diverge do pacote: faltam [${faltandoNoCache.join(", ")}], sobram [${sobrandoNoCache.join(", ")}]`);
+  }
+  fs.writeFileSync(workerPath, normalizarLf(worker), "utf8");
+  return { buildId, bootstrap: bootstrapPublicado };
 }
 
 /* ------------------------------------------------------------------ *
@@ -202,8 +339,12 @@ function main() {
   const gerado = path.join(DIST, "js/modules/app.generated.js");
   if (!fs.existsSync(gerado)) throw new Error("Rode `npm run build` antes: js/modules/app.generated.js não existe.");
 
+  const modulos = versionarModulos();
+  const pacote = reescreverPacoteVersionado(modulos);
+
   absolutizar("landing.html");
 
+  console.log(`Pacote ${pacote.buildId} inicia em ${pacote.bootstrap}.`);
   console.log(`dist/ gerado com ${total} arquivo(s).`);
 }
 

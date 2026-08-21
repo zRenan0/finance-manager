@@ -175,7 +175,9 @@ e servidores compatíveis, mas a publicação usa `authMode: "cookie"`.
 
 ```json
 {
-  "protocol": 2,
+  "protocol": 3,
+  "serverProtocol": 3,
+  "minimumWriteProtocol": 2,
   "status": "applied",
   "revision": "1284",
   "applied": 3,
@@ -186,6 +188,45 @@ e servidores compatíveis, mas a publicação usa `authMode: "cookie"`.
 ```
 
 `revision` é a maior `seq` do usuário. O cliente a trata como cursor opaco.
+
+`protocol` é o ECO da versão que o cliente falou no cabeçalho `X-Sync-Protocol`;
+`serverProtocol` é a versão que o servidor implementa. Sem o eco, publicar o
+backend novo faria todo aparelho ainda no protocolo 2 recusar as respostas por
+"protocolo incompatível" antes mesmo de o aplicativo novo existir nos aparelhos.
+
+## Versões e a janela de atualização
+
+`minimumWriteProtocol` é configuração versionada do backend (`cofre_sync_config`),
+igual para todos os usuários. Durante a transição ela vale `2`: um cliente antigo
+continua gravando. No corte ela passa a `3`, e uma escrita abaixo do mínimo recebe
+**HTTP 426** com `protocol_upgrade_required`.
+
+426, e não 409: o cliente trata 409 como conflito de documento, e descartaria a
+fila. Com 426 ele para o motor, mantém a fila local intacta e sobe tudo assim que
+o aplicativo for atualizado. Leitura continua permitida em qualquer versão.
+
+## Entidades (protocolo 3)
+
+Nove coleções sincronizam POR REGISTRO: `transactions`, `categories`, `goals`,
+`assets`, `accounts`, `creditCards`, `accountTransfers`, `cardPayments` e
+`accountAdjustments`.
+
+As cinco últimas viajavam como uma lista inteira dentro de `settings`. Duas
+contas criadas em aparelhos diferentes disputavam a MESMA chave, e uma delas
+sumia. Um cliente 3 não pode mais enviar `settings/accounts` e afins; um cliente
+2 ainda pode, durante a transição, e cada registro é resolvido pela própria
+`rev`.
+
+## Vínculo com condição de revisão
+
+O primeiro lote do vínculo automático (dados criados antes do login entrando numa
+conta que nunca foi usada) leva `expectedRemoteRevision` no corpo. O banco compara
+a revisão sob bloqueio antes de aplicar; se a conta tiver avançado no intervalo,
+responde **409 `remote_changed`** com a revisão observada no corpo.
+
+Esse é o único 409 que o cliente NÃO trata como conflito de documento: o diário e
+a fila do vínculo continuam intactos, o envio daquele lote para, e a decisão volta
+para a pessoa como confirmação de mesclagem.
 
 ## Concorrência e repetição
 

@@ -93,6 +93,107 @@ function accountSyncCard() {
   </div>`;
 }
 
+// Cartão do vínculo entre os dados deste aparelho e a conta.
+//
+// Ele só mostra CONTAGENS e estado. Nunca a impressão do conteúdo, nunca o UUID
+// da conta, nunca o id de um registro: quem está olhando a tela precisa decidir,
+// não auditar. E a decisão nunca é gravada por abrir ou fechar o cartão.
+function accountLinkParts(resumo) {
+  if (!resumo) return "";
+  const plural = (n, um, muitos) => `${n} ${n > 1 ? muitos : um}`;
+  const partes = [];
+  if (resumo.transactions) partes.push(plural(resumo.transactions, "lançamento", "lançamentos"));
+  if (resumo.accounts) partes.push(plural(resumo.accounts, "conta", "contas"));
+  if (resumo.creditCards) partes.push(plural(resumo.creditCards, "cartão", "cartões"));
+  if (resumo.accountTransfers) partes.push(plural(resumo.accountTransfers, "transferência", "transferências"));
+  if (resumo.cardPayments) partes.push(plural(resumo.cardPayments, "pagamento", "pagamentos"));
+  if (resumo.accountAdjustments) partes.push(plural(resumo.accountAdjustments, "conciliação", "conciliações"));
+  if (resumo.goals) partes.push(plural(resumo.goals, "meta", "metas"));
+  if (resumo.assets) partes.push(plural(resumo.assets, "item de patrimônio", "itens de patrimônio"));
+  if (resumo.categories) partes.push(plural(resumo.categories, "categoria personalizada", "categorias personalizadas"));
+  if (resumo.monthlyIncome) partes.push("a renda cadastrada");
+  const restante = Number(resumo.settings) - (resumo.monthlyIncome ? 1 : 0);
+  if (restante > 0) partes.push(plural(restante, "configuração financeira", "configurações financeiras"));
+  if (!partes.length) return "";
+  if (partes.length === 1) return partes[0];
+  return `${partes.slice(0, -1).join(", ")} e ${partes[partes.length - 1]}`;
+}
+
+const ACCOUNT_LINK_VIEW = {
+  checking: { icon: "loader", title: "Conferindo os dados deste aparelho" },
+  linking: { icon: "loader", title: "Vinculando dados deste aparelho" },
+  linked: { icon: "checkCircle", title: "Dados deste aparelho vinculados" },
+  confirm: { icon: "upload", title: "Trazer os dados deste aparelho?" },
+  waiting: { icon: "wifi", title: "Vínculo aguardando conexão" },
+  pending: { icon: "alertTriangle", title: "Vínculo pendente" },
+  dismissed: { icon: "info", title: "Dados deste aparelho separados da conta" },
+};
+
+function accountGuestLinkCard() {
+  const link = state.account.guestLink || freshGuestLink();
+  const view = ACCOUNT_LINK_VIEW[link.phase];
+  // `idle` é ausência de trabalho: nenhum cartão, nenhuma pergunta.
+  if (!view) return "";
+  const conteudo = accountLinkParts(link.summary);
+  const busy = !!link.busy || link.phase === "checking" || link.phase === "linking";
+
+  let corpo = "";
+  if (link.phase === "confirm") {
+    corpo = `<p class="card-subtitle">Este navegador tem ${escapeHtml(conteudo || "dados salvos sem conta")} guardados fora da conta.${
+      link.errorCode === "remote_changed"
+        ? " A conta recebeu alterações de outro aparelho enquanto isto era preparado."
+        : (String(link.remoteRevision || "0") === "0" ? "" : " A conta já tem conteúdo de outro aparelho.")
+    }</p>
+    <p class="field-hint">Juntar não substitui nem apaga nada: registros diferentes entram por união e, no mesmo registro, vence a versão mais recente. A cópia deste aparelho continua aqui de qualquer forma.</p>`;
+  } else if (link.phase === "linked") {
+    const stats = link.stats || null;
+    corpo = `<p class="card-subtitle">O conteúdo deste aparelho já faz parte da conta e está no servidor.</p>${
+      stats ? `<p class="field-hint">Incorporados: ${escapeHtml(String(Number(stats.added) || 0))} lançamento(s), ${escapeHtml(String(Number(stats.goals) || 0))} meta(s), ${escapeHtml(String(Number(stats.accounts) || 0))} conta(s).</p>` : ""
+    }`;
+  } else if (link.phase === "dismissed") {
+    corpo = `<p class="card-subtitle">Você escolheu manter ${escapeHtml(conteudo || "esses dados")} fora da conta. Nada foi apagado.</p>
+      <p class="field-hint">Se mudar de ideia, o vínculo continua disponível aqui.</p>`;
+  } else if (link.phase === "waiting") {
+    corpo = `<p class="card-subtitle">${escapeHtml(link.error || "Sem conexão para conferir a conta.")}</p>
+      <p class="field-hint">Nada é presumido sem saber o que a conta já tem. O vínculo termina quando a rede voltar.</p>`;
+  } else if (link.phase === "pending") {
+    corpo = `<p class="card-subtitle">${escapeHtml(link.error || "O vínculo não foi concluído.")}</p>
+      <p class="field-hint">Seus dados continuam completos nos dois lados. A sincronização não aparece como concluída enquanto isto não terminar.</p>
+      ${link.errorCode ? `<p class="field-hint">Código da falha: ${escapeHtml(link.errorCode)}</p>` : ""}`;
+  } else {
+    corpo = `<p class="card-subtitle">Conferindo o que existe aqui e o que a conta já tem, antes de qualquer envio.</p>`;
+  }
+
+  let acoes = "";
+  if (link.phase === "confirm") {
+    acoes = `<div class="account-link__actions">
+      <button class="btn btn--primary btn--sm" data-action="account-link-confirm" ${busy ? "disabled" : ""}>${svgIcon("upload", 15)} Juntar dados</button>
+      <button class="btn btn--secondary btn--sm" data-action="account-link-dismiss" ${busy ? "disabled" : ""}>Manter separados</button>
+      <button class="link-btn" data-action="account-link-later">Agora não</button>
+    </div>`;
+  } else if (link.phase === "pending") {
+    acoes = `<div class="account-link__actions">
+      <button class="btn btn--secondary btn--sm" data-action="account-link-confirm" ${busy ? "disabled" : ""}>${svgIcon("refresh", 15)} Tentar novamente</button>
+      <button class="link-btn" data-action="account-link-later">Agora não</button>
+    </div>`;
+  } else if (link.phase === "dismissed" || link.phase === "waiting") {
+    acoes = `<div class="account-link__actions">
+      <button class="btn btn--secondary btn--sm" data-action="account-link-review" ${busy ? "disabled" : ""}>Vincular dados deste aparelho</button>
+    </div>`;
+  }
+
+  return `<div class="card account-sync account-link">
+    <div class="account-sync__head">
+      <span class="account-sync__icon account-sync__icon--${escapeHtml(link.phase)}">${svgIcon(view.icon, 18)}</span>
+      <div>
+        <p class="card-title">${escapeHtml(view.title)}</p>
+        ${corpo}
+      </div>
+    </div>
+    ${acoes}
+  </div>`;
+}
+
 function accountSignedIn() {
   const a = state.account;
   return `<div class="card account-profile">
@@ -100,6 +201,7 @@ function accountSignedIn() {
     <button class="btn btn--secondary" data-action="account-logout" ${a.busy ? "disabled" : ""}>Sair desta conta</button>
   </div>
   ${accountSyncCard()}
+  ${accountGuestLinkCard()}
   ${a.mode === "password" ? `<div class="card"><p class="card-title">Definir nova senha</p><div class="field"><label class="field__label" for="account-new-password">Nova senha</label><input id="account-new-password" class="input" type="password" data-field="auth-new-password" minlength="10" maxlength="128" value="${escapeHtml(a.form.newPassword)}" autocomplete="new-password" /></div><button class="btn btn--primary" data-action="account-submit" data-value="password" ${a.busy ? "disabled" : ""}>Salvar nova senha</button></div>` : ""}
   <div class="card"><div class="settings-row-header"><div><p class="card-title">Dispositivos conectados</p><p class="card-subtitle">Revogue qualquer acesso que você não reconheça.</p></div><button class="icon-btn" data-action="account-refresh" aria-label="Atualizar dispositivos">${svgIcon("refresh", 16)}</button></div>
     <div class="account-device-list">${a.devices.length ? a.devices.map((device) => `<div class="account-device"><span class="account-device__icon">${svgIcon("phone", 18)}</span><span><b>${escapeHtml(device.label || "Dispositivo")}${device.current ? " (este)" : ""}</b><small>Último acesso: ${escapeHtml(accountDeviceDate(device.lastSeenAt))}${device.revokedAt ? " · acesso revogado" : ""}</small></span>${device.revokedAt ? "" : `<button class="btn btn--ghost btn--sm" data-action="account-revoke" data-id="${escapeHtml(device.id)}">Revogar</button>`}</div>`).join("") : `<p class="field-hint">Nenhum dispositivo listado.</p>`}</div>

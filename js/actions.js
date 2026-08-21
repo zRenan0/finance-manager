@@ -212,6 +212,12 @@ function onClick(e) {
     // `retry` e não `syncNow`: quando o motor parou por erro, sincronizar
     // agora não faz nada, e é justamente nesse estado que o botão aparece.
     case "account-sync-now": if (typeof CloudSync !== "undefined") CloudSync.retry(); break;
+    // Vínculo dos dados deste aparelho com a conta. Cada ação é uma escolha
+    // diferente; nenhuma delas substitui ou apaga um dos lados.
+    case "account-link-confirm": accountLinkGuest(); break;
+    case "account-link-dismiss": accountDismissGuestLink(); break;
+    case "account-link-later": accountPostponeGuestLink(); break;
+    case "account-link-review": accountReviewGuestLink(); break;
     case "account-logout": accountLogout(); break;
     case "account-revoke":
       requestConfirmation({ title: "Revogar acesso deste dispositivo?", message: "A sessão desse dispositivo deixará de acessar sua conta.", confirmLabel: "Revogar acesso", tone: "danger", onConfirm: () => accountRevoke(id) });

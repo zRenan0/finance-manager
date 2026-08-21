@@ -2,6 +2,18 @@
 
 const SCHEMA_VERSION = 22;
 const COLLECTIONS = ["transactions", "categories", "goals", "assets"];
+const RECORD_ENTITIES = ["accounts", "creditCards", "accountTransfers", "cardPayments", "accountAdjustments"];
+const ALL_RECORD_ENTITIES = [...COLLECTIONS, ...RECORD_ENTITIES];
+const LIST_ENTITY_BY_SETTING = Object.freeze({
+  accounts: "accounts",
+  creditCards: "creditCards",
+  accountTransfers: "accountTransfers",
+  cardPayments: "cardPayments",
+  accountAdjustments: "accountAdjustments",
+});
+const LIST_SETTING_BY_ENTITY = Object.freeze(Object.fromEntries(
+  Object.entries(LIST_ENTITY_BY_SETTING).map(([setting, entity]) => [entity, setting]),
+));
 const SETTING_KEYS = [
   "monthlyIncome", "creditCardLimit", "theme", "dismissedCarryForwardMonth", "budgetSplit", "budgetAlerts",
   "budgetHistory", "version", "lastPersistAt", "userName", "emergencyGoalId", "emergencyMonths", "marketRates",
@@ -11,7 +23,17 @@ const SETTING_KEYS = [
 ];
 const TOP_LEVEL = new Set([...COLLECTIONS, ...SETTING_KEYS]);
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9:_-]{0,79}$/;
-const LIMITS = { transactions: 100000, categories: 500, goals: 1000, assets: 5000 };
+const LIMITS = {
+  transactions: 100000,
+  categories: 500,
+  goals: 1000,
+  assets: 5000,
+  accounts: 1000,
+  creditCards: 1000,
+  accountTransfers: 50000,
+  cardPayments: 50000,
+  accountAdjustments: 50000,
+};
 const SETTING_ARRAY_LIMITS = { accounts: 1000, creditCards: 1000, accountTransfers: 50000, cardPayments: 50000, accountAdjustments: 50000 };
 const FORBIDDEN = new Set(["__proto__", "prototype", "constructor"]);
 
@@ -44,6 +66,15 @@ function validDate(value, optional = false) {
 }
 function validMoney(value) { return typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= 1e12; }
 function validRef(value) { return value == null || value === "" || SAFE_ID.test(String(value)); }
+function validRequiredRef(value) { return value != null && value !== "" && SAFE_ID.test(String(value)); }
+function validTimestamp(value, optional = true) {
+  if (optional && (value == null || value === "")) return true;
+  return typeof value === "string" && value.length <= 40 && !Number.isNaN(Date.parse(value));
+}
+function validColor(value) { return /^#[0-9A-F]{6}$/i.test(String(value || "")); }
+function validateSourceIds(value, max) {
+  return value == null || (Array.isArray(value) && value.length <= max && value.every(validRequiredRef));
+}
 function validateRecord(name, record) {
   if (name === "transactions") {
     if (!["income", "expense"].includes(record.type) || !validMoney(record.amount) || record.amount < 0 || !validDate(record.date)) invalid("Lançamento financeiro inválido");
@@ -60,6 +91,57 @@ function validateRecord(name, record) {
   if (name === "assets") {
     if (typeof record.name !== "string" || !record.name.trim() || record.name.length > 80 || !["asset", "liability"].includes(record.kind) || !validMoney(record.value) || record.value < 0) invalid("Item patrimonial inválido");
   }
+  if (name === "accounts") {
+    if (typeof record.name !== "string" || !record.name.trim() || record.name.length > 60
+      || !["corrente", "poupanca", "dinheiro", "digital", "outro"].includes(record.type)
+      || !validMoney(record.openingBalance) || !validDate(record.openingDate) || !validColor(record.color)
+      || !validTimestamp(record.reconciledAt) || !validTimestamp(record.createdAt) || !validTimestamp(record.updatedAt)) {
+      invalid("Conta inválida");
+    }
+  }
+  if (name === "creditCards") {
+    if (typeof record.name !== "string" || !record.name.trim() || record.name.length > 60
+      || !validRef(record.accountId) || !validMoney(record.limit) || record.limit < 0
+      || !Number.isInteger(record.closingDay) || record.closingDay < 1 || record.closingDay > 31
+      || !Number.isInteger(record.dueDay) || record.dueDay < 1 || record.dueDay > 31
+      || !validColor(record.color) || !validTimestamp(record.createdAt) || !validTimestamp(record.updatedAt)) {
+      invalid("Cartão inválido");
+    }
+  }
+  if (name === "accountTransfers") {
+    if (!validRequiredRef(record.fromAccountId) || !validRequiredRef(record.toAccountId)
+      || record.fromAccountId === record.toAccountId || !validMoney(record.amount) || record.amount <= 0
+      || !validDate(record.date) || (record.description != null && (typeof record.description !== "string" || record.description.length > 100))
+      || !validateSourceIds(record.sourceTransactionIds, 2) || !validTimestamp(record.createdAt) || !validTimestamp(record.updatedAt)) {
+      invalid("Transferência entre contas inválida");
+    }
+  }
+  if (name === "cardPayments") {
+    if (!validRequiredRef(record.accountId) || !validRequiredRef(record.creditCardId)
+      || !validMoney(record.amount) || record.amount <= 0 || !/^\d{4}-\d{2}$/.test(String(record.statementKey || ""))
+      || !validDate(record.date) || !validateSourceIds(record.sourceTransactionIds, 1)
+      || !validTimestamp(record.createdAt) || !validTimestamp(record.updatedAt)) {
+      invalid("Pagamento de cartão inválido");
+    }
+  }
+  if (name === "accountAdjustments") {
+    if (!validRequiredRef(record.accountId) || !validMoney(record.amount) || !validDate(record.date)
+      || (record.note != null && (typeof record.note !== "string" || record.note.length > 100))
+      || !validTimestamp(record.createdAt)) {
+      invalid("Ajuste de conta inválido");
+    }
+  }
+}
+
+function validateRecordList(name, value, limit = LIMITS[name]) {
+  if (!Array.isArray(value) || value.length > limit) invalid(`Configuração inválida: ${name}`);
+  const seen = new Set();
+  value.forEach((record) => {
+    if (!record || typeof record !== "object" || Array.isArray(record) || !SAFE_ID.test(String(record.id || ""))) invalid(`Identificador inválido em ${name}`);
+    if (seen.has(record.id)) invalid(`Identificador repetido em ${name}`);
+    seen.add(record.id);
+    validateRecord(name, record);
+  });
 }
 
 function validateSnapshot(raw) {
@@ -69,16 +151,10 @@ function validateSnapshot(raw) {
   COLLECTIONS.forEach((name) => {
     const list = raw[name];
     if (!Array.isArray(list) || list.length > LIMITS[name]) invalid(`Coleção inválida: ${name}`);
-    const seen = new Set();
-    list.forEach((record) => {
-      if (!record || typeof record !== "object" || !SAFE_ID.test(String(record.id || ""))) invalid(`Identificador inválido em ${name}`);
-      if (seen.has(record.id)) invalid(`Identificador repetido em ${name}`);
-      seen.add(record.id);
-      validateRecord(name, record);
-    });
+    validateRecordList(name, list, LIMITS[name]);
   });
   Object.entries(SETTING_ARRAY_LIMITS).forEach(([key, limit]) => {
-    if (raw[key] != null && (!Array.isArray(raw[key]) || raw[key].length > limit)) invalid(`Configuração inválida: ${key}`);
+    if (raw[key] != null) validateRecordList(LIST_ENTITY_BY_SETTING[key], raw[key], limit);
   });
   ["monthlyIncome", "creditCardLimit"].forEach((key) => { if (raw[key] != null && (!validMoney(raw[key]) || raw[key] < 0)) invalid(`Valor inválido: ${key}`); });
   inspect(raw);
@@ -128,24 +204,29 @@ function emptySnapshot() {
 // operação isolada, validada por si só. Isso é o que permite recusar UMA
 // operação inválida sem descartar o lote todo do usuário, e é o que mantém o
 // custo por ciclo proporcional ao que mudou.
-const OP_ENTITIES = [...COLLECTIONS, "settings"];
+const OP_ENTITIES = [...ALL_RECORD_ENTITIES, "settings"];
 const REV_PATTERN = /^\d{15}\.\d{6}\.[A-Za-z0-9][A-Za-z0-9:_-]{0,79}$/;
 const MAX_OPS_PER_BATCH = 500;
 const MAX_OP_BYTES = 64 * 1024;          // um registro isolado nunca chega perto disso
 
-function validateOp(raw) {
+function validateOp(raw, protocol = 2) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) invalid("Operação inválida");
   const entity = String(raw.entity || "");
   const entityId = String(raw.entityId == null ? "" : raw.entityId);
   const op = String(raw.op || "");
   const rev = String(raw.rev || "");
 
-  if (OP_ENTITIES.indexOf(entity) === -1) invalid("Coleção não permitida na operação");
+  const spoken = Number(protocol);
+  const allowedEntities = spoken >= 3 ? OP_ENTITIES : [...COLLECTIONS, "settings"];
+  if (allowedEntities.indexOf(entity) === -1) invalid("Coleção não permitida na operação");
   if (op !== "put" && op !== "delete") invalid("Tipo de operação não permitido");
   if (!REV_PATTERN.test(rev)) invalid("Marca de versão inválida na operação");
 
   if (entity === "settings") {
     if (SETTING_KEYS.indexOf(entityId) === -1) invalid("Configuração não permitida");
+    if (spoken >= 3 && Object.prototype.hasOwnProperty.call(LIST_ENTITY_BY_SETTING, entityId)) {
+      invalid("A lista financeira precisa ser enviada por registro", "protocol_entity_required");
+    }
     if (op === "delete") invalid("Configuração não é excluída, apenas substituída");
   } else {
     if (!SAFE_ID.test(entityId)) invalid("Identificador inválido na operação");
@@ -161,16 +242,18 @@ function validateOp(raw) {
       if (!raw.payload || typeof raw.payload !== "object" || Array.isArray(raw.payload)) invalid("Registro inválido na operação");
       if (String(raw.payload.id || "") !== entityId) invalid("Identificador do registro não confere");
       validateRecord(entity, raw.payload);
+    } else if (Object.prototype.hasOwnProperty.call(LIST_ENTITY_BY_SETTING, entityId)) {
+      validateRecordList(LIST_ENTITY_BY_SETTING[entityId], raw.payload, SETTING_ARRAY_LIMITS[entityId]);
     }
     out.payload = JSON.parse(JSON.stringify(raw.payload));
   }
   return out;
 }
 
-function validateOps(raw) {
+function validateOps(raw, protocol = 2) {
   if (!Array.isArray(raw)) invalid("Lote de operações inválido");
   if (raw.length > MAX_OPS_PER_BATCH) invalid("Lote de operações acima do limite", "batch_too_large");
-  return raw.map(validateOp);
+  return raw.map((op) => validateOp(op, protocol));
 }
 
 // Dobra o log de operações num snapshot, para exportação e restauração. É a
@@ -178,19 +261,38 @@ function validateOps(raw) {
 function foldOps(ops) {
   const snapshot = emptySnapshot();
   const maps = {};
-  COLLECTIONS.forEach((name) => { maps[name] = new Map(); });
+  const revs = {};
+  ALL_RECORD_ENTITIES.forEach((name) => { maps[name] = new Map(); revs[name] = new Map(); });
   (ops || []).forEach((row) => {
-    if (!row || row.op !== "put") return;
-    if (row.entity === "settings") { snapshot[row.entityId] = row.payload; return; }
+    if (!row) return;
+    if (row.entity === "settings") {
+      if (row.op !== "put") return;
+      const mapped = LIST_ENTITY_BY_SETTING[row.entityId];
+      if (!mapped) { snapshot[row.entityId] = row.payload; return; }
+      if (!Array.isArray(row.payload)) return;
+      row.payload.forEach((record) => {
+        if (!record || !record.id) return;
+        const prior = revs[mapped].get(record.id) || "";
+        if (prior && prior >= String(row.rev || "")) return;
+        maps[mapped].set(record.id, record);
+        revs[mapped].set(record.id, String(row.rev || ""));
+      });
+      return;
+    }
     if (!maps[row.entity]) return;
-    maps[row.entity].set(row.entityId, row.payload);
+    const prior = revs[row.entity].get(row.entityId) || "";
+    if (prior && prior >= String(row.rev || "")) return;
+    revs[row.entity].set(row.entityId, String(row.rev || ""));
+    if (row.op === "put") maps[row.entity].set(row.entityId, row.payload);
+    else maps[row.entity].delete(row.entityId);
   });
-  COLLECTIONS.forEach((name) => { snapshot[name] = Array.from(maps[name].values()); });
+  ALL_RECORD_ENTITIES.forEach((name) => { snapshot[name] = Array.from(maps[name].values()); });
   return snapshot;
 }
 
 module.exports = {
-  SCHEMA_VERSION, COLLECTIONS, SETTING_KEYS, MAX_OPS_PER_BATCH,
+  SCHEMA_VERSION, COLLECTIONS, RECORD_ENTITIES, ALL_RECORD_ENTITIES, OP_ENTITIES,
+  LIST_ENTITY_BY_SETTING, LIST_SETTING_BY_ENTITY, SETTING_KEYS, MAX_OPS_PER_BATCH,
   validateSnapshot, validateChanges, applyChanges, emptySnapshot,
   validateOp, validateOps, foldOps,
 };

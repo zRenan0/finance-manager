@@ -2,6 +2,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const { spawnSync } = require("child_process");
 
 const ROOT = path.join(__dirname, "..");
@@ -52,7 +53,57 @@ const index = read("index.html");
 check("HTML possui apenas boot e bootstrap", (index.match(/<script\b/g) || []).length === 2);
 check("nenhum arquivo clássico do aplicativo é carregado", !/<script[^>]+src="js\/(?!boot\.js|modules\/bootstrap\.js)/.test(index));
 
-console.log("\n2. Estilos fora do HTML");
+console.log("\n2. Pacote publicado com nomes por conteúdo");
+const distBuild = spawnSync(process.execPath, [path.join(ROOT, "scripts/build-dist.js")], { cwd: ROOT, encoding: "utf8" });
+check("dist é gerado", distBuild.status === 0, (distBuild.stderr || distBuild.stdout).trim().split("\n")[0]);
+
+if (distBuild.status === 0) {
+  const digest = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
+  const distFiles = walk("dist").map((file) => file.replace(/\\/g, "/"));
+  const moduleFiles = distFiles.filter((file) => file.startsWith("dist/js/modules/") && file.endsWith(".js"));
+  const sourceModules = walk("js/modules")
+    .map((file) => file.replace(/\\/g, "/"))
+    .filter((file) => file.endsWith(".js"));
+  const semHash = sourceModules.filter((file) => fs.existsSync(path.join(ROOT, "dist", file)));
+
+  check("todo módulo publicado leva SHA-256 no nome", moduleFiles.length === sourceModules.length
+    && moduleFiles.every((file) => /\.[a-f0-9]{64}\.js$/.test(file)), moduleFiles.join(", "));
+  check("o SHA-256 do nome corresponde aos bytes", moduleFiles.every((file) => {
+    const esperado = (file.match(/\.([a-f0-9]{64})\.js$/) || [])[1];
+    return esperado === digest(fs.readFileSync(path.join(ROOT, file)));
+  }));
+  check("as cópias de módulo sem hash foram removidas", semHash.length === 0, semHash.join(", "));
+
+  const appPublicado = read("dist/app.html");
+  const bootstrapRef = (appPublicado.match(/<script\s+type="module"\s+src="(js\/modules\/bootstrap\.[a-f0-9]{64}\.js)"/) || [])[1];
+  const buildId = (appPublicado.match(/<meta\s+name="cofre-build"\s+content="(sha256-[a-f0-9]{64})"/) || [])[1];
+  check("app.html aponta para o bootstrap versionado", !!bootstrapRef && fs.existsSync(path.join(ROOT, "dist", bootstrapRef)), bootstrapRef || "ausente");
+  check("app.html declara o identificador do pacote", !!buildId && bootstrapRef && buildId.slice(7) === (bootstrapRef.match(/\.([a-f0-9]{64})\.js$/) || [])[1], buildId || "ausente");
+
+  const bootstrapPublicado = bootstrapRef ? read(path.posix.join("dist", bootstrapRef)) : "";
+  const importados = Array.from(bootstrapPublicado.matchAll(/import\(["'](\.\/[^"']+\.js)["']\)/g)).map((m) => m[1]);
+  check("imports do bootstrap apontam apenas para módulos versionados", importados.length === 5
+    && importados.every((ref) => /\.[a-f0-9]{64}\.js$/.test(ref)
+      && fs.existsSync(path.join(ROOT, "dist/js/modules", ref.slice(2)))), importados.join(", "));
+
+  const workerPublicado = read("dist/service-worker.js");
+  const versaoCache = (read("service-worker.js").match(/const VERSION = "(v\d+)";/) || [])[1] || "";
+  const cacheados = new Set(Array.from(workerPublicado.matchAll(/["'](js\/modules\/[^"']+\.js)["']/g)).map((m) => m[1]));
+  const publicados = new Set(moduleFiles.map((file) => file.slice("dist/".length)));
+  check("service worker guarda exatamente os módulos versionados", cacheados.size === publicados.size
+    && Array.from(publicados).every((file) => cacheados.has(file)), Array.from(cacheados).join(", "));
+  check("cache publicado muda junto do pacote", !!buildId && !!versaoCache
+    && workerPublicado.includes(`const VERSION = "${versaoCache}-${buildId.slice(7)}";`)
+    && workerPublicado.includes(`const BUILD_ID = "${buildId}";`));
+
+  const extensoesTexto = new Set([".css", ".html", ".js", ".json", ".map", ".svg", ".txt", ".webmanifest", ".xml"]);
+  const comCr = distFiles.filter((file) => extensoesTexto.has(path.extname(file).toLowerCase())
+    && fs.readFileSync(path.join(ROOT, file)).includes(13));
+  check("arquivos de texto do dist usam somente LF", comCr.length === 0, comCr.join(", "));
+  check("dist não publica index.html", !fs.existsSync(path.join(ROOT, "dist/index.html")));
+}
+
+console.log("\n3. Estilos fora do HTML");
 const renderedSources = ["index.html", ...walk("js").filter((file) => file.endsWith(".js") && !file.endsWith("app.generated.js"))];
 const inlineStyleFiles = renderedSources.filter((file) => /(?:\sstyle\s*=|\sstyle\\?=\\?["'])/i.test(read(file)));
 check("modelos não possuem atributos style", inlineStyleFiles.length === 0, inlineStyleFiles.join(", "));
@@ -64,7 +115,7 @@ check("regras entram na folha externa", /insertRule/.test(dynamicStyles) && /dat
 const testBridge = read("js/modules/test-bridge.js");
 check("ponte de teste só funciona localmente e por opção explícita", /localhost/.test(testBridge) && /__test/.test(testBridge));
 
-console.log("\n3. Cache e política de conteúdo");
+console.log("\n4. Cache e política de conteúdo");
 const worker = read("service-worker.js");
 check("cache inclui o artefato modular", worker.includes('"js/modules/app.generated.js"'));
 check("cache inclui os serviços do bootstrap", worker.includes('"js/modules/dynamic-styles.js"') && worker.includes('"js/modules/test-bridge.js"'));

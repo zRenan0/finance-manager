@@ -302,8 +302,10 @@ section("3. Lápides de exclusão (v14)");
   check("schema subiu para 22", run("SCHEMA_VERSION") === 22);
   check("banco novo nasce com cemitério vazio",
     Object.keys(run("migrate(defaultData()).graveyard.transactions")).length === 0);
-  check("cemitério cobre as quatro coleções",
-    Object.keys(run("migrate(defaultData()).graveyard")).sort().join() === "assets,categories,goals,transactions");
+  check("cemitério cobre as nove entidades sincronizáveis",
+    Object.keys(run("migrate(defaultData()).graveyard")).sort().join()
+      === "accountAdjustments,accountTransfers,accounts,assets,cardPayments,categories,creditCards,goals,transactions",
+    Object.keys(run("migrate(defaultData()).graveyard")).sort().join());
 
   // Backup antigo (sem o campo) continua válido.
   ctx.__legacy = { version: 3, transactions: [], categories: [], goals: [] };

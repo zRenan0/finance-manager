@@ -1387,7 +1387,7 @@ if (typeof module !== "undefined" && module.exports) {
 const SAFE_ERROR_STORAGE_KEY = "financas_safe_errors_v1";
 const SAFE_ERROR_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const SAFE_ERROR_LIMIT = 50;
-const SAFE_ERROR_APP_VERSION = "0.29.3";
+const SAFE_ERROR_APP_VERSION = "0.30.0";
 const SAFE_ERROR_AREAS = new Set(["app", "storage", "backup", "import", "sync", "ai", "qr", "events"]);
 const SAFE_ERROR_CODES = new Set([
   "unexpected", "app_init", "storage_init", "storage_read", "storage_write", "storage_delete",
@@ -1510,7 +1510,7 @@ if (typeof module !== "undefined" && module.exports) {
 "use strict";
 
 const DB_NAME = "financas_db";
-const DB_VERSION = 3;   // v3. Fila de sincronização ("outbox") e metadados por escopo
+const DB_VERSION = 4;   // v4. Commit atômico, metadados locais e entidades do protocolo 3
 const LEGACY_KEY = "financas_pro_v2";     // storage antigo (localStorage)
 const LS_FALLBACK_KEY = "financas_db_fallback";
 const LS_MIRROR_KEY = "financas_db_mirror";   // espelho síncrono anti-perda
@@ -1857,8 +1857,49 @@ const STORE_GOALS = "goals";
 const STORE_SETTINGS = "settings";
 const STORE_ASSETS = "assets";            // Módulo 3; patrimônio e dívidas cadastrados
 const STORE_OUTBOX = "outbox";            // v3; fila persistente de mutações a enviar
+const STORE_LOCAL_META = "localMeta";      // v4; cursor, recibos e diários que nunca sobem
+
+// Chaves do `localMeta`. Ficam aqui, e não no motor de sincronização, porque
+// quem grava e quem lê é o armazenamento: o motor apenas as usa pelo nome.
+const META_CURSOR = "syncCursor";              // até onde este aparelho leu o log
+const META_SEED_RECEIPT = "syncSeedReceipt";   // semeadura confirmada pelo servidor
+const META_SEED_JOURNAL = "syncSeedJournal";   // semeadura em andamento
+const META_LINK_JOURNAL = "guestLinkJournal";  // vínculo em andamento, com as marcas já cunhadas
+const META_LINK_RECEIPT = "guestLinkReceipt";  // decisão registrada pela impressão do conteúdo
 const COLLECTIONS = [STORE_TX, STORE_CAT, STORE_GOALS, STORE_ASSETS];
 const ALL_STORES = [STORE_TX, STORE_CAT, STORE_GOALS, STORE_ASSETS, STORE_SETTINGS];
+
+// Uma descrição única impede que uma coleção seja esquecida num dos caminhos
+// de diff, semeadura, conflito, lápide ou restauração. As cinco últimas ainda
+// moram fisicamente em `settings`, mas sincronizam como registros por ID.
+const SYNC_ENTITY_DEFS = Object.freeze({
+  transactions: Object.freeze({ store: STORE_TX, prefix: "transaction" }),
+  categories: Object.freeze({ store: STORE_CAT, prefix: "category" }),
+  goals: Object.freeze({ store: STORE_GOALS, prefix: "goal" }),
+  assets: Object.freeze({ store: STORE_ASSETS, prefix: "asset" }),
+  accounts: Object.freeze({ setting: "accounts", prefix: "account" }),
+  creditCards: Object.freeze({ setting: "creditCards", prefix: "card" }),
+  accountTransfers: Object.freeze({ setting: "accountTransfers", prefix: "transfer" }),
+  cardPayments: Object.freeze({ setting: "cardPayments", prefix: "payment" }),
+  accountAdjustments: Object.freeze({ setting: "accountAdjustments", prefix: "adjustment" }),
+});
+const SYNC_ENTITY_FIELDS = Object.freeze(Object.keys(SYNC_ENTITY_DEFS));
+const SYNC_LIST_SETTINGS = new Set(SYNC_ENTITY_FIELDS.filter((field) => !!SYNC_ENTITY_DEFS[field].setting));
+
+function syncEntryKey(entry) {
+  const current = String(entry && entry.entryKey || "");
+  if (/^[A-Za-z0-9][A-Za-z0-9:_-]{7,119}$/.test(current)) return current;
+  if (typeof crypto !== "undefined" && crypto.randomUUID) return `op_${crypto.randomUUID()}`;
+  return `op_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 14)}`;
+}
+
+function prepareOutboxEntries(entries) {
+  return (Array.isArray(entries) ? entries : []).map((entry) => ({
+    ...entry,
+    entryKey: syncEntryKey(entry),
+    queuedAt: Number(entry && entry.queuedAt) || Date.now(),
+  }));
+}
 
 const SAFE_RECORD_ID = /^[A-Za-z0-9][A-Za-z0-9:_-]{0,79}$/;
 function recordIdHash(value) {
@@ -2695,6 +2736,7 @@ function normalizeAccounts(raw) {
       reconciledAt: normalizeIsoDate(a.reconciledAt) || null,
       createdAt: a.createdAt || new Date().toISOString(),
       updatedAt: a.updatedAt || a.createdAt || new Date().toISOString(),
+      syncRev: normalizeSyncRev(a.syncRev),
     };
   }).filter(Boolean);
 }
@@ -2719,6 +2761,7 @@ function normalizeCreditCards(raw, accounts) {
       archived: !!c.archived,
       createdAt: c.createdAt || new Date().toISOString(),
       updatedAt: c.updatedAt || c.createdAt || new Date().toISOString(),
+      syncRev: normalizeSyncRev(c.syncRev),
     };
   }).filter(Boolean);
 }
@@ -2743,6 +2786,7 @@ function normalizeAccountTransfers(raw, accounts) {
       sourceTransactionIds: (Array.isArray(t.sourceTransactionIds) ? t.sourceTransactionIds : []).filter((value) => typeof value === "string" && value.trim()).map((value) => normalizeRecordId(value, "transaction")).slice(0, 2),
       changeLog: normalizeTransactionLog(t.changeLog, t.createdAt, "transfer"),
       createdAt: t.createdAt || new Date().toISOString(), updatedAt: t.updatedAt || t.createdAt || new Date().toISOString(),
+      syncRev: normalizeSyncRev(t.syncRev),
     };
   }).filter(Boolean);
 }
@@ -2767,6 +2811,7 @@ function normalizeCardPayments(raw, accounts, cards) {
       sourceTransactionIds: (Array.isArray(p.sourceTransactionIds) ? p.sourceTransactionIds : []).filter((value) => typeof value === "string" && value.trim()).map((value) => normalizeRecordId(value, "transaction")).slice(0, 1),
       changeLog: normalizeTransactionLog(p.changeLog, p.createdAt, "card-payment"),
       createdAt: p.createdAt || new Date().toISOString(), updatedAt: p.updatedAt || p.createdAt || new Date().toISOString(),
+      syncRev: normalizeSyncRev(p.syncRev),
     };
   }).filter(Boolean);
 }
@@ -2784,6 +2829,8 @@ function normalizeAccountAdjustments(raw, accounts) {
       date: isRealIsoDate(String(a.date || "")) ? a.date : todayIso(),
       note: String(a.note || "Conciliação de saldo").trim().slice(0, 100),
       createdAt: a.createdAt || new Date().toISOString(),
+      updatedAt: a.updatedAt || a.createdAt || new Date().toISOString(),
+      syncRev: normalizeSyncRev(a.syncRev),
     };
   }).filter(Boolean);
 }
@@ -2808,7 +2855,7 @@ function normalizeAccountAdjustments(raw, accounts) {
 //
 // Escrever isto agora custa um campo. Depois de ligar a nuvem, custaria uma
 // migração com dado divergente em produção.
-const GRAVEYARD_COLLECTIONS = ["transactions", "categories", "goals", "assets"];
+const GRAVEYARD_COLLECTIONS = SYNC_ENTITY_FIELDS;
 const GRAVEYARD_MAX_PER_COLLECTION = 4000;
 const GRAVEYARD_MAX_AGE_MS = 730 * 24 * 60 * 60 * 1000;   // ~24 meses
 
@@ -2818,7 +2865,9 @@ function defaultGraveyard() {
   return out;
 }
 
-const GRAVE_PREFIXES = { transactions: "transaction", categories: "category", goals: "goal", assets: "asset" };
+const GRAVE_PREFIXES = Object.freeze(Object.fromEntries(
+  SYNC_ENTITY_FIELDS.map((field) => [field, SYNC_ENTITY_DEFS[field].prefix])
+));
 
 // Cada lápide guarda DUAS coisas: a data (legível, usada para poda) e a marca
 // do relógio lógico (usada para decidir o conflito). Bases antigas trazem só a
@@ -3303,14 +3352,18 @@ class StorageAdapter {
   get supportsIndexes() { return false; }
   async init() { throw new Error("init() não implementado"); }
   async readAll() { throw new Error("readAll() não implementado"); }
-  async writeChanges(_changeSet) { throw new Error("writeChanges() não implementado"); }
-  async replaceAll(_data) { throw new Error("replaceAll() não implementado"); }
+  async writeChanges(_changeSet, _commit) { throw new Error("writeChanges() não implementado"); }
+  async replaceAll(_data, _commit) { throw new Error("replaceAll() não implementado"); }
   async clearAll() { throw new Error("clearAll() não implementado"); }
   // Fila de sincronização; o adapter em memória simplesmente não guarda nada.
   async outboxAppend(_entries) { return false; }
   async outboxRead(_limit) { return []; }
   async outboxDrop(_seqs) { return false; }
   async outboxClear() { return false; }
+  async localMetaGet(_key) { return null; }
+  async localMetaPut(_key, _value) { return false; }
+  async localMetaDelete(_key) { return false; }
+  async localMetaClear() { return false; }
   close() {}
 }
 
@@ -3379,8 +3432,20 @@ class IndexedDBAdapter extends StorageAdapter {
         // v3. Fila de saída da sincronização. `autoIncrement` dá a ordem de
         // envio; ela precisa sobreviver ao fechamento da aba, senão uma
         // mutação feita offline some antes de chegar ao servidor.
+        let outboxStore;
         if (!db.objectStoreNames.contains(STORE_OUTBOX)) {
-          db.createObjectStore(STORE_OUTBOX, { keyPath: "seq", autoIncrement: true });
+          outboxStore = db.createObjectStore(STORE_OUTBOX, { keyPath: "seq", autoIncrement: true });
+        } else {
+          outboxStore = req.transaction.objectStore(STORE_OUTBOX);
+        }
+        if (!outboxStore.indexNames.contains("by_linkId")) outboxStore.createIndex("by_linkId", "linkId", { unique: false });
+        if (!outboxStore.indexNames.contains("by_seedId")) outboxStore.createIndex("by_seedId", "seedId", { unique: false });
+        if (!outboxStore.indexNames.contains("by_entryKey")) outboxStore.createIndex("by_entryKey", "entryKey", { unique: false });
+
+        // v4. Metadados que pertencem ao aparelho e ao escopo atual. Este store
+        // não participa de `readAll()`, backup, exportação nem operações remotas.
+        if (!db.objectStoreNames.contains(STORE_LOCAL_META)) {
+          db.createObjectStore(STORE_LOCAL_META, { keyPath: "key" });
         }
       };
       req.onsuccess = settle(() => resolve(req.result));
@@ -3462,32 +3527,68 @@ class IndexedDBAdapter extends StorageAdapter {
     return { transactions, categories, goals, assets, settings };
   }
 
-  // changeSet: { puts: {store: [records]}, deletes: {store: [ids]}, settings: {k:v} }
-  async writeChanges(changeSet) {
+  _commitStores(commit) {
+    const options = commit || {};
+    const stores = ALL_STORES.slice();
+    if ((options.outboxAdds || []).length || (options.outboxDrops || []).length) stores.push(STORE_OUTBOX);
+    if (Object.keys(options.metaPuts || {}).length || (options.metaDeletes || []).length) stores.push(STORE_LOCAL_META);
+    return stores;
+  }
+
+  _applyCommitSidecars(tx, commit) {
+    const options = commit || {};
+    const outboxAdds = prepareOutboxEntries(options.outboxAdds || []);
+    const outboxDrops = Array.isArray(options.outboxDrops) ? options.outboxDrops : [];
+    if (outboxAdds.length || outboxDrops.length) {
+      if (!this._has(STORE_OUTBOX)) throw new Error("Fila de sincronização ausente no banco local");
+      const store = tx.objectStore(STORE_OUTBOX);
+      outboxDrops.forEach((seq) => store.delete(Number(seq)));
+      outboxAdds.forEach((entry) => {
+        const clean = { ...entry };
+        delete clean.seq;
+        store.add(clean);
+      });
+    }
+
+    const metaPuts = options.metaPuts || {};
+    const metaDeletes = Array.isArray(options.metaDeletes) ? options.metaDeletes : [];
+    if (Object.keys(metaPuts).length || metaDeletes.length) {
+      if (!this._has(STORE_LOCAL_META)) throw new Error("Metadados locais ausentes no banco local");
+      const store = tx.objectStore(STORE_LOCAL_META);
+      metaDeletes.forEach((key) => store.delete(String(key)));
+      Object.entries(metaPuts).forEach(([key, value]) => store.put({ key, value }));
+    }
+  }
+
+  // O diff financeiro, a fila e os metadados confirmam no mesmo `oncomplete`.
+  async writeChanges(changeSet, commit) {
     await this._ensure();
-    const tx = this._tx(ALL_STORES, "readwrite");
+    const changes = changeSet || { puts: {}, deletes: {}, settings: {} };
+    const tx = this._tx(this._commitStores(commit), "readwrite");
     COLLECTIONS.forEach((name) => {
       if (!this._has(name)) return;
       const store = tx.objectStore(name);
-      (changeSet.puts[name] || []).forEach((rec) => store.put(rec));
-      (changeSet.deletes[name] || []).forEach((id) => store.delete(id));
+      ((changes.puts || {})[name] || []).forEach((rec) => store.put(rec));
+      ((changes.deletes || {})[name] || []).forEach((id) => store.delete(id));
     });
     const settingsStore = tx.objectStore(STORE_SETTINGS);
-    Object.entries(changeSet.settings || {}).forEach(([key, value]) => {
+    Object.entries(changes.settings || {}).forEach(([key, value]) => {
       settingsStore.put({ key, value });
     });
+    this._applyCommitSidecars(tx, commit);
     return this._done(tx);
   }
 
-  async replaceAll(data) {
+  async replaceAll(data, commit) {
     await this._ensure();
-    const tx = this._tx(ALL_STORES, "readwrite");
+    const tx = this._tx(this._commitStores(commit), "readwrite");
     this._existing(ALL_STORES).forEach((s) => tx.objectStore(s).clear());
     data.transactions.forEach((t) => tx.objectStore(STORE_TX).put(t));
     data.categories.forEach((c) => tx.objectStore(STORE_CAT).put(c));
     data.goals.forEach((g) => tx.objectStore(STORE_GOALS).put(g));
     if (this._has(STORE_ASSETS)) (data.assets || []).forEach((a) => tx.objectStore(STORE_ASSETS).put(a));
     SETTING_KEYS.forEach((key) => tx.objectStore(STORE_SETTINGS).put({ key, value: data[key] }));
+    this._applyCommitSidecars(tx, commit);
     return this._done(tx);
   }
 
@@ -3515,17 +3616,13 @@ class IndexedDBAdapter extends StorageAdapter {
   // porque perder uma entrada da fila custa uma reenvio; perder o dado custa o
   // lançamento do usuário.
   async outboxAppend(entries) {
-    await this._ensure();
-    if (!this._has(STORE_OUTBOX) || !entries.length) return true;
-    const tx = this._tx([STORE_OUTBOX], "readwrite");
-    const store = tx.objectStore(STORE_OUTBOX);
-    entries.forEach((entry) => store.put({ ...entry, seq: undefined }));
-    return this._done(tx);
+    if (!entries.length) return true;
+    return this.writeChanges(null, { outboxAdds: entries });
   }
 
   async outboxRead(limit) {
     await this._ensure();
-    if (!this._has(STORE_OUTBOX)) return [];
+    if (!this._has(STORE_OUTBOX)) throw new Error("Fila de sincronização ausente no banco local");
     const tx = this._tx([STORE_OUTBOX], "readonly");
     const all = await this._getAll(tx.objectStore(STORE_OUTBOX));
     all.sort((a, b) => Number(a.seq) - Number(b.seq));
@@ -3533,19 +3630,42 @@ class IndexedDBAdapter extends StorageAdapter {
   }
 
   async outboxDrop(seqs) {
-    await this._ensure();
-    if (!this._has(STORE_OUTBOX) || !seqs.length) return true;
-    const tx = this._tx([STORE_OUTBOX], "readwrite");
-    const store = tx.objectStore(STORE_OUTBOX);
-    seqs.forEach((seq) => store.delete(Number(seq)));
-    return this._done(tx);
+    if (!seqs.length) return true;
+    return this.writeChanges(null, { outboxDrops: seqs });
   }
 
   async outboxClear() {
     await this._ensure();
-    if (!this._has(STORE_OUTBOX)) return true;
+    if (!this._has(STORE_OUTBOX)) throw new Error("Fila de sincronização ausente no banco local");
     const tx = this._tx([STORE_OUTBOX], "readwrite");
     tx.objectStore(STORE_OUTBOX).clear();
+    return this._done(tx);
+  }
+
+  async localMetaGet(key) {
+    await this._ensure();
+    if (!this._has(STORE_LOCAL_META)) throw new Error("Metadados locais ausentes no banco local");
+    const tx = this._tx([STORE_LOCAL_META], "readonly");
+    return new Promise((resolve, reject) => {
+      const req = tx.objectStore(STORE_LOCAL_META).get(String(key));
+      req.onsuccess = () => resolve(req.result ? req.result.value : null);
+      req.onerror = () => reject(req.error || new Error("Falha ao ler metadado local"));
+    });
+  }
+
+  async localMetaPut(key, value) {
+    return this.writeChanges(null, { metaPuts: { [String(key)]: value } });
+  }
+
+  async localMetaDelete(key) {
+    return this.writeChanges(null, { metaDeletes: [String(key)] });
+  }
+
+  async localMetaClear() {
+    await this._ensure();
+    if (!this._has(STORE_LOCAL_META)) throw new Error("Metadados locais ausentes no banco local");
+    const tx = this._tx([STORE_LOCAL_META], "readwrite");
+    tx.objectStore(STORE_LOCAL_META).clear();
     return this._done(tx);
   }
 
@@ -3568,6 +3688,8 @@ class LocalStorageAdapter extends StorageAdapter {
     this.scope = normalizeStorageScope(scope);
     this.key = scopedName(LS_FALLBACK_KEY, this.scope);
     this.outboxKey = scopedName("financas_db_outbox", this.scope);
+    this.metaKey = scopedName("financas_db_meta", this.scope);
+    this.recoveryKey = scopedName("financas_db_recovery", this.scope);
   }
   get name() { return "localstorage"; }
 
@@ -3583,13 +3705,77 @@ class LocalStorageAdapter extends StorageAdapter {
 
   async init() {
     if (!LocalStorageAdapter.isSupported()) throw new Error("localStorage indisponível");
+    this._recover();
     return true;
   }
 
   _read() {
     const raw = localStorage.getItem(this.key);
     if (!raw) return null;
-    try { return JSON.parse(raw); } catch (e) { return null; }
+    try { return JSON.parse(raw); }
+    catch (e) { throw new Error("Base local corrompida"); }
+  }
+
+  _readMeta() {
+    const raw = localStorage.getItem(this.metaKey);
+    if (!raw) return {};
+    try {
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("formato");
+      return parsed;
+    } catch (e) { throw new Error("Metadados locais corrompidos"); }
+  }
+
+  _recover() {
+    const raw = localStorage.getItem(this.recoveryKey);
+    if (!raw) return false;
+    let pending;
+    try { pending = JSON.parse(raw); }
+    catch (e) { throw new Error("Registro de recuperação local corrompido"); }
+    if (!pending || pending.version !== 1 || !pending.data || !Array.isArray(pending.outbox) || !pending.meta) {
+      throw new Error("Registro de recuperação local inválido");
+    }
+    localStorage.setItem(this.key, JSON.stringify(pending.data));
+    localStorage.setItem(this.outboxKey, JSON.stringify(pending.outbox));
+    localStorage.setItem(this.metaKey, JSON.stringify(pending.meta));
+    localStorage.removeItem(this.recoveryKey);
+    return true;
+  }
+
+  _commitFull(data, outbox, meta) {
+    const payload = { version: 1, data, outbox, meta };
+    const recovery = JSON.stringify(payload);
+    const dataText = JSON.stringify(data);
+    const outboxText = JSON.stringify(outbox);
+    const metaText = JSON.stringify(meta);
+    localStorage.setItem(this.recoveryKey, recovery);
+    localStorage.setItem(this.key, dataText);
+    localStorage.setItem(this.outboxKey, outboxText);
+    localStorage.setItem(this.metaKey, metaText);
+    if (localStorage.getItem(this.key) !== dataText
+      || localStorage.getItem(this.outboxKey) !== outboxText
+      || localStorage.getItem(this.metaKey) !== metaText) {
+      throw new Error("O navegador não confirmou a gravação local");
+    }
+    localStorage.removeItem(this.recoveryKey);
+    return true;
+  }
+
+  _applyCommit(outbox, meta, commit) {
+    const options = commit || {};
+    const drop = new Set((options.outboxDrops || []).map((seq) => Number(seq)));
+    const kept = outbox.filter((entry) => !drop.has(Number(entry.seq)));
+    const entryKeys = new Set(kept.map((entry) => String(entry.entryKey || "")).filter(Boolean));
+    let nextSeq = kept.reduce((max, entry) => Math.max(max, Number(entry.seq) || 0), 0);
+    prepareOutboxEntries(options.outboxAdds || []).forEach((entry) => {
+      if (entryKeys.has(entry.entryKey)) return;
+      entryKeys.add(entry.entryKey);
+      kept.push({ ...entry, seq: ++nextSeq });
+    });
+    const nextMeta = { ...meta };
+    (options.metaDeletes || []).forEach((key) => { delete nextMeta[String(key)]; });
+    Object.entries(options.metaPuts || {}).forEach(([key, value]) => { nextMeta[key] = value; });
+    return { outbox: kept.sort((a, b) => Number(a.seq) - Number(b.seq)), meta: nextMeta };
   }
 
   async readAll() {
@@ -3606,12 +3792,13 @@ class LocalStorageAdapter extends StorageAdapter {
     };
   }
 
-  async writeChanges(changeSet) {
+  async writeChanges(changeSet, commit) {
+    const changes = changeSet || { puts: {}, deletes: {}, settings: {} };
     const current = (await this.readAll());
     const apply = (list, name) => {
       const map = new Map(list.map((r) => [r.id, r]));
-      (changeSet.puts[name] || []).forEach((r) => map.set(r.id, r));
-      (changeSet.deletes[name] || []).forEach((id) => map.delete(id));
+      ((changes.puts || {})[name] || []).forEach((r) => map.set(r.id, r));
+      ((changes.deletes || {})[name] || []).forEach((id) => map.delete(id));
       return Array.from(map.values());
     };
     const next = {
@@ -3620,15 +3807,15 @@ class LocalStorageAdapter extends StorageAdapter {
       goals: apply(current.goals, STORE_GOALS),
       assets: apply(current.assets || [], STORE_ASSETS),
       ...current.settings,
-      ...(changeSet.settings || {}),
+      ...(changes.settings || {}),
     };
-    localStorage.setItem(this.key, JSON.stringify(next));
-    return true;
+    const sidecars = this._applyCommit(this._readOutbox(), this._readMeta(), commit);
+    return this._commitFull(next, sidecars.outbox, sidecars.meta);
   }
 
-  async replaceAll(data) {
-    localStorage.setItem(this.key, JSON.stringify(data));
-    return true;
+  async replaceAll(data, commit) {
+    const sidecars = this._applyCommit(this._readOutbox(), this._readMeta(), commit);
+    return this._commitFull(data, sidecars.outbox, sidecars.meta);
   }
 
   async clearAll() {
@@ -3638,23 +3825,23 @@ class LocalStorageAdapter extends StorageAdapter {
 
   // ---- Fila persistente (mesma semântica do IndexedDB, em uma chave só) ----
   _readOutbox() {
+    const raw = localStorage.getItem(this.outboxKey);
+    if (!raw) return [];
     try {
-      const parsed = JSON.parse(localStorage.getItem(this.outboxKey) || "[]");
-      return Array.isArray(parsed) ? parsed : [];
-    } catch (e) { return []; }
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) throw new Error("formato");
+      return parsed;
+    } catch (e) { throw new Error("Fila local corrompida"); }
   }
 
   _writeOutbox(list) {
-    try { localStorage.setItem(this.outboxKey, JSON.stringify(list)); return true; }
-    catch (e) { return false; }
+    localStorage.setItem(this.outboxKey, JSON.stringify(list));
+    return true;
   }
 
   async outboxAppend(entries) {
     if (!entries.length) return true;
-    const list = this._readOutbox();
-    let next = list.length ? Number(list[list.length - 1].seq) || list.length : 0;
-    entries.forEach((entry) => { list.push({ ...entry, seq: ++next }); });
-    return this._writeOutbox(list);
+    return this.writeChanges(null, { outboxAdds: entries });
   }
 
   async outboxRead(limit) {
@@ -3663,19 +3850,44 @@ class LocalStorageAdapter extends StorageAdapter {
   }
 
   async outboxDrop(seqs) {
-    const drop = new Set(seqs.map((seq) => Number(seq)));
-    return this._writeOutbox(this._readOutbox().filter((entry) => !drop.has(Number(entry.seq))));
+    if (!seqs.length) return true;
+    return this.writeChanges(null, { outboxDrops: seqs });
   }
 
   async outboxClear() {
-    try { localStorage.removeItem(this.outboxKey); return true; } catch (e) { return false; }
+    const current = await this.readAll();
+    return this._commitFull({
+      transactions: current.transactions, categories: current.categories, goals: current.goals,
+      assets: current.assets, ...current.settings,
+    }, [], this._readMeta());
+  }
+
+  async localMetaGet(key) {
+    const meta = this._readMeta();
+    return Object.prototype.hasOwnProperty.call(meta, String(key)) ? meta[String(key)] : null;
+  }
+
+  async localMetaPut(key, value) {
+    return this.writeChanges(null, { metaPuts: { [String(key)]: value } });
+  }
+
+  async localMetaDelete(key) {
+    return this.writeChanges(null, { metaDeletes: [String(key)] });
+  }
+
+  async localMetaClear() {
+    const current = await this.readAll();
+    return this._commitFull({
+      transactions: current.transactions, categories: current.categories, goals: current.goals,
+      assets: current.assets, ...current.settings,
+    }, this._readOutbox(), {});
   }
 }
 
 // ------------------------------------------------------------------------------
 // CloudAdapter; contrato defensivo para uma futura sincronização comercial.
 // ------------------------------------------------------------------------------
-const CLOUD_SYNC_PROTOCOL = 2;
+const CLOUD_SYNC_PROTOCOL = 3;
 const CLOUD_MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 
 function cloudMutationId() {
@@ -3700,7 +3912,10 @@ async function cloudErrorBody(res) {
     if (!dados || typeof dados !== "object") return {};
     const code = typeof dados.code === "string" && /^[a-z0-9_]{1,40}$/.test(dados.code) ? dados.code : null;
     const message = typeof dados.message === "string" && dados.message.length <= 300 ? dados.message : null;
-    return { code, message };
+    // A revisão vem no corpo do 409 de `remote_changed`: é ela que diz até onde
+    // a conta avançou enquanto este aparelho preparava o vínculo.
+    const revision = /^\d{1,18}$/.test(String(dados.revision == null ? "" : dados.revision)) ? String(dados.revision) : null;
+    return { code, message, revision };
   } catch (e) { return {}; }
 }
 
@@ -3730,8 +3945,8 @@ class CloudAdapter extends StorageAdapter {
     fetchImpl = null,
     timeoutMs = 12000,
     allowCrossOrigin = false,
-    allowDestructive = false,
-    authMode = "bearer",
+      allowDestructive = false,
+      authMode = "bearer",
   } = {}) {
     super();
     if (!enabled) throw new CloudSyncError("A sincronização em nuvem está desativada.", "disabled");
@@ -3760,6 +3975,8 @@ class CloudAdapter extends StorageAdapter {
     this.timeoutMs = clamp(Number(timeoutMs) || 12000, 1000, 30000);
     this.allowDestructive = allowDestructive === true;
     this.revision = null;
+    this.serverProtocol = null;
+    this.minimumWriteProtocol = null;
     this.initialized = false;
   }
   get name() { return "cloud"; }
@@ -3798,7 +4015,6 @@ class CloudAdapter extends StorageAdapter {
       clearTimeout(timer);
     }
 
-    if (res.status === 409) throw new CloudSyncConflictError(res.headers && res.headers.get ? res.headers.get("x-sync-revision") : null);
     if (!res.ok) {
       // A RAZÃO DA FALHA VEM NO CORPO, E ERA JOGADA FORA.
       //
@@ -3808,6 +4024,17 @@ class CloudAdapter extends StorageAdapter {
       // mesma frase sem conteúdo, e a tela mostrava "Sincronização com falha"
       // sem nunca dizer a falha.
       const detalhe = await cloudErrorBody(res);
+      // `remote_changed` é o único 409 que NÃO é conflito de documento: ele diz
+      // que a conta remota avançou entre a leitura e a confirmação do vínculo.
+      // Tratá-lo como conflito faria o motor descartar a fila do vínculo.
+      if (res.status === 409) {
+        if (detalhe.code === "remote_changed") {
+          const erro = new CloudSyncError(detalhe.message || "A conta mudou durante a operação.", "remote_changed", res.status);
+          erro.revision = detalhe.revision != null ? String(detalhe.revision) : null;
+          throw erro;
+        }
+        throw new CloudSyncConflictError(res.headers && res.headers.get ? res.headers.get("x-sync-revision") : null);
+      }
       if (res.status === 401 || res.status === 403) {
         // O código continua sendo um dos DOIS que o motor sabe tratar (parar em
         // vez de insistir); só a frase passa a ser a de verdade.
@@ -3839,6 +4066,11 @@ class CloudAdapter extends StorageAdapter {
     const result = await this._call("/health");
     if (result.status !== "ok") throw new CloudSyncError("O servidor de sincronização não está pronto.", "unavailable");
     this.revision = typeof result.revision === "string" ? result.revision : null;
+    this.serverProtocol = Number(result.serverProtocol || result.protocol) || null;
+    this.minimumWriteProtocol = Number(result.minimumWriteProtocol || result.protocol) || null;
+    if (this.minimumWriteProtocol > CLOUD_SYNC_PROTOCOL) {
+      throw new CloudSyncError("Atualize o aplicativo para voltar a sincronizar.", "protocol_upgrade_required", 426);
+    }
     this.initialized = true;
     return true;
   }
@@ -3867,13 +4099,20 @@ class CloudAdapter extends StorageAdapter {
   // operação carrega a própria marca e o servidor guarda a vencedora. É o fim
   // do 409 em rajada: dois aparelhos gravando campos diferentes não disputam
   // mais nada.
-  async push(ops, since) {
+  async push(ops, since, options) {
     this._requireReady(false);
     const mutationId = cloudMutationId();
     const result = await this._call("/changes", {
       method: "POST",
       headers: { "Idempotency-Key": mutationId },
-      body: { protocol: CLOUD_SYNC_PROTOCOL, mutationId, ops, since: String(since || "0") },
+      body: {
+        protocol: CLOUD_SYNC_PROTOCOL, mutationId, ops, since: String(since || "0"),
+        // O nome do campo é o mesmo lido pelo backend. Divergir aqui fazia o
+        // servidor ignorar a condição e aplicar o vínculo sem verificar nada.
+        ...(options && options.expectedRemoteRevision != null
+          ? { expectedRemoteRevision: String(options.expectedRemoteRevision) }
+          : {}),
+      },
     });
     if (!result || typeof result.revision !== "string") throw new CloudSyncError("O servidor não confirmou a nova revisão.", "revision_missing");
     this.revision = result.revision;
@@ -4027,7 +4266,12 @@ const FinanceStore = (() => {
   // `graveyard` não vai como configuração: as exclusões viajam como operações
   // próprias (op "delete"), que já carregam a mesma informação e não crescem o
   // envio a cada ciclo.
-  const SYNC_SKIP_SETTINGS = new Set(["lastPersistAt", "graveyard", "theme", "dashboardLayout"]);
+  const SYNC_ALLOWED_SETTINGS = new Set([
+    "monthlyIncome", "creditCardLimit", "budgetSplit", "budgetAlerts", "budgetHistory", "userName",
+    "emergencyGoalId", "emergencyMonths", "marketRates", "achievements", "recurringPrefs", "debtPlan",
+    "onboarding", "categoryRules",
+  ]);
+  const SYNC_SKIP_SETTINGS = new Set(SETTING_KEYS.filter((key) => !SYNC_ALLOWED_SETTINGS.has(key)));
 
   // Marca os registros ALTERADOS LOCALMENTE e transforma o diff em operações.
   //
@@ -4035,12 +4279,29 @@ const FinanceStore = (() => {
   // registro que chegou do servidor já vem com marca, e sua marca é diferente
   // da versão anterior daqui. Remarcá-lo faria este aparelho reivindicar a
   // alteração alheia e devolvê-la ao servidor, para sempre.
-  function stampChangeSet(prev, changeSet) {
+  function stampChangeSet(prev, next, changeSet) {
     if (!changeSet) return [];
     const ops = [];
-    const pairs = [[STORE_TX, "transactions"], [STORE_CAT, "categories"], [STORE_GOALS, "goals"], [STORE_ASSETS, "assets"]];
-    for (const [storeName, field] of pairs) {
-      (changeSet.puts[storeName] || []).forEach((rec) => {
+    for (const field of SYNC_ENTITY_FIELDS) {
+      const definition = SYNC_ENTITY_DEFS[field];
+      let puts;
+      let deletes;
+      if (definition.store) {
+        puts = (changeSet.puts[definition.store] || []);
+        deletes = (changeSet.deletes[definition.store] || []);
+      } else {
+        const before = indexById((prev && prev[field]) || []);
+        const after = indexById((next && next[field]) || []);
+        puts = [];
+        deletes = [];
+        after.forEach((rec, id) => {
+          const old = before.get(id);
+          if (!old || fingerprintOf(old) !== fingerprintOf(rec)) puts.push(rec);
+        });
+        before.forEach((_rec, id) => { if (!after.has(id)) deletes.push(id); });
+      }
+
+      puts.forEach((rec) => {
         // "Veio de fora" é decidido por CONTEÚDO, não por dedução a partir da
         // marca. A dedução errava num caso real: o usuário edita um registro
         // que acabou de chegar do outro aparelho, antes de a gravação daquele
@@ -4059,10 +4320,15 @@ const FinanceStore = (() => {
         rec.syncRev = SyncClock.tick();
         ops.push({ entity: field, entityId: rec.id, op: "put", rev: rec.syncRev, payload: rec });
       });
-      (changeSet.deletes[storeName] || []).forEach((id) => {
+      deletes.forEach((id) => {
         // A lápide correspondente já foi criada por `withTombstones`; usamos a
         // marca dela para que exclusão e edição concorrentes sejam comparáveis.
-        const grave = normalizeGraveEntry(((snapshot.graveyard || {})[field] || {})[id]);
+        let grave = normalizeGraveEntry(((next.graveyard || {})[field] || {})[id]);
+        if (!grave) {
+          next.graveyard = withTombstones(next.graveyard, field, id);
+          changeSet.settings.graveyard = next.graveyard;
+          grave = normalizeGraveEntry(((next.graveyard || {})[field] || {})[id]);
+        }
         const rev = (grave && grave.rev) || SyncClock.tick();
         // Exclusão que VEIO de fora não volta para o servidor: a marca dela
         // aponta para outro aparelho. Sem esta checagem, cada exclusão remota
@@ -4096,15 +4362,48 @@ const FinanceStore = (() => {
   // Cada operação é comparada com o que existe aqui pela marca lógica. O
   // resultado é o MESMO nos dois aparelhos, sem conversa e sem tela de
   // "escolha uma versão": a ordem é total e determinística.
-  function applyRemoteOps(ops) {
-    const list = Array.isArray(ops) ? ops : [];
-    if (!list.length) return { changed: false, data: snapshot, applied: 0 };
+  function expandLegacyListOps(ops) {
+    const expanded = [];
+    (Array.isArray(ops) ? ops : []).forEach((op) => {
+      const field = op && op.entity === "settings" ? String(op.entityId || "") : "";
+      if (!SYNC_LIST_SETTINGS.has(field) || !Array.isArray(op.payload)) {
+        expanded.push(op);
+        return;
+      }
+      const seen = new Set();
+      op.payload.forEach((record) => {
+        if (!record || !record.id) return;
+        const id = normalizeRecordId(record.id, SYNC_ENTITY_DEFS[field].prefix);
+        seen.add(id);
+        expanded.push({
+          entity: field, entityId: id, op: "put",
+          rev: normalizeSyncRev(record.syncRev) || op.rev,
+          payload: { ...record, id },
+        });
+      });
+      (snapshot[field] || []).forEach((record) => {
+        if (record && record.id && !seen.has(record.id)) {
+          expanded.push({ entity: field, entityId: record.id, op: "delete", rev: op.rev });
+        }
+      });
+    });
+    return expanded;
+  }
 
-    const fields = ["transactions", "categories", "goals", "assets"];
+  async function applyRemoteOps(ops) {
+    const rawList = Array.isArray(ops) ? ops : [];
+    if (!rawList.length) return { changed: false, data: snapshot, applied: 0 };
+    const flushed = await flush();
+    if (!flushed || !adapter) throw new Error("Não foi possível preparar o armazenamento para a descida");
+    const list = expandLegacyListOps(rawList);
+
     const maps = {};
-    fields.forEach((f) => { maps[f] = indexById(snapshot[f] || []); });
+    SYNC_ENTITY_FIELDS.forEach((f) => { maps[f] = indexById(snapshot[f] || []); });
     let graveyard = normalizeGraveyard(snapshot.graveyard);
     const settings = {};
+    const nextSettingRevs = { ...settingRevs };
+    const nextSettingEcho = { ...remoteSettingEcho };
+    const observedRevs = [];
     let changed = false;
     let applied = 0;
     const touched = new Set();   // registros efetivamente alterados por esta rodada
@@ -4113,20 +4412,20 @@ const FinanceStore = (() => {
       if (!op || typeof op !== "object") return;
       const rev = normalizeSyncRev(op.rev);
       if (!rev) return;                       // operação sem marca não é comparável
-      SyncClock.observe(rev);
+      observedRevs.push(rev);
 
       if (op.entity === "settings") {
         const key = String(op.entityId || "");
         if (SETTING_KEYS.indexOf(key) === -1 || SYNC_SKIP_SETTINGS.has(key)) return;
-        if (!syncRevGreater(rev, settingRevs[key] || "")) return;
-        settingRevs[key] = rev;
+        if (!syncRevGreater(rev, nextSettingRevs[key] || "")) return;
+        nextSettingRevs[key] = rev;
         settings[key] = op.payload;
-        remoteSettingEcho[key] = JSON.stringify(op.payload);
+        nextSettingEcho[key] = JSON.stringify(op.payload);
         changed = true; applied++;
         return;
       }
 
-      if (fields.indexOf(op.entity) === -1) return;
+      if (SYNC_ENTITY_FIELDS.indexOf(op.entity) === -1) return;
       const map = maps[op.entity];
       const id = normalizeRecordId(op.entityId, GRAVE_PREFIXES[op.entity] || "item");
       const existing = map.get(id);
@@ -4150,34 +4449,48 @@ const FinanceStore = (() => {
       changed = true; applied++;
     });
 
-    if (!changed) { saveClockState(); return { changed: false, data: snapshot, applied: 0 }; }
+    if (!changed) {
+      observedRevs.forEach((rev) => SyncClock.observe(rev));
+      saveClockState();
+      return { changed: false, data: snapshot, applied: 0 };
+    }
 
-    const next = migrate({
+    const assembled = {
       ...snapshot,
       ...settings,
       graveyard,
-      transactions: Array.from(maps.transactions.values()),
-      categories: Array.from(maps.categories.values()),
-      goals: Array.from(maps.goals.values()),
-      assets: Array.from(maps.assets.values()),
-    });
+    };
+    SYNC_ENTITY_FIELDS.forEach((field) => { assembled[field] = Array.from(maps[field].values()); });
+    const next = migrate(assembled);
+    const changeSet = computeChangeSet(snapshot, next);
+    // Operação remota que a normalização anula (um carimbo que `migrate`
+    // reescreve para o mesmo valor) não gera gravação. Isso não é falha: o
+    // conteúdo já está aqui. O que ela não pode fazer é avançar o cursor sem
+    // registrar a revisão observada, e por isso a marca continua sendo salva.
+    if (changeSet) {
+      if (!adapter) throw new Error("Armazenamento local indisponível para a descida");
+      const stamp = Date.now();
+      changeSet.settings.lastPersistAt = stamp;
+      next.lastPersistAt = stamp;
+      await enqueueWrite(() => adapter.writeChanges(changeSet));
+    }
+    snapshot = next;
+    lastPersisted = shallowSnapshot(next);
+    settingRevs = nextSettingRevs;
+    remoteSettingEcho = nextSettingEcho;
+    observedRevs.forEach((rev) => SyncClock.observe(rev));
     // Guarda a impressão do registro JÁ NORMALIZADO. É com ela que a gravação
     // seguinte reconhece o eco e não devolve ao servidor a alteração alheia.
-    fields.forEach((field) => {
+    SYNC_ENTITY_FIELDS.forEach((field) => {
       (next[field] || []).forEach((rec) => {
         const key = `${field} ${rec.id}`;
         if (touched.has(key)) remoteApplied.set(key, fingerprintOf(rec));
       });
     });
     saveClockState();
+    markHealthy();
+    announceWrite();
     return { changed: true, data: next, applied };
-  }
-
-  // A fila só recebe quando existe conta ligada. Sem conta não há para onde
-  // enviar, e uma fila que cresce para sempre num aparelho offline vira lixo.
-  function queueOps(ops) {
-    if (!ops.length || !outboxEnabled || !adapter) return;
-    adapter.outboxAppend(ops.map((op) => ({ ...op, queuedAt: Date.now() }))).catch(() => {});
   }
 
   // ---------------------------------------------------------------------------
@@ -4200,10 +4513,6 @@ const FinanceStore = (() => {
   // adotados). Como a marca viaja junto e o servidor guarda a VENCEDORA,
   // ignorando marca menor ou igual, reapresentar é inofensivo mesmo quando o
   // outro aparelho já escreveu algo mais novo no mesmo registro.
-  const SYNC_STORE_BY_FIELD = {
-    transactions: STORE_TX, categories: STORE_CAT, goals: STORE_GOALS, assets: STORE_ASSETS,
-  };
-
   // `restamp` distingue os dois usos: semear reapresenta com a marca que já
   // existe; substituir a base inteira (restaurar backup, adotar visitante) é
   // uma declaração nova, e por isso cunha marca nova para tudo.
@@ -4230,7 +4539,8 @@ const FinanceStore = (() => {
 
   function collectSyncOps(restamp) {
     const ops = [];
-    const stamped = {};
+    const stamped = { puts: {}, deletes: {}, settings: {} };
+    const stampedSettings = new Set();
     // Na substituição da base inteira a comparação com o padrão não vale: ali o
     // usuário DECLAROU o estado, inclusive quando ele coincide com o de fábrica.
     const padrao = restamp ? null : defaultData();
@@ -4246,12 +4556,14 @@ const FinanceStore = (() => {
           if (semNovidade(rec, modelos[field].get(rec.id))) return;
           rev = SyncClock.tick();
           rec.syncRev = rev;
-          const store = SYNC_STORE_BY_FIELD[field];
-          (stamped[store] = stamped[store] || []).push(rec);
+          const definition = SYNC_ENTITY_DEFS[field];
+          if (definition.store) (stamped.puts[definition.store] = stamped.puts[definition.store] || []).push(rec);
+          else stampedSettings.add(field);
         }
         ops.push({ entity: field, entityId: rec.id, op: "put", rev, payload: rec });
       });
     });
+    stampedSettings.forEach((field) => { stamped.settings[field] = snapshot[field]; });
     SETTING_KEYS.forEach((key) => {
       if (SYNC_SKIP_SETTINGS.has(key)) return;
       if (snapshot[key] === undefined) return;
@@ -4279,29 +4591,25 @@ const FinanceStore = (() => {
     return { ops, stamped };
   }
 
-  // Marca cunhada na semeadura precisa CHEGAR AO DISCO. Se ficasse só em
-  // memória, o carregamento seguinte traria o registro sem marca de novo e ele
-  // perderia uma disputa que deveria vencer. `lastPersisted` não é tocado de
-  // propósito: ele é a base do diff, e adiantá-lo aqui esconderia da gravação
-  // seguinte uma alteração ainda não salva.
-  async function persistStamps(stamped) {
-    const stores = Object.keys(stamped);
-    if (!stores.length || !adapter) return;
-    const changeSet = { puts: {}, deletes: {}, settings: {} };
-    stores.forEach((name) => { changeSet.puts[name] = stamped[name]; });
-    try { await adapter.writeChanges(changeSet); }
-    catch (err) { emitError(err); }
-  }
-
-  // Devolve quantas operações entraram na fila, para o motor decidir se vale
-  // uma volta de envio a mais.
+  // Marcas, fila e diário de semeadura confirmam juntos. O recibo definitivo
+  // nasce somente quando o servidor reconhecer o lote e a fila ficar vazia.
   async function seedOutbox() {
-    if (!outboxEnabled || !adapter) return 0;
+    if (!outboxEnabled || !adapter) return { seedId: null, queued: 0, empty: true };
+    const flushed = await flush();
+    if (!flushed) throw new Error("Não foi possível concluir os dados antes da semeadura");
     const { ops, stamped } = collectSyncOps(false);
-    if (!ops.length) return 0;
-    await persistStamps(stamped);
-    await outboxAppend(ops.map((op) => ({ ...op, queuedAt: Date.now() })));
-    return ops.length;
+    if (!ops.length) return { seedId: null, queued: 0, empty: true };
+    const seedId = syncEntryKey({}).replace(/^op_/, "seed_");
+    const entries = ops.map((op, index) => ({
+      ...op, seedId, entryKey: `${seedId}_${String(index).padStart(6, "0")}`,
+    }));
+    await adapter.writeChanges(stamped, {
+      outboxAdds: entries,
+      metaPuts: { [META_SEED_JOURNAL]: { version: 1, seedId, status: "queued", queued: entries.length, createdAt: new Date().toISOString() } },
+    });
+    lastPersisted = shallowSnapshot(snapshot);
+    markHealthy();
+    return { seedId, queued: entries.length, empty: false };
   }
 
   // Troca da base inteira: o que sumiu precisa de lápide, senão volta do outro
@@ -4352,10 +4660,7 @@ const FinanceStore = (() => {
   // para o diff acima) sem o custo do JSON.parse(JSON.stringify(...)) completo.
   function shallowSnapshot(data) {
     const out = Object.assign({}, data);
-    out.transactions = (data.transactions || []).slice();
-    out.categories = (data.categories || []).slice();
-    out.goals = (data.goals || []).slice();
-    out.assets = (data.assets || []).slice();
+    SYNC_ENTITY_FIELDS.forEach((field) => { out[field] = (data[field] || []).slice(); });
     return out;
   }
 
@@ -4568,6 +4873,30 @@ const FinanceStore = (() => {
   // Enfileira a gravação. Coalescemos chamadas em rajada num único write e nunca
   // deixamos duas transações rodarem em paralelo. Todas as promessas coalescidas
   // são resolvidas (antes, as anteriores ficavam penduradas para sempre).
+  function enqueueWrite(job) {
+    const run = writeQueue.then(job, job);
+    writeQueue = run.catch(() => {});
+    return run;
+  }
+
+  async function commitCurrentSnapshot() {
+    if (!adapter) return false;
+    const target = shallowSnapshot(snapshot);
+    const cs = computeChangeSet(lastPersisted, target);
+    if (!cs) return true;
+    const ops = outboxEnabled ? stampChangeSet(lastPersisted, target, cs) : [];
+    const stamp = Date.now();
+    cs.settings.lastPersistAt = stamp;
+    target.lastPersistAt = stamp;
+    snapshot.lastPersistAt = stamp;
+    snapshot.graveyard = target.graveyard;
+    await adapter.writeChanges(cs, { outboxAdds: ops });
+    lastPersisted = target;
+    markHealthy();
+    announceWrite();
+    return true;
+  }
+
   function persist(data) {
     snapshot = data;
     writeMirror(snapshot, false);          // proteção imediata, síncrona
@@ -4579,24 +4908,10 @@ const FinanceStore = (() => {
       pendingTimer = setTimeout(() => {
         const resolvers = pendingResolvers;
         pendingResolvers = [];
-        writeQueue = writeQueue.then(async () => {
+        enqueueWrite(async () => {
           const settle = (v) => resolvers.forEach((r) => r(v));
           try {
-            const target = shallowSnapshot(snapshot);
-            const cs = computeChangeSet(lastPersisted, target);
-            if (!cs) { settle(true); return; }
-            // Marcar ANTES de gravar: o registro tem de chegar ao disco já com
-            // a marca, senão um fechamento no meio deixaria a fila apontando
-            // para uma versão que o banco não tem.
-            queueOps(stampChangeSet(lastPersisted, cs));
-            const stamp = Date.now();
-            cs.settings.lastPersistAt = stamp;
-            target.lastPersistAt = stamp;
-            snapshot.lastPersistAt = stamp;
-            await adapter.writeChanges(cs);
-            lastPersisted = target;
-            markHealthy();
-            announceWrite();
+            await commitCurrentSnapshot();
             settle(true);
           } catch (err) {
             emitError(err);
@@ -4618,20 +4933,9 @@ const FinanceStore = (() => {
     pendingResolvers = [];
     if (!adapter) { resolvers.forEach((r) => r(false)); return false; }
     try {
-      const target = shallowSnapshot(snapshot);
-      const cs = computeChangeSet(lastPersisted, target);
-      if (cs) {
-        queueOps(stampChangeSet(lastPersisted, cs));
-        const stamp = Date.now();
-        cs.settings.lastPersistAt = stamp;
-        target.lastPersistAt = stamp;
-        snapshot.lastPersistAt = stamp;
-        await adapter.writeChanges(cs);
-        lastPersisted = target;
-        announceWrite();
-      }
+      const ok = await enqueueWrite(commitCurrentSnapshot);
       resolvers.forEach((r) => r(true));
-      return true;
+      return ok;
     } catch (err) {
       emitError(err);
       resolvers.forEach((r) => r(false));
@@ -4640,6 +4944,7 @@ const FinanceStore = (() => {
   }
 
   async function replaceAll(data) {
+    await flush();
     const normalized = migrate(data);
     // Guarda o estado anterior para permitir desfazer um restore acidental.
     try { localStorage.setItem(undoKey(), JSON.stringify({ savedAt: Date.now(), data: snapshot })); } catch (e) {}
@@ -4656,10 +4961,9 @@ const FinanceStore = (() => {
     writeMirror(snapshot, true);
     if (!adapter) return false;
     try {
-      await adapter.replaceAll(snapshot);
+      await enqueueWrite(() => adapter.replaceAll(snapshot, { outboxAdds: semente.ops }));
       lastPersisted = shallowSnapshot(snapshot);
       markHealthy();
-      queueOps(semente.ops);
       return true;
     } catch (err) { emitError(err); return false; }
   }
@@ -4697,8 +5001,13 @@ const FinanceStore = (() => {
     const keys = [
       scopedName(LS_FALLBACK_KEY, scope),
       scopedName("financas_db_outbox", scope),
+      scopedName("financas_db_meta", scope),
+      scopedName("financas_db_recovery", scope),
+      scopedName("financas_db_clock", scope),
       mirrorKey(),
       undoKey(),
+      scope === GUEST_SCOPE ? "cofre_sync_cursor" : `cofre_sync_cursor__${scope}`,
+      `cofre_sync_seeded__${scope}`,
       ...(scope === GUEST_SCOPE ? [LEGACY_KEY, LEGACY_KEY + "_backup", "financas_theme"] : []),
     ];
     if (!adapter) {
@@ -4709,6 +5018,8 @@ const FinanceStore = (() => {
     }
     try {
       await adapter.clearAll();
+      await adapter.outboxClear();
+      await adapter.localMetaClear();
       await adapter.replaceAll(fresh);
       snapshot = fresh;
       lastPersisted = shallowSnapshot(fresh);
@@ -4726,70 +5037,330 @@ const FinanceStore = (() => {
   // ESCOPO: leitura de outra conta, adoção explícita e troca
   // ---------------------------------------------------------------------------
 
+  // A DECISÃO DE VÍNCULO É REGISTRADA PELO CONTEÚDO, NÃO PELA PERGUNTA.
+  //
+  // O marcador antigo gravava "já perguntei" no momento em que o diálogo abria.
+  // Quem fechasse a caixa sem responder ficava com dois bancos separados para
+  // sempre, sem nenhum caminho de volta na interface. A impressão canônica
+  // abaixo substitui esse marcador: ela muda quando o conteúdo do visitante
+  // muda, e é isso que faz o aplicativo voltar a reconhecer trabalho pendente.
+  //
+  // Ela ignora de propósito marca de relógio, carimbos e trilha de auditoria:
+  // sincronizar o mesmo conteúdo em outro aparelho não pode reabrir a pergunta.
+  const LINK_DIGEST_VERSION = 1;
+  const LINK_VOLATILE_FIELDS = new Set([
+    "syncRev", "createdAt", "updatedAt", "reconciledAt", "changeLog", "lastPersistAt",
+  ]);
+
+  function canonicalValue(value) {
+    if (Array.isArray(value)) return value.map(canonicalValue);
+    if (value && typeof value === "object") {
+      const out = {};
+      Object.keys(value).sort().forEach((key) => {
+        if (LINK_VOLATILE_FIELDS.has(key)) return;
+        const inner = canonicalValue(value[key]);
+        if (inner === undefined) return;
+        out[key] = inner;
+      });
+      return out;
+    }
+    return value === undefined ? undefined : value;
+  }
+
+  function sameCanonical(a, b) {
+    return JSON.stringify(canonicalValue(a)) === JSON.stringify(canonicalValue(b));
+  }
+
+  // Categoria de fábrica intocada não é conteúdo do usuário. Renomear, mudar
+  // orçamento, cor ou criar uma nova, é.
+  function customCategories(data, padrao) {
+    const fabrica = indexById((padrao || defaultData()).categories || []);
+    return (data.categories || []).filter((cat) => {
+      const original = fabrica.get(cat.id);
+      return !original || !sameCanonical(original, cat);
+    });
+  }
+
+  // Só a lista fechada de configurações do vínculo entra, e só quando difere do
+  // padrão. Tema, disposição da tela, consentimentos e notificações ficam de
+  // fora: são preferências do aparelho, não conteúdo financeiro.
+  function linkSettings(data, padrao) {
+    const base = padrao || defaultData();
+    const out = {};
+    Array.from(SYNC_ALLOWED_SETTINGS).sort().forEach((key) => {
+      const value = data[key];
+      if (value === undefined || value === null || value === "") return;
+      if (sameCanonical(base[key], value)) return;
+      out[key] = canonicalValue(value);
+    });
+    return out;
+  }
+
+  function canonicalContent(data) {
+    const padrao = defaultData();
+    const body = { v: LINK_DIGEST_VERSION };
+    SYNC_ENTITY_FIELDS.forEach((field) => {
+      const list = field === "categories" ? customCategories(data, padrao) : (data[field] || []);
+      body[field] = list
+        .slice()
+        .sort((a, b) => (String(a && a.id) < String(b && b.id) ? -1 : 1))
+        .map(canonicalValue);
+    });
+    body.settings = linkSettings(data, padrao);
+    return body;
+  }
+
+  function utf8Bytes(text) {
+    if (typeof TextEncoder === "function") return new TextEncoder().encode(text);
+    const out = [];
+    for (let i = 0; i < text.length; i++) {
+      let code = text.charCodeAt(i);
+      if (code >= 0xd800 && code <= 0xdbff && i + 1 < text.length) {
+        code = 0x10000 + ((code - 0xd800) << 10) + (text.charCodeAt(++i) - 0xdc00);
+      }
+      if (code < 0x80) out.push(code);
+      else if (code < 0x800) out.push(0xc0 | (code >> 6), 0x80 | (code & 63));
+      else if (code < 0x10000) out.push(0xe0 | (code >> 12), 0x80 | ((code >> 6) & 63), 0x80 | (code & 63));
+      else out.push(0xf0 | (code >> 18), 0x80 | ((code >> 12) & 63), 0x80 | ((code >> 6) & 63), 0x80 | (code & 63));
+    }
+    return new Uint8Array(out);
+  }
+
+  // Sem WebCrypto não há impressão, e sem impressão o aplicativo PERGUNTA de
+  // novo. Preferimos repetir a pergunta a esconder uma alteração do usuário
+  // atrás de uma decisão que não temos como validar.
+  async function contentDigest(data) {
+    const subtle = typeof crypto !== "undefined" && crypto.subtle;
+    if (!subtle || typeof subtle.digest !== "function") return null;
+    try {
+      const texto = JSON.stringify(canonicalContent(data));
+      const buffer = await subtle.digest("SHA-256", utf8Bytes(texto));
+      const bytes = Array.from(new Uint8Array(buffer));
+      return `v${LINK_DIGEST_VERSION}:${bytes.map((b) => b.toString(16).padStart(2, "0")).join("")}`;
+    } catch (e) { return null; }
+  }
+
   // Abre OUTRO escopo só para olhar, sem tocar no que está carregado. É o que
   // permite perguntar "este aparelho tem dados de visitante?" sem já os trazer
-  // para dentro da conta.
-  async function peekScope(target) {
+  // para dentro da conta. Fechar o adapter em `finally` importa: uma conexão
+  // aberta com o banco de outro escopo segura upgrades e mantém uma referência
+  // viva aos dados de quem acabou de sair.
+  async function readScope(target) {
     const wanted = normalizeStorageScope(target);
-    if (wanted === scope) return summarize(snapshot);
+    let erro = null;
     const candidates = [new IndexedDBAdapter(wanted), new LocalStorageAdapter(wanted)];
     for (const candidate of candidates) {
       try {
         await candidate.init();
         const raw = await candidate.readAll();
         const data = isEmpty(raw) ? null : migrate(assembleSnapshot(raw));
-        if (typeof candidate.close === "function") candidate.close();
-        if (data) return summarize(data);
-      } catch (e) { /* escopo inexistente ou inacessível; tenta o próximo */ }
+        if (data) return { ok: true, data };
+      } catch (e) {
+        erro = e;
+      } finally {
+        try { if (typeof candidate.close === "function") candidate.close(); } catch (e) { /* já fechado */ }
+      }
     }
     // Visitante sem banco ainda pode ter o blob antigo do localStorage.
     if (wanted === GUEST_SCOPE) {
       try {
         const legacy = JSON.parse(localStorage.getItem(LEGACY_KEY) || "null");
-        if (legacy && typeof legacy === "object") return summarize(migrate(legacy));
+        if (legacy && typeof legacy === "object") return { ok: true, data: migrate(legacy) };
       } catch (e) { /* sem legado */ }
     }
-    return summarize(null);
+    // Nenhum adapter abriu: isso é DIFERENTE de "o escopo está vazio", e a
+    // interface precisa saber a diferença para não afirmar que não há nada.
+    if (erro && !LocalStorageAdapter.isSupported()) return { ok: false, data: null, error: erro };
+    return { ok: true, data: null };
   }
 
-  function summarize(data) {
-    if (!data) return { exists: false, transactions: 0, goals: 0, assets: 0, lastPersistAt: 0 };
+  async function peekScope(target) {
+    const wanted = normalizeStorageScope(target);
+    if (wanted === scope) return summarize(snapshot, await contentDigest(snapshot));
+    const read = await readScope(wanted);
+    if (!read.ok) return { ...summarize(null, null), readable: false };
+    if (!read.data) return summarize(null, null);
+    return summarize(read.data, await contentDigest(read.data));
+  }
+
+  // O resumo conta TODAS as entidades, e não só lançamentos, metas e
+  // patrimônio. Quem cadastrou apenas a conta do banco, apenas o cartão ou
+  // apenas a renda tinha um resumo que dizia "não há nada aqui" e perdia o
+  // vínculo por completo. Nenhum campo devolvido identifica um registro: são
+  // contagens e sinalizadores, para a tela nunca precisar mostrar conteúdo
+  // financeiro nem a impressão.
+  function summarize(data, digest) {
+    const vazio = {
+      exists: false, readable: true, digest: null, digestVersion: LINK_DIGEST_VERSION,
+      transactions: 0, categories: 0, goals: 0, assets: 0, accounts: 0, creditCards: 0,
+      accountTransfers: 0, cardPayments: 0, accountAdjustments: 0,
+      monthlyIncome: false, settings: 0, lastPersistAt: 0,
+    };
+    if (!data) return vazio;
+    const padrao = defaultData();
+    const contagem = {};
+    SYNC_ENTITY_FIELDS.forEach((field) => {
+      contagem[field] = field === "categories"
+        ? customCategories(data, padrao).length
+        : (data[field] || []).length;
+    });
+    const settings = Object.keys(linkSettings(data, padrao)).length;
+    const total = SYNC_ENTITY_FIELDS.reduce((soma, field) => soma + contagem[field], 0);
     return {
-      exists: (data.transactions || []).length > 0 || (data.goals || []).length > 0 || (data.assets || []).length > 0,
-      transactions: (data.transactions || []).length,
-      goals: (data.goals || []).length,
-      assets: (data.assets || []).length,
+      ...vazio,
+      ...contagem,
+      exists: total > 0 || settings > 0,
+      digest: digest || null,
+      monthlyIncome: Number(data.monthlyIncome) > 0,
+      settings,
       lastPersistAt: Number(data.lastPersistAt) || 0,
     };
   }
 
-  // Adoção EXPLÍCITA: só roda quando o usuário confirmou que quer trazer os
-  // dados de visitante para a conta. Funde (não substitui), para não apagar o
-  // que a conta já tinha em outro aparelho.
-  async function adoptScope(source) {
+  // Adoção EXPLÍCITA: só roda quando a decisão de vínculo já foi tomada, seja
+  // automaticamente (conta remota nunca usada) ou por confirmação da pessoa.
+  // Funde, nunca substitui: nada da conta é apagado, e o escopo de origem
+  // continua intacto para quem quiser voltar a ele.
+  //
+  // O ponto delicado é a repetição. Uma queda de rede no meio do vínculo não
+  // pode gerar um segundo lote com marcas novas, porque as duas versões
+  // disputariam entre si. Por isso a gravação nasce junto de um DIÁRIO: se ele
+  // existe, o lote já está na fila com as marcas que ele registrou, e a
+  // tentativa seguinte apenas termina aquele mesmo lote.
+  async function adoptScope(source, options) {
+    const opts = options || {};
     const from = normalizeStorageScope(source);
     if (from === scope) return { ok: false, reason: "same_scope" };
-    let incoming = null;
-    const candidates = [new IndexedDBAdapter(from), new LocalStorageAdapter(from)];
-    for (const candidate of candidates) {
-      try {
-        await candidate.init();
-        const raw = await candidate.readAll();
-        if (!isEmpty(raw)) incoming = migrate(assembleSnapshot(raw));
-        if (typeof candidate.close === "function") candidate.close();
-        if (incoming) break;
-      } catch (e) { /* tenta o próximo */ }
+    if (scope === GUEST_SCOPE) return { ok: false, reason: "not_authenticated" };
+    if (!adapter) return { ok: false, reason: "no_storage" };
+
+    const read = await readScope(from);
+    if (!read.ok) return { ok: false, reason: "unreadable" };
+    if (!read.data) return { ok: false, reason: "empty" };
+    const incoming = read.data;
+    const digest = await contentDigest(incoming);
+
+    // Conteúdo já vinculado não é vinculado de novo. Sem esta parada, uma
+    // segunda passagem refazia a mesclagem e a trilha de auditoria dos mesmos
+    // lançamentos era reconstruída, gerando um lote de operações que não
+    // representava alteração nenhuma.
+    const reciboAtual = await localMetaGet(META_LINK_RECEIPT);
+    if (reciboAtual && reciboAtual.status === "linked" && digest
+      && reciboAtual.accountScope === scope && reciboAtual.sourceDigest === digest) {
+      return {
+        ok: true, changed: false, alreadyLinked: true, linkId: reciboAtual.linkId || null,
+        digest, stats: reciboAtual.stats || null, queued: 0,
+      };
     }
-    if (!incoming && from === GUEST_SCOPE) {
-      try {
-        const legacy = JSON.parse(localStorage.getItem(LEGACY_KEY) || "null");
-        if (legacy && typeof legacy === "object") incoming = migrate(legacy);
-      } catch (e) { /* sem legado */ }
+
+    const anterior = await localMetaGet(META_LINK_JOURNAL);
+    if (anterior && anterior.accountScope === scope && anterior.sourceDigest === digest) {
+      // Retomada: as operações já estão na fila, com as marcas do diário. Nada
+      // é recarimbado, e nenhuma versão nova é criada para reivindicar o
+      // conflito que interrompeu a tentativa anterior.
+      return {
+        ok: true, resumed: true, changed: false, linkId: anterior.linkId, digest,
+        stats: anterior.stats || null, queued: Number(anterior.queued) || 0,
+        blocked: anterior.status === "blocked",
+      };
     }
-    if (!incoming) return { ok: false, reason: "empty" };
-    const result = mergeBackupInto(snapshot, incoming);
-    const saved = await replaceAll(result.data);
-    return { ok: saved, stats: result.stats };
+
+    await flush();
+    const fusao = mergeBackupInto(snapshot, incoming);
+    const target = migrate(fusao.data);
+    const changeSet = computeChangeSet(snapshot, target);
+    const linkId = syncEntryKey({}).replace(/^op_/, "link_");
+
+    if (!changeSet) {
+      // O conteúdo do visitante já está inteiro na conta. Isso é conclusão, não
+      // falha: o recibo evita que a pergunta volte na próxima entrada.
+      await localMetaPut(META_LINK_RECEIPT, {
+        version: 1, status: "linked", accountScope: scope, accountUserId: String(opts.userId || ""),
+        sourceScope: from, sourceDigest: digest, linkId,
+        remoteBaseRevision: opts.remoteRevision == null ? null : String(opts.remoteRevision),
+        serverRevision: null, decidedAt: new Date().toISOString(), stats: fusao.stats,
+      });
+      return { ok: true, changed: false, linkId, digest, stats: fusao.stats, queued: 0 };
+    }
+
+    const ops = stampChangeSet(snapshot, target, changeSet);
+    const entries = ops.map((op, index) => ({
+      ...op, linkId, entryKey: `${linkId}_${String(index).padStart(6, "0")}`,
+    }));
+    const diario = {
+      version: 1, linkId, status: "queued",
+      accountScope: scope, accountUserId: String(opts.userId || ""),
+      sourceScope: from, sourceDigest: digest,
+      remoteBaseRevision: opts.remoteRevision == null ? null : String(opts.remoteRevision),
+      stats: fusao.stats, queued: entries.length, createdAt: new Date().toISOString(),
+    };
+    // A revisão esperada só acompanha o vínculo AUTOMÁTICO. Ela é o que faz o
+    // servidor recusar a adoção se a conta tiver recebido qualquer operação
+    // entre a leitura e a confirmação.
+    if (opts.expectedRemoteRevision != null) diario.expectedRemoteRevision = String(opts.expectedRemoteRevision);
+
+    const stamp = Date.now();
+    changeSet.settings.lastPersistAt = stamp;
+    target.lastPersistAt = stamp;
+    try {
+      await enqueueWrite(() => adapter.writeChanges(changeSet, {
+        outboxAdds: entries,
+        metaPuts: { [META_LINK_JOURNAL]: diario },
+      }));
+    } catch (err) {
+      // Dados, fila e diário falham juntos: a conta continua exatamente como
+      // estava, e o visitante também.
+      emitError(err);
+      return { ok: false, reason: "write_failed", digest, error: err };
+    }
+    snapshot = target;
+    lastPersisted = shallowSnapshot(target);
+    writeMirror(snapshot, true);
+    markHealthy();
+    announceWrite();
+    return { ok: true, changed: true, linkId, digest, stats: fusao.stats, queued: entries.length, data: snapshot };
+  }
+
+  // ---- Recibos e diário do vínculo, para a tela de conta ----
+  function guestLinkReceipt() { return localMetaGet(META_LINK_RECEIPT); }
+  function guestLinkJournal() { return localMetaGet(META_LINK_JOURNAL); }
+
+  // `dismissed` nasce SOMENTE de uma escolha explícita, e vale apenas para a
+  // impressão escolhida. Sem impressão (WebCrypto ausente) nada é gravado: a
+  // pergunta volta, que é o comportamento seguro.
+  async function dismissGuestLink(digest, sourceScope) {
+    if (!digest) return false;
+    await localMetaPut(META_LINK_RECEIPT, {
+      version: 1, status: "dismissed", accountScope: scope,
+      sourceScope: normalizeStorageScope(sourceScope || GUEST_SCOPE),
+      sourceDigest: String(digest), decidedAt: new Date().toISOString(),
+    });
+    return true;
+  }
+
+  // A conta avançou entre a leitura e a confirmação. O diário e a fila ficam
+  // como estão; o motor apenas para de reenviar aquele lote até a pessoa
+  // decidir de novo.
+  async function blockGuestLink(remoteRevision) {
+    const diario = await localMetaGet(META_LINK_JOURNAL);
+    if (!diario || diario.status === "blocked") return false;
+    await localMetaPut(META_LINK_JOURNAL, {
+      ...diario, status: "blocked",
+      blockedAt: new Date().toISOString(),
+      observedRemoteRevision: remoteRevision == null ? null : String(remoteRevision),
+    });
+    return true;
+  }
+
+  // Confirmação explícita depois do bloqueio: o lote volta a subir, agora sem
+  // declarar revisão esperada, porque a pessoa já sabe que a conta mudou.
+  async function releaseGuestLink() {
+    const diario = await localMetaGet(META_LINK_JOURNAL);
+    if (!diario) return false;
+    const proximo = { ...diario, status: "queued", releasedAt: new Date().toISOString() };
+    delete proximo.expectedRemoteRevision;
+    await localMetaPut(META_LINK_JOURNAL, proximo);
+    return true;
   }
 
   // ---------------------------------------------------------------------------
@@ -4842,22 +5413,97 @@ const FinanceStore = (() => {
   }
 
   // ---- Fila persistente exposta ao motor de sincronização ----
-  function outboxAppend(entries) {
+  async function outboxAppend(entries) {
     const list = Array.isArray(entries) ? entries : [entries];
-    if (!adapter || !list.length) return Promise.resolve(false);
-    return adapter.outboxAppend(list).catch((err) => { emitError(err); return false; });
+    if (!adapter) throw new Error("Armazenamento local indisponível para a fila");
+    if (!list.length) return true;
+    try {
+      const result = await enqueueWrite(() => adapter.outboxAppend(list));
+      markHealthy();
+      return result;
+    } catch (err) { emitError(err); throw err; }
   }
-  function outboxRead(limit) {
-    if (!adapter) return Promise.resolve([]);
-    return adapter.outboxRead(limit).catch(() => []);
+  async function outboxRead(limit) {
+    if (!adapter) throw new Error("Armazenamento local indisponível para a fila");
+    try {
+      await writeQueue;
+      const result = await adapter.outboxRead(limit);
+      markHealthy();
+      return result;
+    } catch (err) { emitError(err); throw err; }
   }
-  function outboxDrop(seqs) {
-    if (!adapter || !seqs.length) return Promise.resolve(false);
-    return adapter.outboxDrop(seqs).catch(() => false);
+  async function outboxDrop(seqs) {
+    if (!adapter) throw new Error("Armazenamento local indisponível para a fila");
+    if (!seqs.length) return true;
+    try {
+      const result = await enqueueWrite(() => adapter.outboxDrop(seqs));
+      markHealthy();
+      return result;
+    } catch (err) { emitError(err); throw err; }
   }
-  function outboxClear() {
-    if (!adapter) return Promise.resolve(false);
-    return adapter.outboxClear().catch(() => false);
+  async function outboxClear() {
+    if (!adapter) throw new Error("Armazenamento local indisponível para a fila");
+    try {
+      const result = await enqueueWrite(() => adapter.outboxClear());
+      markHealthy();
+      return result;
+    } catch (err) { emitError(err); throw err; }
+  }
+
+  async function localMetaGet(key) {
+    if (!adapter) throw new Error("Armazenamento local indisponível para metadados");
+    await writeQueue;
+    return adapter.localMetaGet(String(key));
+  }
+
+  async function localMetaPut(key, value) {
+    if (!adapter) throw new Error("Armazenamento local indisponível para metadados");
+    return enqueueWrite(() => adapter.localMetaPut(String(key), value));
+  }
+
+  async function localMetaDelete(key) {
+    if (!adapter) throw new Error("Armazenamento local indisponível para metadados");
+    return enqueueWrite(() => adapter.localMetaDelete(String(key)));
+  }
+
+  async function acknowledgeOutbox(seqs, serverAck) {
+    if (!adapter) throw new Error("Armazenamento local indisponível para confirmar a fila");
+    const drop = new Set((seqs || []).map((seq) => Number(seq)));
+    if (!drop.size) return { dropped: 0, linkIds: [], seedIds: [] };
+    return enqueueWrite(async () => {
+      const queued = await adapter.outboxRead(0);
+      const removed = queued.filter((entry) => drop.has(Number(entry.seq)));
+      if (removed.length !== drop.size) throw new Error("A fila mudou antes da confirmação do servidor");
+      const remaining = queued.filter((entry) => !drop.has(Number(entry.seq)));
+      const linkIds = Array.from(new Set(removed.map((entry) => entry.linkId).filter(Boolean)))
+        .filter((id) => !remaining.some((entry) => entry.linkId === id));
+      const seedIds = Array.from(new Set(removed.map((entry) => entry.seedId).filter(Boolean)))
+        .filter((id) => !remaining.some((entry) => entry.seedId === id));
+      const metaPuts = {};
+      const metaDeletes = [];
+      for (const linkId of linkIds) {
+        const journal = await adapter.localMetaGet(META_LINK_JOURNAL);
+        if (!journal || journal.linkId !== linkId) continue;
+        metaPuts[META_LINK_RECEIPT] = {
+          version: 1, status: "linked", accountUserId: journal.accountUserId,
+          accountScope: journal.accountScope, sourceScope: journal.sourceScope,
+          sourceDigest: journal.sourceDigest, linkId, remoteBaseRevision: journal.remoteBaseRevision,
+          serverRevision: String(serverAck && serverAck.revision || ""), decidedAt: new Date().toISOString(),
+          stats: journal.stats || null,
+        };
+        metaDeletes.push(META_LINK_JOURNAL);
+      }
+      for (const seedId of seedIds) {
+        metaPuts[META_SEED_RECEIPT] = {
+          version: 1, status: "confirmed", seedId,
+          serverRevision: String(serverAck && serverAck.revision || ""), confirmedAt: new Date().toISOString(),
+        };
+        metaDeletes.push(META_SEED_JOURNAL);
+      }
+      await adapter.writeChanges(null, { outboxDrops: Array.from(drop), metaPuts, metaDeletes });
+      markHealthy();
+      return { dropped: removed.length, linkIds, seedIds };
+    });
   }
 
   async function queryTransactionsByMonth(monthKey) {
@@ -4883,6 +5529,14 @@ const FinanceStore = (() => {
     switchScope: (target, preferredAdapter) => init(preferredAdapter || null, { scope: target }),
     peekScope,
     adoptScope,
+    // Recibos do vínculo. A tela de conta precisa saber se há trabalho
+    // pendente, dispensado ou concluído SEM nunca ver conteúdo financeiro.
+    guestLinkReceipt,
+    guestLinkJournal,
+    dismissGuestLink,
+    blockGuestLink,
+    releaseGuestLink,
+    contentDigest,
     applyRemoteOps,
     reload,
     onOtherTabWrite: (fn) => { if (typeof fn === "function") tabListeners.push(fn); },
@@ -4890,6 +5544,10 @@ const FinanceStore = (() => {
     outboxRead,
     outboxDrop,
     outboxClear,
+    acknowledgeOutbox,
+    localMetaGet,
+    localMetaPut,
+    localMetaDelete,
     // Reapresenta ao servidor a base que já estava neste aparelho. Ver o bloco
     // "SEMEADURA" acima: sem isto, quem começou a usar antes de ligar a conta
     // nunca subia nada, e o segundo aparelho via a conta vazia.
@@ -4899,6 +5557,9 @@ const FinanceStore = (() => {
     setOutboxEnabled: (value) => { outboxEnabled = !!value; },
     isOutboxEnabled: () => outboxEnabled,
     syncRevOf: (record) => normalizeSyncRev(record && record.syncRev),
+    // As nove entidades que sincronizam por registro. Uma lista só, para que
+    // nenhum caminho (diff, lápide, restauração) esqueça uma delas.
+    syncEntityFields: () => SYNC_ENTITY_FIELDS.slice(),
     // Marca nova do relógio lógico deste aparelho. Usada por operações que não
     // nascem de um registro, como o "apagar tudo" da conta.
     mintRev: () => { const rev = SyncClock.tick(); saveClockState(); return rev; },
@@ -5897,6 +6558,9 @@ function freshAccountState() {
     // tela mostra o cartão de "confirmação pendente" com o botão de reenvio;
     // antes disto, quem não recebia o email não tinha para onde ir.
     pendingEmail: "",
+    // Estado do vínculo entre os dados deste aparelho e a conta. Ver o bloco
+    // "VÍNCULO DOS DADOS DESTE APARELHO COM A CONTA" mais abaixo.
+    guestLink: freshGuestLink(),
     form: { email: "", password: "", newPassword: "", deletePassword: "", deleteText: "" }, devices: [],
   };
 }
@@ -5908,20 +6572,14 @@ function freshAccountState() {
 // Este bloco é quem mantém o banco carregado igual à sessão atual: entrar troca
 // o escopo, sair volta para o de visitante, e NADA é copiado entre eles sem o
 // usuário mandar.
-const GUEST_IMPORT_PREFIX = "cofre_guest_import_";
-
-function guestImportDecision(scope) {
-  try { return localStorage.getItem(GUEST_IMPORT_PREFIX + scope) || ""; }
-  catch (_) { return ""; }
-}
-
-function rememberGuestImportDecision(scope, decision) {
-  try { localStorage.setItem(GUEST_IMPORT_PREFIX + scope, decision); } catch (_) {}
-}
-
 // Troca o banco carregado. Só é chamada quando a sessão foi CONFIRMADA pelo
 // servidor: uma falha de rede não pode derrubar o usuário para o escopo de
 // visitante e fazer parecer que os dados sumiram.
+//
+// Ela NÃO decide mais nada sobre vínculo. A decisão depende de saber o que a
+// conta remota já tem, e isso só existe depois da primeira descida; misturar as
+// duas coisas aqui era o que fazia o aplicativo perguntar (ou deixar de
+// perguntar) antes de ter a informação.
 async function applyAccountScope(userId) {
   const desired = storageScopeFor(userId);
   if (desired === FinanceStore.scope()) return false;
@@ -5937,8 +6595,6 @@ async function applyAccountScope(userId) {
   // conta que entrou agora.
   resetScopedUiState();
   render();
-
-  if (desired !== "guest") await offerGuestImport(desired);
   return true;
 }
 
@@ -5958,45 +6614,272 @@ function resetScopedUiState() {
   state.importError = null;
   state.aiInsight = { loading: false, text: null, error: null, analise: null };
   state.backup = { preview: null, error: null, mode: "merge", busy: false, undoAvailable: !!FinanceStore.readUndoSnapshot() };
+  state.account.guestLink = freshGuestLink();
   state.onboarding.open = !(state.data.onboarding && state.data.onboarding.done);
   // A memoização do app é por IDENTIDADE do snapshot; `switchStorageScope`
   // devolve um objeto novo, então os caches derivados erram por construção.
 }
 
-// Dados de visitante só entram numa conta com confirmação EXPLÍCITA, e a
-// resposta fica registrada para a pergunta não voltar a cada login.
-async function offerGuestImport(scope) {
-  if (guestImportDecision(scope)) return;
-  let guest;
-  try { guest = await FinanceStore.peekScope("guest"); }
-  catch (_) { return; }
-  if (!guest || !guest.exists) { rememberGuestImportDecision(scope, "empty"); return; }
+// ------------------------------------------------------------------------------
+// VÍNCULO DOS DADOS DESTE APARELHO COM A CONTA
+// ------------------------------------------------------------------------------
+// O DEFEITO QUE ISTO CORRIGE
+//
+// Quem usava o app sem conta e depois entrava numa conta ficava com DOIS bancos
+// no mesmo navegador: o de visitante, cheio, e o da conta, vazio. O segundo
+// aparelho entrava na mesma conta e via o vazio. A pergunta de importação
+// existia, mas gravava "já perguntei" no instante em que a caixa abria: quem
+// fechasse sem responder perdia o caminho de volta para sempre.
+//
+// A sequência agora é uma só, e nesta ordem:
+//
+//   1. abrir o escopo da conta (feito por applyAccountScope);
+//   2. DESCER o que a conta já tem, sem enviar e sem semear;
+//   3. ler o resumo do visitante e a decisão já registrada para aquele conteúdo;
+//   4. vincular sozinho apenas quando a conta nunca recebeu nada;
+//   5. pedir confirmação quando a conta já tem história;
+//   6. liberar a fila e a semeadura;
+//   7. só declarar concluído com o recibo do servidor na mão.
+//
+// Nada é apagado em nenhum dos lados, e a base de visitante continua intacta.
+function freshGuestLink() {
+  return {
+    // idle | checking | waiting | confirm | linking | linked | dismissed | pending
+    phase: "idle",
+    summary: null, stats: null, digest: "", remoteRevision: null,
+    error: "", errorCode: "", busy: false,
+  };
+}
 
-  const partes = [];
-  if (guest.transactions) partes.push(`${guest.transactions} lançamento${guest.transactions > 1 ? "s" : ""}`);
-  if (guest.goals) partes.push(`${guest.goals} meta${guest.goals > 1 ? "s" : ""}`);
-  if (guest.assets) partes.push(`${guest.assets} item${guest.assets > 1 ? "ns" : ""} de patrimônio`);
+// Cada sequência de vínculo carrega um número. Sair da conta, entrar em outra
+// ou trocar de escopo invalida o número, e a promessa que estava em voo termina
+// sem escrever nada na conta errada.
+let __guestLinkToken = 0;
 
-  requestConfirmation({
-    title: "Trazer os dados deste aparelho?",
-    message: `Este navegador tem ${partes.join(", ")} salvos sem conta. Você quer copiá-los para ${state.account.email || "esta conta"}? Se recusar, eles continuam disponíveis ao sair da conta.`,
-    confirmLabel: "Copiar para a conta",
-    cancelLabel: "Manter separados",
-    icon: "upload",
-    onConfirm: async () => {
-      const result = await FinanceStore.adoptScope("guest");
-      rememberGuestImportDecision(scope, "imported");
-      if (result && result.ok) {
-        state.data = FinanceStore.snapshot();
-        render();
-        notify("Dados do aparelho copiados para a conta");
-        if (typeof CloudSync !== "undefined") CloudSync.schedule();
-      } else notify("Não foi possível copiar os dados deste aparelho", "danger");
-    },
+function setGuestLink(patch) {
+  state.account.guestLink = { ...(state.account.guestLink || freshGuestLink()), ...patch };
+  render();
+}
+
+function guestLinkFailureText(reason) {
+  if (reason === "unreadable") return "Não foi possível ler os dados de visitante deste aparelho.";
+  if (reason === "write_failed") return "Não foi possível salvar o vínculo neste aparelho. Nada foi alterado.";
+  if (reason === "empty") return "Não há dados de visitante para vincular.";
+  if (reason === "not_authenticated") return "Entre na conta para vincular os dados deste aparelho.";
+  return "O vínculo não foi concluído. Seus dados continuam completos nos dois lados.";
+}
+
+// Executa o vínculo e devolve o controle para o motor. `opts.expectedRemoteRevision`
+// só existe no vínculo automático: é ela que faz o servidor recusar a adoção se
+// a conta tiver recebido qualquer operação nesse intervalo.
+async function runGuestLink(token, escopo, visitante, opts) {
+  const valido = () => token === __guestLinkToken && FinanceStore.scope() === escopo;
+  let resultado;
+  try { resultado = await FinanceStore.adoptScope("guest", opts); }
+  catch (error) { resultado = { ok: false, reason: "write_failed", error }; }
+  if (!valido()) return;
+
+  if (!resultado.ok) {
+    setGuestLink({ phase: "pending", busy: false, error: guestLinkFailureText(resultado.reason), errorCode: resultado.reason });
+    if (typeof CloudSync !== "undefined") await CloudSync.finishAccountBootstrap();
+    return;
+  }
+  state.data = FinanceStore.snapshot();
+  setGuestLink({ phase: "linking", stats: resultado.stats || null, digest: resultado.digest || visitante.digest || "" });
+  await concludeGuestLink(token, escopo, visitante);
+}
+
+// "Concluído" exige o recibo, e o recibo exige que o servidor tenha reconhecido
+// o lote e que nada daquele vínculo tenha sobrado na fila.
+async function concludeGuestLink(token, escopo, visitante) {
+  const valido = () => token === __guestLinkToken && FinanceStore.scope() === escopo;
+  if (typeof CloudSync !== "undefined") await CloudSync.finishAccountBootstrap();
+  if (!valido()) return;
+  state.data = FinanceStore.snapshot();
+
+  let recibo = null;
+  try { recibo = await FinanceStore.guestLinkReceipt(); } catch (_) { recibo = null; }
+  if (!valido()) return;
+
+  const impressao = visitante && visitante.digest;
+  if (recibo && recibo.status === "linked" && (!impressao || recibo.sourceDigest === impressao)) {
+    setGuestLink({ phase: "linked", busy: false, error: "", errorCode: "", stats: recibo.stats || state.account.guestLink.stats });
+    notify("Dados deste aparelho vinculados à conta");
+    return;
+  }
+
+  const sync = typeof CloudSync === "undefined" ? {} : CloudSync.status();
+  if (sync.errorCode === "remote_changed") {
+    // A conta avançou durante o vínculo automático. Nada foi descartado: o lote
+    // continua na fila, parado, esperando a confirmação de mesclagem.
+    setGuestLink({ phase: "confirm", busy: false, errorCode: "remote_changed", error: sync.error || "" });
+    return;
+  }
+  setGuestLink({
+    phase: "pending", busy: false,
+    error: sync.error || "O servidor ainda não confirmou o vínculo. Ele termina sozinho na próxima conexão.",
+    errorCode: sync.errorCode || "pending",
   });
-  // Recusar também é resposta: sem registrar, a pergunta voltaria no próximo
-  // login e viraria insistência.
-  rememberGuestImportDecision(scope, "asked");
+}
+
+// A sequência completa, chamada depois de a sessão e o escopo estarem prontos.
+async function bootstrapAccountLink() {
+  if (typeof CloudSync === "undefined") return;
+  const escopo = FinanceStore.scope();
+  if (escopo === "guest") return;
+  const token = ++__guestLinkToken;
+  const userId = state.account.userId;
+  const valido = () => token === __guestLinkToken && FinanceStore.scope() === escopo && state.account.authenticated;
+
+  setGuestLink({ phase: "checking", error: "", errorCode: "", busy: true });
+
+  // Descer PRIMEIRO. Sem isto, o próprio aparelho preenchia a conta e depois
+  // concluía que ela já estava em uso.
+  const preparo = await CloudSync.prepareAccount();
+  if (!valido()) return;
+  setGuestLink({ busy: false, remoteRevision: preparo.revision });
+
+  let visitante = null;
+  try { visitante = await FinanceStore.peekScope("guest"); }
+  catch (_) { visitante = null; }
+  if (!valido()) return;
+
+  if (!visitante || visitante.readable === false) {
+    setGuestLink({ phase: "pending", error: guestLinkFailureText("unreadable"), errorCode: "guest_unreadable" });
+    await CloudSync.finishAccountBootstrap();
+    return;
+  }
+  if (!visitante.exists) {
+    setGuestLink({ phase: "idle", summary: null, digest: "" });
+    await CloudSync.finishAccountBootstrap();
+    return;
+  }
+  setGuestLink({ summary: visitante, digest: visitante.digest || "" });
+
+  // Um lote já gravado termina o que começou: as marcas dele estão no diário, e
+  // recomeçar criaria uma segunda versão dos mesmos registros.
+  let diario = null;
+  try { diario = await FinanceStore.guestLinkJournal(); } catch (_) { diario = null; }
+  if (!valido()) return;
+  if (diario && diario.status === "blocked") {
+    setGuestLink({ phase: "confirm", errorCode: "remote_changed", error: "A conta mudou em outro aparelho. Confirme como juntar os dados." });
+    await CloudSync.finishAccountBootstrap();
+    return;
+  }
+  if (diario) {
+    setGuestLink({ phase: "linking", stats: diario.stats || null });
+    await concludeGuestLink(token, escopo, visitante);
+    return;
+  }
+
+  // Decisão registrada vale pela IMPRESSÃO do conteúdo: se o visitante mudou, a
+  // impressão muda e o aplicativo volta a reconhecer trabalho pendente.
+  let recibo = null;
+  try { recibo = await FinanceStore.guestLinkReceipt(); } catch (_) { recibo = null; }
+  if (!valido()) return;
+  const decidido = recibo && visitante.digest && recibo.sourceDigest === visitante.digest;
+  if (decidido && recibo.status === "linked") {
+    setGuestLink({ phase: "linked", stats: recibo.stats || null });
+    await CloudSync.finishAccountBootstrap();
+    return;
+  }
+  if (decidido && recibo.status === "dismissed") {
+    setGuestLink({ phase: "dismissed" });
+    await CloudSync.finishAccountBootstrap();
+    return;
+  }
+
+  // Sem saber o que a conta tem, o aplicativo NÃO presume que ela está vazia.
+  if (!preparo.ok || preparo.revision == null) {
+    setGuestLink({
+      phase: "waiting",
+      error: preparo.error || "Sem conexão para conferir a conta. O vínculo espera a rede voltar.",
+      errorCode: preparo.errorCode || "offline",
+    });
+    await CloudSync.finishAccountBootstrap();
+    return;
+  }
+
+  // Revisão zero: a conta nunca recebeu uma operação. Incorporar é seguro.
+  if (String(preparo.revision) === "0") {
+    setGuestLink({ phase: "linking" });
+    await runGuestLink(token, escopo, visitante, {
+      userId, remoteRevision: "0", expectedRemoteRevision: "0",
+    });
+    return;
+  }
+
+  // Conta com história: só com confirmação, e sem nenhuma opção que substitua
+  // ou apague um dos lados.
+  setGuestLink({ phase: "confirm" });
+  await CloudSync.finishAccountBootstrap();
+}
+
+// ---- Ações da tela de conta ----
+
+// "Juntar dados": confirmação explícita, inclusive depois de um bloqueio por
+// mudança remota. Aqui o lote sobe sem declarar revisão esperada, porque a
+// pessoa já sabe que a conta mudou.
+async function accountLinkGuest() {
+  if (!state.account.authenticated) return;
+  const escopo = FinanceStore.scope();
+  const token = ++__guestLinkToken;
+  setGuestLink({ phase: "linking", busy: true, error: "", errorCode: "" });
+
+  let visitante = null;
+  try { visitante = await FinanceStore.peekScope("guest"); }
+  catch (_) { visitante = null; }
+  if (token !== __guestLinkToken || FinanceStore.scope() !== escopo) return;
+  if (!visitante || !visitante.exists) {
+    setGuestLink({ phase: "idle", busy: false, summary: null });
+    return;
+  }
+  setGuestLink({ summary: visitante, digest: visitante.digest || "", busy: false });
+
+  try { await FinanceStore.releaseGuestLink(); } catch (_) { /* sem diário */ }
+  await runGuestLink(token, escopo, visitante, {
+    userId: state.account.userId,
+    remoteRevision: state.account.guestLink.remoteRevision,
+  });
+}
+
+// "Manter separados": decisão explícita, gravada pela impressão do conteúdo.
+// Fechar a tela NÃO passa por aqui, e é isso que impede o marcador silencioso
+// que existia antes.
+async function accountDismissGuestLink() {
+  const digest = state.account.guestLink && state.account.guestLink.digest;
+  if (!digest) {
+    // Sem impressão (navegador sem WebCrypto) nada é gravado: preferimos
+    // perguntar de novo a esconder uma alteração.
+    setGuestLink({ phase: "dismissed" });
+    return;
+  }
+  try { await FinanceStore.dismissGuestLink(digest, "guest"); }
+  catch (_) { /* a pergunta volta na próxima entrada */ }
+  setGuestLink({ phase: "dismissed", error: "", errorCode: "" });
+  notify("Os dados deste aparelho continuam separados da conta");
+}
+
+// "Agora não": esconde o cartão nesta sessão, sem gravar decisão nenhuma.
+function accountPostponeGuestLink() {
+  setGuestLink({ phase: "idle" });
+}
+
+// "Rever": traz o cartão de volta, com o resumo recalculado.
+async function accountReviewGuestLink() {
+  setGuestLink({ phase: "checking", busy: true, error: "", errorCode: "" });
+  const escopo = FinanceStore.scope();
+  const token = __guestLinkToken;
+  let visitante = null;
+  try { visitante = await FinanceStore.peekScope("guest"); }
+  catch (_) { visitante = null; }
+  if (token !== __guestLinkToken || FinanceStore.scope() !== escopo) return;
+  if (!visitante || !visitante.exists) {
+    setGuestLink({ phase: "idle", busy: false, summary: null, digest: "" });
+    notify("Não há dados de visitante neste aparelho");
+    return;
+  }
+  setGuestLink({ phase: "confirm", busy: false, summary: visitante, digest: visitante.digest || "" });
 }
 
 const AccountAPI = (() => {
@@ -6095,8 +6978,12 @@ async function refreshAccountSession() {
   // assim que ela deixa de existir. `enable()` já faz a primeira volta completa
   // (puxa o remoto, funde e devolve), então é aqui que um aparelho novo recebe
   // o histórico. Não é aguardado para não segurar a pintura da tela de conta.
+  // A sincronização segue a sessão. Ela não é mais ligada "solta": a entrada
+  // numa conta passa pela sequência de vínculo, que desce primeiro, decide, e só
+  // então libera a fila e a semeadura. Não é aguardada para não segurar a
+  // pintura da tela de conta.
   if (typeof CloudSync !== "undefined") {
-    if (state.account.authenticated) CloudSync.enable().catch(() => {});
+    if (state.account.authenticated) bootstrapAccountLink().catch(() => {});
     else CloudSync.disable();
   }
   render();
@@ -6305,8 +7192,9 @@ async function accountDelete() {
     // Apagar a conta apaga também a cópia local dela. Deixar o banco da conta
     // excluída neste navegador manteria vivo exatamente o dado que o usuário
     // pediu para destruir, e num aparelho compartilhado isso é um vazamento.
+    // `purge()` já apaga o `localMeta` do escopo, e com ele o recibo e o diário
+    // de vínculo daquela conta. Nada sobra apontando para dados que não existem.
     try { await FinanceStore.purge(); } catch (_) {}
-    try { localStorage.removeItem(GUEST_IMPORT_PREFIX + FinanceStore.scope()); } catch (_) {}
     state.account = freshAccountState(); state.account.loading = false; state.account.configured = true;
     await applyAccountScope("");
     render(); notify("Conta apagada no servidor e neste aparelho.");
@@ -6314,7 +7202,7 @@ async function accountDelete() {
 }
 
 // source: js/cloud-sync.js
-// cloud-sync.js; motor de sincronização incremental (protocolo 2)
+// cloud-sync.js; motor de sincronização incremental (protocolo 3)
 // ------------------------------------------------------------------------------
 // O QUE MUDOU, E POR QUE
 //
@@ -6338,6 +7226,20 @@ async function accountDelete() {
 // outros aparelhos fizeram desde o último cursor, e aplica pela marca. Não há
 // mais fusão de documentos, nem 409, nem teto.
 //
+// A ORDEM DO CICLO É PARTE DO CONTRATO
+//
+// Um aparelho que entrava numa conta subia a própria base ANTES de olhar o que
+// a conta já tinha. Era isso que fazia o vínculo decidir errado: a conta parecia
+// preenchida porque este mesmo aparelho acabara de preenchê-la. A ordem agora é
+// fixa: terminar as gravações locais, descer, semear, subir, aplicar a resposta,
+// confirmar a fila, descer de novo e só então declarar "sincronizado".
+//
+// "SINCRONIZADO" EXIGE PROVA
+//
+// A tela dizia "Tudo sincronizado" sempre que o ciclo não lançava exceção, mesmo
+// com a fila cheia e mesmo quando a leitura da fila tinha falhado. Agora esse
+// estado só aparece depois de uma leitura da fila que FUNCIONOU e voltou vazia.
+//
 // UMA ABA POR VEZ
 //
 // Duas abas sincronizando ao mesmo tempo enviariam a mesma fila duas vezes. O
@@ -6351,9 +7253,15 @@ const CLOUD_SYNC_RETRY_MS = 30000;        // nova tentativa após falha de rede
 const CLOUD_SYNC_BATCH = 400;             // operações por requisição (servidor aceita 500)
 const CLOUD_SYNC_PAGE = 500;              // operações por página na descida
 const CLOUD_SYNC_MAX_PAGES = 200;         // trava de segurança contra cursor que não anda
+const CLOUD_SYNC_MAX_BATCHES = 200;       // trava equivalente na subida
 const CLOUD_SYNC_POLL_MS = 60000;         // volta periódica enquanto o app está à vista
+
+// Chaves antigas, no localStorage. Continuam sendo LIDAS uma única vez, para
+// importar o progresso de quem já usava o app; a partir daí o cursor e o recibo
+// moram no banco local, na mesma transação que grava os dados.
+// As chaves do `localMeta` (META_CURSOR, META_SEED_RECEIPT, META_SEED_JOURNAL e
+// META_LINK_JOURNAL) são declaradas em `js/storage.js`, que é quem as grava.
 const CLOUD_CURSOR_KEY = "cofre_sync_cursor";
-const CLOUD_SEED_KEY = "cofre_sync_seeded";
 
 const CloudSync = (() => {
   let adapter = null;
@@ -6363,8 +7271,19 @@ const CloudSync = (() => {
   let cicloMexeu = false;          // esta volta enviou ou aplicou alguma coisa
   let running = false;
   let scope = "guest";
-  let hooks = { applyRemote: null, readLocal: null };
+  let hooks = { applyRemote: null };
   const listeners = [];
+
+  // Segura a subida e a semeadura até a decisão de vínculo. Sem isto, entrar
+  // numa conta vazia num aparelho que já tinha dados subiria a base local antes
+  // de alguém perguntar se ela pertence àquela conta.
+  let bootstrapHeld = false;
+  // Revisão da conta OBSERVADA antes de qualquer envio deste aparelho. É ela
+  // que decide "conta vazia" no vínculo automático; usar a revisão de depois
+  // faria o próprio aparelho responder à própria pergunta.
+  let observedRevision = null;
+  let cursorCache = null;
+  let cursorScope = null;
 
   let state = {
     enabled: false,
@@ -6374,6 +7293,8 @@ const CloudSync = (() => {
     errorCode: null,
     pending: false,
     queued: 0,              // operações ainda não enviadas
+    remoteRevision: null,   // revisão observada na primeira descida
+    bootstrapHeld: false,   // aguardando a decisão de vínculo
   };
 
   // `silencioso` existe por causa da volta periódica: `onStatus` redesenha o
@@ -6390,22 +7311,49 @@ const CloudSync = (() => {
     return typeof navigator !== "undefined" && navigator.onLine === false;
   }
 
+  function syncError(message, code) {
+    if (typeof CloudSyncError === "function") return new CloudSyncError(message, code);
+    const error = new Error(message);
+    error.code = code;
+    return error;
+  }
+
   // ---------------------------------------------------------------------------
   // Cursor: até onde este aparelho já leu o log do servidor
   // ---------------------------------------------------------------------------
-  // Por escopo, porque duas contas no mesmo navegador têm logs independentes.
-  function cursorKey() { return scope === "guest" ? CLOUD_CURSOR_KEY : `${CLOUD_CURSOR_KEY}__${scope}`; }
+  // Ele mora no BANCO, e não mais no localStorage, por um motivo específico: o
+  // cursor só pode avançar depois que a operação correspondente chegou ao disco.
+  // Guardado fora do banco, ele avançava mesmo quando a gravação falhava, e o
+  // aparelho passava a pular para sempre uma alteração que nunca aplicou.
+  function legacyCursorKey() { return scope === "guest" ? CLOUD_CURSOR_KEY : `${CLOUD_CURSOR_KEY}__${scope}`; }
 
-  function readCursor() {
+  function legacyCursor() {
     try {
-      const raw = localStorage.getItem(cursorKey());
+      const raw = localStorage.getItem(legacyCursorKey());
       return /^\d{1,18}$/.test(String(raw || "")) ? String(raw) : "0";
     } catch (e) { return "0"; }
   }
 
-  function writeCursor(value) {
+  async function readCursor() {
+    if (cursorScope === scope && cursorCache !== null) return cursorCache;
+    const stored = await FinanceStore.localMetaGet(META_CURSOR);
+    let value = /^\d{1,18}$/.test(String(stored == null ? "" : stored)) ? String(stored) : "";
+    if (!value) {
+      // Importação única do cursor antigo. Quem já sincronizava não volta a
+      // baixar o log inteiro só porque o lugar de guardar mudou.
+      value = legacyCursor();
+      await FinanceStore.localMetaPut(META_CURSOR, value);
+    }
+    cursorScope = scope;
+    cursorCache = value;
+    return value;
+  }
+
+  async function writeCursor(value) {
     if (!/^\d{1,18}$/.test(String(value || ""))) return;
-    try { localStorage.setItem(cursorKey(), String(value)); } catch (e) { /* cota cheia */ }
+    await FinanceStore.localMetaPut(META_CURSOR, String(value));
+    cursorScope = scope;
+    cursorCache = String(value);
   }
 
   // ---------------------------------------------------------------------------
@@ -6418,17 +7366,35 @@ const CloudSync = (() => {
   // tudo zerado. Pior, sem sinal de erro: a fila estava mesmo vazia, então a
   // tela dizia "Tudo sincronizado".
   //
-  // A semeadura roda UMA vez por conta neste aparelho, depois da primeira
-  // descida completa - depois, para não empurrar uma versão velha por cima do
-  // que o outro aparelho escreveu; e a marca de cada registro decide o resto.
-  function seedKey() { return `${CLOUD_SEED_KEY}__${scope}`; }
-
-  function alreadySeeded() {
-    try { return localStorage.getItem(seedKey()) === "1"; } catch (e) { return false; }
+  // A semeadura roda DEPOIS da primeira descida completa, e é considerada
+  // concluída somente quando o servidor confirma o lote e a fila daquele
+  // `seedId` fica vazia. O marcador booleano antigo ("já semeei") não conta como
+  // recibo: era ele que impedia a reparação de quem sincronizou antes de as
+  // tabelas existirem no banco.
+  // "Base significativa" não é só lançamento. Quem cadastrou apenas a conta do
+  // banco, ou apenas a renda, tem conteúdo de verdade para levar para a conta.
+  function baseTemConteudo() {
+    const data = FinanceStore.snapshot();
+    const listas = ["transactions", "goals", "assets", "accounts", "creditCards",
+      "accountTransfers", "cardPayments", "accountAdjustments"];
+    if (listas.some((campo) => (data[campo] || []).length > 0)) return true;
+    if (Number(data.monthlyIncome) > 0) return true;
+    // Categoria de fábrica não é conteúdo; categoria criada pelo usuário é.
+    return (data.categories || []).some((c) => c && c.custom === true);
   }
 
-  function markSeeded() {
-    try { localStorage.setItem(seedKey(), "1"); } catch (e) { /* cota cheia */ }
+  async function precisaSemear(cursor) {
+    const recibo = await FinanceStore.localMetaGet(META_SEED_RECEIPT);
+    // Sem recibo confirmado, ou com um diário interrompido pendurado, semear é
+    // o certo: reapresentar registros com a marca que eles já têm é inofensivo,
+    // porque o servidor guarda a versão de marca maior.
+    if (!recibo || recibo.status !== "confirmed") return true;
+    const diario = await FinanceStore.localMetaGet(META_SEED_JOURNAL);
+    if (diario) return true;
+    // Rede de segurança: cursor zerado depois de uma descida completa significa
+    // servidor sem NENHUMA operação. Se este aparelho tem base e o servidor não
+    // tem nada, semear de novo é o certo, mesmo com recibo.
+    return String(cursor) === "0" && baseTemConteudo();
   }
 
   // ---------------------------------------------------------------------------
@@ -6450,6 +7416,9 @@ const CloudSync = (() => {
     return Array.from(byKey.values()).sort((a, b) => (String(a.rev) < String(b.rev) ? -1 : 1));
   }
 
+  // O corpo que vai para o servidor tem SOMENTE o que o protocolo define.
+  // `linkId`, `seedId`, `entryKey`, `seq` e `queuedAt` são contabilidade local:
+  // enviá-los vazaria o funcionamento interno do aparelho para dentro da conta.
   function toWireOp(entry) {
     const op = { entity: entry.entity, entityId: entry.entityId, op: entry.op, rev: entry.rev };
     if (entry.op === "put") op.payload = entry.payload;
@@ -6461,12 +7430,15 @@ const CloudSync = (() => {
   // ---------------------------------------------------------------------------
 
   async function applyIncoming(ops) {
-    if (!ops.length) return false;
-    const result = FinanceStore.applyRemoteOps(ops);
+    if (!ops || !ops.length) return false;
+    // `applyRemoteOps` agora GRAVA antes de devolver. É esta promessa que o
+    // cursor espera: enquanto ela não resolve, o aparelho não pode declarar que
+    // já leu aquele trecho do log.
+    const result = await FinanceStore.applyRemoteOps(ops);
     if (!result.changed) return false;
     cicloMexeu = true;
-    // `applyRemote` grava, redesenha e reavalia conquistas e avisos, como se o
-    // próprio usuário tivesse feito a alteração; porque, em outro aparelho, foi.
+    // `applyRemote` redesenha e reavalia conquistas e avisos, como se o próprio
+    // usuário tivesse feito a alteração; porque, em outro aparelho, foi.
     hooks.applyRemote(result.data);
     return true;
   }
@@ -6477,36 +7449,58 @@ const CloudSync = (() => {
     let guard = 0;
     for (;;) {
       const queued = await FinanceStore.outboxRead(0);
+      const diarioVinculo = await FinanceStore.localMetaGet(META_LINK_JOURNAL);
+      // Vínculo bloqueado por mudança remota espera decisão explícita. As
+      // entradas continuam na fila; elas só não são REENVIADAS às cegas.
+      const bloqueado = diarioVinculo && diarioVinculo.status === "blocked" ? String(diarioVinculo.linkId) : "";
+      const enviaveis = bloqueado ? queued.filter((entry) => String(entry.linkId || "") !== bloqueado) : queued;
       setState({ queued: queued.length });
-      if (!queued.length) break;
-      if (++guard > CLOUD_SYNC_MAX_PAGES) break;
+      if (!enviaveis.length) break;
+      if (++guard > CLOUD_SYNC_MAX_BATCHES) {
+        throw syncError("A fila de sincronização não terminou dentro do limite de lotes.", "batch_limit");
+      }
 
-      const compact = compactOutbox(queued);
+      const compact = compactOutbox(enviaveis);
       const batch = compact.slice(0, CLOUD_SYNC_BATCH);
       if (batch.length) cicloMexeu = true;
-      const result = await adapter.push(batch.map(toWireOp), cursor);
+      const result = await adapter.push(batch.map(toWireOp), cursor, pushOptions(batch, diarioVinculo));
 
-      // Só remove da fila DEPOIS da confirmação do servidor. Se a rede cair no
-      // meio, a operação continua lá e sobe na próxima volta; o `mutationId`
-      // garante que reenviar não duplica nada.
-      //
+      // A resposta é APLICADA antes de a fila ser confirmada. Se a gravação da
+      // resposta falhar, a fila continua inteira e o lote volta na próxima
+      // volta; o `mutationId` garante que reenviar não duplica nada.
+      await applyIncoming(result.ops);
+
       // Saem também as versões ANTERIORES do mesmo registro, que a compactação
       // substituiu: a marca já enviada é maior que a delas.
       const enviado = new Map(batch.map((entry) => [`${entry.entity} ${entry.entityId}`, String(entry.rev)]));
-      const seqs = queued
+      const seqs = enviaveis
         .filter((entry) => {
           const rev = enviado.get(`${entry.entity} ${entry.entityId}`);
           return rev !== undefined && String(entry.rev) <= rev;
         })
         .map((entry) => entry.seq);
-      await FinanceStore.outboxDrop(seqs);
+      // Confirmar é gravar: a remoção da fila e a promoção do recibo de vínculo
+      // ou de semeadura acontecem na mesma transação.
+      await FinanceStore.acknowledgeOutbox(seqs, { revision: result.revision });
 
-      await applyIncoming(result.ops);
+      // O cursor só avança depois de tudo acima ter chegado ao disco.
       cursor = result.cursor;
-      writeCursor(cursor);
+      await writeCursor(cursor);
       if (batch.length >= compact.length && !result.hasMore) break;
     }
     return cursor;
+  }
+
+  // Só o PRIMEIRO lote automático do vínculo declara a revisão esperada. É essa
+  // declaração que faz o servidor recusar a adoção se a conta tiver recebido
+  // qualquer coisa entre a leitura e a confirmação.
+  function pushOptions(batch, diarioVinculo) {
+    if (!diarioVinculo || diarioVinculo.expectedRemoteRevision == null) return null;
+    if (diarioVinculo.status === "blocked") return null;
+    const linkId = String(diarioVinculo.linkId || "");
+    if (!linkId || !batch.length) return null;
+    if (!batch.every((entry) => String(entry.linkId || "") === linkId)) return null;
+    return { expectedRemoteRevision: String(diarioVinculo.expectedRemoteRevision) };
   }
 
   // ---- Descida: páginas até alcançar o servidor ----
@@ -6517,37 +7511,44 @@ const CloudSync = (() => {
       await applyIncoming(result.ops);
       const advanced = String(result.cursor) !== String(cursor);
       cursor = result.cursor;
-      writeCursor(cursor);
-      if (!result.hasMore || !advanced) break;
+      await writeCursor(cursor);
+      if (!result.hasMore) return cursor;
+      // Servidor dizendo "tem mais" sem mover o cursor é laço infinito
+      // disfarçado de sucesso. Parar em silêncio deixaria o aparelho com meia
+      // conta e a tela dizendo que estava tudo em dia.
+      if (!advanced) throw syncError("O servidor não avançou a leitura da conta.", "cursor_stalled");
     }
-    return cursor;
+    throw syncError("A leitura da conta excedeu o limite de páginas.", "page_limit");
   }
 
   async function cycle() {
-    let cursor = readCursor();
-    cursor = await upload(cursor);
-    cursor = await download(cursor);
+    // 1. Gravação local em curso termina ANTES de qualquer decisão. Uma
+    //    alteração ainda no debounce não pode ficar de fora do primeiro envio,
+    //    nem ser sobrescrita pela primeira descida.
+    const gravou = await FinanceStore.flush();
+    if (gravou === false) throw syncError("O aparelho não conseguiu salvar antes de sincronizar.", "local_write_failed");
 
-    // ---- Semeadura ----
-    // Roda DEPOIS da descida, e por isso é segura: o que o outro aparelho já
-    // escreveu está aqui, com marca, e a semeadura reapresenta cada registro
-    // com a marca que ele tem. O servidor guarda a vencedora, então nada velho
-    // derruba nada novo.
-    //
-    // A segunda condição é a rede de segurança que faltava: cursor zerado
-    // depois de uma descida completa significa servidor sem NENHUMA operação.
-    // Se este aparelho tem base e o servidor não tem nada, semear de novo é o
-    // certo, mesmo que a marca de "já semeado" esteja gravada - foi o caso de
-    // quem sincronizou antes de as tabelas existirem no banco.
-    const servidorVazio = String(cursor) === "0" && !!(FinanceStore.snapshot().transactions || []).length;
-    if (!alreadySeeded() || servidorVazio) {
-      const semeadas = await FinanceStore.seedOutbox();
-      markSeeded();
-      if (semeadas > 0) {
-        cursor = await upload(cursor);
-        cursor = await download(cursor);
-      }
+    let cursor = await readCursor();
+
+    // 2. Descida primeiro. O vínculo e a semeadura precisam saber o que a conta
+    //    JÁ TEM antes de este aparelho empurrar qualquer coisa.
+    cursor = await download(cursor);
+    if (observedRevision === null) {
+      observedRevision = String(adapter.revision == null ? cursor : adapter.revision);
+      setState({ remoteRevision: observedRevision }, true);
     }
+
+    // 3. Enquanto a decisão de vínculo não sai, nada sobe e nada é semeado.
+    if (bootstrapHeld) return;
+
+    if (await precisaSemear(cursor)) await FinanceStore.seedOutbox();
+
+    // 4. Subida, com aplicação da resposta e confirmação da fila por dentro.
+    cursor = await upload(cursor);
+
+    // 5. Descida final: fecha a volta com o que outros aparelhos escreveram
+    //    enquanto este enviava.
+    await download(cursor);
   }
 
   // Um ciclo por vez, e uma ABA por vez. `ifAvailable` faz a aba desistir na
@@ -6565,7 +7566,7 @@ const CloudSync = (() => {
   }
 
   async function runSync(quieto) {
-    if (!adapter || running || !hooks.readLocal || !hooks.applyRemote) return false;
+    if (!adapter || running || !hooks.applyRemote) return false;
     if (offline()) { setState({ phase: "offline", pending: true }); return false; }
 
     running = true;
@@ -6575,15 +7576,19 @@ const CloudSync = (() => {
     try {
       const ran = await withLock(cycle);
       if (ran === false) { setState({ phase: "idle", pending: true }); return false; }
+      // A LEITURA FINAL DA FILA É A PROVA. Se ela falhar, o `catch` assume: o
+      // aplicativo não tem como afirmar que não sobrou nada por enviar.
       const queued = await FinanceStore.outboxRead(0);
+      const pendente = queued.length > 0;
       // Volta periódica que não achou nada e não mudou nada visível não avisa
       // ninguém: para o usuário, a tela continua exatamente como estava.
-      const semNovidade = !!quieto && !cicloMexeu && eraSincronizado && queued.length === 0;
+      const semNovidade = !!quieto && !cicloMexeu && eraSincronizado && !pendente;
       setState({
-        phase: "synced", lastSyncAt: new Date().toISOString(),
-        pending: queued.length > 0, queued: queued.length, error: null, errorCode: null,
+        phase: pendente ? "idle" : "synced", lastSyncAt: new Date().toISOString(),
+        pending: pendente, queued: queued.length, error: null, errorCode: null,
+        bootstrapHeld,
       }, semNovidade);
-      return true;
+      return !pendente;
     } catch (error) {
       return handleFailure(error);
     } finally {
@@ -6602,8 +7607,21 @@ const CloudSync = (() => {
       return false;
     }
     if (code === "protocol_upgrade_required") {
+      // A fila NÃO é descartada: ela sobe assim que o aplicativo atualizar.
       disable();
-      setState({ phase: "error", error: "Atualize o aplicativo para voltar a sincronizar.", errorCode: code });
+      setState({ phase: "error", pending: true, error: "Atualize o aplicativo para voltar a sincronizar.", errorCode: code });
+      return false;
+    }
+    if (code === "remote_changed") {
+      // A conta recebeu algo entre a leitura e a confirmação do vínculo. Nada é
+      // descartado: o diário e a fila continuam, e a decisão volta para o
+      // usuário como confirmação de mesclagem.
+      FinanceStore.blockGuestLink(error && error.revision).catch(() => {});
+      setState({
+        phase: "idle", pending: true,
+        error: "A conta mudou em outro aparelho. Confirme como juntar os dados.",
+        errorCode: code,
+      });
       return false;
     }
     // Problema de INSTALAÇÃO não se resolve sozinho em 30 segundos. Tentar de
@@ -6700,12 +7718,10 @@ const CloudSync = (() => {
     if (!state.enabled || !adapter) return false;
     const rev = FinanceStore.mintRev();
     const result = await adapter.resetRemote(rev);
-    writeCursor(String(result.revision || "0"));
     await FinanceStore.outboxClear();
+    await writeCursor(String(result.revision || "0"));
     return true;
   }
-
-
 
   async function createCheckpoint(label) {
     if (!state.enabled || !adapter) return null;
@@ -6747,7 +7763,7 @@ const CloudSync = (() => {
 
     const naVersao = new Set(ops.map((op) => `${op.entity} ${op.entityId}`));
     const atual = FinanceStore.snapshot();
-    ["transactions", "categories", "goals", "assets"].forEach((field) => {
+    FinanceStore.syncEntityFields().forEach((field) => {
       (atual[field] || []).forEach((rec) => {
         if (!naVersao.has(`${field} ${rec.id}`)) {
           ops.push({ entity: field, entityId: rec.id, op: "delete", rev: FinanceStore.mintRev() });
@@ -6755,7 +7771,7 @@ const CloudSync = (() => {
       });
     });
 
-    const aplicado = FinanceStore.applyRemoteOps(ops);
+    const aplicado = await FinanceStore.applyRemoteOps(ops);
     if (aplicado.changed) hooks.applyRemote(aplicado.data);
     // As operações da restauração precisam SUBIR: `applyRemoteOps` não
     // enfileira nada, porque normalmente o que ele aplica veio de fora.
@@ -6765,13 +7781,45 @@ const CloudSync = (() => {
   }
 
   // ---------------------------------------------------------------------------
+  // Entrada numa conta: preparar, decidir, concluir
+  // ---------------------------------------------------------------------------
+  // `prepareAccount` liga o motor e BAIXA, sem enviar e sem semear. É o que
+  // permite ao vínculo perguntar "esta conta já tem alguma coisa?" antes de
+  // este aparelho ter escrito qualquer coisa nela.
+  async function prepareAccount() {
+    bootstrapHeld = true;
+    observedRevision = null;
+    setState({ bootstrapHeld: true, remoteRevision: null }, true);
+    if (state.enabled) await runSync();
+    else await enable();
+    return {
+      ok: observedRevision !== null,
+      revision: observedRevision,
+      phase: state.phase,
+      error: state.error,
+      errorCode: state.errorCode,
+    };
+  }
+
+  // Libera a fila e a semeadura depois da decisão de vínculo, e devolve o
+  // resultado real do ciclo que roda em seguida.
+  async function finishAccountBootstrap() {
+    bootstrapHeld = false;
+    setState({ bootstrapHeld: false }, true);
+    if (!state.enabled) return enable();
+    return syncNow();
+  }
+
+  // ---------------------------------------------------------------------------
   // Ligar e desligar
   // ---------------------------------------------------------------------------
 
   async function enable() {
-    if (state.enabled) return true;
-    if (!hooks.readLocal || !hooks.applyRemote) return false;
+    if (state.enabled) return runSync();
+    if (!hooks.applyRemote) return false;
     scope = FinanceStore.scope();
+    cursorCache = null;
+    cursorScope = null;
     try {
       adapter = new CloudAdapter({
         enabled: true,
@@ -6802,8 +7850,9 @@ const CloudSync = (() => {
     FinanceStore.setOutboxEnabled(true);
     setState({ enabled: true, phase: "idle", error: null, errorCode: null });
     startPolling();
-    await runSync();
-    return true;
+    // O resultado do PRIMEIRO ciclo é o resultado de ligar. Devolver `true` sem
+    // olhar era o que deixava a tela dizer "sincronizado" com a fila cheia.
+    return runSync();
   }
 
   function disable() {
@@ -6811,15 +7860,21 @@ const CloudSync = (() => {
     clearTimeout(retryTimer);
     stopPolling();
     adapter = null;
+    bootstrapHeld = false;
+    observedRevision = null;
+    cursorCache = null;
+    cursorScope = null;
     // A fila NÃO é apagada: ela é o que ainda não chegou ao servidor. Apagar
     // aqui perderia lançamentos feitos offline logo antes de sair.
     FinanceStore.setOutboxEnabled(false);
-    setState({ enabled: false, phase: "disabled", pending: false, error: null, errorCode: null });
+    setState({
+      enabled: false, phase: "disabled", pending: false, error: null, errorCode: null,
+      remoteRevision: null, bootstrapHeld: false,
+    });
   }
 
   function configure(options) {
     const o = options || {};
-    if (typeof o.readLocal === "function") hooks.readLocal = o.readLocal;
     if (typeof o.applyRemote === "function") hooks.applyRemote = o.applyRemote;
     if (typeof o.onStatus === "function") listeners.push(o.onStatus);
   }
@@ -6850,6 +7905,9 @@ const CloudSync = (() => {
     createCheckpoint,
     listCheckpoints,
     restoreCheckpoint,
+    prepareAccount,
+    finishAccountBootstrap,
+    observedRevision: () => observedRevision,
     status: () => state,
     isEnabled: () => state.enabled,
   };
@@ -25095,6 +26153,107 @@ function accountSyncCard() {
   </div>`;
 }
 
+// Cartão do vínculo entre os dados deste aparelho e a conta.
+//
+// Ele só mostra CONTAGENS e estado. Nunca a impressão do conteúdo, nunca o UUID
+// da conta, nunca o id de um registro: quem está olhando a tela precisa decidir,
+// não auditar. E a decisão nunca é gravada por abrir ou fechar o cartão.
+function accountLinkParts(resumo) {
+  if (!resumo) return "";
+  const plural = (n, um, muitos) => `${n} ${n > 1 ? muitos : um}`;
+  const partes = [];
+  if (resumo.transactions) partes.push(plural(resumo.transactions, "lançamento", "lançamentos"));
+  if (resumo.accounts) partes.push(plural(resumo.accounts, "conta", "contas"));
+  if (resumo.creditCards) partes.push(plural(resumo.creditCards, "cartão", "cartões"));
+  if (resumo.accountTransfers) partes.push(plural(resumo.accountTransfers, "transferência", "transferências"));
+  if (resumo.cardPayments) partes.push(plural(resumo.cardPayments, "pagamento", "pagamentos"));
+  if (resumo.accountAdjustments) partes.push(plural(resumo.accountAdjustments, "conciliação", "conciliações"));
+  if (resumo.goals) partes.push(plural(resumo.goals, "meta", "metas"));
+  if (resumo.assets) partes.push(plural(resumo.assets, "item de patrimônio", "itens de patrimônio"));
+  if (resumo.categories) partes.push(plural(resumo.categories, "categoria personalizada", "categorias personalizadas"));
+  if (resumo.monthlyIncome) partes.push("a renda cadastrada");
+  const restante = Number(resumo.settings) - (resumo.monthlyIncome ? 1 : 0);
+  if (restante > 0) partes.push(plural(restante, "configuração financeira", "configurações financeiras"));
+  if (!partes.length) return "";
+  if (partes.length === 1) return partes[0];
+  return `${partes.slice(0, -1).join(", ")} e ${partes[partes.length - 1]}`;
+}
+
+const ACCOUNT_LINK_VIEW = {
+  checking: { icon: "loader", title: "Conferindo os dados deste aparelho" },
+  linking: { icon: "loader", title: "Vinculando dados deste aparelho" },
+  linked: { icon: "checkCircle", title: "Dados deste aparelho vinculados" },
+  confirm: { icon: "upload", title: "Trazer os dados deste aparelho?" },
+  waiting: { icon: "wifi", title: "Vínculo aguardando conexão" },
+  pending: { icon: "alertTriangle", title: "Vínculo pendente" },
+  dismissed: { icon: "info", title: "Dados deste aparelho separados da conta" },
+};
+
+function accountGuestLinkCard() {
+  const link = state.account.guestLink || freshGuestLink();
+  const view = ACCOUNT_LINK_VIEW[link.phase];
+  // `idle` é ausência de trabalho: nenhum cartão, nenhuma pergunta.
+  if (!view) return "";
+  const conteudo = accountLinkParts(link.summary);
+  const busy = !!link.busy || link.phase === "checking" || link.phase === "linking";
+
+  let corpo = "";
+  if (link.phase === "confirm") {
+    corpo = `<p class="card-subtitle">Este navegador tem ${escapeHtml(conteudo || "dados salvos sem conta")} guardados fora da conta.${
+      link.errorCode === "remote_changed"
+        ? " A conta recebeu alterações de outro aparelho enquanto isto era preparado."
+        : (String(link.remoteRevision || "0") === "0" ? "" : " A conta já tem conteúdo de outro aparelho.")
+    }</p>
+    <p class="field-hint">Juntar não substitui nem apaga nada: registros diferentes entram por união e, no mesmo registro, vence a versão mais recente. A cópia deste aparelho continua aqui de qualquer forma.</p>`;
+  } else if (link.phase === "linked") {
+    const stats = link.stats || null;
+    corpo = `<p class="card-subtitle">O conteúdo deste aparelho já faz parte da conta e está no servidor.</p>${
+      stats ? `<p class="field-hint">Incorporados: ${escapeHtml(String(Number(stats.added) || 0))} lançamento(s), ${escapeHtml(String(Number(stats.goals) || 0))} meta(s), ${escapeHtml(String(Number(stats.accounts) || 0))} conta(s).</p>` : ""
+    }`;
+  } else if (link.phase === "dismissed") {
+    corpo = `<p class="card-subtitle">Você escolheu manter ${escapeHtml(conteudo || "esses dados")} fora da conta. Nada foi apagado.</p>
+      <p class="field-hint">Se mudar de ideia, o vínculo continua disponível aqui.</p>`;
+  } else if (link.phase === "waiting") {
+    corpo = `<p class="card-subtitle">${escapeHtml(link.error || "Sem conexão para conferir a conta.")}</p>
+      <p class="field-hint">Nada é presumido sem saber o que a conta já tem. O vínculo termina quando a rede voltar.</p>`;
+  } else if (link.phase === "pending") {
+    corpo = `<p class="card-subtitle">${escapeHtml(link.error || "O vínculo não foi concluído.")}</p>
+      <p class="field-hint">Seus dados continuam completos nos dois lados. A sincronização não aparece como concluída enquanto isto não terminar.</p>
+      ${link.errorCode ? `<p class="field-hint">Código da falha: ${escapeHtml(link.errorCode)}</p>` : ""}`;
+  } else {
+    corpo = `<p class="card-subtitle">Conferindo o que existe aqui e o que a conta já tem, antes de qualquer envio.</p>`;
+  }
+
+  let acoes = "";
+  if (link.phase === "confirm") {
+    acoes = `<div class="account-link__actions">
+      <button class="btn btn--primary btn--sm" data-action="account-link-confirm" ${busy ? "disabled" : ""}>${svgIcon("upload", 15)} Juntar dados</button>
+      <button class="btn btn--secondary btn--sm" data-action="account-link-dismiss" ${busy ? "disabled" : ""}>Manter separados</button>
+      <button class="link-btn" data-action="account-link-later">Agora não</button>
+    </div>`;
+  } else if (link.phase === "pending") {
+    acoes = `<div class="account-link__actions">
+      <button class="btn btn--secondary btn--sm" data-action="account-link-confirm" ${busy ? "disabled" : ""}>${svgIcon("refresh", 15)} Tentar novamente</button>
+      <button class="link-btn" data-action="account-link-later">Agora não</button>
+    </div>`;
+  } else if (link.phase === "dismissed" || link.phase === "waiting") {
+    acoes = `<div class="account-link__actions">
+      <button class="btn btn--secondary btn--sm" data-action="account-link-review" ${busy ? "disabled" : ""}>Vincular dados deste aparelho</button>
+    </div>`;
+  }
+
+  return `<div class="card account-sync account-link">
+    <div class="account-sync__head">
+      <span class="account-sync__icon account-sync__icon--${escapeHtml(link.phase)}">${svgIcon(view.icon, 18)}</span>
+      <div>
+        <p class="card-title">${escapeHtml(view.title)}</p>
+        ${corpo}
+      </div>
+    </div>
+    ${acoes}
+  </div>`;
+}
+
 function accountSignedIn() {
   const a = state.account;
   return `<div class="card account-profile">
@@ -25102,6 +26261,7 @@ function accountSignedIn() {
     <button class="btn btn--secondary" data-action="account-logout" ${a.busy ? "disabled" : ""}>Sair desta conta</button>
   </div>
   ${accountSyncCard()}
+  ${accountGuestLinkCard()}
   ${a.mode === "password" ? `<div class="card"><p class="card-title">Definir nova senha</p><div class="field"><label class="field__label" for="account-new-password">Nova senha</label><input id="account-new-password" class="input" type="password" data-field="auth-new-password" minlength="10" maxlength="128" value="${escapeHtml(a.form.newPassword)}" autocomplete="new-password" /></div><button class="btn btn--primary" data-action="account-submit" data-value="password" ${a.busy ? "disabled" : ""}>Salvar nova senha</button></div>` : ""}
   <div class="card"><div class="settings-row-header"><div><p class="card-title">Dispositivos conectados</p><p class="card-subtitle">Revogue qualquer acesso que você não reconheça.</p></div><button class="icon-btn" data-action="account-refresh" aria-label="Atualizar dispositivos">${svgIcon("refresh", 16)}</button></div>
     <div class="account-device-list">${a.devices.length ? a.devices.map((device) => `<div class="account-device"><span class="account-device__icon">${svgIcon("phone", 18)}</span><span><b>${escapeHtml(device.label || "Dispositivo")}${device.current ? " (este)" : ""}</b><small>Último acesso: ${escapeHtml(accountDeviceDate(device.lastSeenAt))}${device.revokedAt ? " · acesso revogado" : ""}</small></span>${device.revokedAt ? "" : `<button class="btn btn--ghost btn--sm" data-action="account-revoke" data-id="${escapeHtml(device.id)}">Revogar</button>`}</div>`).join("") : `<p class="field-hint">Nenhum dispositivo listado.</p>`}</div>
@@ -25582,6 +26742,12 @@ function onClick(e) {
     // `retry` e não `syncNow`: quando o motor parou por erro, sincronizar
     // agora não faz nada, e é justamente nesse estado que o botão aparece.
     case "account-sync-now": if (typeof CloudSync !== "undefined") CloudSync.retry(); break;
+    // Vínculo dos dados deste aparelho com a conta. Cada ação é uma escolha
+    // diferente; nenhuma delas substitui ou apaga um dos lados.
+    case "account-link-confirm": accountLinkGuest(); break;
+    case "account-link-dismiss": accountDismissGuestLink(); break;
+    case "account-link-later": accountPostponeGuestLink(); break;
+    case "account-link-review": accountReviewGuestLink(); break;
     case "account-logout": accountLogout(); break;
     case "account-revoke":
       requestConfirmation({ title: "Revogar acesso deste dispositivo?", message: "A sessão desse dispositivo deixará de acessar sua conta.", confirmLabel: "Revogar acesso", tone: "danger", onConfirm: () => accountRevoke(id) });
@@ -27468,9 +28634,12 @@ function setData(updater) {
 //
 // A gravação em si é segura contra laço porque o registro já chega marcado por
 // quem o alterou; `stampChangeSet` só reivindica o que foi alterado aqui.
+// O que chegou de fora JÁ ESTÁ GRAVADO quando esta função roda: quem persiste é
+// `FinanceStore.applyRemoteOps`, na mesma transação que confirma a operação
+// remota. Regravar aqui reabriria a janela em que o cursor avançava sem o dado
+// ter chegado ao disco, e ainda faria o aparelho reivindicar a alteração alheia.
 function setDataFromRemote(next) {
   state.data = next;
-  saveData(state.data);
   render();
   idleTask(syncAchievements);
   EventBus.emit(APP_EVENTS.DATA_CHANGED, { data: state.data, origin: "remote" });
@@ -28613,7 +29782,6 @@ async function init() {
   // aparelho, foi ele quem fez.
   if (typeof CloudSync !== "undefined") {
     CloudSync.configure({
-      readLocal: () => state.data,
       applyRemote: (merged) => setDataFromRemote(merged),
       onStatus: () => scheduleRender(render),
     });
@@ -28668,7 +29836,59 @@ async function init() {
     window.addEventListener("load", () => {
       navigator.serviceWorker.register("service-worker.js").catch(() => {});
     });
+    // DOIS PACOTES NA MESMA ABA É O PIOR CENÁRIO DA ATUALIZAÇÃO.
+    //
+    // Quando o service worker novo assume, o HTML que já está na tela continua
+    // pedindo módulos do pacote antigo, que o cache novo já não guarda. A
+    // aba passa a rodar metade de cada versão, e uma gravação em andamento pode
+    // terminar no meio da troca. Ao ver `controllerchange`, perguntamos ao
+    // worker QUAL pacote ele é, terminamos o que estava sendo salvo e só então
+    // recarregamos, uma única vez por pacote.
+    navigator.serviceWorker.addEventListener("controllerchange", () => { handleControllerChange(); });
   }
+}
+
+const APP_RELOAD_GUARD_KEY = "cofre_build_reload";
+
+// O worker responde pelo canal que enviamos, e não pelo `postMessage` da
+// janela: assim a resposta não se confunde com nenhuma outra mensagem, e uma
+// versão antiga que não conheça `GET_BUILD` simplesmente não responde.
+function activeBuildId(worker) {
+  return new Promise((resolve) => {
+    if (!worker || typeof MessageChannel !== "function") { resolve(""); return; }
+    let respondido = false;
+    const concluir = (valor) => { if (!respondido) { respondido = true; resolve(valor); } };
+    try {
+      const canal = new MessageChannel();
+      canal.port1.onmessage = (event) => {
+        const dados = event && event.data;
+        concluir(dados && dados.type === "COFRE_BUILD" ? String(dados.build || "") : "");
+      };
+      worker.postMessage({ type: "GET_BUILD" }, [canal.port2]);
+    } catch (e) { concluir(""); }
+    setTimeout(() => concluir(""), 3000);
+  });
+}
+
+async function handleControllerChange() {
+  const build = await activeBuildId(navigator.serviceWorker.controller);
+  // A guarda é POR PACOTE. Uma guarda booleana impediria a recarga da próxima
+  // atualização; nenhuma guarda deixaria a aba recarregar em laço.
+  let guarda = "";
+  try { guarda = sessionStorage.getItem(APP_RELOAD_GUARD_KEY) || ""; } catch (e) { guarda = ""; }
+  const marca = build || "sem-identidade";
+  if (guarda === marca) return;
+
+  let gravou = false;
+  try { gravou = await FinanceStore.flush(); } catch (e) { gravou = false; }
+  if (!gravou) {
+    // Recarregar agora perderia a gravação que o navegador não confirmou. A
+    // página fica onde está, e o aviso diz o que está pendente.
+    notify("Atualização pendente: os dados ainda estão sendo salvos", "danger");
+    return;
+  }
+  try { sessionStorage.setItem(APP_RELOAD_GUARD_KEY, marca); } catch (e) { /* modo privado */ }
+  location.reload();
 }
 
 if (window.CofreUI && window.CofreUI.test && window.CofreUI.test.enabled) {

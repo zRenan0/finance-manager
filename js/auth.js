@@ -25,6 +25,9 @@ function freshAccountState() {
     // tela mostra o cartão de "confirmação pendente" com o botão de reenvio;
     // antes disto, quem não recebia o email não tinha para onde ir.
     pendingEmail: "",
+    // Estado do vínculo entre os dados deste aparelho e a conta. Ver o bloco
+    // "VÍNCULO DOS DADOS DESTE APARELHO COM A CONTA" mais abaixo.
+    guestLink: freshGuestLink(),
     form: { email: "", password: "", newPassword: "", deletePassword: "", deleteText: "" }, devices: [],
   };
 }
@@ -36,20 +39,14 @@ function freshAccountState() {
 // Este bloco é quem mantém o banco carregado igual à sessão atual: entrar troca
 // o escopo, sair volta para o de visitante, e NADA é copiado entre eles sem o
 // usuário mandar.
-const GUEST_IMPORT_PREFIX = "cofre_guest_import_";
-
-function guestImportDecision(scope) {
-  try { return localStorage.getItem(GUEST_IMPORT_PREFIX + scope) || ""; }
-  catch (_) { return ""; }
-}
-
-function rememberGuestImportDecision(scope, decision) {
-  try { localStorage.setItem(GUEST_IMPORT_PREFIX + scope, decision); } catch (_) {}
-}
-
 // Troca o banco carregado. Só é chamada quando a sessão foi CONFIRMADA pelo
 // servidor: uma falha de rede não pode derrubar o usuário para o escopo de
 // visitante e fazer parecer que os dados sumiram.
+//
+// Ela NÃO decide mais nada sobre vínculo. A decisão depende de saber o que a
+// conta remota já tem, e isso só existe depois da primeira descida; misturar as
+// duas coisas aqui era o que fazia o aplicativo perguntar (ou deixar de
+// perguntar) antes de ter a informação.
 async function applyAccountScope(userId) {
   const desired = storageScopeFor(userId);
   if (desired === FinanceStore.scope()) return false;
@@ -65,8 +62,6 @@ async function applyAccountScope(userId) {
   // conta que entrou agora.
   resetScopedUiState();
   render();
-
-  if (desired !== "guest") await offerGuestImport(desired);
   return true;
 }
 
@@ -86,45 +81,272 @@ function resetScopedUiState() {
   state.importError = null;
   state.aiInsight = { loading: false, text: null, error: null, analise: null };
   state.backup = { preview: null, error: null, mode: "merge", busy: false, undoAvailable: !!FinanceStore.readUndoSnapshot() };
+  state.account.guestLink = freshGuestLink();
   state.onboarding.open = !(state.data.onboarding && state.data.onboarding.done);
   // A memoização do app é por IDENTIDADE do snapshot; `switchStorageScope`
   // devolve um objeto novo, então os caches derivados erram por construção.
 }
 
-// Dados de visitante só entram numa conta com confirmação EXPLÍCITA, e a
-// resposta fica registrada para a pergunta não voltar a cada login.
-async function offerGuestImport(scope) {
-  if (guestImportDecision(scope)) return;
-  let guest;
-  try { guest = await FinanceStore.peekScope("guest"); }
-  catch (_) { return; }
-  if (!guest || !guest.exists) { rememberGuestImportDecision(scope, "empty"); return; }
+// ------------------------------------------------------------------------------
+// VÍNCULO DOS DADOS DESTE APARELHO COM A CONTA
+// ------------------------------------------------------------------------------
+// O DEFEITO QUE ISTO CORRIGE
+//
+// Quem usava o app sem conta e depois entrava numa conta ficava com DOIS bancos
+// no mesmo navegador: o de visitante, cheio, e o da conta, vazio. O segundo
+// aparelho entrava na mesma conta e via o vazio. A pergunta de importação
+// existia, mas gravava "já perguntei" no instante em que a caixa abria: quem
+// fechasse sem responder perdia o caminho de volta para sempre.
+//
+// A sequência agora é uma só, e nesta ordem:
+//
+//   1. abrir o escopo da conta (feito por applyAccountScope);
+//   2. DESCER o que a conta já tem, sem enviar e sem semear;
+//   3. ler o resumo do visitante e a decisão já registrada para aquele conteúdo;
+//   4. vincular sozinho apenas quando a conta nunca recebeu nada;
+//   5. pedir confirmação quando a conta já tem história;
+//   6. liberar a fila e a semeadura;
+//   7. só declarar concluído com o recibo do servidor na mão.
+//
+// Nada é apagado em nenhum dos lados, e a base de visitante continua intacta.
+function freshGuestLink() {
+  return {
+    // idle | checking | waiting | confirm | linking | linked | dismissed | pending
+    phase: "idle",
+    summary: null, stats: null, digest: "", remoteRevision: null,
+    error: "", errorCode: "", busy: false,
+  };
+}
 
-  const partes = [];
-  if (guest.transactions) partes.push(`${guest.transactions} lançamento${guest.transactions > 1 ? "s" : ""}`);
-  if (guest.goals) partes.push(`${guest.goals} meta${guest.goals > 1 ? "s" : ""}`);
-  if (guest.assets) partes.push(`${guest.assets} item${guest.assets > 1 ? "ns" : ""} de patrimônio`);
+// Cada sequência de vínculo carrega um número. Sair da conta, entrar em outra
+// ou trocar de escopo invalida o número, e a promessa que estava em voo termina
+// sem escrever nada na conta errada.
+let __guestLinkToken = 0;
 
-  requestConfirmation({
-    title: "Trazer os dados deste aparelho?",
-    message: `Este navegador tem ${partes.join(", ")} salvos sem conta. Você quer copiá-los para ${state.account.email || "esta conta"}? Se recusar, eles continuam disponíveis ao sair da conta.`,
-    confirmLabel: "Copiar para a conta",
-    cancelLabel: "Manter separados",
-    icon: "upload",
-    onConfirm: async () => {
-      const result = await FinanceStore.adoptScope("guest");
-      rememberGuestImportDecision(scope, "imported");
-      if (result && result.ok) {
-        state.data = FinanceStore.snapshot();
-        render();
-        notify("Dados do aparelho copiados para a conta");
-        if (typeof CloudSync !== "undefined") CloudSync.schedule();
-      } else notify("Não foi possível copiar os dados deste aparelho", "danger");
-    },
+function setGuestLink(patch) {
+  state.account.guestLink = { ...(state.account.guestLink || freshGuestLink()), ...patch };
+  render();
+}
+
+function guestLinkFailureText(reason) {
+  if (reason === "unreadable") return "Não foi possível ler os dados de visitante deste aparelho.";
+  if (reason === "write_failed") return "Não foi possível salvar o vínculo neste aparelho. Nada foi alterado.";
+  if (reason === "empty") return "Não há dados de visitante para vincular.";
+  if (reason === "not_authenticated") return "Entre na conta para vincular os dados deste aparelho.";
+  return "O vínculo não foi concluído. Seus dados continuam completos nos dois lados.";
+}
+
+// Executa o vínculo e devolve o controle para o motor. `opts.expectedRemoteRevision`
+// só existe no vínculo automático: é ela que faz o servidor recusar a adoção se
+// a conta tiver recebido qualquer operação nesse intervalo.
+async function runGuestLink(token, escopo, visitante, opts) {
+  const valido = () => token === __guestLinkToken && FinanceStore.scope() === escopo;
+  let resultado;
+  try { resultado = await FinanceStore.adoptScope("guest", opts); }
+  catch (error) { resultado = { ok: false, reason: "write_failed", error }; }
+  if (!valido()) return;
+
+  if (!resultado.ok) {
+    setGuestLink({ phase: "pending", busy: false, error: guestLinkFailureText(resultado.reason), errorCode: resultado.reason });
+    if (typeof CloudSync !== "undefined") await CloudSync.finishAccountBootstrap();
+    return;
+  }
+  state.data = FinanceStore.snapshot();
+  setGuestLink({ phase: "linking", stats: resultado.stats || null, digest: resultado.digest || visitante.digest || "" });
+  await concludeGuestLink(token, escopo, visitante);
+}
+
+// "Concluído" exige o recibo, e o recibo exige que o servidor tenha reconhecido
+// o lote e que nada daquele vínculo tenha sobrado na fila.
+async function concludeGuestLink(token, escopo, visitante) {
+  const valido = () => token === __guestLinkToken && FinanceStore.scope() === escopo;
+  if (typeof CloudSync !== "undefined") await CloudSync.finishAccountBootstrap();
+  if (!valido()) return;
+  state.data = FinanceStore.snapshot();
+
+  let recibo = null;
+  try { recibo = await FinanceStore.guestLinkReceipt(); } catch (_) { recibo = null; }
+  if (!valido()) return;
+
+  const impressao = visitante && visitante.digest;
+  if (recibo && recibo.status === "linked" && (!impressao || recibo.sourceDigest === impressao)) {
+    setGuestLink({ phase: "linked", busy: false, error: "", errorCode: "", stats: recibo.stats || state.account.guestLink.stats });
+    notify("Dados deste aparelho vinculados à conta");
+    return;
+  }
+
+  const sync = typeof CloudSync === "undefined" ? {} : CloudSync.status();
+  if (sync.errorCode === "remote_changed") {
+    // A conta avançou durante o vínculo automático. Nada foi descartado: o lote
+    // continua na fila, parado, esperando a confirmação de mesclagem.
+    setGuestLink({ phase: "confirm", busy: false, errorCode: "remote_changed", error: sync.error || "" });
+    return;
+  }
+  setGuestLink({
+    phase: "pending", busy: false,
+    error: sync.error || "O servidor ainda não confirmou o vínculo. Ele termina sozinho na próxima conexão.",
+    errorCode: sync.errorCode || "pending",
   });
-  // Recusar também é resposta: sem registrar, a pergunta voltaria no próximo
-  // login e viraria insistência.
-  rememberGuestImportDecision(scope, "asked");
+}
+
+// A sequência completa, chamada depois de a sessão e o escopo estarem prontos.
+async function bootstrapAccountLink() {
+  if (typeof CloudSync === "undefined") return;
+  const escopo = FinanceStore.scope();
+  if (escopo === "guest") return;
+  const token = ++__guestLinkToken;
+  const userId = state.account.userId;
+  const valido = () => token === __guestLinkToken && FinanceStore.scope() === escopo && state.account.authenticated;
+
+  setGuestLink({ phase: "checking", error: "", errorCode: "", busy: true });
+
+  // Descer PRIMEIRO. Sem isto, o próprio aparelho preenchia a conta e depois
+  // concluía que ela já estava em uso.
+  const preparo = await CloudSync.prepareAccount();
+  if (!valido()) return;
+  setGuestLink({ busy: false, remoteRevision: preparo.revision });
+
+  let visitante = null;
+  try { visitante = await FinanceStore.peekScope("guest"); }
+  catch (_) { visitante = null; }
+  if (!valido()) return;
+
+  if (!visitante || visitante.readable === false) {
+    setGuestLink({ phase: "pending", error: guestLinkFailureText("unreadable"), errorCode: "guest_unreadable" });
+    await CloudSync.finishAccountBootstrap();
+    return;
+  }
+  if (!visitante.exists) {
+    setGuestLink({ phase: "idle", summary: null, digest: "" });
+    await CloudSync.finishAccountBootstrap();
+    return;
+  }
+  setGuestLink({ summary: visitante, digest: visitante.digest || "" });
+
+  // Um lote já gravado termina o que começou: as marcas dele estão no diário, e
+  // recomeçar criaria uma segunda versão dos mesmos registros.
+  let diario = null;
+  try { diario = await FinanceStore.guestLinkJournal(); } catch (_) { diario = null; }
+  if (!valido()) return;
+  if (diario && diario.status === "blocked") {
+    setGuestLink({ phase: "confirm", errorCode: "remote_changed", error: "A conta mudou em outro aparelho. Confirme como juntar os dados." });
+    await CloudSync.finishAccountBootstrap();
+    return;
+  }
+  if (diario) {
+    setGuestLink({ phase: "linking", stats: diario.stats || null });
+    await concludeGuestLink(token, escopo, visitante);
+    return;
+  }
+
+  // Decisão registrada vale pela IMPRESSÃO do conteúdo: se o visitante mudou, a
+  // impressão muda e o aplicativo volta a reconhecer trabalho pendente.
+  let recibo = null;
+  try { recibo = await FinanceStore.guestLinkReceipt(); } catch (_) { recibo = null; }
+  if (!valido()) return;
+  const decidido = recibo && visitante.digest && recibo.sourceDigest === visitante.digest;
+  if (decidido && recibo.status === "linked") {
+    setGuestLink({ phase: "linked", stats: recibo.stats || null });
+    await CloudSync.finishAccountBootstrap();
+    return;
+  }
+  if (decidido && recibo.status === "dismissed") {
+    setGuestLink({ phase: "dismissed" });
+    await CloudSync.finishAccountBootstrap();
+    return;
+  }
+
+  // Sem saber o que a conta tem, o aplicativo NÃO presume que ela está vazia.
+  if (!preparo.ok || preparo.revision == null) {
+    setGuestLink({
+      phase: "waiting",
+      error: preparo.error || "Sem conexão para conferir a conta. O vínculo espera a rede voltar.",
+      errorCode: preparo.errorCode || "offline",
+    });
+    await CloudSync.finishAccountBootstrap();
+    return;
+  }
+
+  // Revisão zero: a conta nunca recebeu uma operação. Incorporar é seguro.
+  if (String(preparo.revision) === "0") {
+    setGuestLink({ phase: "linking" });
+    await runGuestLink(token, escopo, visitante, {
+      userId, remoteRevision: "0", expectedRemoteRevision: "0",
+    });
+    return;
+  }
+
+  // Conta com história: só com confirmação, e sem nenhuma opção que substitua
+  // ou apague um dos lados.
+  setGuestLink({ phase: "confirm" });
+  await CloudSync.finishAccountBootstrap();
+}
+
+// ---- Ações da tela de conta ----
+
+// "Juntar dados": confirmação explícita, inclusive depois de um bloqueio por
+// mudança remota. Aqui o lote sobe sem declarar revisão esperada, porque a
+// pessoa já sabe que a conta mudou.
+async function accountLinkGuest() {
+  if (!state.account.authenticated) return;
+  const escopo = FinanceStore.scope();
+  const token = ++__guestLinkToken;
+  setGuestLink({ phase: "linking", busy: true, error: "", errorCode: "" });
+
+  let visitante = null;
+  try { visitante = await FinanceStore.peekScope("guest"); }
+  catch (_) { visitante = null; }
+  if (token !== __guestLinkToken || FinanceStore.scope() !== escopo) return;
+  if (!visitante || !visitante.exists) {
+    setGuestLink({ phase: "idle", busy: false, summary: null });
+    return;
+  }
+  setGuestLink({ summary: visitante, digest: visitante.digest || "", busy: false });
+
+  try { await FinanceStore.releaseGuestLink(); } catch (_) { /* sem diário */ }
+  await runGuestLink(token, escopo, visitante, {
+    userId: state.account.userId,
+    remoteRevision: state.account.guestLink.remoteRevision,
+  });
+}
+
+// "Manter separados": decisão explícita, gravada pela impressão do conteúdo.
+// Fechar a tela NÃO passa por aqui, e é isso que impede o marcador silencioso
+// que existia antes.
+async function accountDismissGuestLink() {
+  const digest = state.account.guestLink && state.account.guestLink.digest;
+  if (!digest) {
+    // Sem impressão (navegador sem WebCrypto) nada é gravado: preferimos
+    // perguntar de novo a esconder uma alteração.
+    setGuestLink({ phase: "dismissed" });
+    return;
+  }
+  try { await FinanceStore.dismissGuestLink(digest, "guest"); }
+  catch (_) { /* a pergunta volta na próxima entrada */ }
+  setGuestLink({ phase: "dismissed", error: "", errorCode: "" });
+  notify("Os dados deste aparelho continuam separados da conta");
+}
+
+// "Agora não": esconde o cartão nesta sessão, sem gravar decisão nenhuma.
+function accountPostponeGuestLink() {
+  setGuestLink({ phase: "idle" });
+}
+
+// "Rever": traz o cartão de volta, com o resumo recalculado.
+async function accountReviewGuestLink() {
+  setGuestLink({ phase: "checking", busy: true, error: "", errorCode: "" });
+  const escopo = FinanceStore.scope();
+  const token = __guestLinkToken;
+  let visitante = null;
+  try { visitante = await FinanceStore.peekScope("guest"); }
+  catch (_) { visitante = null; }
+  if (token !== __guestLinkToken || FinanceStore.scope() !== escopo) return;
+  if (!visitante || !visitante.exists) {
+    setGuestLink({ phase: "idle", busy: false, summary: null, digest: "" });
+    notify("Não há dados de visitante neste aparelho");
+    return;
+  }
+  setGuestLink({ phase: "confirm", busy: false, summary: visitante, digest: visitante.digest || "" });
 }
 
 const AccountAPI = (() => {
@@ -223,8 +445,12 @@ async function refreshAccountSession() {
   // assim que ela deixa de existir. `enable()` já faz a primeira volta completa
   // (puxa o remoto, funde e devolve), então é aqui que um aparelho novo recebe
   // o histórico. Não é aguardado para não segurar a pintura da tela de conta.
+  // A sincronização segue a sessão. Ela não é mais ligada "solta": a entrada
+  // numa conta passa pela sequência de vínculo, que desce primeiro, decide, e só
+  // então libera a fila e a semeadura. Não é aguardada para não segurar a
+  // pintura da tela de conta.
   if (typeof CloudSync !== "undefined") {
-    if (state.account.authenticated) CloudSync.enable().catch(() => {});
+    if (state.account.authenticated) bootstrapAccountLink().catch(() => {});
     else CloudSync.disable();
   }
   render();
@@ -433,8 +659,9 @@ async function accountDelete() {
     // Apagar a conta apaga também a cópia local dela. Deixar o banco da conta
     // excluída neste navegador manteria vivo exatamente o dado que o usuário
     // pediu para destruir, e num aparelho compartilhado isso é um vazamento.
+    // `purge()` já apaga o `localMeta` do escopo, e com ele o recibo e o diário
+    // de vínculo daquela conta. Nada sobra apontando para dados que não existem.
     try { await FinanceStore.purge(); } catch (_) {}
-    try { localStorage.removeItem(GUEST_IMPORT_PREFIX + FinanceStore.scope()); } catch (_) {}
     state.account = freshAccountState(); state.account.loading = false; state.account.configured = true;
     await applyAccountScope("");
     render(); notify("Conta apagada no servidor e neste aparelho.");

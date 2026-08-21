@@ -1,5 +1,75 @@
 # Histórico de versões
 
+## 0.30.0
+
+Entrar com a mesma conta em dois aparelhos passou a mostrar o mesmo conteúdo.
+O aparelho que já era usado sem conta guardava os dados num banco de visitante;
+o login abria um segundo banco, vazio, e nada ligava um ao outro. A pergunta de
+importação existia, mas gravava "já perguntei" no instante em que a caixa abria:
+quem fechasse sem responder perdia o caminho de volta para sempre.
+
+### O vínculo acontece, e é seguro
+
+- **Vínculo automático quando a conta nunca foi usada.** A decisão usa a revisão
+  do servidor OBSERVADA na conexão, antes de qualquer envio deste aparelho.
+  Revisão zero significa uma conta que nunca recebeu uma operação, e só nesse
+  caso os dados de visitante entram sozinhos.
+- **Conta com história pede confirmação.** As opções são `Juntar dados` e
+  `Manter separados`. Nenhuma delas substitui ou apaga um dos lados: registros
+  com IDs diferentes entram por união, e no mesmo registro vence a marca do
+  relógio lógico, depois `updatedAt`, depois a personalização, e por fim o
+  conteúdo que já estava na conta.
+- **A cópia de visitante permanece.** Ela nunca é apagada pelo vínculo, então
+  qualquer conflito continua recuperável no aparelho de origem.
+- **A decisão é registrada pelo CONTEÚDO.** Um recibo com a impressão SHA-256
+  canônica do que existe no visitante substituiu o marcador antigo. Abrir ou
+  fechar a caixa não grava nada; `Manter separados` grava, e vale só para aquele
+  conteúdo. Se o visitante mudar, a impressão muda e o aplicativo volta a
+  reconhecer trabalho pendente. A tela de conta mantém a ação de vincular.
+- **Repetir não duplica.** Um diário local guarda o `linkId` e as marcas já
+  cunhadas: uma queda no meio do vínculo termina o MESMO lote na volta seguinte,
+  em vez de criar uma segunda versão dos mesmos registros.
+
+### "Sincronizado" passou a exigir prova
+
+- **Dado e fila gravam juntos ou falham juntos.** A alteração financeira e as
+  operações que a representam agora entram na mesma transação do IndexedDB. No
+  fallback em `localStorage`, um registro de recuperação recompõe a gravação
+  interrompida na abertura seguinte.
+- **A fila deixou de esconder falha.** Erro de leitura não vira mais lista
+  vazia, e erro de inclusão não vira sucesso. Era isso que permitia a tela dizer
+  "Tudo sincronizado" com a fila cheia.
+- **O ciclo tem ordem fixa:** terminar as gravações locais, descer, semear,
+  subir, aplicar a resposta, confirmar a fila, descer de novo. O cursor só
+  avança depois de a operação remota chegar ao disco, e o estado só vira
+  `synced` depois de uma leitura da fila que funcionou e voltou vazia.
+- **A semeadura considera a base inteira.** Quem cadastrou só a conta do banco,
+  só o cartão ou só a renda era tratado como base vazia e não subia nada. O
+  marcador booleano antigo deixou de valer como recibo, o que libera a
+  reparação de quem sincronizou antes de as tabelas existirem no banco.
+
+### Protocolo 3: as coleções financeiras sincronizam por registro
+
+- **Contas, cartões, transferências, pagamentos e conciliações** eram enviadas
+  como uma lista inteira dentro de `settings`. Duas contas criadas em aparelhos
+  diferentes disputavam a lista, e uma delas sumia. Agora cada uma é uma
+  entidade com ID próprio, com operação `put` e `delete` individuais.
+- **Transição sem quebra.** O servidor fala 3 e ECOA a versão do cliente;
+  `minimumWriteProtocol` vale 2 durante a janela de atualização, e uma escrita
+  abaixo do mínimo recebe HTTP 426 (não 409, que o cliente trata como conflito
+  de documento e descartaria a fila). Uma migração de preparação converte o
+  snapshot antigo apenas para quem ainda não tem operações no log.
+
+### Atualização do aplicativo
+
+- **Módulos publicados levam o SHA-256 no nome** e o service worker guarda
+  exatamente esses nomes, então uma navegação nova não recebe metade de cada
+  versão.
+- **A troca de controller espera a gravação.** O aplicativo pergunta ao worker
+  novo qual pacote ele é, força `FinanceStore.flush()` e só então recarrega, uma
+  vez por pacote. Se a gravação não confirmar, a página fica e o aviso diz que a
+  atualização está pendente.
+
 ## 0.29.3
 
 Os dois aparelhos passaram a mostrar os mesmos valores. Duas falhas somadas

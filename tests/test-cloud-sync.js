@@ -67,12 +67,14 @@ const espera = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Servidor de mentira que se comporta como o real: guarda a operação VENCEDORA
 // de cada (entidade, id) e devolve por cursor o que veio depois.
-function servidorFalso() {
+function servidorFalso(opcoes) {
   const linhas = new Map();     // chave -> { seq, entity, entityId, op, rev, payload }
   let seq = 0;
   const recebidos = [];
   return {
     linhas, recebidos,
+    serverProtocol: (opcoes && opcoes.serverProtocol) || 3,
+    minimumWriteProtocol: (opcoes && opcoes.minimumWriteProtocol) || 2,
     revision: () => String(seq),
     aplicar(ops) {
       let aplicados = 0;
@@ -100,24 +102,41 @@ function servidorFalso() {
         cursor: pagina.length ? String(pagina[pagina.length - 1].seq) : String(cursor || "0"),
       };
     },
+    // O servidor real fala 3 e ECOA a versão do cliente, para que um aparelho
+    // ainda no protocolo 2 continue funcionando durante a janela de atualização.
     handler(servidor) {
       return async (url, options) => {
         const metodo = (options && options.method) || "GET";
         const texto = String(url);
-        if (texto.includes("/health")) return json({ protocol: 2, status: "ok", revision: servidor.revision() });
+        const cabecalhos = (options && options.headers) || {};
+        const falado = Number(cabecalhos["X-Sync-Protocol"] || 3) || 3;
+        const envelope = {
+          protocol: falado,
+          serverProtocol: servidor.serverProtocol,
+          minimumWriteProtocol: servidor.minimumWriteProtocol,
+        };
+        if (texto.includes("/health")) return json({ ...envelope, status: "ok", revision: servidor.revision() });
         if (metodo === "GET" && texto.includes("/changes")) {
           const since = (texto.match(/since=(\d+)/) || [])[1] || "0";
           const page = servidor.desde(since, 500);
-          return json({ protocol: 2, status: "ok", revision: servidor.revision(), ...page });
+          return json({ ...envelope, status: "ok", revision: servidor.revision(), ...page });
         }
         if (metodo === "POST" && texto.includes("/changes")) {
           const corpo = JSON.parse(options.body);
           servidor.recebidos.push(corpo);
+          if (falado < servidor.minimumWriteProtocol) {
+            return json({ ...envelope, status: "error", code: "protocol_upgrade_required", message: "Atualize o aplicativo." }, 426);
+          }
+          // A conta pode ter avançado entre a leitura e a confirmação do
+          // vínculo; quem declarou a revisão esperada precisa saber disso.
+          if (corpo.expectedRemoteRevision != null && String(corpo.expectedRemoteRevision) !== servidor.revision()) {
+            return json({ ...envelope, status: "error", code: "remote_changed", revision: servidor.revision() }, 409);
+          }
           const aplicados = servidor.aplicar(corpo.ops || []);
           const page = servidor.desde(corpo.since || "0", 500);
-          return json({ protocol: 2, status: "applied", revision: servidor.revision(), applied: aplicados, ...page });
+          return json({ ...envelope, status: "applied", revision: servidor.revision(), applied: aplicados, ...page });
         }
-        return json({ protocol: 2, status: "error", code: "not_found" }, 404);
+        return json({ ...envelope, status: "error", code: "not_found" }, 404);
       };
     },
   };

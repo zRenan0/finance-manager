@@ -1,4 +1,4 @@
-// cloud-sync.js; motor de sincronização incremental (protocolo 2)
+// cloud-sync.js; motor de sincronização incremental (protocolo 3)
 // ------------------------------------------------------------------------------
 // O QUE MUDOU, E POR QUE
 //
@@ -22,6 +22,20 @@
 // outros aparelhos fizeram desde o último cursor, e aplica pela marca. Não há
 // mais fusão de documentos, nem 409, nem teto.
 //
+// A ORDEM DO CICLO É PARTE DO CONTRATO
+//
+// Um aparelho que entrava numa conta subia a própria base ANTES de olhar o que
+// a conta já tinha. Era isso que fazia o vínculo decidir errado: a conta parecia
+// preenchida porque este mesmo aparelho acabara de preenchê-la. A ordem agora é
+// fixa: terminar as gravações locais, descer, semear, subir, aplicar a resposta,
+// confirmar a fila, descer de novo e só então declarar "sincronizado".
+//
+// "SINCRONIZADO" EXIGE PROVA
+//
+// A tela dizia "Tudo sincronizado" sempre que o ciclo não lançava exceção, mesmo
+// com a fila cheia e mesmo quando a leitura da fila tinha falhado. Agora esse
+// estado só aparece depois de uma leitura da fila que FUNCIONOU e voltou vazia.
+//
 // UMA ABA POR VEZ
 //
 // Duas abas sincronizando ao mesmo tempo enviariam a mesma fila duas vezes. O
@@ -35,9 +49,15 @@ const CLOUD_SYNC_RETRY_MS = 30000;        // nova tentativa após falha de rede
 const CLOUD_SYNC_BATCH = 400;             // operações por requisição (servidor aceita 500)
 const CLOUD_SYNC_PAGE = 500;              // operações por página na descida
 const CLOUD_SYNC_MAX_PAGES = 200;         // trava de segurança contra cursor que não anda
+const CLOUD_SYNC_MAX_BATCHES = 200;       // trava equivalente na subida
 const CLOUD_SYNC_POLL_MS = 60000;         // volta periódica enquanto o app está à vista
+
+// Chaves antigas, no localStorage. Continuam sendo LIDAS uma única vez, para
+// importar o progresso de quem já usava o app; a partir daí o cursor e o recibo
+// moram no banco local, na mesma transação que grava os dados.
+// As chaves do `localMeta` (META_CURSOR, META_SEED_RECEIPT, META_SEED_JOURNAL e
+// META_LINK_JOURNAL) são declaradas em `js/storage.js`, que é quem as grava.
 const CLOUD_CURSOR_KEY = "cofre_sync_cursor";
-const CLOUD_SEED_KEY = "cofre_sync_seeded";
 
 const CloudSync = (() => {
   let adapter = null;
@@ -47,8 +67,19 @@ const CloudSync = (() => {
   let cicloMexeu = false;          // esta volta enviou ou aplicou alguma coisa
   let running = false;
   let scope = "guest";
-  let hooks = { applyRemote: null, readLocal: null };
+  let hooks = { applyRemote: null };
   const listeners = [];
+
+  // Segura a subida e a semeadura até a decisão de vínculo. Sem isto, entrar
+  // numa conta vazia num aparelho que já tinha dados subiria a base local antes
+  // de alguém perguntar se ela pertence àquela conta.
+  let bootstrapHeld = false;
+  // Revisão da conta OBSERVADA antes de qualquer envio deste aparelho. É ela
+  // que decide "conta vazia" no vínculo automático; usar a revisão de depois
+  // faria o próprio aparelho responder à própria pergunta.
+  let observedRevision = null;
+  let cursorCache = null;
+  let cursorScope = null;
 
   let state = {
     enabled: false,
@@ -58,6 +89,8 @@ const CloudSync = (() => {
     errorCode: null,
     pending: false,
     queued: 0,              // operações ainda não enviadas
+    remoteRevision: null,   // revisão observada na primeira descida
+    bootstrapHeld: false,   // aguardando a decisão de vínculo
   };
 
   // `silencioso` existe por causa da volta periódica: `onStatus` redesenha o
@@ -74,22 +107,49 @@ const CloudSync = (() => {
     return typeof navigator !== "undefined" && navigator.onLine === false;
   }
 
+  function syncError(message, code) {
+    if (typeof CloudSyncError === "function") return new CloudSyncError(message, code);
+    const error = new Error(message);
+    error.code = code;
+    return error;
+  }
+
   // ---------------------------------------------------------------------------
   // Cursor: até onde este aparelho já leu o log do servidor
   // ---------------------------------------------------------------------------
-  // Por escopo, porque duas contas no mesmo navegador têm logs independentes.
-  function cursorKey() { return scope === "guest" ? CLOUD_CURSOR_KEY : `${CLOUD_CURSOR_KEY}__${scope}`; }
+  // Ele mora no BANCO, e não mais no localStorage, por um motivo específico: o
+  // cursor só pode avançar depois que a operação correspondente chegou ao disco.
+  // Guardado fora do banco, ele avançava mesmo quando a gravação falhava, e o
+  // aparelho passava a pular para sempre uma alteração que nunca aplicou.
+  function legacyCursorKey() { return scope === "guest" ? CLOUD_CURSOR_KEY : `${CLOUD_CURSOR_KEY}__${scope}`; }
 
-  function readCursor() {
+  function legacyCursor() {
     try {
-      const raw = localStorage.getItem(cursorKey());
+      const raw = localStorage.getItem(legacyCursorKey());
       return /^\d{1,18}$/.test(String(raw || "")) ? String(raw) : "0";
     } catch (e) { return "0"; }
   }
 
-  function writeCursor(value) {
+  async function readCursor() {
+    if (cursorScope === scope && cursorCache !== null) return cursorCache;
+    const stored = await FinanceStore.localMetaGet(META_CURSOR);
+    let value = /^\d{1,18}$/.test(String(stored == null ? "" : stored)) ? String(stored) : "";
+    if (!value) {
+      // Importação única do cursor antigo. Quem já sincronizava não volta a
+      // baixar o log inteiro só porque o lugar de guardar mudou.
+      value = legacyCursor();
+      await FinanceStore.localMetaPut(META_CURSOR, value);
+    }
+    cursorScope = scope;
+    cursorCache = value;
+    return value;
+  }
+
+  async function writeCursor(value) {
     if (!/^\d{1,18}$/.test(String(value || ""))) return;
-    try { localStorage.setItem(cursorKey(), String(value)); } catch (e) { /* cota cheia */ }
+    await FinanceStore.localMetaPut(META_CURSOR, String(value));
+    cursorScope = scope;
+    cursorCache = String(value);
   }
 
   // ---------------------------------------------------------------------------
@@ -102,17 +162,35 @@ const CloudSync = (() => {
   // tudo zerado. Pior, sem sinal de erro: a fila estava mesmo vazia, então a
   // tela dizia "Tudo sincronizado".
   //
-  // A semeadura roda UMA vez por conta neste aparelho, depois da primeira
-  // descida completa - depois, para não empurrar uma versão velha por cima do
-  // que o outro aparelho escreveu; e a marca de cada registro decide o resto.
-  function seedKey() { return `${CLOUD_SEED_KEY}__${scope}`; }
-
-  function alreadySeeded() {
-    try { return localStorage.getItem(seedKey()) === "1"; } catch (e) { return false; }
+  // A semeadura roda DEPOIS da primeira descida completa, e é considerada
+  // concluída somente quando o servidor confirma o lote e a fila daquele
+  // `seedId` fica vazia. O marcador booleano antigo ("já semeei") não conta como
+  // recibo: era ele que impedia a reparação de quem sincronizou antes de as
+  // tabelas existirem no banco.
+  // "Base significativa" não é só lançamento. Quem cadastrou apenas a conta do
+  // banco, ou apenas a renda, tem conteúdo de verdade para levar para a conta.
+  function baseTemConteudo() {
+    const data = FinanceStore.snapshot();
+    const listas = ["transactions", "goals", "assets", "accounts", "creditCards",
+      "accountTransfers", "cardPayments", "accountAdjustments"];
+    if (listas.some((campo) => (data[campo] || []).length > 0)) return true;
+    if (Number(data.monthlyIncome) > 0) return true;
+    // Categoria de fábrica não é conteúdo; categoria criada pelo usuário é.
+    return (data.categories || []).some((c) => c && c.custom === true);
   }
 
-  function markSeeded() {
-    try { localStorage.setItem(seedKey(), "1"); } catch (e) { /* cota cheia */ }
+  async function precisaSemear(cursor) {
+    const recibo = await FinanceStore.localMetaGet(META_SEED_RECEIPT);
+    // Sem recibo confirmado, ou com um diário interrompido pendurado, semear é
+    // o certo: reapresentar registros com a marca que eles já têm é inofensivo,
+    // porque o servidor guarda a versão de marca maior.
+    if (!recibo || recibo.status !== "confirmed") return true;
+    const diario = await FinanceStore.localMetaGet(META_SEED_JOURNAL);
+    if (diario) return true;
+    // Rede de segurança: cursor zerado depois de uma descida completa significa
+    // servidor sem NENHUMA operação. Se este aparelho tem base e o servidor não
+    // tem nada, semear de novo é o certo, mesmo com recibo.
+    return String(cursor) === "0" && baseTemConteudo();
   }
 
   // ---------------------------------------------------------------------------
@@ -134,6 +212,9 @@ const CloudSync = (() => {
     return Array.from(byKey.values()).sort((a, b) => (String(a.rev) < String(b.rev) ? -1 : 1));
   }
 
+  // O corpo que vai para o servidor tem SOMENTE o que o protocolo define.
+  // `linkId`, `seedId`, `entryKey`, `seq` e `queuedAt` são contabilidade local:
+  // enviá-los vazaria o funcionamento interno do aparelho para dentro da conta.
   function toWireOp(entry) {
     const op = { entity: entry.entity, entityId: entry.entityId, op: entry.op, rev: entry.rev };
     if (entry.op === "put") op.payload = entry.payload;
@@ -145,12 +226,15 @@ const CloudSync = (() => {
   // ---------------------------------------------------------------------------
 
   async function applyIncoming(ops) {
-    if (!ops.length) return false;
-    const result = FinanceStore.applyRemoteOps(ops);
+    if (!ops || !ops.length) return false;
+    // `applyRemoteOps` agora GRAVA antes de devolver. É esta promessa que o
+    // cursor espera: enquanto ela não resolve, o aparelho não pode declarar que
+    // já leu aquele trecho do log.
+    const result = await FinanceStore.applyRemoteOps(ops);
     if (!result.changed) return false;
     cicloMexeu = true;
-    // `applyRemote` grava, redesenha e reavalia conquistas e avisos, como se o
-    // próprio usuário tivesse feito a alteração; porque, em outro aparelho, foi.
+    // `applyRemote` redesenha e reavalia conquistas e avisos, como se o próprio
+    // usuário tivesse feito a alteração; porque, em outro aparelho, foi.
     hooks.applyRemote(result.data);
     return true;
   }
@@ -161,36 +245,58 @@ const CloudSync = (() => {
     let guard = 0;
     for (;;) {
       const queued = await FinanceStore.outboxRead(0);
+      const diarioVinculo = await FinanceStore.localMetaGet(META_LINK_JOURNAL);
+      // Vínculo bloqueado por mudança remota espera decisão explícita. As
+      // entradas continuam na fila; elas só não são REENVIADAS às cegas.
+      const bloqueado = diarioVinculo && diarioVinculo.status === "blocked" ? String(diarioVinculo.linkId) : "";
+      const enviaveis = bloqueado ? queued.filter((entry) => String(entry.linkId || "") !== bloqueado) : queued;
       setState({ queued: queued.length });
-      if (!queued.length) break;
-      if (++guard > CLOUD_SYNC_MAX_PAGES) break;
+      if (!enviaveis.length) break;
+      if (++guard > CLOUD_SYNC_MAX_BATCHES) {
+        throw syncError("A fila de sincronização não terminou dentro do limite de lotes.", "batch_limit");
+      }
 
-      const compact = compactOutbox(queued);
+      const compact = compactOutbox(enviaveis);
       const batch = compact.slice(0, CLOUD_SYNC_BATCH);
       if (batch.length) cicloMexeu = true;
-      const result = await adapter.push(batch.map(toWireOp), cursor);
+      const result = await adapter.push(batch.map(toWireOp), cursor, pushOptions(batch, diarioVinculo));
 
-      // Só remove da fila DEPOIS da confirmação do servidor. Se a rede cair no
-      // meio, a operação continua lá e sobe na próxima volta; o `mutationId`
-      // garante que reenviar não duplica nada.
-      //
+      // A resposta é APLICADA antes de a fila ser confirmada. Se a gravação da
+      // resposta falhar, a fila continua inteira e o lote volta na próxima
+      // volta; o `mutationId` garante que reenviar não duplica nada.
+      await applyIncoming(result.ops);
+
       // Saem também as versões ANTERIORES do mesmo registro, que a compactação
       // substituiu: a marca já enviada é maior que a delas.
       const enviado = new Map(batch.map((entry) => [`${entry.entity} ${entry.entityId}`, String(entry.rev)]));
-      const seqs = queued
+      const seqs = enviaveis
         .filter((entry) => {
           const rev = enviado.get(`${entry.entity} ${entry.entityId}`);
           return rev !== undefined && String(entry.rev) <= rev;
         })
         .map((entry) => entry.seq);
-      await FinanceStore.outboxDrop(seqs);
+      // Confirmar é gravar: a remoção da fila e a promoção do recibo de vínculo
+      // ou de semeadura acontecem na mesma transação.
+      await FinanceStore.acknowledgeOutbox(seqs, { revision: result.revision });
 
-      await applyIncoming(result.ops);
+      // O cursor só avança depois de tudo acima ter chegado ao disco.
       cursor = result.cursor;
-      writeCursor(cursor);
+      await writeCursor(cursor);
       if (batch.length >= compact.length && !result.hasMore) break;
     }
     return cursor;
+  }
+
+  // Só o PRIMEIRO lote automático do vínculo declara a revisão esperada. É essa
+  // declaração que faz o servidor recusar a adoção se a conta tiver recebido
+  // qualquer coisa entre a leitura e a confirmação.
+  function pushOptions(batch, diarioVinculo) {
+    if (!diarioVinculo || diarioVinculo.expectedRemoteRevision == null) return null;
+    if (diarioVinculo.status === "blocked") return null;
+    const linkId = String(diarioVinculo.linkId || "");
+    if (!linkId || !batch.length) return null;
+    if (!batch.every((entry) => String(entry.linkId || "") === linkId)) return null;
+    return { expectedRemoteRevision: String(diarioVinculo.expectedRemoteRevision) };
   }
 
   // ---- Descida: páginas até alcançar o servidor ----
@@ -201,37 +307,44 @@ const CloudSync = (() => {
       await applyIncoming(result.ops);
       const advanced = String(result.cursor) !== String(cursor);
       cursor = result.cursor;
-      writeCursor(cursor);
-      if (!result.hasMore || !advanced) break;
+      await writeCursor(cursor);
+      if (!result.hasMore) return cursor;
+      // Servidor dizendo "tem mais" sem mover o cursor é laço infinito
+      // disfarçado de sucesso. Parar em silêncio deixaria o aparelho com meia
+      // conta e a tela dizendo que estava tudo em dia.
+      if (!advanced) throw syncError("O servidor não avançou a leitura da conta.", "cursor_stalled");
     }
-    return cursor;
+    throw syncError("A leitura da conta excedeu o limite de páginas.", "page_limit");
   }
 
   async function cycle() {
-    let cursor = readCursor();
-    cursor = await upload(cursor);
-    cursor = await download(cursor);
+    // 1. Gravação local em curso termina ANTES de qualquer decisão. Uma
+    //    alteração ainda no debounce não pode ficar de fora do primeiro envio,
+    //    nem ser sobrescrita pela primeira descida.
+    const gravou = await FinanceStore.flush();
+    if (gravou === false) throw syncError("O aparelho não conseguiu salvar antes de sincronizar.", "local_write_failed");
 
-    // ---- Semeadura ----
-    // Roda DEPOIS da descida, e por isso é segura: o que o outro aparelho já
-    // escreveu está aqui, com marca, e a semeadura reapresenta cada registro
-    // com a marca que ele tem. O servidor guarda a vencedora, então nada velho
-    // derruba nada novo.
-    //
-    // A segunda condição é a rede de segurança que faltava: cursor zerado
-    // depois de uma descida completa significa servidor sem NENHUMA operação.
-    // Se este aparelho tem base e o servidor não tem nada, semear de novo é o
-    // certo, mesmo que a marca de "já semeado" esteja gravada - foi o caso de
-    // quem sincronizou antes de as tabelas existirem no banco.
-    const servidorVazio = String(cursor) === "0" && !!(FinanceStore.snapshot().transactions || []).length;
-    if (!alreadySeeded() || servidorVazio) {
-      const semeadas = await FinanceStore.seedOutbox();
-      markSeeded();
-      if (semeadas > 0) {
-        cursor = await upload(cursor);
-        cursor = await download(cursor);
-      }
+    let cursor = await readCursor();
+
+    // 2. Descida primeiro. O vínculo e a semeadura precisam saber o que a conta
+    //    JÁ TEM antes de este aparelho empurrar qualquer coisa.
+    cursor = await download(cursor);
+    if (observedRevision === null) {
+      observedRevision = String(adapter.revision == null ? cursor : adapter.revision);
+      setState({ remoteRevision: observedRevision }, true);
     }
+
+    // 3. Enquanto a decisão de vínculo não sai, nada sobe e nada é semeado.
+    if (bootstrapHeld) return;
+
+    if (await precisaSemear(cursor)) await FinanceStore.seedOutbox();
+
+    // 4. Subida, com aplicação da resposta e confirmação da fila por dentro.
+    cursor = await upload(cursor);
+
+    // 5. Descida final: fecha a volta com o que outros aparelhos escreveram
+    //    enquanto este enviava.
+    await download(cursor);
   }
 
   // Um ciclo por vez, e uma ABA por vez. `ifAvailable` faz a aba desistir na
@@ -249,7 +362,7 @@ const CloudSync = (() => {
   }
 
   async function runSync(quieto) {
-    if (!adapter || running || !hooks.readLocal || !hooks.applyRemote) return false;
+    if (!adapter || running || !hooks.applyRemote) return false;
     if (offline()) { setState({ phase: "offline", pending: true }); return false; }
 
     running = true;
@@ -259,15 +372,19 @@ const CloudSync = (() => {
     try {
       const ran = await withLock(cycle);
       if (ran === false) { setState({ phase: "idle", pending: true }); return false; }
+      // A LEITURA FINAL DA FILA É A PROVA. Se ela falhar, o `catch` assume: o
+      // aplicativo não tem como afirmar que não sobrou nada por enviar.
       const queued = await FinanceStore.outboxRead(0);
+      const pendente = queued.length > 0;
       // Volta periódica que não achou nada e não mudou nada visível não avisa
       // ninguém: para o usuário, a tela continua exatamente como estava.
-      const semNovidade = !!quieto && !cicloMexeu && eraSincronizado && queued.length === 0;
+      const semNovidade = !!quieto && !cicloMexeu && eraSincronizado && !pendente;
       setState({
-        phase: "synced", lastSyncAt: new Date().toISOString(),
-        pending: queued.length > 0, queued: queued.length, error: null, errorCode: null,
+        phase: pendente ? "idle" : "synced", lastSyncAt: new Date().toISOString(),
+        pending: pendente, queued: queued.length, error: null, errorCode: null,
+        bootstrapHeld,
       }, semNovidade);
-      return true;
+      return !pendente;
     } catch (error) {
       return handleFailure(error);
     } finally {
@@ -286,8 +403,21 @@ const CloudSync = (() => {
       return false;
     }
     if (code === "protocol_upgrade_required") {
+      // A fila NÃO é descartada: ela sobe assim que o aplicativo atualizar.
       disable();
-      setState({ phase: "error", error: "Atualize o aplicativo para voltar a sincronizar.", errorCode: code });
+      setState({ phase: "error", pending: true, error: "Atualize o aplicativo para voltar a sincronizar.", errorCode: code });
+      return false;
+    }
+    if (code === "remote_changed") {
+      // A conta recebeu algo entre a leitura e a confirmação do vínculo. Nada é
+      // descartado: o diário e a fila continuam, e a decisão volta para o
+      // usuário como confirmação de mesclagem.
+      FinanceStore.blockGuestLink(error && error.revision).catch(() => {});
+      setState({
+        phase: "idle", pending: true,
+        error: "A conta mudou em outro aparelho. Confirme como juntar os dados.",
+        errorCode: code,
+      });
       return false;
     }
     // Problema de INSTALAÇÃO não se resolve sozinho em 30 segundos. Tentar de
@@ -384,12 +514,10 @@ const CloudSync = (() => {
     if (!state.enabled || !adapter) return false;
     const rev = FinanceStore.mintRev();
     const result = await adapter.resetRemote(rev);
-    writeCursor(String(result.revision || "0"));
     await FinanceStore.outboxClear();
+    await writeCursor(String(result.revision || "0"));
     return true;
   }
-
-
 
   async function createCheckpoint(label) {
     if (!state.enabled || !adapter) return null;
@@ -431,7 +559,7 @@ const CloudSync = (() => {
 
     const naVersao = new Set(ops.map((op) => `${op.entity} ${op.entityId}`));
     const atual = FinanceStore.snapshot();
-    ["transactions", "categories", "goals", "assets"].forEach((field) => {
+    FinanceStore.syncEntityFields().forEach((field) => {
       (atual[field] || []).forEach((rec) => {
         if (!naVersao.has(`${field} ${rec.id}`)) {
           ops.push({ entity: field, entityId: rec.id, op: "delete", rev: FinanceStore.mintRev() });
@@ -439,7 +567,7 @@ const CloudSync = (() => {
       });
     });
 
-    const aplicado = FinanceStore.applyRemoteOps(ops);
+    const aplicado = await FinanceStore.applyRemoteOps(ops);
     if (aplicado.changed) hooks.applyRemote(aplicado.data);
     // As operações da restauração precisam SUBIR: `applyRemoteOps` não
     // enfileira nada, porque normalmente o que ele aplica veio de fora.
@@ -449,13 +577,45 @@ const CloudSync = (() => {
   }
 
   // ---------------------------------------------------------------------------
+  // Entrada numa conta: preparar, decidir, concluir
+  // ---------------------------------------------------------------------------
+  // `prepareAccount` liga o motor e BAIXA, sem enviar e sem semear. É o que
+  // permite ao vínculo perguntar "esta conta já tem alguma coisa?" antes de
+  // este aparelho ter escrito qualquer coisa nela.
+  async function prepareAccount() {
+    bootstrapHeld = true;
+    observedRevision = null;
+    setState({ bootstrapHeld: true, remoteRevision: null }, true);
+    if (state.enabled) await runSync();
+    else await enable();
+    return {
+      ok: observedRevision !== null,
+      revision: observedRevision,
+      phase: state.phase,
+      error: state.error,
+      errorCode: state.errorCode,
+    };
+  }
+
+  // Libera a fila e a semeadura depois da decisão de vínculo, e devolve o
+  // resultado real do ciclo que roda em seguida.
+  async function finishAccountBootstrap() {
+    bootstrapHeld = false;
+    setState({ bootstrapHeld: false }, true);
+    if (!state.enabled) return enable();
+    return syncNow();
+  }
+
+  // ---------------------------------------------------------------------------
   // Ligar e desligar
   // ---------------------------------------------------------------------------
 
   async function enable() {
-    if (state.enabled) return true;
-    if (!hooks.readLocal || !hooks.applyRemote) return false;
+    if (state.enabled) return runSync();
+    if (!hooks.applyRemote) return false;
     scope = FinanceStore.scope();
+    cursorCache = null;
+    cursorScope = null;
     try {
       adapter = new CloudAdapter({
         enabled: true,
@@ -486,8 +646,9 @@ const CloudSync = (() => {
     FinanceStore.setOutboxEnabled(true);
     setState({ enabled: true, phase: "idle", error: null, errorCode: null });
     startPolling();
-    await runSync();
-    return true;
+    // O resultado do PRIMEIRO ciclo é o resultado de ligar. Devolver `true` sem
+    // olhar era o que deixava a tela dizer "sincronizado" com a fila cheia.
+    return runSync();
   }
 
   function disable() {
@@ -495,15 +656,21 @@ const CloudSync = (() => {
     clearTimeout(retryTimer);
     stopPolling();
     adapter = null;
+    bootstrapHeld = false;
+    observedRevision = null;
+    cursorCache = null;
+    cursorScope = null;
     // A fila NÃO é apagada: ela é o que ainda não chegou ao servidor. Apagar
     // aqui perderia lançamentos feitos offline logo antes de sair.
     FinanceStore.setOutboxEnabled(false);
-    setState({ enabled: false, phase: "disabled", pending: false, error: null, errorCode: null });
+    setState({
+      enabled: false, phase: "disabled", pending: false, error: null, errorCode: null,
+      remoteRevision: null, bootstrapHeld: false,
+    });
   }
 
   function configure(options) {
     const o = options || {};
-    if (typeof o.readLocal === "function") hooks.readLocal = o.readLocal;
     if (typeof o.applyRemote === "function") hooks.applyRemote = o.applyRemote;
     if (typeof o.onStatus === "function") listeners.push(o.onStatus);
   }
@@ -534,6 +701,9 @@ const CloudSync = (() => {
     createCheckpoint,
     listCheckpoints,
     restoreCheckpoint,
+    prepareAccount,
+    finishAccountBootstrap,
+    observedRevision: () => observedRevision,
     status: () => state,
     isEnabled: () => state.enabled,
   };
