@@ -132,7 +132,7 @@ function renderPrivacyScreen() {
     </div>
 
     <div class="card">
-      <div class="settings-row-header"><div><p class="card-title">Diagnóstico local</p><p class="card-subtitle">${diagnostics.total} ocorrência(s) nos últimos 30 dias. Limite de 50.</p></div><span class="status-badge">Não enviado</span></div>
+      <div class="settings-row-header"><div><p class="card-title">Diagnóstico local</p><p class="card-subtitle">${plural(diagnostics.total, "ocorrência", "ocorrências")} nos últimos 30 dias. Limite de 50.</p></div><span class="status-badge">Não enviado</span></div>
       <p class="card-subtitle">O registro contém somente data, área, código controlado, versão, schema e estado de conexão. Mensagens, pilhas, valores, descrições, contas, categorias, metas, arquivos e identificadores não entram.</p>
       <div class="button-row">
         <button class="btn btn--secondary" data-action="diagnostics-export" ${diagnostics.total ? "" : "disabled"}>${svgIcon("download", 15)} Exportar resumo</button>

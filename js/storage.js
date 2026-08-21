@@ -4765,7 +4765,7 @@ function buildBackupEnvelope(data) {
   return {
     kind: BACKUP_KIND,
     schema: SCHEMA_VERSION,
-    app: "Finanças. Controle Financeiro Pessoal",
+    app: "Cofre. Organizador financeiro pessoal",
     exportedAt: new Date().toISOString(),
     counts: {
       transactions: payload.transactions.length,

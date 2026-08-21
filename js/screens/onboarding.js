@@ -63,8 +63,28 @@ function onbCanAdvance(step) {
   return true;
 }
 
+// POR QUE O MOTIVO DO BLOQUEIO PRECISA ESTAR ESCRITO NA TELA.
+//
+// "Continuar" e "Pular por agora" nascem desabilitados e nada dizia por quê:
+// o usuário clicava, não acontecia nada, e não havia texto, title nem relação
+// de acessibilidade que ligasse o botão morto ao aceite que faltava. Botão
+// desabilitado sem explicação é um beco, e o passo 1 não era o único: o 2
+// trava sem renda e o 3 sem nome e saldo da conta, com o mesmo silêncio.
+//
+// Cada passo passa a dizer em uma linha o que falta, e os botões apontam para
+// essa linha por aria-describedby, para o leitor de tela anunciar a exigência
+// junto do botão em vez de deixá-la solta no meio da tela.
+function onbBlockReason(step) {
+  if (step === 1) return "Marque o aceite da política e dos termos para continuar.";
+  if (step === 2) return "Informe uma renda maior que zero para continuar.";
+  if (step === 3) return "Dê um nome à conta e informe o saldo, ou marque a opção de cadastrar depois.";
+  return "";
+}
+
 function renderOnboardingLayer() {
   const o = state.onboarding;
+  const motivo = onbBlockReason(o.step);
+  const travado = !onbCanAdvance(o.step);
   const body = o.step === 1 ? renderOnbWelcome()
     : o.step === 2 ? renderOnbIncome()
     : o.step === 3 ? renderOnbAccount()
@@ -73,14 +93,15 @@ function renderOnboardingLayer() {
   return `<div class="onb" role="dialog" aria-modal="true" aria-label="Configuração inicial">
     <div class="onb__sheet">
       <div class="onb__head">
-        <div class="onb__brand">${svgIcon("wallet", 18)}<span>Finanças</span></div>
-        <button class="btn btn--ghost btn--sm" data-action="onb-skip" ${o.legalAccepted ? "" : "disabled"}>Pular por agora</button>
+        <div class="onb__brand">${svgIcon("wallet", 18)}<span>Cofre</span></div>
+        <button class="btn btn--ghost btn--sm" data-action="onb-skip" ${o.legalAccepted ? "" : `disabled aria-describedby="onb-block-reason"`}>Pular por agora</button>
       </div>
       ${renderOnbProgress(o.step)}
       <div class="onb__body">${body}</div>
+      ${motivo ? `<p class="onb__block-hint" id="onb-block-reason" ${travado ? "" : "hidden"}>${svgIcon("info", 14)}<span>${motivo}</span></p>` : ""}
       <div class="onb__foot">
         ${o.step > 1 ? `<button class="btn btn--secondary" data-action="onb-back">${svgIcon("chevronLeft", 16)} Voltar</button>` : `<span></span>`}
-        <button id="onb-advance" class="btn btn--primary" data-action="${last ? "onb-finish" : "onb-next"}" ${onbCanAdvance(o.step) ? "" : "disabled"}>
+        <button id="onb-advance" class="btn btn--primary" data-action="${last ? "onb-finish" : "onb-next"}" ${travado ? `disabled aria-describedby="onb-block-reason"` : ""}>
           ${last ? `${svgIcon("checkCircle", 16)} Concluir` : "Continuar"}
         </button>
       </div>
@@ -92,8 +113,20 @@ function renderOnboardingLayer() {
 // enquanto se digita um valor com vírgula perde o cursor. Patch pontual, mesmo
 // padrão de patchSubmitButton() na tela de lançamento.
 function patchOnboardingFooter() {
+  const pode = onbCanAdvance(state.onboarding.step);
   const btn = document.getElementById("onb-advance");
-  if (btn) btn.disabled = !onbCanAdvance(state.onboarding.step);
+  const aviso = document.getElementById("onb-block-reason");
+  if (btn) {
+    btn.disabled = !pode;
+    // O motivo só descreve o botão enquanto ele está travado. Um
+    // aria-describedby fixo faria o leitor de tela anunciar, a cada foco, uma
+    // exigência que o usuário já cumpriu.
+    if (pode) btn.removeAttribute("aria-describedby");
+    else btn.setAttribute("aria-describedby", "onb-block-reason");
+  }
+  // O aviso acompanha o botão no patch: sem isto ele continuaria na tela
+  // depois de a renda ser digitada, contradizendo um botão já liberado.
+  if (aviso) aviso.hidden = pode;
 }
 
 function renderOnbProgress(step) {

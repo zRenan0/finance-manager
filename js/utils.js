@@ -204,6 +204,25 @@ function moneyOrZero(input) {
   return Number.isFinite(n) ? n : 0;
 }
 
+// TETO DE SANIDADE DA QUANTIA DIGITADA.
+//
+// Não havia limite nenhum: dava para salvar R$ 999.999.999.999 num lançamento,
+// e a partir daí o seletor de conta exibia "-R$ 1.000.000.001.063,26" e
+// estourava a largura do controle. O teto é generoso de propósito, porque o
+// que ele precisa barrar é o dedo preso no zero, não o usuário; e mora aqui
+// para que toda tela que aceita dinheiro cobre o mesmo limite com a mesma
+// frase, em vez de cada uma inventar o seu.
+const MONEY_MAX = 999999999.99;
+
+function moneyWithinMax(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && Math.abs(n) <= MONEY_MAX;
+}
+
+function moneyMaxMessage(label) {
+  return `${label || "Valor"} acima do limite de ${fmtBRL(MONEY_MAX)}.`;
+}
+
 function sanitizeDecimalInput(input, options) {
   const opts = options && typeof options === "object" ? options : {};
   let value = String(input == null ? "" : input)
@@ -277,6 +296,25 @@ function fmtBRLShort(n) {
 function fmtPct(n, decimals = 0) {
   const v = Number(n);
   return `${(Number.isFinite(v) ? v : 0).toFixed(decimals)}%`;
+}
+// Plural de verdade no lugar do "(s)". Duas razões para virar função em vez de
+// ternário repetido em cada tela: o português conta o ZERO como plural ("0
+// lançamentos"), regra que escapa quando cada arquivo decide sozinho; e o
+// marcador colado no fim da palavra, logo num aviso que pede uma ação do
+// usuário, denuncia texto montado por máquina bem no momento em que o app
+// precisa ser levado a sério.
+//
+// O bloco F-08 de tests/test-beta-fixes.js varre js/ atrás do marcador, e a
+// varredura não distingue comentário de texto de tela: não escreva o marcador
+// literal aqui dentro, nem para dar exemplo.
+function plural(n, um, muitos) {
+  const q = Number(n) || 0;
+  return `${q} ${q === 1 ? um : muitos}`;
+}
+// Mesma regra, só a palavra: para frases em que o número já aparece em outro
+// lugar ou em que o artigo e o verbo também precisam concordar.
+function pluralWord(n, um, muitos) {
+  return (Number(n) || 0) === 1 ? um : muitos;
 }
 function fmtDateShort(iso) { if(!iso) return ""; const [, m, d] = iso.split("-"); return `${d}/${m}`; }
 function fmtDateFull(iso) { if(!iso) return ""; const [y, m, d] = iso.split("-"); return `${d}/${m}/${y}`; }

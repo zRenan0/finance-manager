@@ -360,7 +360,7 @@ function renderCategoriesSettingsCard() {
   // O rodapé responde "e daí?": a linha muda conforme o estado, porque
   // "0 estouradas" quer dizer coisas opostas com e sem teto definido.
   const rodape = estouradas > 0
-    ? `${estouradas} categoria(s) passaram do teto neste mês.`
+    ? `${plural(estouradas, "categoria passou", "categorias passaram")} do teto neste mês.`
     : comTeto > 0
       ? "Nenhum teto estourado neste mês."
       : "Nenhum teto definido ainda; a central é onde se cria o primeiro.";
@@ -409,7 +409,7 @@ function renderBudgetSettingsCard() {
       </div>
     </div>
     ${status.items.length > 0 ? `<p class="footnote" data-ui-css="text-align:left; margin-top:10px">
-      ${status.counts.total} Categoria(s) com Teto · ${status.counts.warn} em atenção · ${status.counts.over} estourada(s) neste mês.
+      ${plural(status.counts.total, "Categoria com Teto", "Categorias com Teto")} · ${status.counts.warn} em atenção · ${status.counts.over} ${pluralWord(status.counts.over, "estourada", "estouradas")} neste mês.
     </p>` : `<p class="footnote" data-ui-css="text-align:left; margin-top:10px">Nenhum teto definido ainda; abra a central de categorias, logo abaixo, para criar o primeiro.</p>`}
   </div>`;
 }
@@ -487,7 +487,7 @@ function renderBackupPreview(b) {
     </div>
 
     <p class="field-hint" data-ui-css="margin-top:10px">${merge
-      ? `Mantém tudo o que já existe aqui e acrescenta o que faltar. Lançamentos repetidos são detectados por conteúdo e ignorados. ${mergedPreview.stats.added} novo(s), ${mergedPreview.stats.skipped} já existente(s).`
+      ? `Mantém tudo o que já existe aqui e acrescenta o que faltar. Lançamentos repetidos são detectados por conteúdo e ignorados. ${plural(mergedPreview.stats.added, "novo", "novos")}, ${mergedPreview.stats.skipped} já ${pluralWord(mergedPreview.stats.skipped, "existente", "existentes")}.`
       : `<b data-ui-css="color:var(--negative)">Apaga tudo o que está neste aparelho</b> e deixa apenas o conteúdo do arquivo. Use quando estiver migrando para um celular novo.`}</p>
 
     <div class="settings-actions" data-ui-css="margin-top:12px">

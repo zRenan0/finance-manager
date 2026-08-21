@@ -138,7 +138,7 @@ function renderPortfolioChartCard(m) {
     </div>
     ${renderWealthChart(m.series, 640, 170)}
     <div class="wealth-axis">${m.series.map((p, i) => `<span class="${p.isCurrent ? "is-current" : ""}">${i % Math.ceil(m.series.length / 6) === 0 || p.isCurrent ? escapeHtml(p.label) : ""}</span>`).join("")}</div>
-    ${d.comparable ? `<p class="health-note">Nos últimos ${m.months} meses a carteira ${d.up ? "cresceu" : "recuou"} <b data-ui-css="color:${d.up ? "var(--positive)" : "var(--negative)"}">${fmtBRL(Math.abs(d.value))}</b> (${d.up ? "+" : "−"}${fmtNum(Math.abs(d.pct))}%). O gráfico mistura aporte novo e rendimento; para separar os dois, veja a comparação com o CDI abaixo.</p>` : ""}
+    ${d.comparable ? `<p class="health-note">${m.months === 1 ? "No último mês" : `Nos últimos ${m.months} meses`} a carteira ${d.up ? "cresceu" : "recuou"} <b data-ui-css="color:${d.up ? "var(--positive)" : "var(--negative)"}">${fmtBRL(Math.abs(d.value))}</b> (${d.up ? "+" : "−"}${fmtNum(Math.abs(d.pct))}%). O gráfico mistura aporte novo e rendimento; para separar os dois, veja a comparação com o CDI abaixo.</p>` : ""}
   </div>`;
 }
 

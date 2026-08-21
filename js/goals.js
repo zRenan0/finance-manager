@@ -46,6 +46,23 @@ function goalTemplateDeadline(template, fromIso) {
   return addMonthsToIso(fromIso || todayIso(), template.months);
 }
 
+// Alvo sugerido do modelo. Hoje só a reserva de emergência tem uma conta a
+// fazer, e essa conta é a razão de o modelo existir: o app já sabe a despesa
+// média e já exibe "N meses de despesa" na tela inicial, mas o modelo abria o
+// formulário com o VALOR ALVO em branco e devolvia ao usuário justamente a
+// única pergunta que ele não tem como responder sozinho.
+//
+// Cuidado com o número: sai de emergencyFund, mas do par monthlyNeed x
+// targetMonths, nunca do campo `target` do modelo, que já vem contaminado pelo
+// alvo de uma reserva existente e faria o formulário copiar a meta antiga em
+// vez de sugerir uma. Sem histórico de despesa a conta dá zero e o campo fica
+// vazio de propósito: alvo inventado é pior que alvo em branco.
+function goalTemplateTarget(template, data) {
+  if (!template || template.id !== "reserva") return 0;
+  const fund = emergencyFund(data);
+  return mulMoney(fund.monthlyNeed, fund.targetMonths);
+}
+
 // Cria a meta e aplica a origem escolhida para o valor inicial. A função é pura
 // para que as duas opções possam ser verificadas sem depender da interface.
 function createGoalWithInitialBalance(data, draft, initialSource, accountId) {

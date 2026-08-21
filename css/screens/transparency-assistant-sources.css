@@ -83,7 +83,11 @@
   .source-row__status { grid-column:2; justify-items:start; text-align:left; }
   .calculation-facts > div { grid-template-columns:1fr; gap:4px; }
   .hero-label-row { align-items:flex-start; }
-  .card--hero .calculation-link { min-height:40px; }
+  /* 44px, não 40px: a regra base já nasce em 44 e era justamente aqui, na
+     largura de celular, que ela caía abaixo do alvo mínimo de toque, ou seja,
+     encolhia o botão exatamente onde ele é tocado com o dedo. Se faltar
+     espaço, tire da largura ou do padding lateral, nunca da altura. */
+  .card--hero .calculation-link { min-height:44px; }
 }
 
 /* Aviso de lançamentos fora do saldo por serem anteriores à abertura da conta.

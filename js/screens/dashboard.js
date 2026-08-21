@@ -738,7 +738,7 @@ function renderCategoryBudgetsCard(mKey) {
   const shown = state.budgetsExpanded ? status.items : status.items.slice(0, 3);
   const totalPct = safePct(status.totals.spent, status.totals.budget);
   const headline = status.counts.over > 0
-    ? { text: `${status.counts.over} orçamento(s) estourado(s)`, color: "var(--negative)" }
+    ? { text: plural(status.counts.over, "orçamento estourado", "orçamentos estourados"), color: "var(--negative)" }
     : status.counts.warn > 0
       ? { text: `${status.counts.warn} perto do limite`, color: "var(--goal)" }
       : { text: "Tudo dentro do limite", color: "var(--positive)" };
@@ -773,7 +773,7 @@ function renderBudgetRow(b, thresholds) {
   return `<div class="budget-row budget-row--${b.level}">
     <div class="budget-row__head">
       <span class="icon-bubble icon-bubble--sm" data-ui-css="background:color-mix(in srgb, ${b.color} 14%, transparent); color:${b.color}">${svgIcon(b.icon, 14)}</span>
-      <span class="budget-row__name">${escapeHtml(b.name)}${b.isParent ? `<span class="budget-row__hint"> · inclui ${b.childCount} subcategoria(s)</span>` : ""}</span>
+      <span class="budget-row__name">${escapeHtml(b.name)}${b.isParent ? `<span class="budget-row__hint"> · inclui ${plural(b.childCount, "subcategoria", "subcategorias")}</span>` : ""}</span>
       <span class="budget-row__value" data-ui-css="color:${meta.color}">${fmtBRL(b.spent)}<span class="cat-value-muted"> / ${fmtBRL(b.budget)}</span></span>
     </div>
     <div class="progress budget-progress">

@@ -155,7 +155,7 @@ function renderWealthChart(series, width, height) {
   const zeroY = min < 0 ? y(0) : null;
   const lastI = series.length - 1;
 
-  return `<svg class="wealth-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="Evolução do patrimônio nos últimos ${series.length} meses">
+  return `<svg class="wealth-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="Evolução do patrimônio ${series.length === 1 ? "no último mês" : `nos últimos ${series.length} meses`}">
     <defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0%" stop-color="${color}" stop-opacity="0.26"/>
       <stop offset="100%" stop-color="${color}" stop-opacity="0"/>

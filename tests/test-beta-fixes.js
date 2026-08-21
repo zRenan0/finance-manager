@@ -381,6 +381,358 @@ function blocoF07() {
     /data-action="[^"]+"[^>]*data-(value|id)="/.test(tela));
 }
 
+/* ------------------------------------------------------------------ F-08 */
+function blocoF08() {
+  section("F-08. Plural de verdade no lugar do \"(s)\"");
+
+  check("o singular não leva s",
+    run(`plural(1, "lançamento", "lançamentos")`) === "1 lançamento");
+  check("o plural leva",
+    run(`plural(2, "lançamento", "lançamentos")`) === "2 lançamentos");
+  // O caso que quase todo ternário escrito à mão erra: em português o zero é
+  // plural. Era `n > 1` no helper local da tela de conta, que dizia "0 meta".
+  check("zero conta como plural, não como singular",
+    run(`plural(0, "meta", "metas")`) === "0 metas");
+  check("pluralWord devolve só a palavra, para o artigo e o verbo concordarem",
+    run(`pluralWord(1, "linha ignorada", "linhas ignoradas")`) === "linha ignorada");
+  check("pluralWord segue a mesma regra do zero",
+    run(`pluralWord(0, "ativa", "ativas")`) === "ativas");
+  // Contagem que ainda não chegou não pode imprimir "NaN lançamentos".
+  check("contagem ausente vira zero em vez de NaN",
+    run(`plural(undefined, "conta", "contas")`) === "0 contas");
+
+  // Varredura do código entregue. A lista de palavras é fechada de propósito:
+  // sem ela, `escapeHtml(s)` e `objectStore(s)` seriam confundidos com
+  // marcador de plural, e o teste passaria a acusar chamada de função.
+  const PALAVRAS = ["lançamento", "categoria", "subcategoria", "regra", "dia", "novo", "linha",
+    "resultado", "ocorrência", "orçamento", "meta", "conta", "gasto", "fixo", "lançado",
+    "importado", "exportado", "atualizado", "recategorizado", "alterado", "alterada",
+    "estourado", "estourada", "existente", "existia", "ativa", "ignorada", "selecionado",
+    "mês", "cartão", "pagamento", "transferência", "conciliação"];
+  const marcador = new RegExp(`(${PALAVRAS.join("|")})\\((s|m)\\)`, "i");
+
+  const entregues = fs.readdirSync(path.join(ROOT, "js"), { recursive: true })
+    .map((nome) => String(nome))
+    .filter((nome) => nome.endsWith(".js"))
+    .map((nome) => path.join("js", nome));
+  const sujos = entregues.filter((arquivo) => marcador.test(readSrc(arquivo)));
+  check("nenhum texto entregue voltou a usar o marcador \"(s)\"", sujos.length === 0, sujos);
+  check("a varredura de fato olhou o código todo, inclusive o pacote gerado",
+    entregues.length > 60 && entregues.some((f) => f.includes("app.generated")), entregues.length);
+}
+
+/* ------------------------------------------------------------------ F-09 */
+function blocoF09() {
+  section("F-09. A importação separa entradas de saídas em vez de somar as duas");
+
+  run(`state.data = migrate(defaultData());`);
+  run(`state.importRows = [
+    { include: true, date: todayIso(), type: "income",  amount: 5420,   description: "Salário",  categoryId: null,      duplicate: false },
+    { include: true, date: todayIso(), type: "expense", amount: 1200,   description: "Mercado",  categoryId: "mercado", duplicate: false },
+    { include: true, date: todayIso(), type: "expense", amount: 630.25, description: "Farmácia", categoryId: "saude",   duplicate: false },
+  ];`);
+  const html = run(`renderImportReview(state.importRows)`);
+
+  check("o que entra aparece com o próprio valor",
+    /R\$\s*5\.420,00 em entradas/.test(html));
+  check("o que sai aparece com o próprio valor",
+    /R\$\s*1\.830,25 em saídas/.test(html));
+  // O número que a tela inventava: 5.420,00 + 1.830,25 somados em módulo. Não
+  // é entrada, não é saída e não é saldo; não existe no extrato.
+  check("a soma das duas direções não aparece em lugar nenhum",
+    !/7\.250,25/.test(html), html.slice(html.indexOf("card-subtitle"), html.indexOf("card-subtitle") + 220));
+  check("o rótulo do botão concorda com a contagem",
+    /Importar 3 lançamentos/.test(html));
+
+  // Extrato só de gastos é o caso comum; "R$ 0,00 em entradas" seria ruído.
+  run(`state.importRows = state.importRows.map((r) => r.type === "income" ? { ...r, include: false } : r);`);
+  const soSaidas = run(`renderImportReview(state.importRows)`);
+  check("sem receita selecionada, a linha de entradas some",
+    !/em entradas/.test(soSaidas));
+  check("e a de saídas continua",
+    /R\$\s*1\.830,25 em saídas/.test(soSaidas));
+
+  // Uma linha só: o lugar onde o "(s)" mais aparecia.
+  run(`state.importRows = [state.importRows[1]];`);
+  const uma = run(`renderImportReview(state.importRows)`);
+  check("uma linha só fica no singular",
+    /1 selecionado para importar/.test(uma));
+  check("uma linha só não escreve o plural do selecionado",
+    !/1 selecionados/.test(uma));
+  check("nem o plural do botão",
+    /Importar 1 lançamento</.test(uma));
+}
+
+/* ------------------------------------------------------------------ F-15 */
+function blocoF15() {
+  section("F-15. O modelo de reserva chega com o valor alvo preenchido");
+
+  // Despesa no mês fechado anterior: é dela que sai a média, porque
+  // avgMonthlyExpense ignora o mês corrente enquanto houver mês fechado.
+  const mesPassado = run(`keyOfDate(addMonths(new Date(), -1))`);
+  const dataPassada = run(`isoOfDate(addMonths(new Date(), -1))`);
+  const semear = `state.data = migrate({ ...defaultData(), transactions: [{
+    id: "t-reserva", type: "expense", amount: 900, categoryId: "mercado",
+    date: ${JSON.stringify(dataPassada)}, monthKey: ${JSON.stringify(mesPassado)},
+    payment: "Pix", description: "Mercado", recurring: false,
+    createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+  }] });`;
+  run(semear);
+
+  check("a base da conta é a despesa média do histórico",
+    run(`avgMonthlyExpense(state.data)`) === 900, run(`avgMonthlyExpense(state.data)`));
+  check("e o horizonte é o que está configurado, seis meses por padrão",
+    run(`emergencyFund(state.data).targetMonths`) === 6);
+  check("o modelo entrega meses de despesa vezes a despesa média",
+    run(`goalTemplateTarget(goalTemplateById("reserva"), state.data)`) === 5400,
+    run(`goalTemplateTarget(goalTemplateById("reserva"), state.data)`));
+
+  // O alvo tem que sair do CÁLCULO, não do campo `target` de uma reserva que
+  // já exista: senão o modelo copia a meta antiga em vez de sugerir uma.
+  run(`state.data = { ...state.data, goals: [{ id: "g-velha", name: "Reserva antiga", target: 99999,
+    current: 0, savedUpfront: 0, existingBalance: 0, deadline: "", icon: "shieldCheck",
+    createdAt: todayIso(), monthlyPlan: 0 }], emergencyGoalId: "g-velha" };`);
+  check("meta de reserva já existente não contamina a sugestão do modelo",
+    run(`goalTemplateTarget(goalTemplateById("reserva"), state.data)`) === 5400,
+    run(`goalTemplateTarget(goalTemplateById("reserva"), state.data)`));
+
+  // Os outros modelos não têm conta a fazer e continuam como estavam.
+  check("modelo sem conta a fazer segue sem alvo",
+    run(`goalTemplateTarget(goalTemplateById("viagem"), state.data)`) === 0);
+  check("modelo inexistente não quebra o formulário",
+    run(`goalTemplateTarget(goalTemplateById("nao-existe"), state.data)`) === 0);
+
+  // Sem histórico não há conta honesta a fazer, e alvo inventado é pior que
+  // alvo em branco: o campo fica vazio de propósito.
+  run(`state.data = migrate(defaultData());`);
+  check("sem histórico de despesa o alvo fica vazio em vez de inventar número",
+    run(`goalTemplateTarget(goalTemplateById("reserva"), state.data)`) === 0);
+}
+
+/* ------------------------------------------------------------------ F-16 */
+function blocoF16() {
+  section("F-16. O chip da categoria mostra o caminho, não troca o pai pelo filho");
+
+  run(`state.data = migrate(defaultData()); state.tab = "add"; state.form = freshTxForm();`);
+  const semFilho = run(`renderAddScreen()`);
+  check("sem subcategoria escolhida o chip mostra só a categoria principal",
+    /chip__label">Alimentação</.test(semFilho));
+
+  run(`state.form = { ...state.form, categoryId: "mercado" };`);
+  const comFilho = run(`renderAddScreen()`);
+  check("com subcategoria escolhida o chip mostra o caminho inteiro",
+    /chip__label">Alimentação › Mercado</.test(comFilho));
+  // O defeito: o rótulo virava só "Mercado" e a fila de chips passava a
+  // misturar dois níveis da taxonomia, "Moradia, Mercado, Transporte".
+  check("o nome do filho não aparece sozinho no lugar do pai",
+    !/chip__label">Mercado</.test(comFilho));
+  check("os outros chips continuam sendo categorias principais",
+    /chip__label">Moradia</.test(comFilho) && /chip__label">Transporte</.test(comFilho));
+  // O ícone do filho já mudava antes e é o que confirma a escolha; preservar.
+  check("o ícone continua sendo o da subcategoria escolhida",
+    comFilho.includes(run(`svgIcon("cart", 17)`)));
+  check("o separador é o mesmo já usado no resto do app",
+    run(`categoryFullName(state.data, "mercado")`) === "Alimentação › Mercado");
+}
+
+/* ------------------------------------------------------------------ F-10 */
+function blocoF10() {
+  section("F-10. Botão desabilitado precisa dizer o que falta");
+
+  check("o passo do aceite explica o bloqueio",
+    /aceite/i.test(run(`onbBlockReason(1)`)), run(`onbBlockReason(1)`));
+  check("o passo da renda também explica",
+    run(`onbBlockReason(2)`).length > 0, run(`onbBlockReason(2)`));
+  check("o passo da conta também explica",
+    run(`onbBlockReason(3)`).length > 0, run(`onbBlockReason(3)`));
+  // O último passo não trava, então inventar exigência ali seria pior que calar.
+  check("o passo que não trava não inventa exigência",
+    run(`onbBlockReason(4)`) === "");
+
+  run(`state.onboarding = { ...freshOnboarding(), open: true, step: 1, legalAccepted: false };`);
+  const travado = run(`renderOnboardingLayer()`);
+  check("com o avanço travado a tela mostra o motivo",
+    /id="onb-block-reason"/.test(travado));
+  check("e o motivo é o aceite",
+    /Marque o aceite/.test(travado));
+  // O elo entre o botão morto e o motivo: sem ele o leitor de tela anuncia um
+  // botão desabilitado e nada mais, que é o mesmo beco só que pior.
+  check("o Continuar aponta para o motivo",
+    /data-action="onb-next"[^>]*aria-describedby="onb-block-reason"/.test(travado));
+  check("o Pular por agora também aponta",
+    /data-action="onb-skip"[^>]*aria-describedby="onb-block-reason"/.test(travado));
+  const trechoTravado = travado.slice(travado.indexOf("onb__block-hint"), travado.indexOf("onb__block-hint") + 130);
+  check("e a linha está visível enquanto trava",
+    !/hidden/.test(trechoTravado), trechoTravado);
+
+  run(`state.onboarding = { ...freshOnboarding(), open: true, step: 1, legalAccepted: true };`);
+  const livre = run(`renderOnboardingLayer()`);
+  check("aceito, o Continuar deixa de ser descrito pela exigência",
+    !/data-action="onb-next"[^>]*aria-describedby/.test(livre));
+  check("aceito, o Pular por agora destrava",
+    !/data-action="onb-skip"[^>]*disabled/.test(livre));
+  const trechoLivre = livre.slice(livre.indexOf("onb__block-hint"), livre.indexOf("onb__block-hint") + 130);
+  check("e a linha sai da tela em vez de contradizer o botão liberado",
+    /hidden/.test(trechoLivre), trechoLivre);
+}
+
+/* ------------------------------------------------------------------ F-11 */
+function blocoF11() {
+  section("F-11. Landing e aplicativo são o mesmo produto");
+
+  const landing = readSrc("landing.html");
+  const app = readSrc("index.html");
+  const manifest = JSON.parse(readSrc("manifest.webmanifest"));
+  const tituloLanding = (landing.match(/<title>([^<]+)<\/title>/) || [])[1];
+  const tituloApp = (app.match(/<title>([^<]+)<\/title>/) || [])[1];
+
+  check("a landing continua sendo o Cofre", /^Cofre\b/.test(tituloLanding), tituloLanding);
+  check("e o aplicativo passa a ser o mesmo nome", /^Cofre\b/.test(tituloApp), tituloApp);
+  // O defeito: quem clicava em "Começar grátis" no Cofre chegava numa página
+  // chamada "Finanças", que lê como outro produto e não como a mesma casa.
+  check("os dois títulos coincidem", tituloLanding === tituloApp, [tituloLanding, tituloApp]);
+  check("o manifesto instala o atalho com o nome certo",
+    manifest.short_name === "Cofre" && /^Cofre\b/.test(manifest.name), [manifest.name, manifest.short_name]);
+  check("o atalho do iOS também", /apple-mobile-web-app-title" content="Cofre"/.test(app));
+  check("o cabeçalho da navegação diz Cofre",
+    /side-nav__brand[\s\S]{0,140}<span>Cofre<\/span>/.test(readSrc("js/app.js")));
+  check("e o cabeçalho do onboarding, que é a primeira tela vinda da landing",
+    /onb__brand[^`]*<span>Cofre<\/span>/.test(readSrc("js/screens/onboarding.js")));
+  check("a marca antiga não sobrou no aplicativo",
+    !/Finanças \| Controle Financeiro Pessoal/.test(app + JSON.stringify(manifest)));
+  // "Mestre das Finanças" é nome de conquista, uso comum da palavra, e não
+  // pode ser confundido com marca por uma varredura preguiçosa.
+  check("a palavra comum segue livre onde não é marca",
+    /Mestre das Finanças/.test(readSrc("js/achievements.js")));
+}
+
+/* ------------------------------------------------------------------ F-12 */
+function blocoF12() {
+  section("F-12. Teto de sanidade para a quantia digitada");
+
+  check("o teto é um número finito", Number.isFinite(run(`MONEY_MAX`)), run(`MONEY_MAX`));
+  check("o valor exatamente no teto passa",
+    run(`moneyWithinMax(999999999.99)`) === true);
+  // O caso do relato: R$ 999.999.999.999 salvos faziam o seletor de conta
+  // exibir "-R$ 1.000.000.001.063,26" e estourar a largura do controle.
+  check("um bilhão não passa",
+    run(`moneyWithinMax(1000000000)`) === false);
+  check("o valor do relato não passa",
+    run(`moneyWithinMax(999999999999)`) === false);
+  check("o teto vale igual para o lado negativo",
+    run(`moneyWithinMax(-1000000000)`) === false);
+  // Saldo negativo é legítimo (conta no vermelho) e não pode ser barrado junto.
+  check("saldo negativo dentro do teto continua válido",
+    run(`moneyWithinMax(-5000)`) === true);
+  check("valor não numérico não escapa pelo teto",
+    run(`moneyWithinMax(NaN)`) === false && run(`moneyWithinMax("abc")`) === false);
+  check("a mensagem diz o limite em reais, não só que é inválido",
+    /R\$\s*999\.999\.999,99/.test(run(`moneyMaxMessage("Valor")`)), run(`moneyMaxMessage("Valor")`));
+
+  // As entradas que GRAVAM registro precisam cobrar o teto; é por elas que o
+  // número absurdo entrava no armazenamento e ia parar no seletor de conta.
+  const acoes = readSrc("js/actions.js");
+  check("o lançamento cobra o teto", /moneyWithinMax\(amt\)/.test(acoes));
+  check("o saldo de abertura da conta cobra o teto", /moneyWithinMax\(openingBalance\)/.test(acoes));
+  check("a conciliação cobra o teto", /moneyWithinMax\(actual\)/.test(acoes));
+  check("a transferência cobra o teto", /moneyWithinMax\(amount\)/.test(acoes));
+  check("o alvo da meta cobra o teto", /moneyWithinMax\(target\)/.test(acoes));
+}
+
+/* ------------------------------------------------------------------ F-13 */
+function blocoF13() {
+  section("F-13. Contraste mínimo de 4,5:1 no tema escuro");
+
+  // WCAG 2.1 relative luminance. O teste calcula em vez de comparar string:
+  // trocar o token e continuar passando é justamente o que não pode acontecer.
+  const canalLinear = (c) => {
+    const v = c / 255;
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  };
+  const luminancia = (hex) => {
+    const h = String(hex).replace("#", "");
+    return 0.2126 * canalLinear(parseInt(h.slice(0, 2), 16))
+      + 0.7152 * canalLinear(parseInt(h.slice(2, 4), 16))
+      + 0.0722 * canalLinear(parseInt(h.slice(4, 6), 16));
+  };
+  const contraste = (a, b) => {
+    const la = luminancia(a), lb = luminancia(b);
+    return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+  };
+  const baseCss = readSrc("css/base.css");
+  const blocoEscuro = baseCss.slice(baseCss.indexOf('[data-theme="dark"]'));
+  const tokenEscuro = (nome) => {
+    const m = blocoEscuro.match(new RegExp(`--${nome}:\\s*(#[0-9A-Fa-f]{6})`));
+    return m ? m[1] : null;
+  };
+
+  const fundoBadge = (readSrc("css/screens/notifications-onboarding.css")
+    .match(/\[data-theme="dark"\]\s*\.notif-bell__badge\s*\{[^}]*background:\s*(#[0-9A-Fa-f]{6})/) || [])[1];
+  check("o badge do sino ganhou fundo próprio no tema escuro", !!fundoBadge, fundoBadge);
+  check("e o branco em cima dele passa dos 4,5:1",
+    !!fundoBadge && contraste("#FFFFFF", fundoBadge) >= 4.5,
+    fundoBadge ? contraste("#FFFFFF", fundoBadge).toFixed(2) : null);
+  // Controle negativo: sem a regra, o token cru reprovaria. Se algum dia o
+  // --negative escurecer sozinho, este check avisa que a regra virou supérflua.
+  check("o vermelho padrão do tema escuro de fato reprovaria sozinho",
+    contraste("#FFFFFF", tokenEscuro("negative")) < 4.5,
+    contraste("#FFFFFF", tokenEscuro("negative")).toFixed(2));
+
+  const tokenPilula = (readSrc("css/screens/planning.css")
+    .match(/\[data-theme="dark"\]\s*\.horizon-chip\.active\s*\{[^}]*color:\s*var\(--([\w-]+)\)/) || [])[1];
+  check("a pílula do horizonte usa um token de texto no tema escuro", !!tokenPilula, tokenPilula);
+  const corPilula = tokenPilula ? tokenEscuro(tokenPilula) : null;
+  const fundoPilula = tokenEscuro("brand");
+  check("e esse texto sobre o teal passa dos 4,5:1",
+    !!corPilula && contraste(corPilula, fundoPilula) >= 4.5,
+    corPilula ? `${corPilula} sobre ${fundoPilula} = ${contraste(corPilula, fundoPilula).toFixed(2)}` : null);
+  check("o branco em cima do teal, que era o defeito, de fato reprovaria",
+    contraste("#FFFFFF", fundoPilula) < 4.5,
+    contraste("#FFFFFF", fundoPilula).toFixed(2));
+}
+
+/* ------------------------------------------------------------------ F-14 */
+function blocoF14() {
+  section("F-14. Alvo de toque de 44px no link de transparência");
+
+  const css = readSrc("css/screens/transparency-assistant-sources.css");
+  const alturas = [...css.matchAll(/\.calculation-link[^{]*\{[^}]*min-height:\s*(\d+)px/g)].map((m) => Number(m[1]));
+  check("o link declara altura mínima em algum lugar", alturas.length > 0, alturas);
+  // O defeito não era a regra base (já nascia em 44) e sim a media query que a
+  // derrubava para 40 justamente na largura de celular, onde se toca com o dedo.
+  check("nenhuma regra derruba a altura abaixo de 44px",
+    alturas.every((h) => h >= 44), alturas);
+}
+
+/* ------------------------------------------------------------------ F-17 */
+function blocoF17() {
+  section("F-17. \"do último mês\" no lugar de \"dos últimos 1 mês\"");
+
+  const plano = (meses) => run(`renderGoalsPlanCard(${JSON.stringify({
+    plan: { commitment: 100, capacity: 500, feasible: true, capacityBasis: "historico", capacityMonths: meses, paceTotal: 0 },
+  })})`);
+
+  const um = plano(1);
+  check("um mês de histórico vira singular com a preposição certa",
+    /Sobra média do último mês com movimento/.test(um));
+  // "dos últimos 1 mês" era o texto exato que aparecia na tela.
+  check("e o \"últimos 1\" não sobra em lugar nenhum do cartão",
+    !/últimos 1\b/.test(um), um.slice(0, 400));
+
+  const tres = plano(3);
+  check("mais de um mês continua no plural",
+    /Sobra média dos últimos 3 meses com movimento/.test(tres));
+
+  // A mesma frase quebrada existia em outras cinco telas; duas delas nem
+  // tinham singular, e diziam "últimos 1 meses" e "últimos 1 dias".
+  check("a correção alcançou a saúde financeira",
+    /No último mês com movimento/.test(readSrc("js/health.js")));
+  check("e os insights", /do último mês/.test(readSrc("js/screens/insights.js")));
+  check("e a carteira", /No último mês/.test(readSrc("js/screens/portfolio.js")));
+  check("e o patrimônio", /no último mês/.test(readSrc("js/screens/wealth.js")));
+  check("e a projeção de gastos do mês", /do último dia/.test(readSrc("js/screens/analytics.js")));
+}
+
 async function main() {
   blocoF01();
   blocoF02();
@@ -388,6 +740,16 @@ async function main() {
   blocoF04();
   blocoF05();
   blocoF07();
+  blocoF08();
+  blocoF09();
+  blocoF10();
+  blocoF11();
+  blocoF12();
+  blocoF13();
+  blocoF14();
+  blocoF15();
+  blocoF16();
+  blocoF17();
   console.log(`\n${fail === 0 ? "TODOS OS TESTES PASSARAM" : "FALHAS ENCONTRADAS"}: ${ok} ok, ${fail} falha(s)\n`);
   process.exit(fail === 0 ? 0 : 1);
 }

@@ -434,7 +434,7 @@ const HEALTH_INDICATORS = [
         ratio,
         display: `${f.positives}/${f.considered}`,
         caption: "meses fechados no azul",
-        description: `Nos últimos ${f.considered} ${f.considered > 1 ? "meses com movimento" : "mês com movimento"}, ${f.positives} ${f.positives === 1 ? "fechou" : "fecharam"} positivo, com resultado médio de ${fmtBRL(f.avgResult)} por mês${f.trend !== 0 ? `; e a tendência recente é de ${f.trend > 0 ? "melhora" : "piora"} (${f.trend > 0 ? "+" : "−"}${fmtBRL(Math.abs(f.trend))} por mês)` : ""}.`,
+        description: `${f.considered === 1 ? "No último mês com movimento" : `Nos últimos ${f.considered} meses com movimento`}, ${f.positives} ${f.positives === 1 ? "fechou" : "fecharam"} positivo, com resultado médio de ${fmtBRL(f.avgResult)} por mês${f.trend !== 0 ? `; e a tendência recente é de ${f.trend > 0 ? "melhora" : "piora"} (${f.trend > 0 ? "+" : "−"}${fmtBRL(Math.abs(f.trend))} por mês)` : ""}.`,
         recommendation: ratio >= 0.8
           ? null
           : f.avgResult < 0

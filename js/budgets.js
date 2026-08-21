@@ -266,7 +266,7 @@ function budgetAlerts(data, monthKey) {
         icon: "alertTriangle",
         title: `"${item.fullName}" já usou ${Math.round(item.pct)}% do orçamento`,
         message: item.dailyAllowance != null
-          ? `Restam ${fmtBRL(item.remaining)} para ${item.daysLeft} dia(s); cerca de ${fmtBRL(item.dailyAllowance)} por dia.`
+          ? `Restam ${fmtBRL(item.remaining)} para ${plural(item.daysLeft, "dia", "dias")}; cerca de ${fmtBRL(item.dailyAllowance)} por dia.`
           : `Restam ${fmtBRL(item.remaining)} até o fim do mês.`,
         categoryId: item.id,
       });
@@ -276,7 +276,7 @@ function budgetAlerts(data, monthKey) {
         severity: "info",
         icon: "trendUp",
         title: `No ritmo atual, "${item.fullName}" estoura o teto`,
-        message: `Você gastou ${fmtBRL(item.spent)} em ${status.progress.elapsed} dia(s). Mantendo o ritmo, fecha o mês em ${fmtBRL(item.projected)} contra o teto de ${fmtBRL(item.budget)}.`,
+        message: `Você gastou ${fmtBRL(item.spent)} em ${plural(status.progress.elapsed, "dia", "dias")}. Mantendo o ritmo, fecha o mês em ${fmtBRL(item.projected)} contra o teto de ${fmtBRL(item.budget)}.`,
         categoryId: item.id,
       });
     }

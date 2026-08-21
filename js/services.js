@@ -550,7 +550,7 @@ const NOTIF_RULES = [
           tone: "warn",
           icon: "shieldCheck",
           title: "Seus dados só existem neste aparelho",
-          message: `${txs.length} lançamento(s) sem cópia. Trocar de celular ou limpar os dados do navegador apaga tudo. Exporte o backup em Ajustes.`,
+          message: `${plural(txs.length, "lançamento", "lançamentos")} sem cópia. Trocar de celular ou limpar os dados do navegador apaga tudo. Exporte o backup em Ajustes.`,
           tab: "settings",
         })];
       }
@@ -569,7 +569,7 @@ const NOTIF_RULES = [
         tone: "info",
         icon: "shieldCheck",
         title: "Backup desatualizado",
-        message: `Seu último backup é de ${dias} dias atrás e ${novos} lançamento(s) entraram depois dele.`,
+        message: `Seu último backup é de ${dias} dias atrás e ${plural(novos, "lançamento entrou", "lançamentos entraram")} depois dele.`,
         tab: "settings",
       })];
     },

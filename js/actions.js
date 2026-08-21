@@ -243,7 +243,7 @@ function onClick(e) {
       if (!expenseIds.size) { notify("Selecione ao menos uma saída para alterar a categoria", "warn"); break; }
       setData((d) => ({ ...d, transactions: d.transactions.map((tx) => expenseIds.has(tx.id) ? updateTransaction(tx, { categoryId }) : tx) }));
       state.movementSelectedIds = []; state.movementBulkCategoryId = "";
-      notify(`${expenseIds.size} lançamento(s) atualizado(s)`);
+      notify(plural(expenseIds.size, "lançamento atualizado", "lançamentos atualizados"));
       break;
     }
     case "movement-bulk-delete": {
@@ -251,7 +251,7 @@ function onClick(e) {
       if (!ids.length) break;
       requestConfirmation({
         title: "Excluir lançamentos selecionados?",
-        message: `${ids.length} lançamento(s) serão removidos do histórico.`,
+        message: `${plural(ids.length, "lançamento será removido", "lançamentos serão removidos")} do histórico.`,
         confirmLabel: "Excluir lançamentos", tone: "danger",
         onConfirm: () => { setData((d) => removeTransactionsWithIntegrity(d, ids)); state.movementSelectedIds = []; state.movementBulkCategoryId = ""; notify("Lançamentos excluídos"); },
       });
@@ -440,7 +440,7 @@ function onClick(e) {
       if (!preview || preview.count === 0) break;
       setData((d) => applyRulesToTransactions(d, preview.changes));
       state.rules.applyPreview = null;
-      notify(`${preview.count} lançamento(s) recategorizado(s)`);
+      notify(plural(preview.count, "lançamento recategorizado", "lançamentos recategorizados"));
       break;
     }
 
@@ -456,10 +456,10 @@ function onClick(e) {
     case "account-save": {
       const f = state.accountsUi.accountForm; if (!f) break;
       const openingBalance = parseMoneyInput(f.openingBalance || "0");
-      if (!String(f.name).trim() || !Number.isFinite(openingBalance)) {
+      if (!String(f.name).trim() || !moneyWithinMax(openingBalance)) {
         showFormErrors({
           ...(String(f.name).trim() ? {} : { "account-name-input": "Informe o nome da conta." }),
-          ...(Number.isFinite(openingBalance) ? {} : { "account-balance-input": "Informe um saldo válido com até duas casas decimais." }),
+          ...(moneyWithinMax(openingBalance) ? {} : { "account-balance-input": Number.isFinite(openingBalance) ? moneyMaxMessage("Saldo") : "Informe um saldo válido com até duas casas decimais." }),
         }, "Revise os dados da conta"); break;
       }
       setData((d) => {
@@ -487,7 +487,7 @@ function onClick(e) {
     case "account-reconcile-cancel": state.accountsUi.reconcileId = null; state.accountsUi.reconcileValue = ""; render(); break;
     case "account-reconcile-save": {
       const actual = parseMoneyInput(state.accountsUi.reconcileValue);
-      if (!Number.isFinite(actual)) { showFormErrors({ "reconcile-balance-input": "Informe o saldo visto no banco." }); break; }
+      if (!moneyWithinMax(actual)) { showFormErrors({ "reconcile-balance-input": Number.isFinite(actual) ? moneyMaxMessage("Saldo") : "Informe o saldo visto no banco." }); break; }
       const result = reconcileAccount(state.data,id,actual,todayIso());
       setData(() => result.data);
       state.accountsUi.reconcileId = null; state.accountsUi.reconcileValue = "";
@@ -530,11 +530,11 @@ function onClick(e) {
       const f = state.accountsUi.transferForm; if (!f) break;
       const amount = parseMoneyInput(f.amount);
       const transfer = makeAccountTransfer({ ...f, amount }, state.data.accounts);
-      if (!transfer) {
+      if (!transfer || !moneyWithinMax(amount)) {
         showFormErrors({
           ...(f.fromAccountId ? {} : { "transfer-from-select": "Escolha a conta de origem." }),
           ...(f.toAccountId && f.toAccountId !== f.fromAccountId ? {} : { "transfer-to-select": "Escolha uma conta de destino diferente." }),
-          ...(amount > 0 ? {} : { "transfer-amount-input": "Informe um valor maior que zero." }),
+          ...(amount > 0 && moneyWithinMax(amount) ? {} : { "transfer-amount-input": amount > 0 ? moneyMaxMessage("Valor") : "Informe um valor maior que zero." }),
         }, "Revise os dados da transferência"); break;
       }
       setData((d) => ({ ...d, accountTransfers:[...d.accountTransfers,transfer] }));
@@ -1094,7 +1094,7 @@ function onClick(e) {
         creditCardId: t.creditCardId || null,
       }));
       setData((d) => ({ ...d, transactions: [...d.transactions, ...newTx], dismissedCarryForwardMonth: mKey }));
-      notify(`${newTx.length} gasto(s) fixo(s) lançado(s)`);
+      notify(plural(newTx.length, "gasto fixo lançado", "gastos fixos lançados"));
       break;
     }
 
@@ -1173,9 +1173,9 @@ function onClick(e) {
     case "submit-tx": {
       const f = state.form;
       const amt = parseMoneyInput(f.amount);
-      if (!(amt > 0) || (f.type === "expense" && !f.categoryId)) {
+      if (!(amt > 0) || !moneyWithinMax(amt) || (f.type === "expense" && !f.categoryId)) {
         showFormErrors({
-          ...(amt > 0 ? {} : { "tx-amount-input": "Informe um valor maior que zero, com até duas casas decimais." }),
+          ...(amt > 0 && moneyWithinMax(amt) ? {} : { "tx-amount-input": amt > 0 ? moneyMaxMessage("Valor") : "Informe um valor maior que zero, com até duas casas decimais." }),
           ...(f.type !== "expense" || f.categoryId ? {} : { "tx-category-group": "Escolha uma categoria." }),
         }, "Revise os dados do lançamento"); break;
       }
@@ -1243,10 +1243,14 @@ function onClick(e) {
     case "goal-template": {
       const tpl = goalTemplateById(value);
       if (!tpl) break;
+      // Mesmo formato de string do caminho de edição ("1234,56"), senão o campo
+      // abre com ponto decimal e o saneamento de entrada o trata como milhar.
+      const alvoSugerido = goalTemplateTarget(tpl, state.data);
       state.goalForm = {
         ...freshGoalForm(), show: true,
         name: tpl.name, icon: GOAL_ICON_OPTIONS.includes(tpl.icon) ? tpl.icon : "piggy",
         deadline: goalTemplateDeadline(tpl),
+        target: alvoSugerido > 0 ? alvoSugerido.toFixed(2).replace(".", ",") : "",
       };
       state.editingGoalId = null;
       render();
@@ -1276,10 +1280,10 @@ function onClick(e) {
       const target = parseMoneyInput(gf.target);
       const savedUpfront = moneyOrZero(gf.savedUpfront);
       const monthlyPlan = moneyOrZero(gf.monthlyPlan);
-      if (!gf.name.trim() || !(target > 0) || savedUpfront < 0 || monthlyPlan < 0) {
+      if (!gf.name.trim() || !(target > 0) || !moneyWithinMax(target) || savedUpfront < 0 || monthlyPlan < 0) {
         showFormErrors({
           ...(gf.name.trim() ? {} : { "goal-name-input": "Informe o nome da meta." }),
-          ...(target > 0 ? {} : { "goal-target-input": "Informe um valor alvo maior que zero." }),
+          ...(target > 0 && moneyWithinMax(target) ? {} : { "goal-target-input": target > 0 ? moneyMaxMessage("Valor alvo") : "Informe um valor alvo maior que zero." }),
           ...(savedUpfront >= 0 ? {} : { "goal-saved-input": "O valor inicial não pode ser negativo." }),
           ...(monthlyPlan >= 0 ? {} : { "goal-plan-input": "O aporte mensal não pode ser negativo." }),
         }, "Revise os dados da meta"); break;
@@ -1550,7 +1554,7 @@ function onClick(e) {
       const newTx = buildTransactionsFromRows(included, meta.format, defaultCashAccountId(), state.importFilename);
       setData((d) => ({ ...d, transactions: [...d.transactions, ...newTx] }));
       state.importRows = null; state.importFilename = null;
-      notify(`${newTx.length} lançamento(s) importado(s)`);
+      notify(plural(newTx.length, "lançamento importado", "lançamentos importados"));
       setState({ tab: "dashboard" });
       break;
     }

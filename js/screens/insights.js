@@ -117,7 +117,7 @@ function renderAdvisorItem(c) {
 function renderSavingPlanCard(plan) {
   return `<div class="card">
     <p class="card-title">Onde estão os ${fmtBRL(plan.total)}</p>
-    <p class="card-subtitle">Comparação com a sua própria média dos últimos ${plan.baselineMonths} ${plan.baselineMonths === 1 ? "mês" : "meses"}; não com um padrão genérico. Categorias essenciais ficam fora da sugestão.</p>
+    <p class="card-subtitle">Comparação com a sua própria média ${plan.baselineMonths === 1 ? "do último mês" : `dos últimos ${plan.baselineMonths} meses`}; não com um padrão genérico. Categorias essenciais ficam fora da sugestão.</p>
     <div class="plan-list">
       ${plan.items.map((i) => `<div class="plan-row">
         <span class="icon-bubble" data-ui-css="width:28px;height:28px;background:color-mix(in srgb, ${i.color} 14%, transparent); color:${i.color}">${svgIcon(i.icon, 14)}</span>

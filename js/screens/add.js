@@ -110,10 +110,17 @@ function renderAddScreen() {
             const selectedChild = children.find((ch) => ch.id === f.categoryId);
             const isSelected = f.categoryId === c.id || !!selectedChild;
             const hasChildren = children.length > 0;
+            // Com subcategoria escolhida o rótulo mostra o caminho inteiro, não só o
+            // nome do filho. Trocar "Alimentação" por "Mercado" fazia a fila de chips
+            // virar "Moradia, Mercado, Transporte": dois níveis da taxonomia lado a
+            // lado, sem nada que diga qual é qual, e o pai escolhido sumia da tela.
+            // categoryFullName é o mesmo formato já usado no seletor de regras e no
+            // rascunho do lançamento. O ícone continua sendo o do filho, que é o que
+            // confirma a escolha de dentro do seletor.
             return `
             <button class="chip ${isSelected ? "active" : ""}" data-ui-css="${isSelected ? `border-color:${c.color}; background:color-mix(in srgb, ${c.color} 10%, transparent)` : ""}" data-action="${hasChildren ? "open-category-picker" : "select-category"}" data-id="${c.id}">
               <span class="icon-bubble" data-ui-css="background:color-mix(in srgb, ${c.color} 14%, transparent); color:${c.color}">${svgIcon(selectedChild ? selectedChild.icon : c.icon, 17)}</span>
-              <span class="chip__label">${escapeHtml(selectedChild ? selectedChild.name : c.name)}</span>
+              <span class="chip__label">${escapeHtml(selectedChild ? categoryFullName(state.data, selectedChild.id) : c.name)}</span>
               ${hasChildren ? `<span class="chip__caret">${svgIcon("chevronDown", 11)}</span>` : ""}
             </button>`;
           }).join("")}

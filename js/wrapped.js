@@ -93,7 +93,7 @@ function drawWrappedCard(canvas, w) {
   ctx.font = "500 26px -apple-system, Helvetica, Arial, sans-serif";
   ctx.fillText(`${w.txCount} lançamentos registrados este mês`, 64, cardY + cardH + 70);
   ctx.font = "700 30px -apple-system, Helvetica, Arial, sans-serif";
-  ctx.fillText("Finanças; meu app financeiro", 64, H - 60);
+  ctx.fillText("Cofre; meu app financeiro", 64, H - 60);
 
   return canvas;
 }

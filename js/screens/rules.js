@@ -79,7 +79,7 @@ function renderCustomRulesCard(cfg) {
     <div class="settings-row-header">
       <div>
         <p class="card-title" data-ui-css="margin:0">Suas regras</p>
-        <p class="card-subtitle" data-ui-css="margin:2px 0 0">${cfg.custom.length === 0 ? "Nenhuma regra criada ainda." : `${cfg.custom.length} regra(s) · ${cfg.custom.filter((r) => r.enabled).length} ativa(s)`}</p>
+        <p class="card-subtitle" data-ui-css="margin:2px 0 0">${cfg.custom.length === 0 ? "Nenhuma regra criada ainda." : `${plural(cfg.custom.length, "regra", "regras")} · ${cfg.custom.filter((r) => r.enabled).length} ${pluralWord(cfg.custom.filter((r) => r.enabled).length, "ativa", "ativas")}`}</p>
       </div>
       ${form ? "" : `<button class="btn btn--primary btn--sm" data-action="rule-new">${svgIcon("plus", 15)} Nova</button>`}
     </div>
@@ -165,7 +165,7 @@ function renderRuleApplyCard() {
 
     ${preview ? (preview.count === 0
       ? `<div class="inline-note">${svgIcon("checkCircle", 16)}<span>Nenhum lançamento em “Outros” casou com as regras atuais.</span></div>`
-      : `<div class="inline-note">${svgIcon("info", 16)}<span><b>${preview.count}</b> lançamento(s) mudariam de categoria.</span></div>
+      : `<div class="inline-note">${svgIcon("info", 16)}<span><b>${preview.count}</b> ${pluralWord(preview.count, "lançamento mudaria", "lançamentos mudariam")} de categoria.</span></div>
          <div class="rule-preview-list">
            ${preview.changes.slice(0, 8).map((c) => `<div class="rule-preview-row">
              <span class="rule-preview-row__desc">${escapeHtml(c.description || "(sem descrição)")}</span>
@@ -195,7 +195,7 @@ function renderBuiltinRulesCard(cfg) {
     <div class="settings-row-header">
       <div>
         <p class="card-title" data-ui-css="margin:0">Regras de fábrica</p>
-        <p class="card-subtitle" data-ui-css="margin:2px 0 0">${BUILTIN_CATEGORY_RULES.length} dicionários prontos${changed > 0 ? ` · ${changed} alterado(s) por você` : ""}</p>
+        <p class="card-subtitle" data-ui-css="margin:2px 0 0">${BUILTIN_CATEGORY_RULES.length} dicionários prontos${changed > 0 ? ` · ${plural(changed, "alterado", "alterados")} por você` : ""}</p>
       </div>
       <button class="btn btn--ghost btn--sm" data-action="rules-toggle-builtins">
         ${open ? "Ocultar" : "Ver todas"} ${svgIcon(open ? "chevronUp" : "chevronDown", 14)}
@@ -220,7 +220,7 @@ function renderBuiltinRulesCard(cfg) {
           </select>
         </div>`;
       }).join("")}
-      ${changed > 0 ? `<button class="btn btn--ghost btn--sm btn--block" data-action="rules-builtin-reset" data-ui-css="margin-top:8px">${svgIcon("refresh", 15)} Restaurar as ${changed} regra(s) de fábrica alterada(s)</button>` : ""}
+      ${changed > 0 ? `<button class="btn btn--ghost btn--sm btn--block" data-action="rules-builtin-reset" data-ui-css="margin-top:8px">${svgIcon("refresh", 15)} Restaurar ${plural(changed, "regra de fábrica alterada", "regras de fábrica alteradas")}</button>` : ""}
     </div>`}
   </div>`;
 }

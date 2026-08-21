@@ -184,7 +184,7 @@ function renderCategoriesOverviewCard(model) {
 
   return `<div class="card cat-overview">
     <p class="card-title" data-ui-css="margin-bottom:4px">Como seus gastos estão organizados</p>
-    <p class="card-subtitle">${totals.parents} categoria(s) principais e ${totals.children} subcategoria(s), com ${fmtBRL(totals.spent)} classificados em ${escapeHtml(monthName)}.</p>
+    <p class="card-subtitle">${plural(totals.parents, "categoria principal", "categorias principais")} e ${plural(totals.children, "subcategoria", "subcategorias")}, com ${fmtBRL(totals.spent)} classificados em ${escapeHtml(monthName)}.</p>
 
     ${totals.spent > 0 ? `<div class="segment-bar cat-overview__bar" role="img" aria-label="Divisão dos gastos do mês entre necessidades, desejos e futuro">
       ${segments.filter((s) => s.pct > 0).map((s) => `<span class="cat-overview__seg cat-overview__seg--${s.group}" data-ui-css="width:${s.pct}%"></span>`).join("")}
@@ -291,7 +291,7 @@ function renderCategoryGroupsView(model) {
         <span class="icon-bubble cat-group-card__icon cat-group-card__icon--${group}">${svgIcon(GROUP_ICONS[group], 18)}</span>
         <div class="cat-group-card__text">
           <p class="card-title" data-ui-css="margin:0">${GROUP_LABELS[group]}</p>
-          <p class="card-subtitle" data-ui-css="margin:3px 0 0">${items.length} categoria(s) · ${fmtBRL(spent)} neste mês</p>
+          <p class="card-subtitle" data-ui-css="margin:3px 0 0">${plural(items.length, "categoria", "categorias")} · ${fmtBRL(spent)} neste mês</p>
         </div>
         ${allocated > 0 ? `<span class="cat-group-card__pct ${over ? "is-over" : ""}">${Math.round(pct)}%</span>` : ""}
       </div>
@@ -410,7 +410,7 @@ function renderCategoryEditorModal() {
         </div>
         <p class="field-hint">${canBeChild
           ? "Subcategorias somam no teto da principal e continuam aparecendo separadas nas análises."
-          : `Esta categoria tem ${childCount} subcategoria(s), então ela mesma precisa continuar sendo principal.`}</p>
+          : `Esta categoria tem ${plural(childCount, "subcategoria", "subcategorias")}, então ela mesma precisa continuar sendo principal.`}</p>
       </div>
 
       <div class="field cat-editor__field">
@@ -452,7 +452,7 @@ function renderCategoryEditorModal() {
 
       ${draft.confirmDelete ? `<div class="cat-editor__danger">
         <p class="cat-editor__danger-title">${svgIcon("alertTriangle", 15)} Excluir “${escapeHtml(existing ? existing.name : previewName)}”?</p>
-        <p class="cat-editor__danger-text">${childCount > 0 ? `As ${childCount} subcategoria(s) também serão excluídas. ` : ""}Os lançamentos não são apagados: eles passam para “Outros”.</p>
+        <p class="cat-editor__danger-text">${childCount > 0 ? `${plural(childCount, "subcategoria também será excluída", "subcategorias também serão excluídas")}. ` : ""}Os lançamentos não são apagados: eles passam para “Outros”.</p>
         <div class="cat-editor__danger-actions">
           <button class="btn btn--ghost btn--sm" data-action="cat-editor-delete-cancel">Manter categoria</button>
           <button class="btn btn--danger btn--sm" data-action="cat-editor-delete-confirm">${svgIcon("trash", 14)} Excluir mesmo assim</button>

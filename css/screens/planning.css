@@ -150,6 +150,13 @@
 }
 .horizon-chip:hover { border-color: var(--brand); color: var(--brand); }
 .horizon-chip.active { background: var(--brand); border-color: var(--brand); color: #fff; }
+/* No tema escuro o --brand clareia para #1FB394, e branco em cima dá 2,65:1,
+   o pior contraste do aplicativo. A pílula ativa é o que diz qual horizonte
+   está sendo projetado, então ler errado aqui é ler o número errado. Em vez de
+   escurecer o teal, que apagaria o destaque de "selecionado", o texto passa a
+   ser o --brand-deep, que existe na paleta escura para exatamente este uso:
+   6,28:1, e o fundo continua vibrante. */
+[data-theme="dark"] .horizon-chip.active { color: var(--brand-deep); }
 
 .forecast-value {
   font-family: var(--font-num); font-variant-numeric: tabular-nums;

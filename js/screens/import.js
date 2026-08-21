@@ -35,7 +35,21 @@ function renderImportScreen() {
 
 function renderImportReview(rows) {
   const included = rows.filter((r) => r.include);
-  const totalIn = included.reduce((s, r) => s + r.amount, 0);
+
+  // O "total" antigo somava receita e despesa no mesmo balde e devolvia um
+  // número que não existe em lugar nenhum do extrato: R$ 5.420,00 de salário
+  // mais R$ 1.830,25 de gastos viravam "total R$ 7.250,25", que não é nem o
+  // que entrou, nem o que saiu, nem o saldo entre os dois. As duas direções
+  // andam separadas. r.amount é sempre a magnitude; quem dá o sinal é r.type.
+  // sumMoney trabalha em centavos inteiros, ao contrário do reduce com + que
+  // acumulava erro de float a cada linha do arquivo.
+  const totalEntradas = sumMoney(included.filter((r) => r.type === "income"), (r) => r.amount);
+  const totalSaidas = sumMoney(included.filter((r) => r.type !== "income"), (r) => r.amount);
+  // Extrato só de gastos é o caso comum. Mostrar "R$ 0,00 em entradas" ali
+  // seria ruído, então cada direção só aparece quando tem valor.
+  const partesTotal = [];
+  if (totalEntradas > 0) partesTotal.push(`${fmtBRL(totalEntradas)} em entradas`);
+  if (totalSaidas > 0) partesTotal.push(`${fmtBRL(totalSaidas)} em saídas`);
 
   // A DATA DE ABERTURA DA CONTA MORDE MAIS FORTE AQUI.
   //
@@ -57,7 +71,7 @@ function renderImportReview(rows) {
       <p class="card-title">Revisar lançamentos (${rows.length})</p>
       <button class="icon-btn" data-action="import-cancel" aria-label="Cancelar importação">${svgIcon("x", 16)}</button>
     </div>
-    <p class="card-subtitle">${(rows.meta && rows.meta.format ? rows.meta.format.toUpperCase() + " · " : "")}${included.length} selecionados para importar · total ${fmtBRL(totalIn)}. Duplicados já vêm desmarcados${rows.meta && rows.meta.skipped ? ` · ${rows.meta.skipped} linha(s) ignorada(s)` : ""}.</p>
+    <p class="card-subtitle">${(rows.meta && rows.meta.format ? rows.meta.format.toUpperCase() + " · " : "")}${plural(included.length, "selecionado para importar", "selecionados para importar")}${partesTotal.length ? ` · ${partesTotal.join(" e ")}` : ""}. Duplicados já vêm desmarcados${rows.meta && rows.meta.skipped ? ` · ${plural(rows.meta.skipped, "linha ignorada", "linhas ignoradas")}` : ""}.</p>
     ${anterioresAoSaldo ? `<div class="import-notice">${svgIcon("info", 16)}<div>
       <b>${anterioresAoSaldo} ${anterioresAoSaldo === 1 ? "lançamento é anterior" : "lançamentos são anteriores"} à abertura de ${escapeHtml(contaDestino.name)} em ${fmtDateFull(aberturaConta)}.</b>
       <span>${anterioresAoSaldo === 1 ? "Ele entra" : "Eles entram"} nas despesas, categorias e gráficos, mas não ${anterioresAoSaldo === 1 ? "altera" : "alteram"} o saldo da conta: o saldo inicial que você informou já inclui esse período. Para que ${anterioresAoSaldo === 1 ? "ele conte" : "eles contem"} no saldo, edite a conta e recue a data de abertura.</span>
@@ -75,7 +89,7 @@ function renderImportReview(rows) {
         <span class="import-row__amount ${r.type === "income" ? "tx-amount--income" : ""}">${r.type === "income" ? "+" : "-"}${fmtBRL(r.amount)}</span>
       </div>`).join("")}
     </div>
-    <button class="btn btn--primary btn--block" data-ui-css="margin-top:14px" data-action="import-confirm" ${included.length === 0 ? "disabled" : ""}>Importar ${included.length} lançamento(s)</button>
+    <button class="btn btn--primary btn--block" data-ui-css="margin-top:14px" data-action="import-confirm" ${included.length === 0 ? "disabled" : ""}>Importar ${plural(included.length, "lançamento", "lançamentos")}</button>
     <button class="btn btn--ghost btn--block btn--sm" data-ui-css="margin-top:8px" data-action="nav" data-tab="rules">
       ${svgIcon("tag", 14)} Corrigindo a mesma categoria várias vezes? Crie uma regra
     </button>

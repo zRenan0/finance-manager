@@ -25,8 +25,17 @@
   padding: 0 5px; border-radius: 999px;
   background: var(--negative); color: #fff;
   font-size: 10.5px; font-weight: 800; line-height: 18px; text-align: center;
+  /* Contraste: ver a regra de tema escuro logo abaixo. */
   box-shadow: 0 0 0 2px var(--paper);
 }
+
+/* No tema escuro o --negative clareia para #E9736A, e branco em cima dele dá
+   2,95:1, abaixo dos 4,5:1 exigidos pela WCAG AA. O texto aqui é o pior caso
+   possível: 10,5px, e é uma contagem, ou seja, cada dígito importa e não há
+   palavra em volta de onde deduzir o que estava escrito. Escurecer só este
+   fundo resolve sem tocar no --negative, que passa nas demais combinações e
+   é usado para texto grande e ícones, onde o vermelho claro é o certo. */
+[data-theme="dark"] .notif-bell__badge { background: #C0392B; }
 
 /* Faixa de filtros: com muitos grupos ela precisa rolar em vez de espremer. */
 .segmented--scroll { overflow-x: auto; scrollbar-width: none; }
@@ -224,6 +233,16 @@
 }
 .onb__preview-pct { color: var(--ink-faint); font-weight: 600; }
 .onb__preview-value { font-size: 13.5px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+
+/* Motivo de o avanço estar travado. Fica FORA do corpo rolável, colado no
+   rodapé, porque o texto só serve se estiver à vista junto do botão morto que
+   ele explica; dentro do corpo, bastaria a lista de objetivos rolar para o
+   usuário voltar a ver um botão que não responde e nenhuma explicação. */
+.onb__block-hint {
+  display: flex; align-items: center; gap: 7px; flex: 0 0 auto;
+  margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--ink-soft);
+}
+.onb__block-hint[hidden] { display: none; }
 
 .onb__foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex: 0 0 auto; }
 .onb__foot .btn { min-width: 118px; }

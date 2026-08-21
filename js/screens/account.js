@@ -100,7 +100,6 @@ function accountSyncCard() {
 // não auditar. E a decisão nunca é gravada por abrir ou fechar o cartão.
 function accountLinkParts(resumo) {
   if (!resumo) return "";
-  const plural = (n, um, muitos) => `${n} ${n > 1 ? muitos : um}`;
   const partes = [];
   if (resumo.transactions) partes.push(plural(resumo.transactions, "lançamento", "lançamentos"));
   if (resumo.accounts) partes.push(plural(resumo.accounts, "conta", "contas"));
@@ -148,7 +147,7 @@ function accountGuestLinkCard() {
   } else if (link.phase === "linked") {
     const stats = link.stats || null;
     corpo = `<p class="card-subtitle">O conteúdo deste aparelho já faz parte da conta e está no servidor.</p>${
-      stats ? `<p class="field-hint">Incorporados: ${escapeHtml(String(Number(stats.added) || 0))} lançamento(s), ${escapeHtml(String(Number(stats.goals) || 0))} meta(s), ${escapeHtml(String(Number(stats.accounts) || 0))} conta(s).</p>` : ""
+      stats ? `<p class="field-hint">Incorporados: ${escapeHtml(plural(Number(stats.added) || 0, "lançamento", "lançamentos"))}, ${escapeHtml(plural(Number(stats.goals) || 0, "meta", "metas"))}, ${escapeHtml(plural(Number(stats.accounts) || 0, "conta", "contas"))}.</p>` : ""
     }`;
   } else if (link.phase === "dismissed") {
     corpo = `<p class="card-subtitle">Você escolheu manter ${escapeHtml(conteudo || "esses dados")} fora da conta. Nada foi apagado.</p>

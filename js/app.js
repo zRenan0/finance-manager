@@ -1003,7 +1003,7 @@ function renderSideNav() {
   return `<nav class="side-nav" aria-label="Navegação principal">
     <div class="side-nav__brand">
       <div class="brand-mark">${svgIcon("wallet", 19)}</div>
-      <span>Finanças</span>
+      <span>Cofre</span>
     </div>
     ${NAV.map((item) => `
       <button class="side-nav__item ${state.tab === item.id ? "active" : ""}" data-action="nav" data-tab="${item.id}" ${state.tab === item.id ? 'aria-current="page"' : ""}>
@@ -1062,7 +1062,7 @@ function keyOfCurrentMonth() { return keyOfDate(new Date()); }
 function exportTransactionsCsv() {
   if (!state.data.transactions.length) { notify("Nenhum lançamento para exportar"); return; }
   downloadFile(backupFilename("csv").replace("backup", "lancamentos"), buildTransactionsCsv(state.data), "text/csv;charset=utf-8;");
-  notify(`${state.data.transactions.length} lançamento(s) exportado(s) em CSV`);
+  notify(`${plural(state.data.transactions.length, "lançamento exportado", "lançamentos exportados")} em CSV`);
 }
 
 function exportBudgetsCsv() {
@@ -1080,7 +1080,7 @@ function renderLastBackupLine() {
   if (!last) {
     if (total === 0) return "";
     return `<p class="field-hint" data-ui-css="color:var(--negative)">
-      ${svgIcon("alertTriangle", 12)} Você ainda não exportou nenhum backup. Estes ${total} lançamento(s) existem só neste aparelho.
+      ${svgIcon("alertTriangle", 12)} Você ainda não exportou nenhum backup. ${total === 1 ? "Este" : "Estes"} ${plural(total, "lançamento existe", "lançamentos existem")} só neste aparelho.
     </p>`;
   }
   const dias = Math.max(0, Math.floor((Date.parse(`${todayIso()}T12:00:00`) - Date.parse(`${last}T12:00:00`)) / 86400000));
@@ -1098,7 +1098,7 @@ function exportBackupJson() {
   // do download: se o navegador bloquear a gravação do arquivo, o app não deve
   // registrar um backup que não existe.
   setData((d) => ({ ...d, lastBackupAt: todayIso() }));
-  notify(`Backup com ${envelope.counts.transactions} lançamento(s) exportado`);
+  notify(`Backup com ${plural(envelope.counts.transactions, "lançamento", "lançamentos")} exportado`);
 }
 
 // Lê o arquivo escolhido e monta a PRÉVIA; nada é gravado antes do usuário
@@ -1136,12 +1136,12 @@ async function confirmBackupRestore() {
     let message;
     if (state.backup.mode === "replace") {
       ok = await FinanceStore.replaceAll(preview.data);
-      message = ok ? `Backup restaurado: ${preview.meta.counts.transactions} lançamento(s)` : "Backup carregado, mas não foi possível gravá-lo";
+      message = ok ? `Backup restaurado: ${plural(preview.meta.counts.transactions, "lançamento", "lançamentos")}` : "Backup carregado, mas não foi possível gravá-lo";
     } else {
       const { data, stats } = mergeBackupInto(state.data, preview.data);
       ok = await FinanceStore.replaceAll(data);
       message = ok
-        ? `Mesclado: ${stats.added} novo(s), ${stats.updated} atualizado(s), ${stats.skipped} já existia(m)`
+        ? `Mesclado: ${plural(stats.added, "novo", "novos")}, ${plural(stats.updated, "atualizado", "atualizados")}, ${stats.skipped} já ${pluralWord(stats.skipped, "existia", "existiam")}`
         : "Mesclagem feita em memória, mas não foi possível gravá-la";
     }
     state.data = FinanceStore.snapshot();

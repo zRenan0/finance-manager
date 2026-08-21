@@ -207,6 +207,25 @@ function moneyOrZero(input) {
   return Number.isFinite(n) ? n : 0;
 }
 
+// TETO DE SANIDADE DA QUANTIA DIGITADA.
+//
+// Não havia limite nenhum: dava para salvar R$ 999.999.999.999 num lançamento,
+// e a partir daí o seletor de conta exibia "-R$ 1.000.000.001.063,26" e
+// estourava a largura do controle. O teto é generoso de propósito, porque o
+// que ele precisa barrar é o dedo preso no zero, não o usuário; e mora aqui
+// para que toda tela que aceita dinheiro cobre o mesmo limite com a mesma
+// frase, em vez de cada uma inventar o seu.
+const MONEY_MAX = 999999999.99;
+
+function moneyWithinMax(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && Math.abs(n) <= MONEY_MAX;
+}
+
+function moneyMaxMessage(label) {
+  return `${label || "Valor"} acima do limite de ${fmtBRL(MONEY_MAX)}.`;
+}
+
 function sanitizeDecimalInput(input, options) {
   const opts = options && typeof options === "object" ? options : {};
   let value = String(input == null ? "" : input)
@@ -280,6 +299,25 @@ function fmtBRLShort(n) {
 function fmtPct(n, decimals = 0) {
   const v = Number(n);
   return `${(Number.isFinite(v) ? v : 0).toFixed(decimals)}%`;
+}
+// Plural de verdade no lugar do "(s)". Duas razões para virar função em vez de
+// ternário repetido em cada tela: o português conta o ZERO como plural ("0
+// lançamentos"), regra que escapa quando cada arquivo decide sozinho; e o
+// marcador colado no fim da palavra, logo num aviso que pede uma ação do
+// usuário, denuncia texto montado por máquina bem no momento em que o app
+// precisa ser levado a sério.
+//
+// O bloco F-08 de tests/test-beta-fixes.js varre js/ atrás do marcador, e a
+// varredura não distingue comentário de texto de tela: não escreva o marcador
+// literal aqui dentro, nem para dar exemplo.
+function plural(n, um, muitos) {
+  const q = Number(n) || 0;
+  return `${q} ${q === 1 ? um : muitos}`;
+}
+// Mesma regra, só a palavra: para frases em que o número já aparece em outro
+// lugar ou em que o artigo e o verbo também precisam concordar.
+function pluralWord(n, um, muitos) {
+  return (Number(n) || 0) === 1 ? um : muitos;
 }
 function fmtDateShort(iso) { if(!iso) return ""; const [, m, d] = iso.split("-"); return `${d}/${m}`; }
 function fmtDateFull(iso) { if(!iso) return ""; const [y, m, d] = iso.split("-"); return `${d}/${m}/${y}`; }
@@ -6257,7 +6295,7 @@ function buildBackupEnvelope(data) {
   return {
     kind: BACKUP_KIND,
     schema: SCHEMA_VERSION,
-    app: "Finanças. Controle Financeiro Pessoal",
+    app: "Cofre. Organizador financeiro pessoal",
     exportedAt: new Date().toISOString(),
     counts: {
       transactions: payload.transactions.length,
@@ -9149,7 +9187,7 @@ function budgetAlerts(data, monthKey) {
         icon: "alertTriangle",
         title: `"${item.fullName}" já usou ${Math.round(item.pct)}% do orçamento`,
         message: item.dailyAllowance != null
-          ? `Restam ${fmtBRL(item.remaining)} para ${item.daysLeft} dia(s); cerca de ${fmtBRL(item.dailyAllowance)} por dia.`
+          ? `Restam ${fmtBRL(item.remaining)} para ${plural(item.daysLeft, "dia", "dias")}; cerca de ${fmtBRL(item.dailyAllowance)} por dia.`
           : `Restam ${fmtBRL(item.remaining)} até o fim do mês.`,
         categoryId: item.id,
       });
@@ -9159,7 +9197,7 @@ function budgetAlerts(data, monthKey) {
         severity: "info",
         icon: "trendUp",
         title: `No ritmo atual, "${item.fullName}" estoura o teto`,
-        message: `Você gastou ${fmtBRL(item.spent)} em ${status.progress.elapsed} dia(s). Mantendo o ritmo, fecha o mês em ${fmtBRL(item.projected)} contra o teto de ${fmtBRL(item.budget)}.`,
+        message: `Você gastou ${fmtBRL(item.spent)} em ${plural(status.progress.elapsed, "dia", "dias")}. Mantendo o ritmo, fecha o mês em ${fmtBRL(item.projected)} contra o teto de ${fmtBRL(item.budget)}.`,
         categoryId: item.id,
       });
     }
@@ -11607,7 +11645,7 @@ const HEALTH_INDICATORS = [
         ratio,
         display: `${f.positives}/${f.considered}`,
         caption: "meses fechados no azul",
-        description: `Nos últimos ${f.considered} ${f.considered > 1 ? "meses com movimento" : "mês com movimento"}, ${f.positives} ${f.positives === 1 ? "fechou" : "fecharam"} positivo, com resultado médio de ${fmtBRL(f.avgResult)} por mês${f.trend !== 0 ? `; e a tendência recente é de ${f.trend > 0 ? "melhora" : "piora"} (${f.trend > 0 ? "+" : "−"}${fmtBRL(Math.abs(f.trend))} por mês)` : ""}.`,
+        description: `${f.considered === 1 ? "No último mês com movimento" : `Nos últimos ${f.considered} meses com movimento`}, ${f.positives} ${f.positives === 1 ? "fechou" : "fecharam"} positivo, com resultado médio de ${fmtBRL(f.avgResult)} por mês${f.trend !== 0 ? `; e a tendência recente é de ${f.trend > 0 ? "melhora" : "piora"} (${f.trend > 0 ? "+" : "−"}${fmtBRL(Math.abs(f.trend))} por mês)` : ""}.`,
         recommendation: ratio >= 0.8
           ? null
           : f.avgResult < 0
@@ -12066,6 +12104,23 @@ function goalTemplateById(id) {
 function goalTemplateDeadline(template, fromIso) {
   if (!template || !template.months) return "";
   return addMonthsToIso(fromIso || todayIso(), template.months);
+}
+
+// Alvo sugerido do modelo. Hoje só a reserva de emergência tem uma conta a
+// fazer, e essa conta é a razão de o modelo existir: o app já sabe a despesa
+// média e já exibe "N meses de despesa" na tela inicial, mas o modelo abria o
+// formulário com o VALOR ALVO em branco e devolvia ao usuário justamente a
+// única pergunta que ele não tem como responder sozinho.
+//
+// Cuidado com o número: sai de emergencyFund, mas do par monthlyNeed x
+// targetMonths, nunca do campo `target` do modelo, que já vem contaminado pelo
+// alvo de uma reserva existente e faria o formulário copiar a meta antiga em
+// vez de sugerir uma. Sem histórico de despesa a conta dá zero e o campo fica
+// vazio de propósito: alvo inventado é pior que alvo em branco.
+function goalTemplateTarget(template, data) {
+  if (!template || template.id !== "reserva") return 0;
+  const fund = emergencyFund(data);
+  return mulMoney(fund.monthlyNeed, fund.targetMonths);
 }
 
 // Cria a meta e aplica a origem escolhida para o valor inicial. A função é pura
@@ -18065,7 +18120,7 @@ function drawWrappedCard(canvas, w) {
   ctx.font = "500 26px -apple-system, Helvetica, Arial, sans-serif";
   ctx.fillText(`${w.txCount} lançamentos registrados este mês`, 64, cardY + cardH + 70);
   ctx.font = "700 30px -apple-system, Helvetica, Arial, sans-serif";
-  ctx.fillText("Finanças; meu app financeiro", 64, H - 60);
+  ctx.fillText("Cofre; meu app financeiro", 64, H - 60);
 
   return canvas;
 }
@@ -18649,7 +18704,7 @@ const NOTIF_RULES = [
           tone: "warn",
           icon: "shieldCheck",
           title: "Seus dados só existem neste aparelho",
-          message: `${txs.length} lançamento(s) sem cópia. Trocar de celular ou limpar os dados do navegador apaga tudo. Exporte o backup em Ajustes.`,
+          message: `${plural(txs.length, "lançamento", "lançamentos")} sem cópia. Trocar de celular ou limpar os dados do navegador apaga tudo. Exporte o backup em Ajustes.`,
           tab: "settings",
         })];
       }
@@ -18668,7 +18723,7 @@ const NOTIF_RULES = [
         tone: "info",
         icon: "shieldCheck",
         title: "Backup desatualizado",
-        message: `Seu último backup é de ${dias} dias atrás e ${novos} lançamento(s) entraram depois dele.`,
+        message: `Seu último backup é de ${dias} dias atrás e ${plural(novos, "lançamento entrou", "lançamentos entraram")} depois dele.`,
         tab: "settings",
       })];
     },
@@ -19053,8 +19108,28 @@ function onbCanAdvance(step) {
   return true;
 }
 
+// POR QUE O MOTIVO DO BLOQUEIO PRECISA ESTAR ESCRITO NA TELA.
+//
+// "Continuar" e "Pular por agora" nascem desabilitados e nada dizia por quê:
+// o usuário clicava, não acontecia nada, e não havia texto, title nem relação
+// de acessibilidade que ligasse o botão morto ao aceite que faltava. Botão
+// desabilitado sem explicação é um beco, e o passo 1 não era o único: o 2
+// trava sem renda e o 3 sem nome e saldo da conta, com o mesmo silêncio.
+//
+// Cada passo passa a dizer em uma linha o que falta, e os botões apontam para
+// essa linha por aria-describedby, para o leitor de tela anunciar a exigência
+// junto do botão em vez de deixá-la solta no meio da tela.
+function onbBlockReason(step) {
+  if (step === 1) return "Marque o aceite da política e dos termos para continuar.";
+  if (step === 2) return "Informe uma renda maior que zero para continuar.";
+  if (step === 3) return "Dê um nome à conta e informe o saldo, ou marque a opção de cadastrar depois.";
+  return "";
+}
+
 function renderOnboardingLayer() {
   const o = state.onboarding;
+  const motivo = onbBlockReason(o.step);
+  const travado = !onbCanAdvance(o.step);
   const body = o.step === 1 ? renderOnbWelcome()
     : o.step === 2 ? renderOnbIncome()
     : o.step === 3 ? renderOnbAccount()
@@ -19063,14 +19138,15 @@ function renderOnboardingLayer() {
   return `<div class="onb" role="dialog" aria-modal="true" aria-label="Configuração inicial">
     <div class="onb__sheet">
       <div class="onb__head">
-        <div class="onb__brand">${svgIcon("wallet", 18)}<span>Finanças</span></div>
-        <button class="btn btn--ghost btn--sm" data-action="onb-skip" ${o.legalAccepted ? "" : "disabled"}>Pular por agora</button>
+        <div class="onb__brand">${svgIcon("wallet", 18)}<span>Cofre</span></div>
+        <button class="btn btn--ghost btn--sm" data-action="onb-skip" ${o.legalAccepted ? "" : `disabled aria-describedby="onb-block-reason"`}>Pular por agora</button>
       </div>
       ${renderOnbProgress(o.step)}
       <div class="onb__body">${body}</div>
+      ${motivo ? `<p class="onb__block-hint" id="onb-block-reason" ${travado ? "" : "hidden"}>${svgIcon("info", 14)}<span>${motivo}</span></p>` : ""}
       <div class="onb__foot">
         ${o.step > 1 ? `<button class="btn btn--secondary" data-action="onb-back">${svgIcon("chevronLeft", 16)} Voltar</button>` : `<span></span>`}
-        <button id="onb-advance" class="btn btn--primary" data-action="${last ? "onb-finish" : "onb-next"}" ${onbCanAdvance(o.step) ? "" : "disabled"}>
+        <button id="onb-advance" class="btn btn--primary" data-action="${last ? "onb-finish" : "onb-next"}" ${travado ? `disabled aria-describedby="onb-block-reason"` : ""}>
           ${last ? `${svgIcon("checkCircle", 16)} Concluir` : "Continuar"}
         </button>
       </div>
@@ -19082,8 +19158,20 @@ function renderOnboardingLayer() {
 // enquanto se digita um valor com vírgula perde o cursor. Patch pontual, mesmo
 // padrão de patchSubmitButton() na tela de lançamento.
 function patchOnboardingFooter() {
+  const pode = onbCanAdvance(state.onboarding.step);
   const btn = document.getElementById("onb-advance");
-  if (btn) btn.disabled = !onbCanAdvance(state.onboarding.step);
+  const aviso = document.getElementById("onb-block-reason");
+  if (btn) {
+    btn.disabled = !pode;
+    // O motivo só descreve o botão enquanto ele está travado. Um
+    // aria-describedby fixo faria o leitor de tela anunciar, a cada foco, uma
+    // exigência que o usuário já cumpriu.
+    if (pode) btn.removeAttribute("aria-describedby");
+    else btn.setAttribute("aria-describedby", "onb-block-reason");
+  }
+  // O aviso acompanha o botão no patch: sem isto ele continuaria na tela
+  // depois de a renda ser digitada, contradizendo um botão já liberado.
+  if (aviso) aviso.hidden = pode;
 }
 
 function renderOnbProgress(step) {
@@ -20021,7 +20109,7 @@ function renderCategoryBudgetsCard(mKey) {
   const shown = state.budgetsExpanded ? status.items : status.items.slice(0, 3);
   const totalPct = safePct(status.totals.spent, status.totals.budget);
   const headline = status.counts.over > 0
-    ? { text: `${status.counts.over} orçamento(s) estourado(s)`, color: "var(--negative)" }
+    ? { text: plural(status.counts.over, "orçamento estourado", "orçamentos estourados"), color: "var(--negative)" }
     : status.counts.warn > 0
       ? { text: `${status.counts.warn} perto do limite`, color: "var(--goal)" }
       : { text: "Tudo dentro do limite", color: "var(--positive)" };
@@ -20056,7 +20144,7 @@ function renderBudgetRow(b, thresholds) {
   return `<div class="budget-row budget-row--${b.level}">
     <div class="budget-row__head">
       <span class="icon-bubble icon-bubble--sm" data-ui-css="background:color-mix(in srgb, ${b.color} 14%, transparent); color:${b.color}">${svgIcon(b.icon, 14)}</span>
-      <span class="budget-row__name">${escapeHtml(b.name)}${b.isParent ? `<span class="budget-row__hint"> · inclui ${b.childCount} subcategoria(s)</span>` : ""}</span>
+      <span class="budget-row__name">${escapeHtml(b.name)}${b.isParent ? `<span class="budget-row__hint"> · inclui ${plural(b.childCount, "subcategoria", "subcategorias")}</span>` : ""}</span>
       <span class="budget-row__value" data-ui-css="color:${meta.color}">${fmtBRL(b.spent)}<span class="cat-value-muted"> / ${fmtBRL(b.budget)}</span></span>
     </div>
     <div class="progress budget-progress">
@@ -20399,10 +20487,17 @@ function renderAddScreen() {
             const selectedChild = children.find((ch) => ch.id === f.categoryId);
             const isSelected = f.categoryId === c.id || !!selectedChild;
             const hasChildren = children.length > 0;
+            // Com subcategoria escolhida o rótulo mostra o caminho inteiro, não só o
+            // nome do filho. Trocar "Alimentação" por "Mercado" fazia a fila de chips
+            // virar "Moradia, Mercado, Transporte": dois níveis da taxonomia lado a
+            // lado, sem nada que diga qual é qual, e o pai escolhido sumia da tela.
+            // categoryFullName é o mesmo formato já usado no seletor de regras e no
+            // rascunho do lançamento. O ícone continua sendo o do filho, que é o que
+            // confirma a escolha de dentro do seletor.
             return `
             <button class="chip ${isSelected ? "active" : ""}" data-ui-css="${isSelected ? `border-color:${c.color}; background:color-mix(in srgb, ${c.color} 10%, transparent)` : ""}" data-action="${hasChildren ? "open-category-picker" : "select-category"}" data-id="${c.id}">
               <span class="icon-bubble" data-ui-css="background:color-mix(in srgb, ${c.color} 14%, transparent); color:${c.color}">${svgIcon(selectedChild ? selectedChild.icon : c.icon, 17)}</span>
-              <span class="chip__label">${escapeHtml(selectedChild ? selectedChild.name : c.name)}</span>
+              <span class="chip__label">${escapeHtml(selectedChild ? categoryFullName(state.data, selectedChild.id) : c.name)}</span>
               ${hasChildren ? `<span class="chip__caret">${svgIcon("chevronDown", 11)}</span>` : ""}
             </button>`;
           }).join("")}
@@ -21114,7 +21209,7 @@ function renderProjectionCard() {
 
   return `<div class="card span-mt">
     <p class="card-title">Projeção de fluxo de caixa</p>
-    <p class="card-subtitle">Regressão linear com base no ritmo de gastos dos últimos ${p.dayOfMonth} dias</p>
+    <p class="card-subtitle">Regressão linear com base no ritmo de gastos ${p.dayOfMonth === 1 ? "do último dia" : `dos últimos ${p.dayOfMonth} dias`}</p>
     ${hasData ? `
     <svg viewBox="0 0 ${w} ${h}" class="projection-chart" preserveAspectRatio="none">
       ${p.income > 0 ? `<line x1="0" y1="${incomeY}" x2="${w}" y2="${incomeY}" stroke="var(--border)" stroke-width="2" stroke-dasharray="5 5"/>` : ""}
@@ -21280,7 +21375,9 @@ function renderGoalsPlanCard(model) {
       <div>
         <p class="card-title" data-ui-css="margin:0">Seu plano cabe no orçamento?</p>
         <p class="mini-card__sub">${p.capacityBasis === "historico"
-          ? `Sobra média dos últimos ${p.capacityMonths} ${p.capacityMonths === 1 ? "mês" : "meses"} com movimento`
+          ? (p.capacityMonths === 1
+            ? "Sobra média do último mês com movimento"
+            : `Sobra média dos últimos ${p.capacityMonths} meses com movimento`)
           : p.capacityBasis === "renda" ? "Estimativa de 20% da renda informada (ainda sem histórico)" : "Sem histórico para estimar a sobra"}</p>
       </div>
       <span class="plan-verdict" data-ui-css="color:${tone}">${p.feasible === false ? "Aperta" : p.feasible === true ? "Cabe" : "Sem base"}</span>
@@ -22067,7 +22164,7 @@ function renderWealthChart(series, width, height) {
   const zeroY = min < 0 ? y(0) : null;
   const lastI = series.length - 1;
 
-  return `<svg class="wealth-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="Evolução do patrimônio nos últimos ${series.length} meses">
+  return `<svg class="wealth-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="Evolução do patrimônio ${series.length === 1 ? "no último mês" : `nos últimos ${series.length} meses`}">
     <defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0%" stop-color="${color}" stop-opacity="0.26"/>
       <stop offset="100%" stop-color="${color}" stop-opacity="0"/>
@@ -22384,7 +22481,7 @@ function renderPortfolioChartCard(m) {
     </div>
     ${renderWealthChart(m.series, 640, 170)}
     <div class="wealth-axis">${m.series.map((p, i) => `<span class="${p.isCurrent ? "is-current" : ""}">${i % Math.ceil(m.series.length / 6) === 0 || p.isCurrent ? escapeHtml(p.label) : ""}</span>`).join("")}</div>
-    ${d.comparable ? `<p class="health-note">Nos últimos ${m.months} meses a carteira ${d.up ? "cresceu" : "recuou"} <b data-ui-css="color:${d.up ? "var(--positive)" : "var(--negative)"}">${fmtBRL(Math.abs(d.value))}</b> (${d.up ? "+" : "−"}${fmtNum(Math.abs(d.pct))}%). O gráfico mistura aporte novo e rendimento; para separar os dois, veja a comparação com o CDI abaixo.</p>` : ""}
+    ${d.comparable ? `<p class="health-note">${m.months === 1 ? "No último mês" : `Nos últimos ${m.months} meses`} a carteira ${d.up ? "cresceu" : "recuou"} <b data-ui-css="color:${d.up ? "var(--positive)" : "var(--negative)"}">${fmtBRL(Math.abs(d.value))}</b> (${d.up ? "+" : "−"}${fmtNum(Math.abs(d.pct))}%). O gráfico mistura aporte novo e rendimento; para separar os dois, veja a comparação com o CDI abaixo.</p>` : ""}
   </div>`;
 }
 
@@ -23699,7 +23796,7 @@ function renderAdvisorItem(c) {
 function renderSavingPlanCard(plan) {
   return `<div class="card">
     <p class="card-title">Onde estão os ${fmtBRL(plan.total)}</p>
-    <p class="card-subtitle">Comparação com a sua própria média dos últimos ${plan.baselineMonths} ${plan.baselineMonths === 1 ? "mês" : "meses"}; não com um padrão genérico. Categorias essenciais ficam fora da sugestão.</p>
+    <p class="card-subtitle">Comparação com a sua própria média ${plan.baselineMonths === 1 ? "do último mês" : `dos últimos ${plan.baselineMonths} meses`}; não com um padrão genérico. Categorias essenciais ficam fora da sugestão.</p>
     <div class="plan-list">
       ${plan.items.map((i) => `<div class="plan-row">
         <span class="icon-bubble" data-ui-css="width:28px;height:28px;background:color-mix(in srgb, ${i.color} 14%, transparent); color:${i.color}">${svgIcon(i.icon, 14)}</span>
@@ -24594,7 +24691,21 @@ function renderImportScreen() {
 
 function renderImportReview(rows) {
   const included = rows.filter((r) => r.include);
-  const totalIn = included.reduce((s, r) => s + r.amount, 0);
+
+  // O "total" antigo somava receita e despesa no mesmo balde e devolvia um
+  // número que não existe em lugar nenhum do extrato: R$ 5.420,00 de salário
+  // mais R$ 1.830,25 de gastos viravam "total R$ 7.250,25", que não é nem o
+  // que entrou, nem o que saiu, nem o saldo entre os dois. As duas direções
+  // andam separadas. r.amount é sempre a magnitude; quem dá o sinal é r.type.
+  // sumMoney trabalha em centavos inteiros, ao contrário do reduce com + que
+  // acumulava erro de float a cada linha do arquivo.
+  const totalEntradas = sumMoney(included.filter((r) => r.type === "income"), (r) => r.amount);
+  const totalSaidas = sumMoney(included.filter((r) => r.type !== "income"), (r) => r.amount);
+  // Extrato só de gastos é o caso comum. Mostrar "R$ 0,00 em entradas" ali
+  // seria ruído, então cada direção só aparece quando tem valor.
+  const partesTotal = [];
+  if (totalEntradas > 0) partesTotal.push(`${fmtBRL(totalEntradas)} em entradas`);
+  if (totalSaidas > 0) partesTotal.push(`${fmtBRL(totalSaidas)} em saídas`);
 
   // A DATA DE ABERTURA DA CONTA MORDE MAIS FORTE AQUI.
   //
@@ -24616,7 +24727,7 @@ function renderImportReview(rows) {
       <p class="card-title">Revisar lançamentos (${rows.length})</p>
       <button class="icon-btn" data-action="import-cancel" aria-label="Cancelar importação">${svgIcon("x", 16)}</button>
     </div>
-    <p class="card-subtitle">${(rows.meta && rows.meta.format ? rows.meta.format.toUpperCase() + " · " : "")}${included.length} selecionados para importar · total ${fmtBRL(totalIn)}. Duplicados já vêm desmarcados${rows.meta && rows.meta.skipped ? ` · ${rows.meta.skipped} linha(s) ignorada(s)` : ""}.</p>
+    <p class="card-subtitle">${(rows.meta && rows.meta.format ? rows.meta.format.toUpperCase() + " · " : "")}${plural(included.length, "selecionado para importar", "selecionados para importar")}${partesTotal.length ? ` · ${partesTotal.join(" e ")}` : ""}. Duplicados já vêm desmarcados${rows.meta && rows.meta.skipped ? ` · ${plural(rows.meta.skipped, "linha ignorada", "linhas ignoradas")}` : ""}.</p>
     ${anterioresAoSaldo ? `<div class="import-notice">${svgIcon("info", 16)}<div>
       <b>${anterioresAoSaldo} ${anterioresAoSaldo === 1 ? "lançamento é anterior" : "lançamentos são anteriores"} à abertura de ${escapeHtml(contaDestino.name)} em ${fmtDateFull(aberturaConta)}.</b>
       <span>${anterioresAoSaldo === 1 ? "Ele entra" : "Eles entram"} nas despesas, categorias e gráficos, mas não ${anterioresAoSaldo === 1 ? "altera" : "alteram"} o saldo da conta: o saldo inicial que você informou já inclui esse período. Para que ${anterioresAoSaldo === 1 ? "ele conte" : "eles contem"} no saldo, edite a conta e recue a data de abertura.</span>
@@ -24634,7 +24745,7 @@ function renderImportReview(rows) {
         <span class="import-row__amount ${r.type === "income" ? "tx-amount--income" : ""}">${r.type === "income" ? "+" : "-"}${fmtBRL(r.amount)}</span>
       </div>`).join("")}
     </div>
-    <button class="btn btn--primary btn--block" data-ui-css="margin-top:14px" data-action="import-confirm" ${included.length === 0 ? "disabled" : ""}>Importar ${included.length} lançamento(s)</button>
+    <button class="btn btn--primary btn--block" data-ui-css="margin-top:14px" data-action="import-confirm" ${included.length === 0 ? "disabled" : ""}>Importar ${plural(included.length, "lançamento", "lançamentos")}</button>
     <button class="btn btn--ghost btn--block btn--sm" data-ui-css="margin-top:8px" data-action="nav" data-tab="rules">
       ${svgIcon("tag", 14)} Corrigindo a mesma categoria várias vezes? Crie uma regra
     </button>
@@ -24745,7 +24856,7 @@ function renderAllScreen() {
           placeholder="Buscar recurso (ex: fatura, juros, meta)" autocomplete="off" />
         ${query ? `<button class="icon-btn icon-btn--muted" data-action="all-search-clear" aria-label="Limpar busca">${svgIcon("x", 15)}</button>` : ""}
       </div>
-      ${query ? `<p class="field-hint" data-ui-css="margin-top:8px">${total} resultado(s) para “${escapeHtml(query)}”.</p>` : ""}
+      ${query ? `<p class="field-hint" data-ui-css="margin-top:8px">${plural(total, "resultado", "resultados")} para “${escapeHtml(query)}”.</p>` : ""}
     </div>
 
     ${total === 0 ? `<div class="card">
@@ -24851,7 +24962,7 @@ function renderCustomRulesCard(cfg) {
     <div class="settings-row-header">
       <div>
         <p class="card-title" data-ui-css="margin:0">Suas regras</p>
-        <p class="card-subtitle" data-ui-css="margin:2px 0 0">${cfg.custom.length === 0 ? "Nenhuma regra criada ainda." : `${cfg.custom.length} regra(s) · ${cfg.custom.filter((r) => r.enabled).length} ativa(s)`}</p>
+        <p class="card-subtitle" data-ui-css="margin:2px 0 0">${cfg.custom.length === 0 ? "Nenhuma regra criada ainda." : `${plural(cfg.custom.length, "regra", "regras")} · ${cfg.custom.filter((r) => r.enabled).length} ${pluralWord(cfg.custom.filter((r) => r.enabled).length, "ativa", "ativas")}`}</p>
       </div>
       ${form ? "" : `<button class="btn btn--primary btn--sm" data-action="rule-new">${svgIcon("plus", 15)} Nova</button>`}
     </div>
@@ -24937,7 +25048,7 @@ function renderRuleApplyCard() {
 
     ${preview ? (preview.count === 0
       ? `<div class="inline-note">${svgIcon("checkCircle", 16)}<span>Nenhum lançamento em “Outros” casou com as regras atuais.</span></div>`
-      : `<div class="inline-note">${svgIcon("info", 16)}<span><b>${preview.count}</b> lançamento(s) mudariam de categoria.</span></div>
+      : `<div class="inline-note">${svgIcon("info", 16)}<span><b>${preview.count}</b> ${pluralWord(preview.count, "lançamento mudaria", "lançamentos mudariam")} de categoria.</span></div>
          <div class="rule-preview-list">
            ${preview.changes.slice(0, 8).map((c) => `<div class="rule-preview-row">
              <span class="rule-preview-row__desc">${escapeHtml(c.description || "(sem descrição)")}</span>
@@ -24967,7 +25078,7 @@ function renderBuiltinRulesCard(cfg) {
     <div class="settings-row-header">
       <div>
         <p class="card-title" data-ui-css="margin:0">Regras de fábrica</p>
-        <p class="card-subtitle" data-ui-css="margin:2px 0 0">${BUILTIN_CATEGORY_RULES.length} dicionários prontos${changed > 0 ? ` · ${changed} alterado(s) por você` : ""}</p>
+        <p class="card-subtitle" data-ui-css="margin:2px 0 0">${BUILTIN_CATEGORY_RULES.length} dicionários prontos${changed > 0 ? ` · ${plural(changed, "alterado", "alterados")} por você` : ""}</p>
       </div>
       <button class="btn btn--ghost btn--sm" data-action="rules-toggle-builtins">
         ${open ? "Ocultar" : "Ver todas"} ${svgIcon(open ? "chevronUp" : "chevronDown", 14)}
@@ -24992,7 +25103,7 @@ function renderBuiltinRulesCard(cfg) {
           </select>
         </div>`;
       }).join("")}
-      ${changed > 0 ? `<button class="btn btn--ghost btn--sm btn--block" data-action="rules-builtin-reset" data-ui-css="margin-top:8px">${svgIcon("refresh", 15)} Restaurar as ${changed} regra(s) de fábrica alterada(s)</button>` : ""}
+      ${changed > 0 ? `<button class="btn btn--ghost btn--sm btn--block" data-action="rules-builtin-reset" data-ui-css="margin-top:8px">${svgIcon("refresh", 15)} Restaurar ${plural(changed, "regra de fábrica alterada", "regras de fábrica alteradas")}</button>` : ""}
     </div>`}
   </div>`;
 }
@@ -25184,7 +25295,7 @@ function renderCategoriesOverviewCard(model) {
 
   return `<div class="card cat-overview">
     <p class="card-title" data-ui-css="margin-bottom:4px">Como seus gastos estão organizados</p>
-    <p class="card-subtitle">${totals.parents} categoria(s) principais e ${totals.children} subcategoria(s), com ${fmtBRL(totals.spent)} classificados em ${escapeHtml(monthName)}.</p>
+    <p class="card-subtitle">${plural(totals.parents, "categoria principal", "categorias principais")} e ${plural(totals.children, "subcategoria", "subcategorias")}, com ${fmtBRL(totals.spent)} classificados em ${escapeHtml(monthName)}.</p>
 
     ${totals.spent > 0 ? `<div class="segment-bar cat-overview__bar" role="img" aria-label="Divisão dos gastos do mês entre necessidades, desejos e futuro">
       ${segments.filter((s) => s.pct > 0).map((s) => `<span class="cat-overview__seg cat-overview__seg--${s.group}" data-ui-css="width:${s.pct}%"></span>`).join("")}
@@ -25291,7 +25402,7 @@ function renderCategoryGroupsView(model) {
         <span class="icon-bubble cat-group-card__icon cat-group-card__icon--${group}">${svgIcon(GROUP_ICONS[group], 18)}</span>
         <div class="cat-group-card__text">
           <p class="card-title" data-ui-css="margin:0">${GROUP_LABELS[group]}</p>
-          <p class="card-subtitle" data-ui-css="margin:3px 0 0">${items.length} categoria(s) · ${fmtBRL(spent)} neste mês</p>
+          <p class="card-subtitle" data-ui-css="margin:3px 0 0">${plural(items.length, "categoria", "categorias")} · ${fmtBRL(spent)} neste mês</p>
         </div>
         ${allocated > 0 ? `<span class="cat-group-card__pct ${over ? "is-over" : ""}">${Math.round(pct)}%</span>` : ""}
       </div>
@@ -25410,7 +25521,7 @@ function renderCategoryEditorModal() {
         </div>
         <p class="field-hint">${canBeChild
           ? "Subcategorias somam no teto da principal e continuam aparecendo separadas nas análises."
-          : `Esta categoria tem ${childCount} subcategoria(s), então ela mesma precisa continuar sendo principal.`}</p>
+          : `Esta categoria tem ${plural(childCount, "subcategoria", "subcategorias")}, então ela mesma precisa continuar sendo principal.`}</p>
       </div>
 
       <div class="field cat-editor__field">
@@ -25452,7 +25563,7 @@ function renderCategoryEditorModal() {
 
       ${draft.confirmDelete ? `<div class="cat-editor__danger">
         <p class="cat-editor__danger-title">${svgIcon("alertTriangle", 15)} Excluir “${escapeHtml(existing ? existing.name : previewName)}”?</p>
-        <p class="cat-editor__danger-text">${childCount > 0 ? `As ${childCount} subcategoria(s) também serão excluídas. ` : ""}Os lançamentos não são apagados: eles passam para “Outros”.</p>
+        <p class="cat-editor__danger-text">${childCount > 0 ? `${plural(childCount, "subcategoria também será excluída", "subcategorias também serão excluídas")}. ` : ""}Os lançamentos não são apagados: eles passam para “Outros”.</p>
         <div class="cat-editor__danger-actions">
           <button class="btn btn--ghost btn--sm" data-action="cat-editor-delete-cancel">Manter categoria</button>
           <button class="btn btn--danger btn--sm" data-action="cat-editor-delete-confirm">${svgIcon("trash", 14)} Excluir mesmo assim</button>
@@ -25837,7 +25948,7 @@ function renderCategoriesSettingsCard() {
   // O rodapé responde "e daí?": a linha muda conforme o estado, porque
   // "0 estouradas" quer dizer coisas opostas com e sem teto definido.
   const rodape = estouradas > 0
-    ? `${estouradas} categoria(s) passaram do teto neste mês.`
+    ? `${plural(estouradas, "categoria passou", "categorias passaram")} do teto neste mês.`
     : comTeto > 0
       ? "Nenhum teto estourado neste mês."
       : "Nenhum teto definido ainda; a central é onde se cria o primeiro.";
@@ -25886,7 +25997,7 @@ function renderBudgetSettingsCard() {
       </div>
     </div>
     ${status.items.length > 0 ? `<p class="footnote" data-ui-css="text-align:left; margin-top:10px">
-      ${status.counts.total} Categoria(s) com Teto · ${status.counts.warn} em atenção · ${status.counts.over} estourada(s) neste mês.
+      ${plural(status.counts.total, "Categoria com Teto", "Categorias com Teto")} · ${status.counts.warn} em atenção · ${status.counts.over} ${pluralWord(status.counts.over, "estourada", "estouradas")} neste mês.
     </p>` : `<p class="footnote" data-ui-css="text-align:left; margin-top:10px">Nenhum teto definido ainda; abra a central de categorias, logo abaixo, para criar o primeiro.</p>`}
   </div>`;
 }
@@ -25964,7 +26075,7 @@ function renderBackupPreview(b) {
     </div>
 
     <p class="field-hint" data-ui-css="margin-top:10px">${merge
-      ? `Mantém tudo o que já existe aqui e acrescenta o que faltar. Lançamentos repetidos são detectados por conteúdo e ignorados. ${mergedPreview.stats.added} novo(s), ${mergedPreview.stats.skipped} já existente(s).`
+      ? `Mantém tudo o que já existe aqui e acrescenta o que faltar. Lançamentos repetidos são detectados por conteúdo e ignorados. ${plural(mergedPreview.stats.added, "novo", "novos")}, ${mergedPreview.stats.skipped} já ${pluralWord(mergedPreview.stats.skipped, "existente", "existentes")}.`
       : `<b data-ui-css="color:var(--negative)">Apaga tudo o que está neste aparelho</b> e deixa apenas o conteúdo do arquivo. Use quando estiver migrando para um celular novo.`}</p>
 
     <div class="settings-actions" data-ui-css="margin-top:12px">
@@ -26111,7 +26222,7 @@ function renderPrivacyScreen() {
     </div>
 
     <div class="card">
-      <div class="settings-row-header"><div><p class="card-title">Diagnóstico local</p><p class="card-subtitle">${diagnostics.total} ocorrência(s) nos últimos 30 dias. Limite de 50.</p></div><span class="status-badge">Não enviado</span></div>
+      <div class="settings-row-header"><div><p class="card-title">Diagnóstico local</p><p class="card-subtitle">${plural(diagnostics.total, "ocorrência", "ocorrências")} nos últimos 30 dias. Limite de 50.</p></div><span class="status-badge">Não enviado</span></div>
       <p class="card-subtitle">O registro contém somente data, área, código controlado, versão, schema e estado de conexão. Mensagens, pilhas, valores, descrições, contas, categorias, metas, arquivos e identificadores não entram.</p>
       <div class="button-row">
         <button class="btn btn--secondary" data-action="diagnostics-export" ${diagnostics.total ? "" : "disabled"}>${svgIcon("download", 15)} Exportar resumo</button>
@@ -26242,7 +26353,6 @@ function accountSyncCard() {
 // não auditar. E a decisão nunca é gravada por abrir ou fechar o cartão.
 function accountLinkParts(resumo) {
   if (!resumo) return "";
-  const plural = (n, um, muitos) => `${n} ${n > 1 ? muitos : um}`;
   const partes = [];
   if (resumo.transactions) partes.push(plural(resumo.transactions, "lançamento", "lançamentos"));
   if (resumo.accounts) partes.push(plural(resumo.accounts, "conta", "contas"));
@@ -26290,7 +26400,7 @@ function accountGuestLinkCard() {
   } else if (link.phase === "linked") {
     const stats = link.stats || null;
     corpo = `<p class="card-subtitle">O conteúdo deste aparelho já faz parte da conta e está no servidor.</p>${
-      stats ? `<p class="field-hint">Incorporados: ${escapeHtml(String(Number(stats.added) || 0))} lançamento(s), ${escapeHtml(String(Number(stats.goals) || 0))} meta(s), ${escapeHtml(String(Number(stats.accounts) || 0))} conta(s).</p>` : ""
+      stats ? `<p class="field-hint">Incorporados: ${escapeHtml(plural(Number(stats.added) || 0, "lançamento", "lançamentos"))}, ${escapeHtml(plural(Number(stats.goals) || 0, "meta", "metas"))}, ${escapeHtml(plural(Number(stats.accounts) || 0, "conta", "contas"))}.</p>` : ""
     }`;
   } else if (link.phase === "dismissed") {
     corpo = `<p class="card-subtitle">Você escolheu manter ${escapeHtml(conteudo || "esses dados")} fora da conta. Nada foi apagado.</p>
@@ -26871,7 +26981,7 @@ function onClick(e) {
       if (!expenseIds.size) { notify("Selecione ao menos uma saída para alterar a categoria", "warn"); break; }
       setData((d) => ({ ...d, transactions: d.transactions.map((tx) => expenseIds.has(tx.id) ? updateTransaction(tx, { categoryId }) : tx) }));
       state.movementSelectedIds = []; state.movementBulkCategoryId = "";
-      notify(`${expenseIds.size} lançamento(s) atualizado(s)`);
+      notify(plural(expenseIds.size, "lançamento atualizado", "lançamentos atualizados"));
       break;
     }
     case "movement-bulk-delete": {
@@ -26879,7 +26989,7 @@ function onClick(e) {
       if (!ids.length) break;
       requestConfirmation({
         title: "Excluir lançamentos selecionados?",
-        message: `${ids.length} lançamento(s) serão removidos do histórico.`,
+        message: `${plural(ids.length, "lançamento será removido", "lançamentos serão removidos")} do histórico.`,
         confirmLabel: "Excluir lançamentos", tone: "danger",
         onConfirm: () => { setData((d) => removeTransactionsWithIntegrity(d, ids)); state.movementSelectedIds = []; state.movementBulkCategoryId = ""; notify("Lançamentos excluídos"); },
       });
@@ -27068,7 +27178,7 @@ function onClick(e) {
       if (!preview || preview.count === 0) break;
       setData((d) => applyRulesToTransactions(d, preview.changes));
       state.rules.applyPreview = null;
-      notify(`${preview.count} lançamento(s) recategorizado(s)`);
+      notify(plural(preview.count, "lançamento recategorizado", "lançamentos recategorizados"));
       break;
     }
 
@@ -27084,10 +27194,10 @@ function onClick(e) {
     case "account-save": {
       const f = state.accountsUi.accountForm; if (!f) break;
       const openingBalance = parseMoneyInput(f.openingBalance || "0");
-      if (!String(f.name).trim() || !Number.isFinite(openingBalance)) {
+      if (!String(f.name).trim() || !moneyWithinMax(openingBalance)) {
         showFormErrors({
           ...(String(f.name).trim() ? {} : { "account-name-input": "Informe o nome da conta." }),
-          ...(Number.isFinite(openingBalance) ? {} : { "account-balance-input": "Informe um saldo válido com até duas casas decimais." }),
+          ...(moneyWithinMax(openingBalance) ? {} : { "account-balance-input": Number.isFinite(openingBalance) ? moneyMaxMessage("Saldo") : "Informe um saldo válido com até duas casas decimais." }),
         }, "Revise os dados da conta"); break;
       }
       setData((d) => {
@@ -27115,7 +27225,7 @@ function onClick(e) {
     case "account-reconcile-cancel": state.accountsUi.reconcileId = null; state.accountsUi.reconcileValue = ""; render(); break;
     case "account-reconcile-save": {
       const actual = parseMoneyInput(state.accountsUi.reconcileValue);
-      if (!Number.isFinite(actual)) { showFormErrors({ "reconcile-balance-input": "Informe o saldo visto no banco." }); break; }
+      if (!moneyWithinMax(actual)) { showFormErrors({ "reconcile-balance-input": Number.isFinite(actual) ? moneyMaxMessage("Saldo") : "Informe o saldo visto no banco." }); break; }
       const result = reconcileAccount(state.data,id,actual,todayIso());
       setData(() => result.data);
       state.accountsUi.reconcileId = null; state.accountsUi.reconcileValue = "";
@@ -27158,11 +27268,11 @@ function onClick(e) {
       const f = state.accountsUi.transferForm; if (!f) break;
       const amount = parseMoneyInput(f.amount);
       const transfer = makeAccountTransfer({ ...f, amount }, state.data.accounts);
-      if (!transfer) {
+      if (!transfer || !moneyWithinMax(amount)) {
         showFormErrors({
           ...(f.fromAccountId ? {} : { "transfer-from-select": "Escolha a conta de origem." }),
           ...(f.toAccountId && f.toAccountId !== f.fromAccountId ? {} : { "transfer-to-select": "Escolha uma conta de destino diferente." }),
-          ...(amount > 0 ? {} : { "transfer-amount-input": "Informe um valor maior que zero." }),
+          ...(amount > 0 && moneyWithinMax(amount) ? {} : { "transfer-amount-input": amount > 0 ? moneyMaxMessage("Valor") : "Informe um valor maior que zero." }),
         }, "Revise os dados da transferência"); break;
       }
       setData((d) => ({ ...d, accountTransfers:[...d.accountTransfers,transfer] }));
@@ -27722,7 +27832,7 @@ function onClick(e) {
         creditCardId: t.creditCardId || null,
       }));
       setData((d) => ({ ...d, transactions: [...d.transactions, ...newTx], dismissedCarryForwardMonth: mKey }));
-      notify(`${newTx.length} gasto(s) fixo(s) lançado(s)`);
+      notify(plural(newTx.length, "gasto fixo lançado", "gastos fixos lançados"));
       break;
     }
 
@@ -27801,9 +27911,9 @@ function onClick(e) {
     case "submit-tx": {
       const f = state.form;
       const amt = parseMoneyInput(f.amount);
-      if (!(amt > 0) || (f.type === "expense" && !f.categoryId)) {
+      if (!(amt > 0) || !moneyWithinMax(amt) || (f.type === "expense" && !f.categoryId)) {
         showFormErrors({
-          ...(amt > 0 ? {} : { "tx-amount-input": "Informe um valor maior que zero, com até duas casas decimais." }),
+          ...(amt > 0 && moneyWithinMax(amt) ? {} : { "tx-amount-input": amt > 0 ? moneyMaxMessage("Valor") : "Informe um valor maior que zero, com até duas casas decimais." }),
           ...(f.type !== "expense" || f.categoryId ? {} : { "tx-category-group": "Escolha uma categoria." }),
         }, "Revise os dados do lançamento"); break;
       }
@@ -27871,10 +27981,14 @@ function onClick(e) {
     case "goal-template": {
       const tpl = goalTemplateById(value);
       if (!tpl) break;
+      // Mesmo formato de string do caminho de edição ("1234,56"), senão o campo
+      // abre com ponto decimal e o saneamento de entrada o trata como milhar.
+      const alvoSugerido = goalTemplateTarget(tpl, state.data);
       state.goalForm = {
         ...freshGoalForm(), show: true,
         name: tpl.name, icon: GOAL_ICON_OPTIONS.includes(tpl.icon) ? tpl.icon : "piggy",
         deadline: goalTemplateDeadline(tpl),
+        target: alvoSugerido > 0 ? alvoSugerido.toFixed(2).replace(".", ",") : "",
       };
       state.editingGoalId = null;
       render();
@@ -27904,10 +28018,10 @@ function onClick(e) {
       const target = parseMoneyInput(gf.target);
       const savedUpfront = moneyOrZero(gf.savedUpfront);
       const monthlyPlan = moneyOrZero(gf.monthlyPlan);
-      if (!gf.name.trim() || !(target > 0) || savedUpfront < 0 || monthlyPlan < 0) {
+      if (!gf.name.trim() || !(target > 0) || !moneyWithinMax(target) || savedUpfront < 0 || monthlyPlan < 0) {
         showFormErrors({
           ...(gf.name.trim() ? {} : { "goal-name-input": "Informe o nome da meta." }),
-          ...(target > 0 ? {} : { "goal-target-input": "Informe um valor alvo maior que zero." }),
+          ...(target > 0 && moneyWithinMax(target) ? {} : { "goal-target-input": target > 0 ? moneyMaxMessage("Valor alvo") : "Informe um valor alvo maior que zero." }),
           ...(savedUpfront >= 0 ? {} : { "goal-saved-input": "O valor inicial não pode ser negativo." }),
           ...(monthlyPlan >= 0 ? {} : { "goal-plan-input": "O aporte mensal não pode ser negativo." }),
         }, "Revise os dados da meta"); break;
@@ -28178,7 +28292,7 @@ function onClick(e) {
       const newTx = buildTransactionsFromRows(included, meta.format, defaultCashAccountId(), state.importFilename);
       setData((d) => ({ ...d, transactions: [...d.transactions, ...newTx] }));
       state.importRows = null; state.importFilename = null;
-      notify(`${newTx.length} lançamento(s) importado(s)`);
+      notify(plural(newTx.length, "lançamento importado", "lançamentos importados"));
       setState({ tab: "dashboard" });
       break;
     }
@@ -29238,7 +29352,7 @@ function renderSideNav() {
   return `<nav class="side-nav" aria-label="Navegação principal">
     <div class="side-nav__brand">
       <div class="brand-mark">${svgIcon("wallet", 19)}</div>
-      <span>Finanças</span>
+      <span>Cofre</span>
     </div>
     ${NAV.map((item) => `
       <button class="side-nav__item ${state.tab === item.id ? "active" : ""}" data-action="nav" data-tab="${item.id}" ${state.tab === item.id ? 'aria-current="page"' : ""}>
@@ -29297,7 +29411,7 @@ function keyOfCurrentMonth() { return keyOfDate(new Date()); }
 function exportTransactionsCsv() {
   if (!state.data.transactions.length) { notify("Nenhum lançamento para exportar"); return; }
   downloadFile(backupFilename("csv").replace("backup", "lancamentos"), buildTransactionsCsv(state.data), "text/csv;charset=utf-8;");
-  notify(`${state.data.transactions.length} lançamento(s) exportado(s) em CSV`);
+  notify(`${plural(state.data.transactions.length, "lançamento exportado", "lançamentos exportados")} em CSV`);
 }
 
 function exportBudgetsCsv() {
@@ -29315,7 +29429,7 @@ function renderLastBackupLine() {
   if (!last) {
     if (total === 0) return "";
     return `<p class="field-hint" data-ui-css="color:var(--negative)">
-      ${svgIcon("alertTriangle", 12)} Você ainda não exportou nenhum backup. Estes ${total} lançamento(s) existem só neste aparelho.
+      ${svgIcon("alertTriangle", 12)} Você ainda não exportou nenhum backup. ${total === 1 ? "Este" : "Estes"} ${plural(total, "lançamento existe", "lançamentos existem")} só neste aparelho.
     </p>`;
   }
   const dias = Math.max(0, Math.floor((Date.parse(`${todayIso()}T12:00:00`) - Date.parse(`${last}T12:00:00`)) / 86400000));
@@ -29333,7 +29447,7 @@ function exportBackupJson() {
   // do download: se o navegador bloquear a gravação do arquivo, o app não deve
   // registrar um backup que não existe.
   setData((d) => ({ ...d, lastBackupAt: todayIso() }));
-  notify(`Backup com ${envelope.counts.transactions} lançamento(s) exportado`);
+  notify(`Backup com ${plural(envelope.counts.transactions, "lançamento", "lançamentos")} exportado`);
 }
 
 // Lê o arquivo escolhido e monta a PRÉVIA; nada é gravado antes do usuário
@@ -29371,12 +29485,12 @@ async function confirmBackupRestore() {
     let message;
     if (state.backup.mode === "replace") {
       ok = await FinanceStore.replaceAll(preview.data);
-      message = ok ? `Backup restaurado: ${preview.meta.counts.transactions} lançamento(s)` : "Backup carregado, mas não foi possível gravá-lo";
+      message = ok ? `Backup restaurado: ${plural(preview.meta.counts.transactions, "lançamento", "lançamentos")}` : "Backup carregado, mas não foi possível gravá-lo";
     } else {
       const { data, stats } = mergeBackupInto(state.data, preview.data);
       ok = await FinanceStore.replaceAll(data);
       message = ok
-        ? `Mesclado: ${stats.added} novo(s), ${stats.updated} atualizado(s), ${stats.skipped} já existia(m)`
+        ? `Mesclado: ${plural(stats.added, "novo", "novos")}, ${plural(stats.updated, "atualizado", "atualizados")}, ${stats.skipped} já ${pluralWord(stats.skipped, "existia", "existiam")}`
         : "Mesclagem feita em memória, mas não foi possível gravá-la";
     }
     state.data = FinanceStore.snapshot();

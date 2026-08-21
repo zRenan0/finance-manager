@@ -327,7 +327,7 @@ function renderProjectionCard() {
 
   return `<div class="card span-mt">
     <p class="card-title">Projeção de fluxo de caixa</p>
-    <p class="card-subtitle">Regressão linear com base no ritmo de gastos dos últimos ${p.dayOfMonth} dias</p>
+    <p class="card-subtitle">Regressão linear com base no ritmo de gastos ${p.dayOfMonth === 1 ? "do último dia" : `dos últimos ${p.dayOfMonth} dias`}</p>
     ${hasData ? `
     <svg viewBox="0 0 ${w} ${h}" class="projection-chart" preserveAspectRatio="none">
       ${p.income > 0 ? `<line x1="0" y1="${incomeY}" x2="${w}" y2="${incomeY}" stroke="var(--border)" stroke-width="2" stroke-dasharray="5 5"/>` : ""}

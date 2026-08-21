@@ -101,7 +101,7 @@ function renderAllScreen() {
           placeholder="Buscar recurso (ex: fatura, juros, meta)" autocomplete="off" />
         ${query ? `<button class="icon-btn icon-btn--muted" data-action="all-search-clear" aria-label="Limpar busca">${svgIcon("x", 15)}</button>` : ""}
       </div>
-      ${query ? `<p class="field-hint" data-ui-css="margin-top:8px">${total} resultado(s) para “${escapeHtml(query)}”.</p>` : ""}
+      ${query ? `<p class="field-hint" data-ui-css="margin-top:8px">${plural(total, "resultado", "resultados")} para “${escapeHtml(query)}”.</p>` : ""}
     </div>
 
     ${total === 0 ? `<div class="card">

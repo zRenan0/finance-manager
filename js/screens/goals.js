@@ -75,7 +75,9 @@ function renderGoalsPlanCard(model) {
       <div>
         <p class="card-title" data-ui-css="margin:0">Seu plano cabe no orçamento?</p>
         <p class="mini-card__sub">${p.capacityBasis === "historico"
-          ? `Sobra média dos últimos ${p.capacityMonths} ${p.capacityMonths === 1 ? "mês" : "meses"} com movimento`
+          ? (p.capacityMonths === 1
+            ? "Sobra média do último mês com movimento"
+            : `Sobra média dos últimos ${p.capacityMonths} meses com movimento`)
           : p.capacityBasis === "renda" ? "Estimativa de 20% da renda informada (ainda sem histórico)" : "Sem histórico para estimar a sobra"}</p>
       </div>
       <span class="plan-verdict" data-ui-css="color:${tone}">${p.feasible === false ? "Aperta" : p.feasible === true ? "Cabe" : "Sem base"}</span>
