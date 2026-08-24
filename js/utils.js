@@ -138,6 +138,42 @@ function splitMoney(total, parts) {
   }
   return out;
 }
+// Rateio PONDERADO, com a mesma garantia do splitMoney: a soma das partes é
+// EXATAMENTE o total. O peso decide o tamanho da fatia; o maior resto decide
+// quem fica com os centavos que a divisão deixou para trás.
+//
+// POR QUE NÃO BASTA MULTIPLICAR CADA PESO PELO TOTAL: ratear R$ 3.000,00 entre
+// cinco categorias por percentuais quebrados e arredondar cada linha separada
+// perde centavos no caminho. O usuário soma as linhas que o app mostrou, não
+// bate com o total que o app também mostrou, e conclui que a conta está errada.
+function splitMoneyByWeights(total, weights) {
+  const list = (Array.isArray(weights) ? weights : []).map((w) => {
+    const n = Number(w);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  });
+  if (list.length === 0) return [];
+  const totalWeight = list.reduce((acc, w) => acc + w, 0);
+  // Nenhum peso positivo: rateio igualitário. É a intenção mais provável de
+  // quem passou pesos zerados e nunca divide por zero.
+  if (totalWeight <= 0) return splitMoney(total, list.length);
+
+  const totalCents = moneyToCents(total);
+  const sign = totalCents < 0 ? -1 : 1;
+  const abs = Math.abs(totalCents);
+  const exact = list.map((w) => (abs * w) / totalWeight);
+  const cents = exact.map((v) => Math.floor(v));
+  let left = abs - cents.reduce((acc, v) => acc + v, 0);
+
+  // Desempate pelo índice quando dois restos são iguais: mesma entrada precisa
+  // produzir sempre a mesma saída, senão dois aparelhos sincronizados divergem
+  // em um centavo sem que nada tenha mudado.
+  const byRemainder = exact
+    .map((v, i) => ({ i, frac: v - Math.floor(v) }))
+    .sort((a, b) => (b.frac - a.frac) || (a.i - b.i));
+  for (let k = 0; k < byRemainder.length && left > 0; k++) { cents[byRemainder[k].i]++; left--; }
+
+  return cents.map((c) => moneyFromCents(sign * c));
+}
 function moneyEquals(a, b) { return moneyToCents(a) === moneyToCents(b); }
 function moneyCompare(a, b) { return moneyToCents(a) - moneyToCents(b); }
 // Percentual seguro (nunca divide por zero, sempre finito).

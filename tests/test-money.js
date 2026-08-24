@@ -74,6 +74,44 @@ casosSplit.forEach(([total, n]) => {
 eq("rateio de 100 em 3 põe o centavo extra na primeira", run(`splitMoney(100, 3)`)[0], 33.34);
 eq("rateio com zero partes não divide por zero", run(`splitMoney(10, 0)`).length, 1);
 
+console.log("\n4b. Rateio ponderado (semeadura de tetos)");
+// Mesma propriedade do rateio igualitário, agora com pesos: a soma das fatias
+// tem de ser EXATAMENTE o total. É o que impede a prévia dos tetos de mostrar
+// linhas que não somam a cota do grupo que a própria tela acabou de exibir.
+const casosPeso = [
+  [3000, [40, 30, 15, 10, 5]],
+  [1500, [50, 25, 25]],
+  [0.05, [1, 1, 1]],
+  [1234.56, [7, 3]],
+  [999.99, [1, 1, 1, 1, 1, 1, 1]],
+  [-600, [2, 1]],
+];
+casosPeso.forEach(([total, pesos]) => {
+  const fatias = run(`splitMoneyByWeights(${total}, ${JSON.stringify(pesos)})`);
+  const soma = run(`sumMoney(${JSON.stringify(fatias)})`);
+  check(`${pesos.length} fatias de ${total} somam o total`, soma === total, `somou ${soma}`);
+  check(`${pesos.length} fatias de ${total} têm a contagem certa`, fatias.length === pesos.length, `gerou ${fatias.length}`);
+});
+
+eq("peso maior recebe fatia maior", run(`splitMoneyByWeights(1000, [75, 25])`)[0], 750);
+eq("peso menor recebe o resto", run(`splitMoneyByWeights(1000, [75, 25])`)[1], 250);
+eq("pesos iguais rateiam igual", JSON.stringify(run(`splitMoneyByWeights(90, [1, 1, 1])`)), JSON.stringify([30, 30, 30]));
+// Determinismo: dois aparelhos sincronizados não podem divergir um centavo por
+// causa da ordem de desempate.
+eq("mesma entrada devolve sempre a mesma saída",
+  JSON.stringify(run(`splitMoneyByWeights(100, [1, 1, 1])`)),
+  JSON.stringify(run(`splitMoneyByWeights(100, [1, 1, 1])`)));
+eq("centavo do desempate vai para o primeiro maior resto",
+  JSON.stringify(run(`splitMoneyByWeights(100, [1, 1, 1])`)), JSON.stringify([33.34, 33.33, 33.33]));
+eq("lista de pesos vazia devolve lista vazia", run(`splitMoneyByWeights(100, []).length`), 0);
+eq("pesos todos zerados caem no rateio igualitário",
+  run(`sumMoney(splitMoneyByWeights(100, [0, 0]))`), 100);
+eq("peso negativo é tratado como zero",
+  JSON.stringify(run(`splitMoneyByWeights(100, [-5, 1])`)), JSON.stringify([0, 100]));
+eq("peso não numérico não produz NaN",
+  run(`sumMoney(splitMoneyByWeights(50, ["x", 1]))`), 50);
+eq("entrada que não é lista devolve lista vazia", run(`splitMoneyByWeights(100, null).length`), 0);
+
 console.log("\n5. Leitura de valor digitado e importado");
 // A tabela abaixo É a especificação de `parseMoneyInput`. Os dois últimos casos
 // da lista de "casas decimais" são a regressão do defeito de assimetria:

@@ -141,6 +141,42 @@ function splitMoney(total, parts) {
   }
   return out;
 }
+// Rateio PONDERADO, com a mesma garantia do splitMoney: a soma das partes é
+// EXATAMENTE o total. O peso decide o tamanho da fatia; o maior resto decide
+// quem fica com os centavos que a divisão deixou para trás.
+//
+// POR QUE NÃO BASTA MULTIPLICAR CADA PESO PELO TOTAL: ratear R$ 3.000,00 entre
+// cinco categorias por percentuais quebrados e arredondar cada linha separada
+// perde centavos no caminho. O usuário soma as linhas que o app mostrou, não
+// bate com o total que o app também mostrou, e conclui que a conta está errada.
+function splitMoneyByWeights(total, weights) {
+  const list = (Array.isArray(weights) ? weights : []).map((w) => {
+    const n = Number(w);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  });
+  if (list.length === 0) return [];
+  const totalWeight = list.reduce((acc, w) => acc + w, 0);
+  // Nenhum peso positivo: rateio igualitário. É a intenção mais provável de
+  // quem passou pesos zerados e nunca divide por zero.
+  if (totalWeight <= 0) return splitMoney(total, list.length);
+
+  const totalCents = moneyToCents(total);
+  const sign = totalCents < 0 ? -1 : 1;
+  const abs = Math.abs(totalCents);
+  const exact = list.map((w) => (abs * w) / totalWeight);
+  const cents = exact.map((v) => Math.floor(v));
+  let left = abs - cents.reduce((acc, v) => acc + v, 0);
+
+  // Desempate pelo índice quando dois restos são iguais: mesma entrada precisa
+  // produzir sempre a mesma saída, senão dois aparelhos sincronizados divergem
+  // em um centavo sem que nada tenha mudado.
+  const byRemainder = exact
+    .map((v, i) => ({ i, frac: v - Math.floor(v) }))
+    .sort((a, b) => (b.frac - a.frac) || (a.i - b.i));
+  for (let k = 0; k < byRemainder.length && left > 0; k++) { cents[byRemainder[k].i]++; left--; }
+
+  return cents.map((c) => moneyFromCents(sign * c));
+}
 function moneyEquals(a, b) { return moneyToCents(a) === moneyToCents(b); }
 function moneyCompare(a, b) { return moneyToCents(a) - moneyToCents(b); }
 // Percentual seguro (nunca divide por zero, sempre finito).
@@ -9220,6 +9256,122 @@ function suggestBudgetFor(data, categoryId) {
   if (months === 0) return null;
   const avg = moneyFromCents(Math.round(cents / months));
   return Math.max(10, Math.ceil(avg / 10) * 10);
+}
+
+// ------------------------------------------------------------------------------
+// SEMEADURA DE TETOS A PARTIR DA REGRA x/x/x
+// ------------------------------------------------------------------------------
+// `suggestBudgetFor` acima resolve o caso de quem JÁ TEM histórico: ele olha os
+// três meses anteriores e devolve uma média. No primeiro dia de uso não existe
+// mês anterior nenhum, então ele devolve null para tudo e o usuário termina a
+// configuração inicial com a regra 50/30/20 escolhida e ZERO teto definido.
+//
+// O efeito é que o motor deste arquivo inteiro (as faixas de 80% e 100%, a
+// projeção de ritmo, o cartão de orçamentos) fica dormindo até a pessoa digitar
+// teto por teto na mão. Escolher um modelo de divisão vira decoração.
+//
+// Esta parte fecha esse buraco pelo outro lado: sem histórico, mas COM renda e
+// COM a regra escolhida, dá para propor um teto por categoria. O número não vem
+// do passado da pessoa, vem da divisão que ela mesma acabou de escolher.
+//
+// Três decisões que valem a explicação:
+//
+//  1. SÓ CATEGORIAS PRINCIPAIS. O gasto de uma subcategoria já conta para o teto
+//     da mãe (ver spentForCategory). Semear as duas criaria dois tetos medindo o
+//     mesmo gasto, e o total do cartão contaria duas vezes.
+//
+//  2. O QUE JÁ TEM TETO É INTOCÁVEL, e o valor dele SAI da cota do grupo. Se
+//     Moradia já tem R$ 2.000 dos R$ 3.000 de Necessidades, as outras dividem os
+//     R$ 1.000 que sobraram, não os R$ 3.000 inteiros. Ignorar isso proporia um
+//     orçamento que estoura a renda no papel, antes de qualquer gasto.
+//
+//  3. PESOS, NÃO PARTES IGUAIS. Moradia e Assinaturas não cabem no mesmo tamanho.
+//     Os pesos abaixo são um ponto de partida do app para um domicílio urbano
+//     brasileiro típico, não uma regra de mercado nem critério de aprovação de
+//     crédito: são relativos DENTRO do grupo e a pessoa ajusta cada linha depois.
+const BUDGET_SEED_WEIGHTS = {
+  // Necessidades
+  moradia: 40, alimentacao: 30, transporte: 15, saude: 10, educacao: 5,
+  // Desejos
+  lazer: 50, assinaturas: 25, outros: 25,
+  // Futuro
+  investimento: 100,
+};
+
+// Categoria criada pelo usuário não está na tabela. Um peso médio dá a ela uma
+// fatia real sem deixá-la dominar o grupo; a normalização cuida do resto.
+const BUDGET_SEED_DEFAULT_WEIGHT = 10;
+
+function budgetSeedWeightOf(category) {
+  const w = BUDGET_SEED_WEIGHTS[category && category.id];
+  return typeof w === "number" && w > 0 ? w : BUDGET_SEED_DEFAULT_WEIGHT;
+}
+
+function budgetSeedGroupOf(category) {
+  return BUDGET_GROUPS.includes(category && category.group) ? category.group : "necessidade";
+}
+
+function hasBudgetCeiling(category) {
+  return !!category && typeof category.budget === "number" && category.budget > 0;
+}
+
+// Devolve o que SERIA gravado, sem gravar nada. A tela usa isso para mostrar a
+// prévia antes de o usuário confirmar, e a gravação usa o mesmo resultado, para
+// prévia e efeito nunca discordarem.
+//
+// Formato: { income, groups: [...], items: [...], kept: [...] }
+//   items  categorias que receberiam teto novo
+//   kept   categorias preservadas porque já tinham teto
+function seedBudgetsFromSplit(data, income, split) {
+  const renda = roundMoney(Number(income) || 0);
+  const regra = { ...defaultBudgetSplit(), ...(split || {}) };
+  const groups = [], items = [], kept = [];
+  if (!(renda > 0)) return { income: 0, groups, items, kept };
+
+  const principais = (data && data.categories ? data.categories : []).filter((c) => !c.parentId);
+
+  BUDGET_GROUPS.forEach((group) => {
+    const pct = Number(regra[group]) || 0;
+    const allocated = mulMoney(renda, pct / 100);
+    const doGrupo = principais.filter((c) => budgetSeedGroupOf(c) === group);
+    const comTeto = doGrupo.filter(hasBudgetCeiling);
+    const semTeto = doGrupo.filter((c) => !hasBudgetCeiling(c));
+    const committed = sumMoney(comTeto, (c) => c.budget);
+    const available = subMoney(allocated, committed);
+
+    comTeto.forEach((c) => kept.push({ categoryId: c.id, name: c.name, group, budget: roundMoney(c.budget) }));
+
+    const novos = [];
+    if (available > 0 && semTeto.length > 0) {
+      const fatias = splitMoneyByWeights(available, semTeto.map(budgetSeedWeightOf));
+      semTeto.forEach((c, i) => {
+        // Uma fatia de zero não é teto: gravar R$ 0,00 faria a categoria nascer
+        // permanentemente estourada, com alerta vermelho no primeiro gasto.
+        if (!(fatias[i] > 0)) return;
+        const item = { categoryId: c.id, name: c.name, icon: c.icon, color: c.color, group, budget: fatias[i] };
+        novos.push(item);
+        items.push(item);
+      });
+    }
+
+    groups.push({ group, pct, allocated, committed, available, items: novos, keptCount: comTeto.length });
+  });
+
+  return { income: renda, groups, items, kept };
+}
+
+// Aplica a semeadura devolvendo uma lista NOVA de categorias. Puro: não grava,
+// não toca no DOM, e a checagem de teto existente é refeita aqui de propósito;
+// se a prévia foi calculada antes de o usuário digitar um teto na outra aba, é
+// esta segunda checagem que impede o valor dele de ser sobrescrito.
+function categoriesWithSeededBudgets(categories, seeds) {
+  const porId = new Map();
+  ((seeds && seeds.items) || []).forEach((s) => porId.set(s.categoryId, s.budget));
+  if (porId.size === 0) return categories || [];
+  return (categories || []).map((c) => {
+    if (!porId.has(c.id) || hasBudgetCeiling(c)) return c;
+    return { ...c, budget: porId.get(c.id) };
+  });
 }
 
 // source: js/charts.js
@@ -19292,7 +19444,50 @@ function renderOnbSplit() {
       <span class="onb__preview-value">${fmtBRL(mulMoney(income, s[g] / 100))}</span>
     </div>`).join("")}
   </div>` : ""}
+  ${renderOnbSeedPreview()}
   <p class="field-hint">Estourar um grupo nunca bloqueia um lançamento. O app avisa e a decisão continua sua.</p>`;
+}
+
+// POR QUE A PRÉVIA DOS TETOS EXISTE.
+//
+// Escolher "50 / 30 / 20" gravava só três percentuais. O motor de tetos por
+// categoria (budgets.js) fica mudo enquanto nenhuma categoria tem limite, e a
+// sugestão automática dele depende de histórico, que no primeiro dia não existe.
+// Resultado: a pessoa escolhia um modelo de orçamento e não ganhava orçamento.
+//
+// Agora a conclusão semeia um teto por categoria principal a partir da regra
+// escolhida. Como isso grava coisa que o usuário não digitou, ele precisa ver o
+// que vai acontecer ANTES de concluir; daí a prévia ficar aberta a um toque, e
+// não escondida em uma tela de ajustes que ele ainda não sabe que existe.
+function renderOnbSeedPreview() {
+  const income = onbIncome();
+  if (!(income > 0)) return "";
+  const seeds = seedBudgetsFromSplit(state.data, income, state.onboarding.split);
+  if (seeds.items.length === 0 && seeds.kept.length === 0) return "";
+
+  const n = seeds.items.length;
+  const resumo = n === 0
+    ? "Seus tetos atuais serão mantidos"
+    : (n === 1 ? "Ver o teto sugerido para 1 categoria" : `Ver os tetos sugeridos para ${n} categorias`);
+
+  return `<details class="onb-seed">
+    <summary class="onb-seed__summary">${svgIcon("target", 14)}<span>${resumo}</span></summary>
+    <div class="onb-seed__body">
+      ${n > 0 ? `<div class="onb-seed__list">
+        ${seeds.items.map((item) => `<div class="onb-seed__row">
+          <span class="onb-seed__name">
+            <span class="icon-bubble icon-bubble--sm" data-ui-css="${categoryBubbleCss(item.color)}">${svgIcon(item.icon, 13)}</span>
+            ${escapeHtml(item.name)}
+          </span>
+          <span class="onb-seed__value">${fmtBRL(item.budget)}</span>
+        </div>`).join("")}
+      </div>` : ""}
+      ${seeds.kept.length > 0 ? `<p class="field-hint" data-ui-css="margin:8px 0 0">${seeds.kept.length === 1
+        ? "1 categoria já tem teto definido e não será alterada."
+        : `${seeds.kept.length} categorias já têm teto definido e não serão alteradas.`}</p>` : ""}
+      <p class="field-hint" data-ui-css="margin:8px 0 0">Ponto de partida do app, não regra de mercado. Cada teto é editável em Categorias, e passar de um deles nunca bloqueia um lançamento.</p>
+    </div>
+  </details>`;
 }
 
 /* ------------------------------------------------------------- conclusão */
@@ -19304,6 +19499,10 @@ function finishOnboarding() {
   const name = String(o.name || "").trim().slice(0, 40);
   const wantsAccount = !o.skipAccount && !!String(o.account.name).trim();
   const balance = parseMoneyInput(o.account.balance || "0");
+  // Calculado UMA vez, fora do setData, para que o texto do aviso e o que foi
+  // de fato gravado venham do mesmo resultado. Recalcular dentro do reducer
+  // abriria espaço para os dois divergirem.
+  const seeds = seedBudgetsFromSplit(state.data, income, o.split);
 
   // A ordem importa: `setData` já renderiza. Fechar a camada antes evita um
   // quadro em que a tela de boas-vindas reaparece por um instante com os dados
@@ -19319,6 +19518,7 @@ function finishOnboarding() {
       dashboardLayout: applyDashboardFocus(d.dashboardLayout, o.focus),
       onboarding: { done: true, skipped: false, completedAt: todayIso() },
       privacy: acceptLegalTexts(d.privacy),
+      categories: categoriesWithSeededBudgets(d.categories, seeds),
     };
     if (wantsAccount) {
       next.accounts = [...(d.accounts || []), makeAccount({
@@ -19329,12 +19529,18 @@ function finishOnboarding() {
         color: "#0B6B5C",
       })];
     }
-    return next;
+    // O snapshot do mês precisa nascer junto: budgetForCategory lê o snapshot
+    // antes de olhar a categoria, então gravar teto sem atualizar o snapshot
+    // deixaria o cartão de orçamentos vazio até a virada do mês.
+    return withBudgetSnapshot(next);
   });
 
   state.form = freshTxForm();
   setState({ tab: "dashboard" });
-  notify(name ? `Tudo pronto, ${name}` : "Tudo pronto");
+  const saudacao = name ? `Tudo pronto, ${name}` : "Tudo pronto";
+  notify(seeds.items.length > 0
+    ? `${saudacao}. Tetos sugeridos em ${plural(seeds.items.length, "categoria", "categorias")}.`
+    : saudacao);
 }
 
 // Pular também é um desfecho: registramos para não perguntar de novo a cada
@@ -25434,12 +25640,42 @@ function renderCategoryBudgetsView(model) {
   if (items.length === 0) {
     return `<div class="card">${renderEmptyState("search", "Nenhuma categoria com esse nome.", "Limpe a busca para ver a lista completa.")}</div>`;
   }
-  return `<div class="card">
+  return `${renderBudgetSeedBanner(model)}<div class="card">
     <p class="card-title">Tetos deste mês</p>
     <p class="card-subtitle">Um teto é um limite seu, não um bloqueio: o app avisa quando você se aproxima e quando passa.</p>
     <div class="cat-budget-list">
       ${items.map((item) => renderCategoryBudgetRow(model, item)).join("")}
     </div>
+  </div>`;
+}
+
+// POR QUE A SEMEADURA TAMBÉM PRECISA MORAR AQUI.
+//
+// A conclusão do assistente inicial semeia tetos a partir da regra x/x/x, mas
+// isso só alcança quem passar por ele daqui para frente. Quem pulou o assistente
+// e quem já usava o app antes desta versão continuaria sem teto nenhum, sem
+// nunca saber que a regra escolhida sabe calcular um.
+//
+// O botão fica na lente de tetos porque é para cá que vem quem quer definir um.
+// O banner some sozinho quando não há o que sugerir: sem renda declarada, ou com
+// todas as categorias principais já com teto próprio.
+function renderBudgetSeedBanner(model) {
+  // Durante uma busca o usuário está atrás de uma linha específica; um convite
+  // sobre as outras nove seria ruído em cima do que ele pediu para ver.
+  if (model.query) return "";
+  const seeds = seedBudgetsFromSplit(state.data, effectiveIncome(state.data, model.monthKey), state.data.budgetSplit);
+  if (seeds.items.length === 0) return "";
+  const s = state.data.budgetSplit;
+  const total = sumMoney(seeds.items, (item) => item.budget);
+  return `<div class="card card--dashed banner-inline">
+    ${svgIcon("target", 30, "banner-inline__icon")}
+    <div class="banner-inline__text">
+      <strong>${seeds.items.length === 1
+        ? "1 categoria principal ainda está sem teto"
+        : `${seeds.items.length} categorias principais ainda estão sem teto`}</strong>
+      <span>A regra ${s.necessidade}/${s.desejo}/${s.futuro} tem ${fmtBRL(total)} para distribuir, a partir da sua renda. Cada linha continua editável depois.</span>
+    </div>
+    <button class="btn btn--primary btn--sm" data-action="seed-budgets-from-split">Sugerir tetos</button>
   </div>`;
 }
 
@@ -28240,6 +28476,20 @@ function onClick(e) {
       if (!(n > 0)) break;
       setData((d) => withBudgetSnapshot({ ...d, categories: d.categories.map((c) => c.id === id ? { ...c, budget: n } : c) }));
       notify(`Teto de ${fmtBRL(n)} definido`);
+      break;
+    }
+    case "seed-budgets-from-split": {
+      const seeds = seedBudgetsFromSplit(state.data, effectiveIncome(state.data, keyOfCurrentMonth()), state.data.budgetSplit);
+      if (seeds.items.length === 0) {
+        notify("Nada a sugerir: informe sua renda em Ajustes ou preencha os tetos que faltam", "warn");
+        break;
+      }
+      // Um rascunho digitado e não confirmado venceria o valor recém-gravado na
+      // hora de redesenhar o campo. Limpar o rascunho das categorias semeadas faz
+      // o campo mostrar o que de fato ficou gravado, não o que sobrou da digitação.
+      seeds.items.forEach((item) => { delete state.categoryBudgetDrafts[item.categoryId]; });
+      setData((d) => withBudgetSnapshot({ ...d, categories: categoriesWithSeededBudgets(d.categories, seeds) }));
+      notify(`Tetos sugeridos em ${plural(seeds.items.length, "categoria", "categorias")}`);
       break;
     }
 

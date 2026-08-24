@@ -20,7 +20,7 @@ const SCREEN_FILES = [
   "js/screens/calendar.js", "js/screens/health.js", "js/screens/wealth.js", "js/screens/portfolio.js",
   "js/screens/invest.js", "js/screens/simulators.js", "js/screens/simulate.js", "js/screens/insights.js",
   "js/screens/subscriptions.js", "js/screens/notifications.js", "js/screens/achievements.js",
-  "js/screens/import.js", "js/screens/settings.js", "js/screens/modals.js",
+  "js/screens/import.js", "js/screens/categories.js", "js/screens/settings.js", "js/screens/modals.js",
 ];
 
 /* ------------------------------------------------------------------- DOM mínimo */
@@ -149,6 +149,119 @@ section("3. Presets da regra de orçamento");
     run(`(() => { state.onboarding.split = { necessidade: 33, desejo: 33, futuro: 34 }; return onbSplitPresetId(); })()`) === "");
 }
 
+/* ================================================= semeadura de tetos */
+// O buraco que esta parte fecha: escolher "50 / 30 / 20" gravava três
+// percentuais e nada mais. Nenhuma categoria ganhava teto, então o motor de
+// budgets.js (faixas de 80% e 100%, projeção de ritmo, cartão de orçamentos)
+// ficava mudo e o modelo escolhido virava decoração.
+section("3b. Semeadura de tetos pela regra x/x/x");
+{
+  run(`state.data = migrate(defaultData());`);
+
+  check("sem renda não semeia nada",
+    run(`seedBudgetsFromSplit(state.data, 0, { necessidade: 50, desejo: 30, futuro: 20 }).items.length`) === 0);
+  check("renda negativa não semeia nada",
+    run(`seedBudgetsFromSplit(state.data, -100, { necessidade: 50, desejo: 30, futuro: 20 }).items.length`) === 0);
+
+  const base = JSON.parse(run(`(() => {
+    const s = seedBudgetsFromSplit(state.data, 5000, { necessidade: 50, desejo: 30, futuro: 20 });
+    return JSON.stringify({
+      ids: s.items.map((i) => i.categoryId),
+      total: sumMoney(s.items, (i) => i.budget),
+      grupos: s.groups.map((g) => ({ group: g.group, allocated: g.allocated, soma: sumMoney(g.items, (i) => i.budget) })),
+      zerados: s.items.filter((i) => !(i.budget > 0)).length,
+      kept: s.kept.length,
+    });
+  })()`));
+
+  check("semeia as categorias principais", base.ids.length > 0, base.ids);
+  check("cada grupo distribui exatamente a sua cota",
+    base.grupos.every((g) => g.soma === g.allocated), base.grupos);
+  check("o total semeado é a renda inteira", base.total === 5000, base.total);
+  check("nenhum teto nasce zerado", base.zerados === 0);
+  check("base nova não tem teto a preservar", base.kept === 0);
+
+  // Subcategoria de fora: o gasto dela já conta para o teto da mãe, então dois
+  // tetos medindo o mesmo gasto contariam o dobro no total do cartão.
+  check("subcategoria não recebe teto próprio",
+    base.ids.indexOf("mercado") === -1 && base.ids.indexOf("delivery") === -1, base.ids);
+  check("categoria principal de cada grupo entra",
+    base.ids.indexOf("moradia") !== -1 && base.ids.indexOf("lazer") !== -1 && base.ids.indexOf("investimento") !== -1);
+
+  // Peso, não parte igual: Moradia não pode receber o mesmo que Educação.
+  const pesos = JSON.parse(run(`(() => {
+    const s = seedBudgetsFromSplit(state.data, 5000, { necessidade: 50, desejo: 30, futuro: 20 });
+    const por = {};
+    s.items.forEach((i) => { por[i.categoryId] = i.budget; });
+    return JSON.stringify(por);
+  })()`));
+  check("Moradia recebe mais que Educação", pesos.moradia > pesos.educacao, pesos);
+  check("Moradia leva 40% das Necessidades", pesos.moradia === 1000, pesos.moradia);
+  check("Investimentos leva o grupo Futuro inteiro", pesos.investimento === 1000, pesos.investimento);
+
+  // Teto já definido é intocável E sai da cota do grupo. Ignorar a segunda parte
+  // proporia um orçamento que estoura a renda no papel, antes de qualquer gasto.
+  const comTeto = JSON.parse(run(`(() => {
+    const d = migrate(defaultData());
+    d.categories = d.categories.map((c) => (c.id === "moradia" ? Object.assign({}, c, { budget: 2000 }) : c));
+    const s = seedBudgetsFromSplit(d, 5000, { necessidade: 50, desejo: 30, futuro: 20 });
+    const nec = s.groups.find((g) => g.group === "necessidade");
+    return JSON.stringify({
+      semeouMoradia: s.items.some((i) => i.categoryId === "moradia"),
+      preservouMoradia: s.kept.some((k) => k.categoryId === "moradia"),
+      committed: nec.committed,
+      available: nec.available,
+      soma: sumMoney(nec.items, (i) => i.budget),
+    });
+  })()`));
+  check("categoria com teto não é semeada de novo", comTeto.semeouMoradia === false);
+  check("categoria com teto aparece como preservada", comTeto.preservouMoradia === true);
+  check("o teto existente é descontado da cota do grupo", comTeto.committed === 2000, comTeto.committed);
+  check("o restante do grupo é o que sobrou da cota", comTeto.available === 500, comTeto.available);
+  check("as demais dividem só o que sobrou", comTeto.soma === 500, comTeto.soma);
+
+  // Grupo já comprometido além da cota: nada a sugerir, e nada de teto negativo.
+  const estourado = JSON.parse(run(`(() => {
+    const d = migrate(defaultData());
+    d.categories = d.categories.map((c) => (c.id === "moradia" ? Object.assign({}, c, { budget: 3000 }) : c));
+    const s = seedBudgetsFromSplit(d, 5000, { necessidade: 50, desejo: 30, futuro: 20 });
+    const nec = s.groups.find((g) => g.group === "necessidade");
+    return JSON.stringify({ itens: nec.items.length, available: nec.available, negativos: s.items.filter((i) => i.budget < 0).length });
+  })()`));
+  check("grupo comprometido além da cota não sugere nada", estourado.itens === 0, estourado);
+  check("cota estourada não vira teto negativo", estourado.negativos === 0);
+
+  // Regra diferente move o dinheiro de grupo, não some com ele.
+  const agressivo = JSON.parse(run(`(() => {
+    const s = seedBudgetsFromSplit(state.data, 5000, { necessidade: 40, desejo: 20, futuro: 40 });
+    const por = {};
+    s.items.forEach((i) => { por[i.categoryId] = i.budget; });
+    return JSON.stringify({ por, total: sumMoney(s.items, (i) => i.budget) });
+  })()`));
+  check("40/20/40 continua distribuindo a renda inteira", agressivo.total === 5000, agressivo.total);
+  check("40/20/40 dobra o teto de Investimentos", agressivo.por.investimento === 2000, agressivo.por.investimento);
+
+  // A aplicação é pura e não mexe em quem já tinha teto.
+  const aplicado = JSON.parse(run(`(() => {
+    const d = migrate(defaultData());
+    d.categories = d.categories.map((c) => (c.id === "lazer" ? Object.assign({}, c, { budget: 111 }) : c));
+    const s = seedBudgetsFromSplit(d, 5000, { necessidade: 50, desejo: 30, futuro: 20 });
+    const novas = categoriesWithSeededBudgets(d.categories, s);
+    return JSON.stringify({
+      original: d.categories.filter((c) => c.budget > 0).length,
+      lazer: novas.find((c) => c.id === "lazer").budget,
+      moradia: novas.find((c) => c.id === "moradia").budget,
+      mercado: novas.find((c) => c.id === "mercado").budget,
+      contagem: novas.length === d.categories.length,
+    });
+  })()`));
+  check("aplicar não muda a lista de origem", aplicado.original === 1, aplicado.original);
+  check("teto digitado pelo usuário sobrevive", aplicado.lazer === 111, aplicado.lazer);
+  check("categoria sem teto recebe o valor semeado", aplicado.moradia > 0, aplicado.moradia);
+  check("subcategoria continua sem teto", aplicado.mercado === null, aplicado.mercado);
+  check("nenhuma categoria some no caminho", aplicado.contagem === true);
+}
+
 /* ============================================================== renderização */
 section("4. Renderização dos 4 passos");
 {
@@ -172,6 +285,16 @@ section("4. Renderização dos 4 passos");
   check("passo 4 com renda mostra a prévia", /onb__preview/.test(comPrevia));
   check("prévia calcula 50% da renda", comPrevia.includes("2.500,00"), comPrevia.includes("2.500,00"));
 
+  // A conclusão grava teto em categoria que o usuário não tocou. Ele precisa
+  // poder ver o que vai acontecer antes de concluir, não descobrir depois.
+  check("passo 4 mostra a prévia dos tetos", /onb-seed/.test(comPrevia));
+  check("prévia dos tetos lista uma linha por categoria principal",
+    (comPrevia.match(/onb-seed__row/g) || []).length === 9, (comPrevia.match(/onb-seed__row/g) || []).length);
+  check("prévia dos tetos nomeia a categoria", comPrevia.includes("Moradia"));
+  run(`state.onboarding.income = "";`);
+  check("sem renda não há prévia de tetos", !/onb-seed/.test(run(`renderOnboardingLayer()`)));
+  run(`state.onboarding.income = "5000";`);
+
   // Todo input delegado precisa de id, senão o foco se perde a cada tecla.
   const semAncora = (readSrc("js/screens/onboarding.js").match(/<input[^>]*>/g) || [])
     .filter((tag) => /data-field=/.test(tag)).filter((tag) => !/ id="/.test(tag));
@@ -182,7 +305,8 @@ section("4. Renderização dos 4 passos");
 section("5. Ações têm case no onClick");
 {
   const src = run(`onClick.toString()`);
-  ["onb-next", "onb-back", "onb-skip", "onb-finish", "onb-split", "onb-skip-account", "onb-restart"]
+  ["onb-next", "onb-back", "onb-skip", "onb-finish", "onb-split", "onb-skip-account", "onb-restart",
+   "seed-budgets-from-split"]
     .forEach((a) => check(`ação "${a}" tem case`, src.includes(`case "${a}"`)));
 
   const inputSrc = run(`onInput.toString()`);
@@ -224,6 +348,57 @@ section("6. Conclusão grava tudo de uma vez");
   run(`finishOnboarding()`);
   check("conta dispensada não é criada", run(`state.data.accounts.length`) === 0);
   check("renda continua gravada mesmo sem conta", run(`state.data.monthlyIncome`) === 3000);
+}
+
+/* ================================================= tetos na conclusão */
+// Integração: não basta a função pura estar certa, o teto tem de chegar ao
+// banco E ao snapshot do mês. budgetForCategory lê o snapshot ANTES de olhar a
+// categoria; gravar um sem o outro deixaria o cartão de orçamentos vazio até a
+// virada do mês, que é o defeito mais difícil de reproduzir dos dois.
+section("6b. Conclusão semeia os tetos e acorda o motor de orçamentos");
+{
+  run(`state.data = migrate(defaultData());`);
+  run(`state.onboarding = Object.assign(freshOnboarding(), {
+    open: true, step: 4, income: "5.000,00", skipAccount: true,
+    split: { necessidade: 50, desejo: 30, futuro: 20 },
+  });`);
+  run(`finishOnboarding()`);
+
+  const comTetos = run(`state.data.categories.filter((c) => c.budget > 0).length`);
+  check("categorias saem da conclusão com teto", comTetos > 0, comTetos);
+  check("soma dos tetos principais é a renda",
+    run(`sumMoney(state.data.categories.filter((c) => !c.parentId && c.budget > 0), (c) => c.budget)`) === 5000,
+    run(`sumMoney(state.data.categories.filter((c) => !c.parentId && c.budget > 0), (c) => c.budget)`));
+  check("subcategoria continua sem teto",
+    run(`state.data.categories.find((c) => c.id === "mercado").budget`) === null);
+
+  // O motor deste projeto inteiro depende disto: sem teto, computeBudgetStatus
+  // devolve lista vazia e nenhum alerta de 80% ou 100% chega a existir.
+  check("o motor de orçamentos passa a enxergar tetos",
+    run(`computeBudgetStatus(state.data, keyOfCurrentMonth()).items.length`) > 0);
+  check("o teto vale para o mês corrente (snapshot atualizado)",
+    run(`budgetForCategory(state.data, "moradia", keyOfCurrentMonth())`) === 1000,
+    run(`budgetForCategory(state.data, "moradia", keyOfCurrentMonth())`));
+  check("o total do cartão não conta o mesmo gasto duas vezes",
+    run(`computeBudgetStatus(state.data, keyOfCurrentMonth()).totals.budget`) === 5000,
+    run(`computeBudgetStatus(state.data, keyOfCurrentMonth()).totals.budget`));
+
+  // Refazer a configuração não pode atropelar um teto digitado à mão.
+  run(`setData((d) => Object.assign({}, d, {
+    categories: d.categories.map((c) => (c.id === "moradia" ? Object.assign({}, c, { budget: 4321 }) : c)),
+  }));`);
+  run(`startOnboarding(); state.onboarding.step = 4; finishOnboarding();`);
+  check("teto digitado sobrevive a uma nova conclusão",
+    run(`state.data.categories.find((c) => c.id === "moradia").budget`) === 4321,
+    run(`state.data.categories.find((c) => c.id === "moradia").budget`));
+
+  // Sem renda declarada não existe cota para dividir; concluir não pode inventar
+  // teto nenhum, e muito menos um teto de R$ 0,00.
+  run(`state.data = migrate(defaultData());`);
+  run(`state.onboarding = Object.assign(freshOnboarding(), { open: true, step: 4, income: "", skipAccount: true });`);
+  run(`finishOnboarding()`);
+  check("sem renda a conclusão não grava teto",
+    run(`state.data.categories.filter((c) => c.budget !== null).length`) === 0);
 }
 
 /* ================================================================== pular */

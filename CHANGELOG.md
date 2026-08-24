@@ -2,8 +2,43 @@
 
 ## Não publicado
 
-Revisão de segurança feita antes da publicação. Nada aqui muda o que o
-aplicativo faz; muda o que ele permite que façam com ele.
+### Escolher a regra x/x/x passou a criar orçamento de verdade
+
+- **A configuração inicial semeia um teto por categoria.** Escolher
+  "50 / 30 / 20" no quarto passo gravava três percentuais e mais nada: nenhuma
+  categoria ganhava teto, então o motor de `js/budgets.js` (faixas de 80% e
+  100%, projeção de ritmo, cartão de orçamentos) ficava dormindo até a pessoa
+  digitar limite por limite na mão. A sugestão automática que já existia não
+  ajudava no primeiro dia porque depende da média dos três meses anteriores, e
+  no primeiro dia não existe mês anterior. Agora a cota de cada grupo é
+  distribuída entre as categorias principais dele e vira teto na conclusão.
+- **A prévia fica no próprio passo 4, aberta a um toque.** A conclusão grava
+  valor que o usuário não digitou; ele precisa ver o que vai acontecer antes de
+  concluir, não descobrir depois. Os números aparecem como ponto de partida do
+  aplicativo, não como regra de mercado, e cada linha continua editável em
+  Categorias.
+- **O que já tem teto é intocável, e o valor dele sai da cota do grupo.** Com
+  Moradia em R$ 2.000 dentro de uma cota de R$ 3.000, as outras dividem os
+  R$ 1.000 que sobraram. Sem esse desconto, a semeadura proporia um orçamento
+  que estoura a renda no papel antes de qualquer gasto. Refazer a configuração
+  por Ajustes também não atropela limite digitado à mão.
+- **Só categorias principais recebem teto.** O gasto de uma subcategoria já
+  conta para o teto da mãe; semear as duas criaria dois limites medindo o mesmo
+  gasto e o total do cartão contaria em dobro.
+- **Quem pulou o assistente, ou já usava o aplicativo, tem o mesmo cálculo.** A
+  lente "Tetos" da tela de Categorias ganhou um convite que aparece só quando há
+  o que sugerir, some sozinho quando não há, e nunca sobrescreve limite
+  existente.
+- **`splitMoneyByWeights` em `js/utils.js`.** Rateio ponderado com a garantia do
+  `splitMoney`: a soma das fatias é exatamente o total. Arredondar cada linha em
+  separado faria a lista de tetos não fechar com a cota que a mesma tela acabou
+  de exibir. O desempate é determinístico, para dois aparelhos sincronizados não
+  divergirem um centavo sem que nada tenha mudado.
+
+### Revisão de segurança feita antes da publicação
+
+Nada nesta seção muda o que o aplicativo faz; muda o que ele permite que façam
+com ele.
 
 ### A força bruta de senha deixou de ter saída fácil
 

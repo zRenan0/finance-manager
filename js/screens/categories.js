@@ -323,12 +323,42 @@ function renderCategoryBudgetsView(model) {
   if (items.length === 0) {
     return `<div class="card">${renderEmptyState("search", "Nenhuma categoria com esse nome.", "Limpe a busca para ver a lista completa.")}</div>`;
   }
-  return `<div class="card">
+  return `${renderBudgetSeedBanner(model)}<div class="card">
     <p class="card-title">Tetos deste mês</p>
     <p class="card-subtitle">Um teto é um limite seu, não um bloqueio: o app avisa quando você se aproxima e quando passa.</p>
     <div class="cat-budget-list">
       ${items.map((item) => renderCategoryBudgetRow(model, item)).join("")}
     </div>
+  </div>`;
+}
+
+// POR QUE A SEMEADURA TAMBÉM PRECISA MORAR AQUI.
+//
+// A conclusão do assistente inicial semeia tetos a partir da regra x/x/x, mas
+// isso só alcança quem passar por ele daqui para frente. Quem pulou o assistente
+// e quem já usava o app antes desta versão continuaria sem teto nenhum, sem
+// nunca saber que a regra escolhida sabe calcular um.
+//
+// O botão fica na lente de tetos porque é para cá que vem quem quer definir um.
+// O banner some sozinho quando não há o que sugerir: sem renda declarada, ou com
+// todas as categorias principais já com teto próprio.
+function renderBudgetSeedBanner(model) {
+  // Durante uma busca o usuário está atrás de uma linha específica; um convite
+  // sobre as outras nove seria ruído em cima do que ele pediu para ver.
+  if (model.query) return "";
+  const seeds = seedBudgetsFromSplit(state.data, effectiveIncome(state.data, model.monthKey), state.data.budgetSplit);
+  if (seeds.items.length === 0) return "";
+  const s = state.data.budgetSplit;
+  const total = sumMoney(seeds.items, (item) => item.budget);
+  return `<div class="card card--dashed banner-inline">
+    ${svgIcon("target", 30, "banner-inline__icon")}
+    <div class="banner-inline__text">
+      <strong>${seeds.items.length === 1
+        ? "1 categoria principal ainda está sem teto"
+        : `${seeds.items.length} categorias principais ainda estão sem teto`}</strong>
+      <span>A regra ${s.necessidade}/${s.desejo}/${s.futuro} tem ${fmtBRL(total)} para distribuir, a partir da sua renda. Cada linha continua editável depois.</span>
+    </div>
+    <button class="btn btn--primary btn--sm" data-action="seed-budgets-from-split">Sugerir tetos</button>
   </div>`;
 }
 

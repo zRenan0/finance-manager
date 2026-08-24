@@ -247,7 +247,50 @@ function renderOnbSplit() {
       <span class="onb__preview-value">${fmtBRL(mulMoney(income, s[g] / 100))}</span>
     </div>`).join("")}
   </div>` : ""}
+  ${renderOnbSeedPreview()}
   <p class="field-hint">Estourar um grupo nunca bloqueia um lançamento. O app avisa e a decisão continua sua.</p>`;
+}
+
+// POR QUE A PRÉVIA DOS TETOS EXISTE.
+//
+// Escolher "50 / 30 / 20" gravava só três percentuais. O motor de tetos por
+// categoria (budgets.js) fica mudo enquanto nenhuma categoria tem limite, e a
+// sugestão automática dele depende de histórico, que no primeiro dia não existe.
+// Resultado: a pessoa escolhia um modelo de orçamento e não ganhava orçamento.
+//
+// Agora a conclusão semeia um teto por categoria principal a partir da regra
+// escolhida. Como isso grava coisa que o usuário não digitou, ele precisa ver o
+// que vai acontecer ANTES de concluir; daí a prévia ficar aberta a um toque, e
+// não escondida em uma tela de ajustes que ele ainda não sabe que existe.
+function renderOnbSeedPreview() {
+  const income = onbIncome();
+  if (!(income > 0)) return "";
+  const seeds = seedBudgetsFromSplit(state.data, income, state.onboarding.split);
+  if (seeds.items.length === 0 && seeds.kept.length === 0) return "";
+
+  const n = seeds.items.length;
+  const resumo = n === 0
+    ? "Seus tetos atuais serão mantidos"
+    : (n === 1 ? "Ver o teto sugerido para 1 categoria" : `Ver os tetos sugeridos para ${n} categorias`);
+
+  return `<details class="onb-seed">
+    <summary class="onb-seed__summary">${svgIcon("target", 14)}<span>${resumo}</span></summary>
+    <div class="onb-seed__body">
+      ${n > 0 ? `<div class="onb-seed__list">
+        ${seeds.items.map((item) => `<div class="onb-seed__row">
+          <span class="onb-seed__name">
+            <span class="icon-bubble icon-bubble--sm" data-ui-css="${categoryBubbleCss(item.color)}">${svgIcon(item.icon, 13)}</span>
+            ${escapeHtml(item.name)}
+          </span>
+          <span class="onb-seed__value">${fmtBRL(item.budget)}</span>
+        </div>`).join("")}
+      </div>` : ""}
+      ${seeds.kept.length > 0 ? `<p class="field-hint" data-ui-css="margin:8px 0 0">${seeds.kept.length === 1
+        ? "1 categoria já tem teto definido e não será alterada."
+        : `${seeds.kept.length} categorias já têm teto definido e não serão alteradas.`}</p>` : ""}
+      <p class="field-hint" data-ui-css="margin:8px 0 0">Ponto de partida do app, não regra de mercado. Cada teto é editável em Categorias, e passar de um deles nunca bloqueia um lançamento.</p>
+    </div>
+  </details>`;
 }
 
 /* ------------------------------------------------------------- conclusão */
@@ -259,6 +302,10 @@ function finishOnboarding() {
   const name = String(o.name || "").trim().slice(0, 40);
   const wantsAccount = !o.skipAccount && !!String(o.account.name).trim();
   const balance = parseMoneyInput(o.account.balance || "0");
+  // Calculado UMA vez, fora do setData, para que o texto do aviso e o que foi
+  // de fato gravado venham do mesmo resultado. Recalcular dentro do reducer
+  // abriria espaço para os dois divergirem.
+  const seeds = seedBudgetsFromSplit(state.data, income, o.split);
 
   // A ordem importa: `setData` já renderiza. Fechar a camada antes evita um
   // quadro em que a tela de boas-vindas reaparece por um instante com os dados
@@ -274,6 +321,7 @@ function finishOnboarding() {
       dashboardLayout: applyDashboardFocus(d.dashboardLayout, o.focus),
       onboarding: { done: true, skipped: false, completedAt: todayIso() },
       privacy: acceptLegalTexts(d.privacy),
+      categories: categoriesWithSeededBudgets(d.categories, seeds),
     };
     if (wantsAccount) {
       next.accounts = [...(d.accounts || []), makeAccount({
@@ -284,12 +332,18 @@ function finishOnboarding() {
         color: "#0B6B5C",
       })];
     }
-    return next;
+    // O snapshot do mês precisa nascer junto: budgetForCategory lê o snapshot
+    // antes de olhar a categoria, então gravar teto sem atualizar o snapshot
+    // deixaria o cartão de orçamentos vazio até a virada do mês.
+    return withBudgetSnapshot(next);
   });
 
   state.form = freshTxForm();
   setState({ tab: "dashboard" });
-  notify(name ? `Tudo pronto, ${name}` : "Tudo pronto");
+  const saudacao = name ? `Tudo pronto, ${name}` : "Tudo pronto";
+  notify(seeds.items.length > 0
+    ? `${saudacao}. Tetos sugeridos em ${plural(seeds.items.length, "categoria", "categorias")}.`
+    : saudacao);
 }
 
 // Pular também é um desfecho: registramos para não perguntar de novo a cada

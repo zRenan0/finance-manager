@@ -1504,6 +1504,20 @@ function onClick(e) {
       notify(`Teto de ${fmtBRL(n)} definido`);
       break;
     }
+    case "seed-budgets-from-split": {
+      const seeds = seedBudgetsFromSplit(state.data, effectiveIncome(state.data, keyOfCurrentMonth()), state.data.budgetSplit);
+      if (seeds.items.length === 0) {
+        notify("Nada a sugerir: informe sua renda em Ajustes ou preencha os tetos que faltam", "warn");
+        break;
+      }
+      // Um rascunho digitado e não confirmado venceria o valor recém-gravado na
+      // hora de redesenhar o campo. Limpar o rascunho das categorias semeadas faz
+      // o campo mostrar o que de fato ficou gravado, não o que sobrou da digitação.
+      seeds.items.forEach((item) => { delete state.categoryBudgetDrafts[item.categoryId]; });
+      setData((d) => withBudgetSnapshot({ ...d, categories: categoriesWithSeededBudgets(d.categories, seeds) }));
+      notify(`Tetos sugeridos em ${plural(seeds.items.length, "categoria", "categorias")}`);
+      break;
+    }
 
     // ---- Feature 4: lançamento inteligente ----
     case "nlp-parse": runNaturalEntryParse(); break;

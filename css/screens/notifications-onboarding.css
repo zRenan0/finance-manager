@@ -247,6 +247,20 @@
 .onb__foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex: 0 0 auto; }
 .onb__foot .btn { min-width: 118px; }
 
+/* Prévia dos tetos semeados pela regra x/x/x. Fica fechada por padrão: o passo
+   4 já pede uma decisão, e nove linhas de valores abertas empurrariam o botão
+   de concluir para fora da tela em aparelho baixo. Quem quiser conferir abre. */
+.onb-seed { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0 13px; background: var(--card-alt); }
+.onb-seed__summary {
+  min-height: 44px; display: flex; align-items: center; gap: 7px; cursor: pointer;
+  color: var(--ink); font-size: 12.5px; font-weight: 700;
+}
+.onb-seed__body { padding-bottom: 12px; }
+.onb-seed__list { display: flex; flex-direction: column; gap: 7px; }
+.onb-seed__row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.onb-seed__name { display: inline-flex; align-items: center; gap: 8px; min-width: 0; font-size: 12.5px; font-weight: 650; color: var(--ink-soft); }
+.onb-seed__value { font-size: 13px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+
 /* Em telas baixas, os intervalos menores devolvem altura ao único scrollport.
    Assim o foco programático mantém o controle e seu anel dentro do corpo. */
 @media (max-height: 520px) {

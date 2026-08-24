@@ -300,3 +300,119 @@ function suggestBudgetFor(data, categoryId) {
   const avg = moneyFromCents(Math.round(cents / months));
   return Math.max(10, Math.ceil(avg / 10) * 10);
 }
+
+// ------------------------------------------------------------------------------
+// SEMEADURA DE TETOS A PARTIR DA REGRA x/x/x
+// ------------------------------------------------------------------------------
+// `suggestBudgetFor` acima resolve o caso de quem JÁ TEM histórico: ele olha os
+// três meses anteriores e devolve uma média. No primeiro dia de uso não existe
+// mês anterior nenhum, então ele devolve null para tudo e o usuário termina a
+// configuração inicial com a regra 50/30/20 escolhida e ZERO teto definido.
+//
+// O efeito é que o motor deste arquivo inteiro (as faixas de 80% e 100%, a
+// projeção de ritmo, o cartão de orçamentos) fica dormindo até a pessoa digitar
+// teto por teto na mão. Escolher um modelo de divisão vira decoração.
+//
+// Esta parte fecha esse buraco pelo outro lado: sem histórico, mas COM renda e
+// COM a regra escolhida, dá para propor um teto por categoria. O número não vem
+// do passado da pessoa, vem da divisão que ela mesma acabou de escolher.
+//
+// Três decisões que valem a explicação:
+//
+//  1. SÓ CATEGORIAS PRINCIPAIS. O gasto de uma subcategoria já conta para o teto
+//     da mãe (ver spentForCategory). Semear as duas criaria dois tetos medindo o
+//     mesmo gasto, e o total do cartão contaria duas vezes.
+//
+//  2. O QUE JÁ TEM TETO É INTOCÁVEL, e o valor dele SAI da cota do grupo. Se
+//     Moradia já tem R$ 2.000 dos R$ 3.000 de Necessidades, as outras dividem os
+//     R$ 1.000 que sobraram, não os R$ 3.000 inteiros. Ignorar isso proporia um
+//     orçamento que estoura a renda no papel, antes de qualquer gasto.
+//
+//  3. PESOS, NÃO PARTES IGUAIS. Moradia e Assinaturas não cabem no mesmo tamanho.
+//     Os pesos abaixo são um ponto de partida do app para um domicílio urbano
+//     brasileiro típico, não uma regra de mercado nem critério de aprovação de
+//     crédito: são relativos DENTRO do grupo e a pessoa ajusta cada linha depois.
+const BUDGET_SEED_WEIGHTS = {
+  // Necessidades
+  moradia: 40, alimentacao: 30, transporte: 15, saude: 10, educacao: 5,
+  // Desejos
+  lazer: 50, assinaturas: 25, outros: 25,
+  // Futuro
+  investimento: 100,
+};
+
+// Categoria criada pelo usuário não está na tabela. Um peso médio dá a ela uma
+// fatia real sem deixá-la dominar o grupo; a normalização cuida do resto.
+const BUDGET_SEED_DEFAULT_WEIGHT = 10;
+
+function budgetSeedWeightOf(category) {
+  const w = BUDGET_SEED_WEIGHTS[category && category.id];
+  return typeof w === "number" && w > 0 ? w : BUDGET_SEED_DEFAULT_WEIGHT;
+}
+
+function budgetSeedGroupOf(category) {
+  return BUDGET_GROUPS.includes(category && category.group) ? category.group : "necessidade";
+}
+
+function hasBudgetCeiling(category) {
+  return !!category && typeof category.budget === "number" && category.budget > 0;
+}
+
+// Devolve o que SERIA gravado, sem gravar nada. A tela usa isso para mostrar a
+// prévia antes de o usuário confirmar, e a gravação usa o mesmo resultado, para
+// prévia e efeito nunca discordarem.
+//
+// Formato: { income, groups: [...], items: [...], kept: [...] }
+//   items  categorias que receberiam teto novo
+//   kept   categorias preservadas porque já tinham teto
+function seedBudgetsFromSplit(data, income, split) {
+  const renda = roundMoney(Number(income) || 0);
+  const regra = { ...defaultBudgetSplit(), ...(split || {}) };
+  const groups = [], items = [], kept = [];
+  if (!(renda > 0)) return { income: 0, groups, items, kept };
+
+  const principais = (data && data.categories ? data.categories : []).filter((c) => !c.parentId);
+
+  BUDGET_GROUPS.forEach((group) => {
+    const pct = Number(regra[group]) || 0;
+    const allocated = mulMoney(renda, pct / 100);
+    const doGrupo = principais.filter((c) => budgetSeedGroupOf(c) === group);
+    const comTeto = doGrupo.filter(hasBudgetCeiling);
+    const semTeto = doGrupo.filter((c) => !hasBudgetCeiling(c));
+    const committed = sumMoney(comTeto, (c) => c.budget);
+    const available = subMoney(allocated, committed);
+
+    comTeto.forEach((c) => kept.push({ categoryId: c.id, name: c.name, group, budget: roundMoney(c.budget) }));
+
+    const novos = [];
+    if (available > 0 && semTeto.length > 0) {
+      const fatias = splitMoneyByWeights(available, semTeto.map(budgetSeedWeightOf));
+      semTeto.forEach((c, i) => {
+        // Uma fatia de zero não é teto: gravar R$ 0,00 faria a categoria nascer
+        // permanentemente estourada, com alerta vermelho no primeiro gasto.
+        if (!(fatias[i] > 0)) return;
+        const item = { categoryId: c.id, name: c.name, icon: c.icon, color: c.color, group, budget: fatias[i] };
+        novos.push(item);
+        items.push(item);
+      });
+    }
+
+    groups.push({ group, pct, allocated, committed, available, items: novos, keptCount: comTeto.length });
+  });
+
+  return { income: renda, groups, items, kept };
+}
+
+// Aplica a semeadura devolvendo uma lista NOVA de categorias. Puro: não grava,
+// não toca no DOM, e a checagem de teto existente é refeita aqui de propósito;
+// se a prévia foi calculada antes de o usuário digitar um teto na outra aba, é
+// esta segunda checagem que impede o valor dele de ser sobrescrito.
+function categoriesWithSeededBudgets(categories, seeds) {
+  const porId = new Map();
+  ((seeds && seeds.items) || []).forEach((s) => porId.set(s.categoryId, s.budget));
+  if (porId.size === 0) return categories || [];
+  return (categories || []).map((c) => {
+    if (!porId.has(c.id) || hasBudgetCeiling(c)) return c;
+    return { ...c, budget: porId.get(c.id) };
+  });
+}
