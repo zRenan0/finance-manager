@@ -41,6 +41,27 @@ async function completeOnboarding(page, focus = "month") {
   await page.waitForSelector(".main-content");
 }
 
+// ESCOLHER CATEGORIA É DOIS PASSOS QUANDO ELA TEM FILHOS.
+//
+// Tocar num chip de categoria que tem subcategorias NÃO conclui a escolha: abre
+// o seletor "Escolha uma subcategoria", com "Geral (sem subcategoria)" na
+// primeira posição. O teste clicava só no chip e seguia para "Salvar gasto",
+// que ficava atrás do modal; o Playwright tentava clicar por 30 segundos,
+// desistia, e o modal continuava aberto na página COMPARTILHADA, derrubando
+// todos os testes seguintes em cascata. Uma falha, cinco vermelhos.
+//
+// A primeira categoria da fila é "Alimentação", que tem Mercado e Delivery.
+// Concluir a escolha aqui é o que o usuário faz, e é o que faltava.
+async function escolherPrimeiraCategoria(page) {
+  await page.locator("#tx-category-group .chip").first().click();
+  const seletor = page.locator(".cat-picker-sheet");
+  if (await seletor.count() === 0) return;
+  // A primeira opção é sempre o próprio pai ("Geral"), então a escolha não
+  // depende de quais subcategorias existem hoje.
+  await page.locator(".cat-picker-option").first().click();
+  await seletor.waitFor({ state: "detached" });
+}
+
 async function openFresh(browser, viewport = { width: 390, height: 844 }, contextOptions = {}) {
   const context = await browser.newContext({ viewport, ...contextOptions });
   const page = await context.newPage();
@@ -321,7 +342,7 @@ async function runOnboardingViewportM4(browser, scenario) {
     assert(await page.evaluate(() => document.activeElement && document.activeElement.id) === "tx-amount-input", "o primeiro erro não recebeu foco");
     await page.fill("#tx-amount-input", "123,456");
     assert(await page.inputValue("#tx-amount-input") === "123,45", "o valor manteve mais de duas casas");
-    await page.locator("#tx-category-group .chip").first().click();
+    await escolherPrimeiraCategoria(page);
     await page.locator('[data-action="submit-tx"]').click();
     await page.waitForFunction(() => CofreUI.test.snapshot().transactionCount === 1);
   });
@@ -332,10 +353,17 @@ async function runOnboardingViewportM4(browser, scenario) {
     await page.locator('[data-action="card-new"]').click();
     await page.fill("#card-name-input", "Cartão teste");
     await page.fill("#card-limit-input", "3000,00");
+    await page.fill("#card-closing-input", "20");
+    await page.fill("#card-due-input", "28");
     await page.locator('[data-action="card-save"]').click();
     await page.evaluate(() => CofreUI.test.navigate("add"));
+    // Depois do fechamento, uma compra com a data atual cai na fatura seguinte,
+    // que corretamente não oferece pagamento. O dia 1 mantém este fluxo pagável
+    // em qualquer data de execução sem mudar a regra do produto.
+    const txDate = await page.inputValue("#tx-date-input");
+    await page.fill("#tx-date-input", `${txDate.slice(0, 7)}-01`);
     await page.fill("#tx-amount-input", "300,00");
-    await page.locator("#tx-category-group .chip").first().click();
+    await escolherPrimeiraCategoria(page);
     await page.locator('[data-action="select-payment"][data-value="Crédito"]').click();
     await page.selectOption("#tx-card-select", { index: 1 });
     await page.locator('[data-action="select-installments"][data-value="3"]').click();

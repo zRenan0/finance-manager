@@ -67,6 +67,20 @@ As regressões estão travadas em `tests/test-beta-fixes.js`, com 53 asserções
 É lá que os novos consertos devem ganhar teste, no mesmo formato: um bloco por
 achado, com asserção do caso positivo **e** do negativo.
 
+### CI de navegador corrigida em 24/08/2026
+
+A suíte saiu de 5 cenários aprovados e 7 falhas para 12 aprovados. O auxiliar
+`escolherPrimeiraCategoria(page)` conclui a folha de subcategorias quando ela
+existe e espera que ela feche, evitando contaminar a página compartilhada. O
+cenário da compra parcelada declara fechamento 20 e vencimento 28, e usa o dia
+1 do mês atual para manter a fatura pagável em qualquer data. O onboarding
+passou em três execuções completas consecutivas durante o diagnóstico e nas
+duas execuções posteriores, por isso não foi alterado. Todo o conserto ficou em
+`tests/browser/run-browser.js`.
+
+Também passaram `npm run build`, `node scripts/lint.js`,
+`node tests/run-all.js` e `node tests/browser/run-browser.js`.
+
 ---
 
 ## Convenções do repositório
@@ -103,6 +117,11 @@ Cada uma destas já custou tempo de diagnóstico:
   cima do que a pessoa já estava fazendo. Antes de deixar um `await` de rede
   alterar o que está na tela, pergunte se a pessoa ainda está onde estava. O
   `state.appEmUso` existe para isso.
+- **Modal abandonado contamina os testes de navegador seguintes.** Alguns
+  cenários reutilizam a mesma página. Depois de abrir uma folha, o teste precisa
+  concluir o fluxo e esperar sua remoção do DOM. O auxiliar
+  `escolherPrimeiraCategoria(page)` existe porque categorias com filhos exigem
+  um segundo toque antes de salvar.
 - **Teste que usa "hoje" apodrece.** `test-health.js` e `test-portfolio.js` já
   falharam sozinhos, sem nenhuma alteração de código, porque montavam cenário
   com `new Date()` e comparavam com número exato: a compra passava do dia de
@@ -110,6 +129,10 @@ Cada uma destas já custou tempo de diagnóstico:
   conferência é de precisão, fixe o prazo em DIAS (`diasAtrasIso(365)`) ou
   congele o dia (`congelarHoje("2026-08-10")`, em `test-health.js`, que troca a
   `todayIso` do contexto da VM e devolve a função de restaurar).
+  `tests/browser/run-browser.js` caiu na mesma armadilha: depois do fechamento
+  no dia 20, a compra do dia entrava numa fatura futura sem botão Pagar. O
+  cenário agora declara fechamento 20, vencimento 28 e compra no dia 1 do mês
+  atual.
 
 ---
 

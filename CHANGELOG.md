@@ -2,6 +2,27 @@
 
 ## Não publicado
 
+### A suíte de navegador parou de falhar em cascata ou conforme o dia
+
+Os dois defeitos estavam no teste, não na regra do aplicativo.
+
+- **A escolha de categoria agora termina antes de salvar.**
+  `escolherPrimeiraCategoria(page)` toca o primeiro chip e, quando ele abre a
+  folha de subcategorias, escolhe a primeira opção e espera a folha sair do DOM.
+  Antes, o teste deixava o modal aberto na página compartilhada e uma falha
+  derrubava os casos seguintes.
+- **A compra parcelada sempre cria uma fatura pagável.** O cenário declara
+  fechamento no dia 20 e vencimento no dia 28, e registra a compra no dia 1 do
+  mês atual. A fatura continua no mês atual qualquer que seja o dia da execução,
+  sem mudar a regra que esconde o pagamento de faturas futuras.
+- **O onboarding não foi alterado sem evidência.** Ele passou em três execuções
+  completas consecutivas durante o diagnóstico e nas duas execuções feitas
+  depois da correção da data.
+- **A verificação terminou verde.** Passaram `npm run build`,
+  `node scripts/lint.js`, `node tests/run-all.js` e
+  `node tests/browser/run-browser.js`; a última suíte de navegador terminou com
+  12 de 12 cenários aprovados.
+
 ### Entrar na conta parou de duplicar a conta do banco
 
 Relatado no beta: "cadastrei uma conta de banco, mas duplicou na hora que fiz
