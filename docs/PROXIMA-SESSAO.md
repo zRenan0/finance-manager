@@ -53,6 +53,7 @@ Depois do commit `5db4d50`, mais dois achados da segunda rodada de beta:
 | --- | --- | --- |
 | F-18 | Entrar na conta reabria o assistente e duplicava a conta do banco | `js/screens/onboarding.js`, `js/auth.js`, `js/app.js`, `js/storage.js` |
 | F-19 | Não havia como excluir uma conta do banco nem um cartão | `js/accounts.js`, `js/actions.js`, `js/screens/accounts.js`, `js/storage.js` |
+| F-20 | O conserto do F-18 fazia o assistente tomar a tela dois segundos depois | `js/screens/onboarding.js`, `js/actions.js`, `js/app.js` |
 
 O F-18 tinha três causas somadas: o assistente decidia "primeiro uso" olhando um
 banco local que ainda não recebera a descida da conta; não existia caminho para
@@ -96,6 +97,12 @@ Cada uma destas já custou tempo de diagnóstico:
   Divergir é esperado enquanto não houver deploy; não é falha.
 - Enter sintético de harness de automação não ativa botão (não gera `click`).
   Não conclua defeito de teclado a partir disso.
+- **Promessa de rede que resolve tarde não pode mexer na tela.** O F-20 nasceu
+  disso: a liberação do portão do assistente esperava um ciclo de
+  sincronização inteiro e, quando voltava, abria um formulário de tela cheia por
+  cima do que a pessoa já estava fazendo. Antes de deixar um `await` de rede
+  alterar o que está na tela, pergunte se a pessoa ainda está onde estava. O
+  `state.appEmUso` existe para isso.
 - **Teste que usa "hoje" apodrece.** `test-health.js` e `test-portfolio.js` já
   falharam sozinhos, sem nenhuma alteração de código, porque montavam cenário
   com `new Date()` e comparavam com número exato: a compra passava do dia de

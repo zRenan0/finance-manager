@@ -11,6 +11,7 @@
 //   F-05  lançamentos anteriores à abertura sumiam do saldo sem aviso
 //   F-18  entrar na conta reabria o assistente e duplicava a conta do banco
 //   F-19  não havia como excluir uma conta do banco nem um cartão
+//   F-20  o conserto do F-18 fazia o assistente tomar a tela dois segundos depois
 "use strict";
 const fs = require("fs");
 const vm = require("vm");
@@ -769,8 +770,10 @@ function blocoF18() {
   check("sem liberação, o portão não abre sozinho",
     run(`refreshOnboardingGate()`) === false && run(`state.onboarding.open`) === false);
 
-  // Conta mesmo vazia: aí sim o assistente é o certo, e a liberação o abre.
-  check("liberado, uma conta vazia recebe o assistente",
+  // Base de visitante mesmo vazia, e ninguém tocou no aplicativo ainda: aí sim
+  // o assistente é o certo, e a liberação o abre.
+  run(`state.appEmUso = false;`);
+  check("liberado num aparelho novo e intocado, o assistente abre",
     run(`refreshOnboardingGate({ release: true })`) === true && run(`state.onboarding.open`) === true);
 
   // Liberar uma conta que já tem configuração não pode reabrir nada.
@@ -807,7 +810,62 @@ function blocoF18() {
   check("entrar na conta grava só o aceite legal",
     /privacy: acceptLegalTexts/.test(corpo.slice(0, 600)) && !/onboarding: \{ done: true/.test(corpo.slice(0, 600)));
 
-  run(`state.onboarding = freshOnboarding();`);
+  run(`state.onboarding = freshOnboarding(); state.appEmUso = false;`);
+}
+
+// ------------------------------------------------------------------------------
+// F-20. O CONSERTO DO F-18 CRIOU UM DEFEITO PIOR: O ASSISTENTE SEQUESTRAVA A TELA
+// ------------------------------------------------------------------------------
+// Relatado no beta, com vídeo. A liberação do portão espera
+// `finishAccountBootstrap`, que roda um ciclo de sincronização inteiro: uma ida
+// e volta na rede. Quem entrava numa conta ainda vazia via o painel carregar,
+// navegava para Início, e DOIS SEGUNDOS DEPOIS o assistente aparecia por cima,
+// sem nenhum clique, como se o aplicativo tivesse esquecido que a pessoa
+// acabara de entrar e sincronizar.
+function blocoF20() {
+  section("F-20. O assistente não pode tomar uma tela que já está em uso");
+
+  const semConfig = `state.data = migrate({ ...defaultData(),
+    onboarding: { done: false, skipped: false, completedAt: null } });`;
+
+  // 1. O caso do vídeo: a pessoa já mexeu no aplicativo quando a rede responde.
+  run(semConfig);
+  run(`state.onboarding = freshOnboarding(); state.appEmUso = false;`);
+  run(`holdOnboardingGate();`);
+  run(`marcarAppEmUso();`);
+  check("depois de a pessoa usar o app, a liberação não abre nada",
+    run(`refreshOnboardingGate({ release: true })`) === false && run(`state.onboarding.open`) === false);
+
+  // Negativo do mesmo caso: sem o toque, a mesma liberação abre.
+  run(`state.appEmUso = false; state.onboarding = freshOnboarding(); holdOnboardingGate();`);
+  check("e sem ninguém ter tocado, ela continua abrindo",
+    run(`refreshOnboardingGate({ release: true })`) === true && run(`state.onboarding.open`) === true);
+
+  // 2. Um clique em qualquer lugar do app marca a tela como em uso. É o clique
+  //    do vídeo, no item "Início" do menu lateral.
+  run(`state.appEmUso = false;`);
+  run(`onClick({ target: { closest: (sel) => (sel === "[data-action]"
+    ? { dataset: { action: "nav", value: "dashboard" }, classList: { contains: () => false } } : null) } });`);
+  check("um clique qualquer registra que a tela é da pessoa", run(`state.appEmUso`) === true);
+
+  // 3. O assistente é a primeira execução DO APARELHO, não DA CONTA. Dentro de
+  //    uma conta ele não abre nem com o app recém-aberto, porque o banco local
+  //    da conta pode estar vazio só porque a descida ainda não veio.
+  const fonte = readSrc("js/screens/onboarding.js");
+  check("a regra exige banco de visitante para abrir",
+    /podeAbrir = liberar && !state\.appEmUso[\s\S]{0,140}FinanceStore\.scope\(\) === GUEST_SCOPE/.test(fonte));
+  check("e exige que ninguém tenha tocado no app", /!state\.appEmUso/.test(fonte));
+  check("os dois ouvintes da raiz marcam o uso",
+    /marcarAppEmUso\(\)/.test(readSrc("js/actions.js")) && /marcarAppEmUso\(\)/.test(readSrc("js/app.js")));
+
+  // 4. Fechar continua livre: dado que chega da conta prova que a configuração
+  //    já foi feita, e isso vale a qualquer momento.
+  run(`state.onboarding = freshOnboarding(); state.onboarding.open = true; state.appEmUso = true;`);
+  run(`state.data = { ...state.data, onboarding: { done: true, skipped: false, completedAt: "2026-08-20" } };`);
+  check("mesmo com o app em uso, o dado da conta ainda fecha o assistente",
+    run(`refreshOnboardingGate()`) === true && run(`state.onboarding.open`) === false);
+
+  run(`state.onboarding = freshOnboarding(); state.appEmUso = false;`);
 }
 
 // ------------------------------------------------------------------------------
@@ -946,6 +1004,7 @@ async function main() {
   blocoF16();
   blocoF17();
   blocoF18();
+  blocoF20();
   blocoF19();
   console.log(`\n${fail === 0 ? "TODOS OS TESTES PASSARAM" : "FALHAS ENCONTRADAS"}: ${ok} ok, ${fail} falha(s)\n`);
   process.exit(fail === 0 ? 0 : 1);

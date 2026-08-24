@@ -19398,16 +19398,43 @@ function holdOnboardingGate() {
   state.onboarding.open = false;
 }
 
-// Devolve true quando a tela precisa ser redesenhada.
+// O ASSISTENTE NUNCA TOMA UMA TELA QUE JÁ ESTÁ EM USO.
 //
-// Sem `release`, esta função só sabe FECHAR: o dado que chega da conta pode
-// provar que a configuração já foi feita, nunca o contrário. Reabrir é decisão
-// do fim da entrada na conta, quando já se sabe que ela está mesmo vazia.
+// Esta trava nasceu de um defeito relatado no beta, e ele era pior que o
+// original. A liberação do portão espera `finishAccountBootstrap`, que roda um
+// ciclo de sincronização inteiro: uma ida e volta na rede. Quem entrava numa
+// conta ainda vazia via o painel carregar, navegava, e DOIS SEGUNDOS DEPOIS o
+// assistente aparecia por cima, do nada, como se o aplicativo tivesse esquecido
+// que a pessoa acabara de entrar. Nenhum clique provocou aquilo: foi a promessa
+// da rede resolvendo tarde.
+//
+// Duas condições passaram a valer para o portão ABRIR o assistente:
+//
+//   1. A pessoa não pode ter encostado no aplicativo ainda. Um clique ou uma
+//      tecla significam que a tela é dela; tomá-la depois disso é sequestro.
+//   2. O banco carregado precisa ser o de VISITANTE. O assistente é a primeira
+//      execução DO APARELHO, não DA CONTA. Quem entrou numa conta vazia vê o
+//      aplicativo vazio, e refaz a configuração por Ajustes quando quiser; o
+//      que ele não pode é ser recebido por um formulário de tela cheia toda vez
+//      que a nuvem responder.
+//
+// Fechar continua livre, e sem `release` é a única coisa que esta função faz: o
+// dado que chega da conta pode provar que a configuração já existe, nunca o
+// contrário.
+
+// Chamada do `onClick` e do `onInput`, os dois ouvintes da raiz. É o registro
+// de que a tela passou para as mãos da pessoa. Mora no `state` e não numa
+// variável de módulo porque é estado de sessão, igual ao `booting`.
+function marcarAppEmUso() { state.appEmUso = true; }
+
+// Devolve true quando a tela precisa ser redesenhada.
 function refreshOnboardingGate(opts) {
   const liberar = !!(opts && opts.release);
   if (liberar) state.onboarding.held = false;
   const concluido = !!(state.data.onboarding && state.data.onboarding.done);
-  const alvo = concluido ? false : (liberar ? !state.onboarding.held : state.onboarding.open);
+  const podeAbrir = liberar && !state.appEmUso
+    && (typeof FinanceStore === "undefined" || FinanceStore.scope() === GUEST_SCOPE);
+  const alvo = concluido ? false : (podeAbrir ? true : state.onboarding.open);
   if (alvo === state.onboarding.open) return false;
   state.onboarding.open = alvo;
   return true;
@@ -27218,6 +27245,9 @@ function commitDebtPayment(p) {
 function onClick(e) {
   const btn = e.target.closest("[data-action]");
   if (!btn) return;
+  // A tela passou para as mãos da pessoa. Daqui em diante o assistente de
+  // boas-vindas não pode mais abrir sozinho por cima do que ela está fazendo.
+  if (typeof marcarAppEmUso === "function") marcarAppEmUso();
   if (btn.classList.contains("modal-overlay") && e.target !== btn) return; // ignora clique dentro do modal
   const action = btn.dataset.action;
   const id = btn.dataset.id;
@@ -29122,6 +29152,10 @@ let state = {
     applyPreview: null,      // prévia da recategorização em massa
   },
   booting: true,             // primeiro paint: esqueleto no lugar dos dados
+  // A pessoa já encostou no aplicativo (clique ou tecla). A partir daí a tela é
+  // dela: nenhuma promessa de rede que resolve tarde pode tomá-la. Ver
+  // refreshOnboardingGate em screens/onboarding.js.
+  appEmUso: false,
   // ---- Configuração inicial em 4 passos (screens/onboarding.js) ----
   // Rascunho volátil: só vira dado real na conclusão. Ver freshOnboarding().
   onboarding: freshOnboarding(),
@@ -30082,6 +30116,8 @@ function sanitizeInputElement(el) {
 }
 
 function onInput(e) {
+  // Mesmo registro do onClick: digitar também é tomar a tela para si.
+  if (typeof marcarAppEmUso === "function") marcarAppEmUso();
   const field = e.target.dataset.field;
   if (!field) return;
   const val = sanitizeInputElement(e.target);

@@ -31,6 +31,28 @@ A culpa era da tela que aparecia logo depois do login.
   só conta o mês em que alguém definiu teto, mudou a regra de divisão ou mexeu
   nos avisos.
 
+### O assistente de boas-vindas parou de tomar a tela sozinho
+
+O conserto acima criou um defeito pior que o original, relatado em vídeo no
+mesmo dia. A liberação do portão espera `finishAccountBootstrap`, que roda um
+ciclo de sincronização inteiro: uma ida e volta na rede. Quem entrava numa conta
+ainda vazia via o painel carregar, navegava para o Início, e **dois segundos
+depois** o assistente aparecia por cima, sem nenhum clique, como se o aplicativo
+tivesse esquecido que a pessoa acabara de entrar e sincronizar.
+
+- **Uma tela em uso não é mais tomada.** Um clique ou uma tecla registram que a
+  tela passou para as mãos da pessoa; a partir daí nenhuma promessa de rede que
+  resolve tarde pode abrir o assistente por cima do que ela está fazendo.
+- **O assistente é a primeira execução DO APARELHO, não DA CONTA.** Dentro de
+  uma conta ele não abre mais, nem com o aplicativo recém-aberto: o banco local
+  de uma conta pode estar vazio apenas porque a descida ainda não veio, e
+  "conta vazia" nunca foi motivo para um formulário de tela cheia. Quem entra
+  numa conta sem configuração vê o aplicativo vazio e refaz a configuração pelo
+  botão de Ajustes, quando quiser.
+- **Fechar continua livre.** O dado que desce da conta pode provar que a
+  configuração já existe, e isso vale a qualquer momento, com o app em uso ou
+  não. O que a liberação perdeu foi só o poder de ABRIR.
+
 ### Dá para excluir uma conta do banco e um cartão
 
 - **Arquivar era a única saída, e ela não resolve cadastro repetido.** Conta

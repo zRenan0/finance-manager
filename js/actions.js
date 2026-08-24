@@ -38,6 +38,9 @@ function commitDebtPayment(p) {
 function onClick(e) {
   const btn = e.target.closest("[data-action]");
   if (!btn) return;
+  // A tela passou para as mãos da pessoa. Daqui em diante o assistente de
+  // boas-vindas não pode mais abrir sozinho por cima do que ela está fazendo.
+  if (typeof marcarAppEmUso === "function") marcarAppEmUso();
   if (btn.classList.contains("modal-overlay") && e.target !== btn) return; // ignora clique dentro do modal
   const action = btn.dataset.action;
   const id = btn.dataset.id;

@@ -243,6 +243,10 @@ let state = {
     applyPreview: null,      // prévia da recategorização em massa
   },
   booting: true,             // primeiro paint: esqueleto no lugar dos dados
+  // A pessoa já encostou no aplicativo (clique ou tecla). A partir daí a tela é
+  // dela: nenhuma promessa de rede que resolve tarde pode tomá-la. Ver
+  // refreshOnboardingGate em screens/onboarding.js.
+  appEmUso: false,
   // ---- Configuração inicial em 4 passos (screens/onboarding.js) ----
   // Rascunho volátil: só vira dado real na conclusão. Ver freshOnboarding().
   onboarding: freshOnboarding(),
@@ -1203,6 +1207,8 @@ function sanitizeInputElement(el) {
 }
 
 function onInput(e) {
+  // Mesmo registro do onClick: digitar também é tomar a tela para si.
+  if (typeof marcarAppEmUso === "function") marcarAppEmUso();
   const field = e.target.dataset.field;
   if (!field) return;
   const val = sanitizeInputElement(e.target);
