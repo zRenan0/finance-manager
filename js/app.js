@@ -503,6 +503,11 @@ function setData(updater) {
 // ter chegado ao disco, e ainda faria o aparelho reivindicar a alteração alheia.
 function setDataFromRemote(next) {
   state.data = next;
+  // Conteúdo que desceu da conta é prova de que a configuração inicial já foi
+  // feita. Sem esta linha, o assistente aberto por um banco local vazio
+  // continuava na frente da tela mesmo depois de os dados chegarem, e quem o
+  // respondia cadastrava a conta do banco uma segunda vez.
+  if (typeof refreshOnboardingGate === "function") refreshOnboardingGate();
   render();
   idleTask(syncAchievements);
   EventBus.emit(APP_EVENTS.DATA_CHANGED, { data: state.data, origin: "remote" });
@@ -1640,7 +1645,12 @@ async function init() {
   // Primeiro uso: a configuração de 4 passos assume a tela. Quem já usava o app
   // nunca cai aqui. `migrate` marca o onboarding como concluído para qualquer
   // base que já tenha lançamento, conta, meta ou renda (ver normalizeOnboarding).
-  state.onboarding.open = !(state.data.onboarding && state.data.onboarding.done);
+  // Abrir já dentro de uma conta segue a mesma regra do login: o banco daquela
+  // conta pode estar vazio neste aparelho só porque a descida ainda não veio, e
+  // um assistente na frente da tela nesse instante pede um cadastro que a conta
+  // já tem. `bootstrapAccountLink` libera o portão quando a descida termina.
+  if (FinanceStore.scope() !== GUEST_SCOPE) holdOnboardingGate();
+  else state.onboarding.open = !(state.data.onboarding && state.data.onboarding.done);
   state.backup.undoAvailable = !!FinanceStore.readUndoSnapshot();
   FinanceStore.onError(() => {
     state.storageOk = false;

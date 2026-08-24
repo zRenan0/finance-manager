@@ -245,6 +245,87 @@ function makeCardPayment(partial, accounts, cards) {
   return normalizeCardPayments([{ ...partial, id: partial.id || uid() }], accounts, cards)[0] || null;
 }
 
+// ==============================================================================
+// EXCLUSÃO DE CONTA E DE CARTÃO
+// ==============================================================================
+// Arquivar era a ÚNICA saída, e ela não resolve o caso mais comum de todos: um
+// cadastro repetido, criado por engano ou por uma segunda passagem pelo
+// assistente, que a pessoa quer fora da lista. Conta arquivada continua na
+// tela, continua contando no total de contas e continua no seletor de
+// conciliação; para quem só queria desfazer um cadastro duplicado, o app
+// simplesmente não tinha resposta.
+//
+// A regra da exclusão é a mesma da dívida: NADA de histórico é apagado junto.
+// O que estava pendurado na conta se divide em dois grupos:
+//
+//   perde o vínculo   lançamento e cartão continuam existindo, só deixam de
+//                     apontar para a conta. O lançamento volta a contar como
+//                     histórico sem conta, na mesma linha "Histórico anterior"
+//                     que a tela já mostra hoje.
+//   sai junto         transferência, conciliação e pagamento de fatura NÃO
+//                     existem sem a conta que os originou. Cada um sai com
+//                     lápide própria, senão o outro aparelho os devolveria na
+//                     sincronização seguinte.
+//
+// O impacto é contado ANTES para a confirmação poder dizer, em número, o que
+// vai acontecer. Excluir sem essa frase seria pedir uma decisão no escuro.
+function accountDeletionImpact(data, accountId) {
+  const transactions = (data.transactions || []).filter((t) => t.accountId === accountId).length;
+  const transfers = (data.accountTransfers || []).filter((t) => t.fromAccountId === accountId || t.toAccountId === accountId).length;
+  const payments = (data.cardPayments || []).filter((p) => p.accountId === accountId).length;
+  const adjustments = (data.accountAdjustments || []).filter((a) => a.accountId === accountId).length;
+  const cards = (data.creditCards || []).filter((c) => c.accountId === accountId).length;
+  return { transactions, transfers, payments, adjustments, cards, total: transactions + transfers + payments + adjustments + cards };
+}
+
+function removeAccountWithIntegrity(data, accountId) {
+  const now = new Date().toISOString();
+  const transfers = (data.accountTransfers || []).filter((t) => t.fromAccountId === accountId || t.toAccountId === accountId).map((t) => t.id);
+  const payments = (data.cardPayments || []).filter((p) => p.accountId === accountId).map((p) => p.id);
+  const adjustments = (data.accountAdjustments || []).filter((a) => a.accountId === accountId).map((a) => a.id);
+  // As lápides são cunhadas aqui, e não deixadas para o diff da sincronização,
+  // porque o registro dependente some por NORMALIZAÇÃO (o normalizador
+  // descarta transferência sem conta). Um id que desaparece sem lápide volta
+  // do outro aparelho na descida seguinte.
+  let graveyard = withTombstones(data.graveyard, "accounts", accountId);
+  if (transfers.length) graveyard = withTombstones(graveyard, "accountTransfers", transfers);
+  if (payments.length) graveyard = withTombstones(graveyard, "cardPayments", payments);
+  if (adjustments.length) graveyard = withTombstones(graveyard, "accountAdjustments", adjustments);
+  return {
+    ...data,
+    accounts: (data.accounts || []).filter((a) => a.id !== accountId),
+    creditCards: (data.creditCards || []).map((c) => (c.accountId === accountId ? { ...c, accountId: null, updatedAt: now } : c)),
+    transactions: (data.transactions || []).map((t) => (t.accountId === accountId ? { ...t, accountId: null, updatedAt: now } : t)),
+    accountTransfers: (data.accountTransfers || []).filter((t) => t.fromAccountId !== accountId && t.toAccountId !== accountId),
+    cardPayments: (data.cardPayments || []).filter((p) => p.accountId !== accountId),
+    accountAdjustments: (data.accountAdjustments || []).filter((a) => a.accountId !== accountId),
+    graveyard,
+  };
+}
+
+// Cartão excluído devolve as compras ao caixa: sem cartão, uma despesa volta a
+// sair do saldo no dia em que foi feita (ver transactionAffectsCash). Isso muda
+// número na tela, então a confirmação precisa dizer quantas compras são.
+function cardDeletionImpact(data, cardId) {
+  const transactions = (data.transactions || []).filter((t) => t.creditCardId === cardId).length;
+  const payments = (data.cardPayments || []).filter((p) => p.creditCardId === cardId).length;
+  return { transactions, payments, total: transactions + payments };
+}
+
+function removeCreditCardWithIntegrity(data, cardId) {
+  const now = new Date().toISOString();
+  const payments = (data.cardPayments || []).filter((p) => p.creditCardId === cardId).map((p) => p.id);
+  let graveyard = withTombstones(data.graveyard, "creditCards", cardId);
+  if (payments.length) graveyard = withTombstones(graveyard, "cardPayments", payments);
+  return {
+    ...data,
+    creditCards: (data.creditCards || []).filter((c) => c.id !== cardId),
+    transactions: (data.transactions || []).map((t) => (t.creditCardId === cardId ? { ...t, creditCardId: null, updatedAt: now } : t)),
+    cardPayments: (data.cardPayments || []).filter((p) => p.creditCardId !== cardId),
+    graveyard,
+  };
+}
+
 function reconcileAccount(data, accountId, actualBalance, date) {
   const checkedAt = date || todayIso();
   const current = accountBalance(data, accountId, checkedAt);
@@ -266,6 +347,7 @@ if (typeof module !== "undefined" && module.exports) {
     accountsCashBalance, cardStatementKeyForDate, cardStatementDueDate, cardStatements,
     cardLiabilityStatements, cardLiabilitySummary,
     accountsSummary, makeAccount, makeCreditCard, makeAccountTransfer, makeCardPayment,
-    reconcileAccount,
+    reconcileAccount, accountDeletionImpact, removeAccountWithIntegrity,
+    cardDeletionImpact, removeCreditCardWithIntegrity,
   };
 }

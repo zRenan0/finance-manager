@@ -28,6 +28,25 @@ function iso(d) { return ctx.isoOfDate(d); }
 function monthsAgo(n, day = 10) { const d = new Date(); return iso(new Date(d.getFullYear(), d.getMonth() - n, day)); }
 function daysAhead(n) { return iso(new Date(Date.now() + n * 86400000)); }
 
+// RELÓGIO CONGELADO PARA CENÁRIO DE FATURA.
+//
+// `debtProfile` chama `todayIso()` por dentro e não aceita data de referência.
+// Um cenário de cartão montado com "hoje" muda de resposta conforme o dia do
+// mês: uma compra feita depois do fechamento cai na fatura do mês seguinte, e o
+// vencimento dela pode passar da janela de 30 dias que o comprometimento usa.
+// O teste então falhava sozinho a partir de certo dia, sem nada ter mudado no
+// código. Congelar o dia deixa o cenário descrever a REGRA contábil, que é o
+// que ele existe para verificar, e não o calendário.
+//
+// `todayIso` é declaração de função no topo do contexto da VM, então vira
+// propriedade do objeto global e pode ser trocada; quem a chama resolve o nome
+// na hora da chamada. Devolve a função que restaura o original.
+function congelarHoje(isoDate) {
+  const original = ctx.todayIso;
+  ctx.todayIso = () => isoDate;
+  return () => { ctx.todayIso = original; };
+}
+
 let seq = 0;
 function tx(p) {
   seq++;
@@ -116,18 +135,23 @@ console.log("\n3. App recém-instalado (nenhum dado)");
 /* ---------------------------------------------- 4. anti-dupla-contagem no crédito */
 console.log("\n4. Parcela do crédito no mês corrente não é contada duas vezes");
 {
-  const now = new Date();
-  const dia = Math.min(28, now.getDate() + 3); // ainda neste mês, no futuro
+  // O cenário exige uma parcela AINDA NO FUTURO dentro do mês corrente. Com
+  // "hoje mais 3 dias, no máximo 28", do dia 28 em diante a data deixava de ser
+  // futura e o cenário passava a testar outra coisa. Dia fixo resolve.
+  const hoje = "2026-08-10";
+  const mesCorrente = "2026-08";
+  const descongelar = congelarHoje(hoje);
   const transactions = [
-    tx({ type: "income", amount: 5000, categoryId: "salario", date: monthsAgo(0, 1) }),
+    tx({ type: "income", amount: 5000, categoryId: "salario", date: "2026-08-01" }),
     tx({
       type: "expense", amount: 300, categoryId: "outros", payment: "Crédito",
-      date: iso(new Date(now.getFullYear(), now.getMonth(), dia)),
+      date: "2026-08-13",
       installmentGroupId: "g", installmentIndex: 2, installmentTotal: 5,
     }),
   ];
   const data = base({ monthlyIncome: 5000, transactions });
-  const d = debtProfile(data, ctx.keyOfDate(now));
+  const d = debtProfile(data, mesCorrente);
+  descongelar();
   check("fatura do mês contém a parcela", Math.abs(d.creditBill - 300) < 0.01, d.creditBill);
   check("comprometimento não dobra o valor", Math.abs(d.monthlyBurden - 300) < 0.01, d.monthlyBurden);
 }
@@ -150,7 +174,11 @@ console.log("\n5. Capacidade de poupança separa essencial de desejo");
 
 console.log("\n5b. Cartão cadastrado entra uma vez no diagnóstico de dívidas");
 {
-  const today = ctx.todayIso();
+  // Dia 10, antes do fechamento (20): a compra entra na fatura DESTE mês, que
+  // vence no dia 28 e portanto cai dentro dos 30 dias do comprometimento.
+  const today = "2026-08-10";
+  const mesCorrente = "2026-08";
+  const descongelar = congelarHoje(today);
   const account = { id: "ha", name: "Conta", type: "corrente", openingBalance: 0, openingDate: today };
   const card = { id: "hc", name: "Cartão", accountId: "ha", limit: 5000, closingDay: 20, dueDay: 28 };
   const purchases = ctx.makeInstallmentTransactions({
@@ -162,11 +190,16 @@ console.log("\n5b. Cartão cadastrado entra uma vez no diagnóstico de dívidas"
     accounts: [account], creditCards: [card],
     transactions: [tx({ type: "income", amount: 5000, categoryId: "salario", date: today }), ...purchases],
   }));
-  const d = debtProfile(data, ctx.keyOfDate(new Date()));
+  const d = debtProfile(data, mesCorrente);
+  descongelar();
   check("saldo total do cartão entra na dívida", Math.abs(d.cardOutstanding - 1200) < 0.01, d.cardOutstanding);
   check("parcelas cadastradas não são somadas de novo", Math.abs(d.installmentsAhead) < 0.01, d.installmentsAhead);
   check("dívida total contém o cartão uma única vez", Math.abs(d.outstanding - 1200) < 0.01, d.outstanding);
   check("a fatura próxima entra no comprometimento mensal", d.creditBill > 0 && d.creditBill <= 1200, d.creditBill);
+  // Só a fatura de agosto entra: as duas parcelas seguintes vencem depois da
+  // janela de 30 dias e continuam contadas apenas na dívida total.
+  check("e só ela, porque as parcelas seguintes ficam fora da janela", Math.abs(d.creditBill - 400) < 0.01, d.creditBill);
+  check("o relógio voltou ao normal depois do cenário", ctx.todayIso() === ctx.isoOfDate(new Date()));
 }
 
 /* -------------------------------------------- 6. robustez: dados corrompidos */

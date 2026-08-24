@@ -3589,6 +3589,31 @@ const FinanceStore = (() => {
     });
   }
 
+  // INSTANTÂNEO DE ORÇAMENTO DO MÊS NÃO É CONTEÚDO DO USUÁRIO.
+  //
+  // `migrate` cria um automaticamente para qualquer base que ainda não tenha
+  // nenhum. Ele sozinho fazia um aparelho recém-aberto parecer cheio: bastava
+  // abrir o aplicativo uma vez, e a entrada na conta passava a mostrar o pedido
+  // de "juntar dados" sem haver absolutamente nada para juntar. Quem entrava num
+  // aparelho novo tinha de apertar um botão para ver o próprio dinheiro.
+  //
+  // Só conta o mês em que ALGUÉM DECIDIU alguma coisa: definiu um teto, mudou a
+  // regra de divisão ou mexeu nos avisos. Grupo e pai de categoria são deduzidos
+  // da árvore de categorias, não são decisão.
+  function decidedBudgetHistory(value, base) {
+    const padraoSplit = (base && base.budgetSplit) || {};
+    const padraoAlerts = (base && base.budgetAlerts) || {};
+    const out = {};
+    Object.keys(value || {}).forEach((mes) => {
+      const linha = (value || {})[mes] || {};
+      const temTeto = Object.keys(linha.budgets || {}).length > 0;
+      if (temTeto || !sameCanonical(padraoSplit, linha.split) || !sameCanonical(padraoAlerts, linha.alerts)) {
+        out[mes] = linha;
+      }
+    });
+    return out;
+  }
+
   // Só a lista fechada de configurações do vínculo entra, e só quando difere do
   // padrão. Tema, disposição da tela, consentimentos e notificações ficam de
   // fora: são preferências do aparelho, não conteúdo financeiro.
@@ -3596,7 +3621,7 @@ const FinanceStore = (() => {
     const base = padrao || defaultData();
     const out = {};
     Array.from(SYNC_ALLOWED_SETTINGS).sort().forEach((key) => {
-      const value = data[key];
+      const value = key === "budgetHistory" ? decidedBudgetHistory(data[key], base) : data[key];
       if (value === undefined || value === null || value === "") return;
       if (sameCanonical(base[key], value)) return;
       out[key] = canonicalValue(value);
@@ -4896,11 +4921,15 @@ function mergeBackupInto(current, incoming) {
   const assets = applyGraveyard(mergeList(current.assets || [], incoming.assets || [], pickUpdated), graveyard, "assets");
   stats.assets = assets.length - (current.assets || []).length;
 
-  const accounts = mergeList(current.accounts || [], incoming.accounts || [], pickUpdated);
-  const creditCards = mergeList(current.creditCards || [], incoming.creditCards || [], pickUpdated);
-  const accountTransfers = mergeList(current.accountTransfers || [], incoming.accountTransfers || [], pickUpdated);
-  const cardPayments = mergeList(current.cardPayments || [], incoming.cardPayments || [], pickUpdated);
-  const accountAdjustments = mergeList(current.accountAdjustments || [], incoming.accountAdjustments || [], pickNewer("createdAt"));
+  // As cinco coleções de conta também passam pelo cemitério. Sem isto, uma
+  // conta do banco excluída aqui voltava a existir na primeira mesclagem de
+  // backup ou no vínculo dos dados de visitante, junto com as transferências e
+  // os pagamentos que saíram com ela: a exclusão parecia não ter funcionado.
+  const accounts = applyGraveyard(mergeList(current.accounts || [], incoming.accounts || [], pickUpdated), graveyard, "accounts");
+  const creditCards = applyGraveyard(mergeList(current.creditCards || [], incoming.creditCards || [], pickUpdated), graveyard, "creditCards");
+  const accountTransfers = applyGraveyard(mergeList(current.accountTransfers || [], incoming.accountTransfers || [], pickUpdated), graveyard, "accountTransfers");
+  const cardPayments = applyGraveyard(mergeList(current.cardPayments || [], incoming.cardPayments || [], pickUpdated), graveyard, "cardPayments");
+  const accountAdjustments = applyGraveyard(mergeList(current.accountAdjustments || [], incoming.accountAdjustments || [], pickNewer("createdAt")), graveyard, "accountAdjustments");
   stats.accounts = accounts.length - (current.accounts || []).length;
   stats.creditCards = creditCards.length - (current.creditCards || []).length;
 

@@ -26,6 +26,8 @@ const ONB_SPLIT_PRESETS = [
 function freshOnboarding() {
   return {
     open: false,
+    // Assistente segurado: ver o bloco "O PORTÃO DO ASSISTENTE" abaixo.
+    held: false,
     step: 1,
     name: "",
     income: "",
@@ -35,6 +37,42 @@ function freshOnboarding() {
     focus: "month",
     split: { necessidade: 50, desejo: 30, futuro: 20 },
   };
+}
+
+// ------------------------------------------------------------------------------
+// O PORTÃO DO ASSISTENTE
+// ------------------------------------------------------------------------------
+// ESTE É O DEFEITO QUE DUPLICAVA A CONTA DO BANCO.
+//
+// Entrar numa conta troca o banco carregado por um banco NOVO e vazio: o
+// conteúdo da conta só chega depois da primeira descida da nuvem. Quem decidia
+// se o assistente abre olhava esse vazio e concluía "primeiro uso". O resultado
+// aparecia logo depois do login: o assistente tomava a tela inteira e pedia
+// nome, renda e conta do banco de novo. Quem respondia terminava com a conta do
+// banco cadastrada duas vezes, a que desceu da nuvem e a que acabara de
+// digitar, e sem nenhuma forma de apagar uma delas.
+//
+// O portão fecha o assistente enquanto a entrada na conta não termina.
+// `refreshOnboardingGate` reavalia quando o conteúdo da conta chega, e só a
+// liberação explícita, no fim da sequência de vínculo, pode reabrir.
+function holdOnboardingGate() {
+  state.onboarding.held = true;
+  state.onboarding.open = false;
+}
+
+// Devolve true quando a tela precisa ser redesenhada.
+//
+// Sem `release`, esta função só sabe FECHAR: o dado que chega da conta pode
+// provar que a configuração já foi feita, nunca o contrário. Reabrir é decisão
+// do fim da entrada na conta, quando já se sabe que ela está mesmo vazia.
+function refreshOnboardingGate(opts) {
+  const liberar = !!(opts && opts.release);
+  if (liberar) state.onboarding.held = false;
+  const concluido = !!(state.data.onboarding && state.data.onboarding.done);
+  const alvo = concluido ? false : (liberar ? !state.onboarding.held : state.onboarding.open);
+  if (alvo === state.onboarding.open) return false;
+  state.onboarding.open = alvo;
+  return true;
 }
 
 // Renda informada no passo 2, em reais. Usada pelo passo 4 para mostrar quanto
@@ -75,7 +113,7 @@ function onbCanAdvance(step) {
 // essa linha por aria-describedby, para o leitor de tela anunciar a exigência
 // junto do botão em vez de deixá-la solta no meio da tela.
 function onbBlockReason(step) {
-  if (step === 1) return "Marque o aceite da política e dos termos para continuar.";
+  if (step === 1) return "Marque o aceite da política e dos termos para continuar ou entrar na sua conta.";
   if (step === 2) return "Informe uma renda maior que zero para continuar.";
   if (step === 3) return "Dê um nome à conta e informe o saldo, ou marque a opção de cadastrar depois.";
   return "";
@@ -94,7 +132,10 @@ function renderOnboardingLayer() {
     <div class="onb__sheet">
       <div class="onb__head">
         <div class="onb__brand">${svgIcon("wallet", 18)}<span>Cofre</span></div>
-        <button class="btn btn--ghost btn--sm" data-action="onb-skip" ${o.legalAccepted ? "" : `disabled aria-describedby="onb-block-reason"`}>Pular por agora</button>
+        <div class="onb__head-actions">
+          <button class="btn btn--ghost btn--sm" data-action="onb-have-account" ${o.legalAccepted ? "" : `disabled aria-describedby="onb-block-reason"`}>Já tenho conta</button>
+          <button class="btn btn--ghost btn--sm" data-action="onb-skip" ${o.legalAccepted ? "" : `disabled aria-describedby="onb-block-reason"`}>Pular por agora</button>
+        </div>
       </div>
       ${renderOnbProgress(o.step)}
       <div class="onb__body">${body}</div>
@@ -344,6 +385,30 @@ function finishOnboarding() {
   notify(seeds.items.length > 0
     ? `${saudacao}. Tetos sugeridos em ${plural(seeds.items.length, "categoria", "categorias")}.`
     : saudacao);
+}
+
+// ------------------------------------------------------------------------------
+// "JÁ TENHO CONTA": A SAÍDA QUE FALTAVA
+// ------------------------------------------------------------------------------
+// O assistente tomava a tela inteira e não oferecia nenhum caminho para entrar
+// numa conta que já existe. Quem instalava o app num aparelho novo era obrigado
+// a INVENTAR renda e conta do banco antes de conseguir chegar na tela de login,
+// e o que ele inventava virava um segundo cadastro ao lado do que a conta já
+// tinha. Pior: aquele conteúdo de visitante passava a exigir a confirmação de
+// "juntar dados" em toda entrada, que é exatamente o botão que ninguém quer
+// apertar para ver o próprio dinheiro.
+//
+// Nada de configuração é gravado aqui. Só o aceite legal, que é do APARELHO e
+// nunca sobe para a conta (`privacy` está fora de SYNC_ALLOWED_SETTINGS), e que
+// por isso não faz a base de visitante contar como conteúdo a vincular.
+function openAccountFromOnboarding() {
+  if (!state.onboarding.legalAccepted) { notify("Aceite a política e os termos para continuar", "warn"); return; }
+  setData((d) => ({ ...d, privacy: acceptLegalTexts(d.privacy) }));
+  // Segurado, não concluído: quem entrar numa conta vazia ainda precisa
+  // configurar, e a liberação no fim do vínculo reabre o assistente.
+  holdOnboardingGate();
+  setState({ tab: "account" });
+  notify("Entre com seu email e senha para trazer os dados da sua conta");
 }
 
 // Pular também é um desfecho: registramos para não perguntar de novo a cada

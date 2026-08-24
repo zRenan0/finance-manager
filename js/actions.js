@@ -191,6 +191,7 @@ function onClick(e) {
     case "diagnostics-clear":
       clearSafeErrors(); render(); notify("Diagnóstico apagado"); break;
     case "onb-skip": skipOnboarding(); break;
+    case "onb-have-account": openAccountFromOnboarding(); break;
     case "onb-finish": finishOnboarding(); break;
     case "onb-restart": startOnboarding(); break;
     case "skip-to-content": {
@@ -480,6 +481,52 @@ function onClick(e) {
       setData((d) => ({ ...d, accounts: d.accounts.map((a) => a.id === id ? { ...a, archived: !a.archived, updatedAt:new Date().toISOString() } : a) }));
       notify("Estado da conta atualizado"); break;
     }
+    case "account-delete": {
+      const target = accountById(state.data, id);
+      if (!target) break;
+      const impacto = accountDeletionImpact(state.data, id);
+      const perdeVinculo = [
+        impacto.transactions ? `${plural(impacto.transactions, "lançamento volta", "lançamentos voltam")} a contar como histórico sem conta` : "",
+        impacto.cards ? `${plural(impacto.cards, "cartão fica", "cartões ficam")} sem conta de pagamento` : "",
+      ].filter(Boolean);
+      const saiJunto = [
+        impacto.transfers ? plural(impacto.transfers, "transferência", "transferências") : "",
+        impacto.payments ? plural(impacto.payments, "pagamento de fatura", "pagamentos de fatura") : "",
+        impacto.adjustments ? plural(impacto.adjustments, "conciliação", "conciliações") : "",
+      ].filter(Boolean);
+      const partes = [`A conta “${target.name}” sai da lista em todos os aparelhos.`];
+      if (perdeVinculo.length) partes.push(`${perdeVinculo.join(" e ")}.`);
+      // A frase da fatura só entra quando existe pagamento para reabrir. Sem a
+      // condição, ela aparecia numa conta que nunca pagou cartão nenhum e
+      // anunciava um efeito que não ia acontecer.
+      const totalSaiJunto = impacto.transfers + impacto.payments + impacto.adjustments;
+      if (saiJunto.length) partes.push(`${saiJunto.join(", ")} ${pluralWord(totalSaiJunto, "deixa", "deixam")} de existir junto com ela.`);
+      if (impacto.payments) partes.push(`As faturas pagas por essa conta voltam a aparecer em aberto.`);
+      if (!perdeVinculo.length && !saiJunto.length) partes.push("Nada está registrado nela, então nenhum outro número muda.");
+      requestConfirmation({
+        title: "Excluir esta conta?",
+        message: partes.join(" "),
+        confirmLabel: "Excluir conta",
+        tone: "danger",
+        // Arquivar continua sendo a saída certa para uma conta encerrada de
+        // verdade, cujo histórico ainda importa. A escolha fica na mesma caixa
+        // para ninguém apagar movimento por falta de alternativa à vista.
+        alternateLabel: target.archived ? null : "Só arquivar",
+        onAlternate: () => {
+          setData((d) => ({ ...d, accounts: d.accounts.map((a) => a.id === id ? { ...a, archived: true, updatedAt: new Date().toISOString() } : a) }));
+          notify("Conta arquivada");
+        },
+        onConfirm: () => {
+          setData((d) => removeAccountWithIntegrity(d, id));
+          if (state.accountsUi.reconcileId === id) { state.accountsUi.reconcileId = null; state.accountsUi.reconcileValue = ""; }
+          if (state.accountsUi.accountForm && state.accountsUi.accountForm.id === id) state.accountsUi.accountForm = null;
+          state.accountsUi.transferForm = null;
+          state.accountsUi.payment = null;
+          notify("Conta excluída");
+        },
+      });
+      break;
+    }
     case "account-reconcile-open": {
       const a = accountById(state.data,id); if (!a) break;
       state.accountsUi.reconcileId = id; state.accountsUi.reconcileValue = moneyDraft(accountBalance(state.data,id,todayIso())); render(); break;
@@ -520,6 +567,33 @@ function onClick(e) {
     case "card-archive":
       setData((d) => ({ ...d, creditCards:d.creditCards.map((c) => c.id === id ? { ...c, archived:!c.archived, updatedAt:new Date().toISOString() } : c) }));
       notify("Estado do cartão atualizado"); break;
+    case "card-delete": {
+      const card = creditCardById(state.data, id);
+      if (!card) break;
+      const impacto = cardDeletionImpact(state.data, id);
+      const partes = [`O cartão “${card.name}” sai da lista em todos os aparelhos.`];
+      if (impacto.transactions) partes.push(`${plural(impacto.transactions, "compra continua", "compras continuam")} no histórico, mas ${pluralWord(impacto.transactions, "passa", "passam")} a sair do saldo em contas na data em que ${pluralWord(impacto.transactions, "foi feita", "foram feitas")}.`);
+      if (impacto.payments) partes.push(`${plural(impacto.payments, "pagamento de fatura deixa", "pagamentos de fatura deixam")} de existir.`);
+      if (!impacto.total) partes.push("Nada está registrado nele, então nenhum outro número muda.");
+      requestConfirmation({
+        title: "Excluir este cartão?",
+        message: partes.join(" "),
+        confirmLabel: "Excluir cartão",
+        tone: "danger",
+        alternateLabel: card.archived ? null : "Só arquivar",
+        onAlternate: () => {
+          setData((d) => ({ ...d, creditCards: d.creditCards.map((c) => c.id === id ? { ...c, archived: true, updatedAt: new Date().toISOString() } : c) }));
+          notify("Cartão arquivado");
+        },
+        onConfirm: () => {
+          setData((d) => removeCreditCardWithIntegrity(d, id));
+          if (state.accountsUi.cardForm && state.accountsUi.cardForm.id === id) state.accountsUi.cardForm = null;
+          if (state.accountsUi.payment && state.accountsUi.payment.creditCardId === id) state.accountsUi.payment = null;
+          notify("Cartão excluído");
+        },
+      });
+      break;
+    }
     case "transfer-new": {
       const list = (state.data.accounts || []).filter((a) => !a.archived);
       state.accountsUi.transferForm = { fromAccountId:(list[0]||{}).id||"", toAccountId:(list[1]||{}).id||"", amount:"", date:todayIso(), description:"Transferência" };

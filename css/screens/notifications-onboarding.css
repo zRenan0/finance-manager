@@ -124,6 +124,9 @@
 @media (prefers-reduced-motion: reduce) { .onb__sheet { animation: none; } }
 
 .onb__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex: 0 0 auto; }
+/* Duas saídas no topo: entrar numa conta existente e pular. Em telas estreitas
+   elas quebram para a linha de baixo em vez de espremer o nome do produto. */
+.onb__head-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 .onb__brand {
   display: inline-flex; align-items: center; gap: 8px;
   font-family: "Space Grotesk", Inter, system-ui, sans-serif;

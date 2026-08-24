@@ -2,6 +2,61 @@
 
 ## Não publicado
 
+### Entrar na conta parou de duplicar a conta do banco
+
+Relatado no beta: "cadastrei uma conta de banco, mas duplicou na hora que fiz
+login". A sincronização não tinha culpa; ela funde por id e nunca duplicou nada.
+A culpa era da tela que aparecia logo depois do login.
+
+- **Entrar numa conta não é mais lido como primeiro uso.** O banco local de uma
+  conta nasce vazio neste aparelho, e o conteúdo dela só chega depois da
+  primeira descida. O aplicativo olhava esse vazio, concluía "primeiro uso" e o
+  assistente de quatro passos tomava a tela inteira pedindo nome, renda e conta
+  do banco de novo. Quem respondia terminava com duas contas do mesmo banco: a
+  que desceu da nuvem e a que acabara de digitar. Agora o assistente fica
+  segurado enquanto a entrada na conta não termina, e o conteúdo que desce da
+  conta o fecha por conta própria. Abrir o aplicativo já dentro de uma conta
+  segue a mesma regra.
+- **O assistente ganhou "Já tenho conta".** Ele cobria a tela inteira e não
+  oferecia nenhum caminho para entrar numa conta existente: quem instalava o
+  aplicativo num aparelho novo era obrigado a INVENTAR renda e conta do banco
+  antes de chegar na tela de login, e o que inventava virava um segundo cadastro
+  ao lado do que a conta já tinha. O botão leva direto para "Conta e acesso" e
+  não grava configuração nenhuma; só o aceite legal, que é do aparelho e nunca
+  sobe para a conta.
+- **Instantâneo de orçamento do mês deixou de contar como conteúdo a vincular.**
+  A migração cria um automaticamente para qualquer base que ainda não tenha
+  nenhum. Ele sozinho fazia um aparelho recém-aberto parecer cheio, e a entrada
+  na conta mostrava o pedido de "juntar dados" sem haver nada para juntar. Agora
+  só conta o mês em que alguém definiu teto, mudou a regra de divisão ou mexeu
+  nos avisos.
+
+### Dá para excluir uma conta do banco e um cartão
+
+- **Arquivar era a única saída, e ela não resolve cadastro repetido.** Conta
+  arquivada continua na tela, continua no total de contas e continua no seletor
+  de conciliação. Quem cadastrou a mesma conta duas vezes não tinha resposta
+  nenhuma dentro do aplicativo. Cada linha de conta e cada cartão ganharam
+  exclusão, e arquivar continua oferecido na mesma caixa de confirmação para
+  ninguém apagar movimento por falta de alternativa à vista.
+- **Nada de histórico é apagado junto.** Lançamento e cartão perdem o vínculo e
+  continuam existindo: o lançamento volta a contar como histórico sem conta, na
+  mesma linha "Histórico anterior" que a tela já mostrava. Transferência,
+  conciliação e pagamento de fatura não existem sem a conta que os originou e
+  saem junto, cada um com lápide própria, senão o outro aparelho os devolveria
+  na sincronização seguinte.
+- **A confirmação diz em número o que vai acontecer** antes de qualquer coisa
+  sair: quantos lançamentos perdem o vínculo, quantas transferências e
+  conciliações somem, e que as faturas pagas por aquela conta voltam a aparecer
+  em aberto. No cartão, que as compras passam a sair do saldo em contas na data
+  em que foram feitas.
+- **A mesclagem passou a respeitar a lápide das cinco coleções de conta.**
+  `mergeBackupInto` aplicava o cemitério em lançamento, categoria, meta e
+  patrimônio, mas não em conta, cartão, transferência, pagamento e conciliação.
+  Sem isso, a conta excluída voltava a existir na primeira restauração de backup
+  ou no vínculo dos dados de visitante, e a exclusão parecia não ter funcionado.
+
+
 ### Escolher a regra x/x/x passou a criar orçamento de verdade
 
 - **A configuração inicial semeia um teto por categoria.** Escolher

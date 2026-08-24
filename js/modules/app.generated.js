@@ -5155,6 +5155,31 @@ const FinanceStore = (() => {
     });
   }
 
+  // INSTANTÂNEO DE ORÇAMENTO DO MÊS NÃO É CONTEÚDO DO USUÁRIO.
+  //
+  // `migrate` cria um automaticamente para qualquer base que ainda não tenha
+  // nenhum. Ele sozinho fazia um aparelho recém-aberto parecer cheio: bastava
+  // abrir o aplicativo uma vez, e a entrada na conta passava a mostrar o pedido
+  // de "juntar dados" sem haver absolutamente nada para juntar. Quem entrava num
+  // aparelho novo tinha de apertar um botão para ver o próprio dinheiro.
+  //
+  // Só conta o mês em que ALGUÉM DECIDIU alguma coisa: definiu um teto, mudou a
+  // regra de divisão ou mexeu nos avisos. Grupo e pai de categoria são deduzidos
+  // da árvore de categorias, não são decisão.
+  function decidedBudgetHistory(value, base) {
+    const padraoSplit = (base && base.budgetSplit) || {};
+    const padraoAlerts = (base && base.budgetAlerts) || {};
+    const out = {};
+    Object.keys(value || {}).forEach((mes) => {
+      const linha = (value || {})[mes] || {};
+      const temTeto = Object.keys(linha.budgets || {}).length > 0;
+      if (temTeto || !sameCanonical(padraoSplit, linha.split) || !sameCanonical(padraoAlerts, linha.alerts)) {
+        out[mes] = linha;
+      }
+    });
+    return out;
+  }
+
   // Só a lista fechada de configurações do vínculo entra, e só quando difere do
   // padrão. Tema, disposição da tela, consentimentos e notificações ficam de
   // fora: são preferências do aparelho, não conteúdo financeiro.
@@ -5162,7 +5187,7 @@ const FinanceStore = (() => {
     const base = padrao || defaultData();
     const out = {};
     Array.from(SYNC_ALLOWED_SETTINGS).sort().forEach((key) => {
-      const value = data[key];
+      const value = key === "budgetHistory" ? decidedBudgetHistory(data[key], base) : data[key];
       if (value === undefined || value === null || value === "") return;
       if (sameCanonical(base[key], value)) return;
       out[key] = canonicalValue(value);
@@ -6462,11 +6487,15 @@ function mergeBackupInto(current, incoming) {
   const assets = applyGraveyard(mergeList(current.assets || [], incoming.assets || [], pickUpdated), graveyard, "assets");
   stats.assets = assets.length - (current.assets || []).length;
 
-  const accounts = mergeList(current.accounts || [], incoming.accounts || [], pickUpdated);
-  const creditCards = mergeList(current.creditCards || [], incoming.creditCards || [], pickUpdated);
-  const accountTransfers = mergeList(current.accountTransfers || [], incoming.accountTransfers || [], pickUpdated);
-  const cardPayments = mergeList(current.cardPayments || [], incoming.cardPayments || [], pickUpdated);
-  const accountAdjustments = mergeList(current.accountAdjustments || [], incoming.accountAdjustments || [], pickNewer("createdAt"));
+  // As cinco coleções de conta também passam pelo cemitério. Sem isto, uma
+  // conta do banco excluída aqui voltava a existir na primeira mesclagem de
+  // backup ou no vínculo dos dados de visitante, junto com as transferências e
+  // os pagamentos que saíram com ela: a exclusão parecia não ter funcionado.
+  const accounts = applyGraveyard(mergeList(current.accounts || [], incoming.accounts || [], pickUpdated), graveyard, "accounts");
+  const creditCards = applyGraveyard(mergeList(current.creditCards || [], incoming.creditCards || [], pickUpdated), graveyard, "creditCards");
+  const accountTransfers = applyGraveyard(mergeList(current.accountTransfers || [], incoming.accountTransfers || [], pickUpdated), graveyard, "accountTransfers");
+  const cardPayments = applyGraveyard(mergeList(current.cardPayments || [], incoming.cardPayments || [], pickUpdated), graveyard, "cardPayments");
+  const accountAdjustments = applyGraveyard(mergeList(current.accountAdjustments || [], incoming.accountAdjustments || [], pickNewer("createdAt")), graveyard, "accountAdjustments");
   stats.accounts = accounts.length - (current.accounts || []).length;
   stats.creditCards = creditCards.length - (current.creditCards || []).length;
 
@@ -6667,14 +6696,14 @@ async function applyAccountScope(userId) {
   // Tudo que a tela guardava era daquele escopo: seleção, formulário aberto,
   // rascunho de importação, pré-visualização de backup. Nada disso vale para a
   // conta que entrou agora.
-  resetScopedUiState();
+  resetScopedUiState(desired);
   render();
   return true;
 }
 
 // Estado de tela derivado dos dados. Sem esta limpeza, um id selecionado na
 // conta anterior continuaria apontado depois da troca.
-function resetScopedUiState() {
+function resetScopedUiState(escopo) {
   state.form = freshTxForm();
   state.editingTxId = null;
   state.movementDetailId = null;
@@ -6689,7 +6718,19 @@ function resetScopedUiState() {
   state.aiInsight = { loading: false, text: null, error: null, analise: null };
   state.backup = { preview: null, error: null, mode: "merge", busy: false, undoAvailable: !!FinanceStore.readUndoSnapshot() };
   state.account.guestLink = freshGuestLink();
-  state.onboarding.open = !(state.data.onboarding && state.data.onboarding.done);
+  // ENTRAR NUMA CONTA NÃO É PRIMEIRO USO.
+  //
+  // O banco local da conta nasce vazio neste aparelho e só é preenchido pela
+  // primeira descida. Decidir aqui, olhando esse vazio, fazia o assistente
+  // abrir logo depois do login e pedir renda e conta do banco de novo; quem
+  // respondia ficava com a conta do banco duplicada. Ver holdOnboardingGate.
+  if (escopo && escopo !== GUEST_SCOPE) holdOnboardingGate();
+  else {
+    // Sair da conta volta ao critério normal, e o portão de uma entrada
+    // anterior não pode ficar pendurado aqui.
+    state.onboarding.held = false;
+    state.onboarding.open = !(state.data.onboarding && state.data.onboarding.done);
+  }
   // A memoização do app é por IDENTIDADE do snapshot; `switchStorageScope`
   // devolve um objeto novo, então os caches derivados erram por construção.
 }
@@ -6743,6 +6784,15 @@ function guestLinkFailureText(reason) {
   return "O vínculo não foi concluído. Seus dados continuam completos nos dois lados.";
 }
 
+// Fim da entrada na conta: o motor volta a enviar e o assistente de boas-vindas
+// volta a poder abrir, agora com o conteúdo da conta já em mãos. Enquanto esta
+// função não roda, o portão fica fechado; é ela que distingue "a conta está
+// mesmo vazia" de "a conta ainda não desceu".
+async function finishAccountBootstrapAndGate() {
+  if (typeof CloudSync !== "undefined") await CloudSync.finishAccountBootstrap();
+  if (typeof refreshOnboardingGate === "function" && refreshOnboardingGate({ release: true })) render();
+}
+
 // Executa o vínculo e devolve o controle para o motor. `opts.expectedRemoteRevision`
 // só existe no vínculo automático: é ela que faz o servidor recusar a adoção se
 // a conta tiver recebido qualquer operação nesse intervalo.
@@ -6755,7 +6805,7 @@ async function runGuestLink(token, escopo, visitante, opts) {
 
   if (!resultado.ok) {
     setGuestLink({ phase: "pending", busy: false, error: guestLinkFailureText(resultado.reason), errorCode: resultado.reason });
-    if (typeof CloudSync !== "undefined") await CloudSync.finishAccountBootstrap();
+    await finishAccountBootstrapAndGate();
     return;
   }
   state.data = FinanceStore.snapshot();
@@ -6767,7 +6817,7 @@ async function runGuestLink(token, escopo, visitante, opts) {
 // o lote e que nada daquele vínculo tenha sobrado na fila.
 async function concludeGuestLink(token, escopo, visitante) {
   const valido = () => token === __guestLinkToken && FinanceStore.scope() === escopo;
-  if (typeof CloudSync !== "undefined") await CloudSync.finishAccountBootstrap();
+  await finishAccountBootstrapAndGate();
   if (!valido()) return;
   state.data = FinanceStore.snapshot();
 
@@ -6798,9 +6848,14 @@ async function concludeGuestLink(token, escopo, visitante) {
 
 // A sequência completa, chamada depois de a sessão e o escopo estarem prontos.
 async function bootstrapAccountLink() {
-  if (typeof CloudSync === "undefined") return;
+  // Sem motor de sincronização não há descida para esperar, e o portão do
+  // assistente não pode ficar fechado à espera de uma decisão que não vem.
+  if (typeof CloudSync === "undefined") {
+    if (typeof refreshOnboardingGate === "function" && refreshOnboardingGate({ release: true })) render();
+    return;
+  }
   const escopo = FinanceStore.scope();
-  if (escopo === "guest") return;
+  if (escopo === GUEST_SCOPE) return;
   const token = ++__guestLinkToken;
   const userId = state.account.userId;
   const valido = () => token === __guestLinkToken && FinanceStore.scope() === escopo && state.account.authenticated;
@@ -6820,12 +6875,12 @@ async function bootstrapAccountLink() {
 
   if (!visitante || visitante.readable === false) {
     setGuestLink({ phase: "pending", error: guestLinkFailureText("unreadable"), errorCode: "guest_unreadable" });
-    await CloudSync.finishAccountBootstrap();
+    await finishAccountBootstrapAndGate();
     return;
   }
   if (!visitante.exists) {
     setGuestLink({ phase: "idle", summary: null, digest: "" });
-    await CloudSync.finishAccountBootstrap();
+    await finishAccountBootstrapAndGate();
     return;
   }
   setGuestLink({ summary: visitante, digest: visitante.digest || "" });
@@ -6837,7 +6892,7 @@ async function bootstrapAccountLink() {
   if (!valido()) return;
   if (diario && diario.status === "blocked") {
     setGuestLink({ phase: "confirm", errorCode: "remote_changed", error: "A conta mudou em outro aparelho. Confirme como juntar os dados." });
-    await CloudSync.finishAccountBootstrap();
+    await finishAccountBootstrapAndGate();
     return;
   }
   if (diario) {
@@ -6854,12 +6909,12 @@ async function bootstrapAccountLink() {
   const decidido = recibo && visitante.digest && recibo.sourceDigest === visitante.digest;
   if (decidido && recibo.status === "linked") {
     setGuestLink({ phase: "linked", stats: recibo.stats || null });
-    await CloudSync.finishAccountBootstrap();
+    await finishAccountBootstrapAndGate();
     return;
   }
   if (decidido && recibo.status === "dismissed") {
     setGuestLink({ phase: "dismissed" });
-    await CloudSync.finishAccountBootstrap();
+    await finishAccountBootstrapAndGate();
     return;
   }
 
@@ -6870,7 +6925,7 @@ async function bootstrapAccountLink() {
       error: preparo.error || "Sem conexão para conferir a conta. O vínculo espera a rede voltar.",
       errorCode: preparo.errorCode || "offline",
     });
-    await CloudSync.finishAccountBootstrap();
+    await finishAccountBootstrapAndGate();
     return;
   }
 
@@ -6886,7 +6941,7 @@ async function bootstrapAccountLink() {
   // Conta com história: só com confirmação, e sem nenhuma opção que substitua
   // ou apague um dos lados.
   setGuestLink({ phase: "confirm" });
-  await CloudSync.finishAccountBootstrap();
+  await finishAccountBootstrapAndGate();
 }
 
 // ---- Ações da tela de conta ----
@@ -7082,6 +7137,10 @@ async function refreshAccountSession() {
     if (state.account.authenticated) bootstrapAccountLink().catch(() => {});
     else CloudSync.disable();
   }
+  // Sem sessão não há descida para esperar. O portão precisa abrir aqui, senão
+  // uma consulta de sessão que falhou por falta de rede deixaria o assistente
+  // fechado para sempre num aparelho que nunca foi configurado.
+  if (!state.account.authenticated && typeof refreshOnboardingGate === "function") refreshOnboardingGate({ release: true });
   render();
 }
 
@@ -8257,6 +8316,87 @@ function makeCardPayment(partial, accounts, cards) {
   return normalizeCardPayments([{ ...partial, id: partial.id || uid() }], accounts, cards)[0] || null;
 }
 
+// ==============================================================================
+// EXCLUSÃO DE CONTA E DE CARTÃO
+// ==============================================================================
+// Arquivar era a ÚNICA saída, e ela não resolve o caso mais comum de todos: um
+// cadastro repetido, criado por engano ou por uma segunda passagem pelo
+// assistente, que a pessoa quer fora da lista. Conta arquivada continua na
+// tela, continua contando no total de contas e continua no seletor de
+// conciliação; para quem só queria desfazer um cadastro duplicado, o app
+// simplesmente não tinha resposta.
+//
+// A regra da exclusão é a mesma da dívida: NADA de histórico é apagado junto.
+// O que estava pendurado na conta se divide em dois grupos:
+//
+//   perde o vínculo   lançamento e cartão continuam existindo, só deixam de
+//                     apontar para a conta. O lançamento volta a contar como
+//                     histórico sem conta, na mesma linha "Histórico anterior"
+//                     que a tela já mostra hoje.
+//   sai junto         transferência, conciliação e pagamento de fatura NÃO
+//                     existem sem a conta que os originou. Cada um sai com
+//                     lápide própria, senão o outro aparelho os devolveria na
+//                     sincronização seguinte.
+//
+// O impacto é contado ANTES para a confirmação poder dizer, em número, o que
+// vai acontecer. Excluir sem essa frase seria pedir uma decisão no escuro.
+function accountDeletionImpact(data, accountId) {
+  const transactions = (data.transactions || []).filter((t) => t.accountId === accountId).length;
+  const transfers = (data.accountTransfers || []).filter((t) => t.fromAccountId === accountId || t.toAccountId === accountId).length;
+  const payments = (data.cardPayments || []).filter((p) => p.accountId === accountId).length;
+  const adjustments = (data.accountAdjustments || []).filter((a) => a.accountId === accountId).length;
+  const cards = (data.creditCards || []).filter((c) => c.accountId === accountId).length;
+  return { transactions, transfers, payments, adjustments, cards, total: transactions + transfers + payments + adjustments + cards };
+}
+
+function removeAccountWithIntegrity(data, accountId) {
+  const now = new Date().toISOString();
+  const transfers = (data.accountTransfers || []).filter((t) => t.fromAccountId === accountId || t.toAccountId === accountId).map((t) => t.id);
+  const payments = (data.cardPayments || []).filter((p) => p.accountId === accountId).map((p) => p.id);
+  const adjustments = (data.accountAdjustments || []).filter((a) => a.accountId === accountId).map((a) => a.id);
+  // As lápides são cunhadas aqui, e não deixadas para o diff da sincronização,
+  // porque o registro dependente some por NORMALIZAÇÃO (o normalizador
+  // descarta transferência sem conta). Um id que desaparece sem lápide volta
+  // do outro aparelho na descida seguinte.
+  let graveyard = withTombstones(data.graveyard, "accounts", accountId);
+  if (transfers.length) graveyard = withTombstones(graveyard, "accountTransfers", transfers);
+  if (payments.length) graveyard = withTombstones(graveyard, "cardPayments", payments);
+  if (adjustments.length) graveyard = withTombstones(graveyard, "accountAdjustments", adjustments);
+  return {
+    ...data,
+    accounts: (data.accounts || []).filter((a) => a.id !== accountId),
+    creditCards: (data.creditCards || []).map((c) => (c.accountId === accountId ? { ...c, accountId: null, updatedAt: now } : c)),
+    transactions: (data.transactions || []).map((t) => (t.accountId === accountId ? { ...t, accountId: null, updatedAt: now } : t)),
+    accountTransfers: (data.accountTransfers || []).filter((t) => t.fromAccountId !== accountId && t.toAccountId !== accountId),
+    cardPayments: (data.cardPayments || []).filter((p) => p.accountId !== accountId),
+    accountAdjustments: (data.accountAdjustments || []).filter((a) => a.accountId !== accountId),
+    graveyard,
+  };
+}
+
+// Cartão excluído devolve as compras ao caixa: sem cartão, uma despesa volta a
+// sair do saldo no dia em que foi feita (ver transactionAffectsCash). Isso muda
+// número na tela, então a confirmação precisa dizer quantas compras são.
+function cardDeletionImpact(data, cardId) {
+  const transactions = (data.transactions || []).filter((t) => t.creditCardId === cardId).length;
+  const payments = (data.cardPayments || []).filter((p) => p.creditCardId === cardId).length;
+  return { transactions, payments, total: transactions + payments };
+}
+
+function removeCreditCardWithIntegrity(data, cardId) {
+  const now = new Date().toISOString();
+  const payments = (data.cardPayments || []).filter((p) => p.creditCardId === cardId).map((p) => p.id);
+  let graveyard = withTombstones(data.graveyard, "creditCards", cardId);
+  if (payments.length) graveyard = withTombstones(graveyard, "cardPayments", payments);
+  return {
+    ...data,
+    creditCards: (data.creditCards || []).filter((c) => c.id !== cardId),
+    transactions: (data.transactions || []).map((t) => (t.creditCardId === cardId ? { ...t, creditCardId: null, updatedAt: now } : t)),
+    cardPayments: (data.cardPayments || []).filter((p) => p.creditCardId !== cardId),
+    graveyard,
+  };
+}
+
 function reconcileAccount(data, accountId, actualBalance, date) {
   const checkedAt = date || todayIso();
   const current = accountBalance(data, accountId, checkedAt);
@@ -8278,7 +8418,8 @@ if (typeof module !== "undefined" && module.exports) {
     accountsCashBalance, cardStatementKeyForDate, cardStatementDueDate, cardStatements,
     cardLiabilityStatements, cardLiabilitySummary,
     accountsSummary, makeAccount, makeCreditCard, makeAccountTransfer, makeCardPayment,
-    reconcileAccount,
+    reconcileAccount, accountDeletionImpact, removeAccountWithIntegrity,
+    cardDeletionImpact, removeCreditCardWithIntegrity,
   };
 }
 
@@ -19223,6 +19364,8 @@ const ONB_SPLIT_PRESETS = [
 function freshOnboarding() {
   return {
     open: false,
+    // Assistente segurado: ver o bloco "O PORTÃO DO ASSISTENTE" abaixo.
+    held: false,
     step: 1,
     name: "",
     income: "",
@@ -19232,6 +19375,42 @@ function freshOnboarding() {
     focus: "month",
     split: { necessidade: 50, desejo: 30, futuro: 20 },
   };
+}
+
+// ------------------------------------------------------------------------------
+// O PORTÃO DO ASSISTENTE
+// ------------------------------------------------------------------------------
+// ESTE É O DEFEITO QUE DUPLICAVA A CONTA DO BANCO.
+//
+// Entrar numa conta troca o banco carregado por um banco NOVO e vazio: o
+// conteúdo da conta só chega depois da primeira descida da nuvem. Quem decidia
+// se o assistente abre olhava esse vazio e concluía "primeiro uso". O resultado
+// aparecia logo depois do login: o assistente tomava a tela inteira e pedia
+// nome, renda e conta do banco de novo. Quem respondia terminava com a conta do
+// banco cadastrada duas vezes, a que desceu da nuvem e a que acabara de
+// digitar, e sem nenhuma forma de apagar uma delas.
+//
+// O portão fecha o assistente enquanto a entrada na conta não termina.
+// `refreshOnboardingGate` reavalia quando o conteúdo da conta chega, e só a
+// liberação explícita, no fim da sequência de vínculo, pode reabrir.
+function holdOnboardingGate() {
+  state.onboarding.held = true;
+  state.onboarding.open = false;
+}
+
+// Devolve true quando a tela precisa ser redesenhada.
+//
+// Sem `release`, esta função só sabe FECHAR: o dado que chega da conta pode
+// provar que a configuração já foi feita, nunca o contrário. Reabrir é decisão
+// do fim da entrada na conta, quando já se sabe que ela está mesmo vazia.
+function refreshOnboardingGate(opts) {
+  const liberar = !!(opts && opts.release);
+  if (liberar) state.onboarding.held = false;
+  const concluido = !!(state.data.onboarding && state.data.onboarding.done);
+  const alvo = concluido ? false : (liberar ? !state.onboarding.held : state.onboarding.open);
+  if (alvo === state.onboarding.open) return false;
+  state.onboarding.open = alvo;
+  return true;
 }
 
 // Renda informada no passo 2, em reais. Usada pelo passo 4 para mostrar quanto
@@ -19272,7 +19451,7 @@ function onbCanAdvance(step) {
 // essa linha por aria-describedby, para o leitor de tela anunciar a exigência
 // junto do botão em vez de deixá-la solta no meio da tela.
 function onbBlockReason(step) {
-  if (step === 1) return "Marque o aceite da política e dos termos para continuar.";
+  if (step === 1) return "Marque o aceite da política e dos termos para continuar ou entrar na sua conta.";
   if (step === 2) return "Informe uma renda maior que zero para continuar.";
   if (step === 3) return "Dê um nome à conta e informe o saldo, ou marque a opção de cadastrar depois.";
   return "";
@@ -19291,7 +19470,10 @@ function renderOnboardingLayer() {
     <div class="onb__sheet">
       <div class="onb__head">
         <div class="onb__brand">${svgIcon("wallet", 18)}<span>Cofre</span></div>
-        <button class="btn btn--ghost btn--sm" data-action="onb-skip" ${o.legalAccepted ? "" : `disabled aria-describedby="onb-block-reason"`}>Pular por agora</button>
+        <div class="onb__head-actions">
+          <button class="btn btn--ghost btn--sm" data-action="onb-have-account" ${o.legalAccepted ? "" : `disabled aria-describedby="onb-block-reason"`}>Já tenho conta</button>
+          <button class="btn btn--ghost btn--sm" data-action="onb-skip" ${o.legalAccepted ? "" : `disabled aria-describedby="onb-block-reason"`}>Pular por agora</button>
+        </div>
       </div>
       ${renderOnbProgress(o.step)}
       <div class="onb__body">${body}</div>
@@ -19541,6 +19723,30 @@ function finishOnboarding() {
   notify(seeds.items.length > 0
     ? `${saudacao}. Tetos sugeridos em ${plural(seeds.items.length, "categoria", "categorias")}.`
     : saudacao);
+}
+
+// ------------------------------------------------------------------------------
+// "JÁ TENHO CONTA": A SAÍDA QUE FALTAVA
+// ------------------------------------------------------------------------------
+// O assistente tomava a tela inteira e não oferecia nenhum caminho para entrar
+// numa conta que já existe. Quem instalava o app num aparelho novo era obrigado
+// a INVENTAR renda e conta do banco antes de conseguir chegar na tela de login,
+// e o que ele inventava virava um segundo cadastro ao lado do que a conta já
+// tinha. Pior: aquele conteúdo de visitante passava a exigir a confirmação de
+// "juntar dados" em toda entrada, que é exatamente o botão que ninguém quer
+// apertar para ver o próprio dinheiro.
+//
+// Nada de configuração é gravado aqui. Só o aceite legal, que é do APARELHO e
+// nunca sobe para a conta (`privacy` está fora de SYNC_ALLOWED_SETTINGS), e que
+// por isso não faz a base de visitante contar como conteúdo a vincular.
+function openAccountFromOnboarding() {
+  if (!state.onboarding.legalAccepted) { notify("Aceite a política e os termos para continuar", "warn"); return; }
+  setData((d) => ({ ...d, privacy: acceptLegalTexts(d.privacy) }));
+  // Segurado, não concluído: quem entrar numa conta vazia ainda precisa
+  // configurar, e a liberação no fim do vínculo reabre o assistente.
+  holdOnboardingGate();
+  setState({ tab: "account" });
+  notify("Entre com seu email e senha para trazer os dados da sua conta");
 }
 
 // Pular também é um desfecho: registramos para não perguntar de novo a cada
@@ -20432,7 +20638,7 @@ function renderAccountRow(a, sourceStats) {
     <span class="account-mark" data-ui-css="--account-color:${a.color}">${svgIcon(a.type === "dinheiro" ? "wallet" : "bank",18)}</span>
     <div class="account-row__info"><b>${escapeHtml(a.name)}</b><span>${ACCOUNT_TYPE_LABELS[a.type] || "Conta"}${a.archived ? ", arquivada" : ""}</span><small>${stats.movementCount} ${stats.movementCount === 1 ? "movimentação" : "movimentações"} · última ${stats.lastMovementAt ? formatMovementTimestamp(stats.lastMovementAt) : "não registrada"}</small><small>Conferida: ${stats.reconciledAt ? formatMovementTimestamp(stats.reconciledAt) : "nunca"}${stats.pendingCount ? ` · ${stats.pendingCount} ${stats.pendingCount === 1 ? "pendência" : "pendências"}` : ""}</small>${foraDoSaldo ? `<small class="account-row__note">${svgIcon("info",12)} ${foraDoSaldo} ${foraDoSaldo === 1 ? "lançamento é anterior" : "lançamentos são anteriores"} à abertura em ${fmtDateFull(a.openingDate)} e ${foraDoSaldo === 1 ? "não entra" : "não entram"} neste saldo</small>` : ""}</div>
     <strong class="account-row__value">${fmtBRL(a.balance)}</strong>
-    <div class="account-row__actions"><button class="icon-btn" data-action="account-reconcile-open" data-id="${a.id}" aria-label="Conciliar ${escapeHtml(a.name)}">${svgIcon("refresh",15)}</button><button class="icon-btn" data-action="account-edit" data-id="${a.id}" aria-label="Editar ${escapeHtml(a.name)}">${svgIcon("pencil",15)}</button><button class="icon-btn" data-action="account-archive" data-id="${a.id}" aria-label="${a.archived ? "Reativar" : "Arquivar"} ${escapeHtml(a.name)}">${svgIcon(a.archived ? "checkCircle" : "archive",15)}</button></div>
+    <div class="account-row__actions"><button class="icon-btn" data-action="account-reconcile-open" data-id="${a.id}" aria-label="Conciliar ${escapeHtml(a.name)}">${svgIcon("refresh",15)}</button><button class="icon-btn" data-action="account-edit" data-id="${a.id}" aria-label="Editar ${escapeHtml(a.name)}">${svgIcon("pencil",15)}</button><button class="icon-btn" data-action="account-archive" data-id="${a.id}" aria-label="${a.archived ? "Reativar" : "Arquivar"} ${escapeHtml(a.name)}">${svgIcon(a.archived ? "checkCircle" : "archive",15)}</button><button class="icon-btn icon-btn--danger" data-action="account-delete" data-id="${a.id}" aria-label="Excluir ${escapeHtml(a.name)}">${svgIcon("trash",15)}</button></div>
     ${reconciling ? `<div class="account-reconcile"><label class="field__label" for="reconcile-balance-input">Saldo visto no banco hoje</label><div class="account-reconcile__line"><input id="reconcile-balance-input" class="input" data-field="reconcile-value" value="${escapeHtml(state.accountsUi.reconcileValue)}" inputmode="decimal" placeholder="0,00" /><button class="btn btn--primary btn--sm" data-action="account-reconcile-save" data-id="${a.id}">Conciliar</button><button class="btn btn--ghost btn--sm" data-action="account-reconcile-cancel">Cancelar</button></div></div>` : ""}
   </div>`;
 }
@@ -20441,7 +20647,7 @@ function renderCardRow(c, sourceStats) {
   const open = c.statements.filter((s) => s.outstanding > 0);
   const stats = sourceStats || { movementCount:0, lastMovementAt:null };
   return `<div class="card account-card-item ${c.archived ? "is-archived" : ""}">
-    <div class="account-card-head"><span class="account-mark" data-ui-css="--account-color:${c.color}">${svgIcon("creditCard",18)}</span><div><p class="card-title" data-ui-css="margin:0">${escapeHtml(c.name)}</p><p class="card-subtitle" data-ui-css="margin:2px 0 0">Fecha dia ${c.closingDay} · vence dia ${c.dueDay}${c.archived ? ", arquivado" : ""}</p><p class="account-source-line">${stats.movementCount} ${stats.movementCount === 1 ? "compra registrada" : "compras registradas"} · última ${stats.lastMovementAt ? formatMovementTimestamp(stats.lastMovementAt) : "não registrada"}</p></div><div class="account-row__actions"><button class="icon-btn" data-action="card-edit" data-id="${c.id}" aria-label="Editar ${escapeHtml(c.name)}">${svgIcon("pencil",15)}</button><button class="icon-btn" data-action="card-archive" data-id="${c.id}" aria-label="${c.archived ? "Reativar" : "Arquivar"} ${escapeHtml(c.name)}">${svgIcon(c.archived ? "checkCircle" : "archive",15)}</button></div></div>
+    <div class="account-card-head"><span class="account-mark" data-ui-css="--account-color:${c.color}">${svgIcon("creditCard",18)}</span><div><p class="card-title" data-ui-css="margin:0">${escapeHtml(c.name)}</p><p class="card-subtitle" data-ui-css="margin:2px 0 0">Fecha dia ${c.closingDay} · vence dia ${c.dueDay}${c.archived ? ", arquivado" : ""}</p><p class="account-source-line">${stats.movementCount} ${stats.movementCount === 1 ? "compra registrada" : "compras registradas"} · última ${stats.lastMovementAt ? formatMovementTimestamp(stats.lastMovementAt) : "não registrada"}</p></div><div class="account-row__actions"><button class="icon-btn" data-action="card-edit" data-id="${c.id}" aria-label="Editar ${escapeHtml(c.name)}">${svgIcon("pencil",15)}</button><button class="icon-btn" data-action="card-archive" data-id="${c.id}" aria-label="${c.archived ? "Reativar" : "Arquivar"} ${escapeHtml(c.name)}">${svgIcon(c.archived ? "checkCircle" : "archive",15)}</button><button class="icon-btn icon-btn--danger" data-action="card-delete" data-id="${c.id}" aria-label="Excluir ${escapeHtml(c.name)}">${svgIcon("trash",15)}</button></div></div>
     <div class="account-stats"><div><span>Faturas até este mês</span><b>${fmtBRL(c.due)}</b></div><div><span>Parcelas futuras</span><b>${fmtBRL(c.future)}</b></div><div><span>Limite disponível</span><b>${fmtBRL(c.availableLimit)}</b></div></div>
     ${open.length ? `<div class="statement-list">${open.slice(0,6).map((s) => `<div class="statement-row"><span><b>${MONTH_ABBR[Number(s.key.slice(5,7))-1]} ${s.key.slice(0,4)}</b><small>Vence ${fmtDateShort(s.dueDate)} · ${s.count} ${s.count === 1 ? "compra" : "compras"}</small></span><strong>${fmtBRL(s.outstanding)}</strong>${s.key <= monthKeyOf(todayIso()) ? `<button class="btn btn--secondary btn--sm" data-action="card-pay-open" data-id="${c.id}" data-value="${s.key}">Pagar</button>` : ""}</div>`).join("")}</div>` : `<p class="field-hint">Nenhuma fatura em aberto.</p>`}
   </div>`;
@@ -27165,6 +27371,7 @@ function onClick(e) {
     case "diagnostics-clear":
       clearSafeErrors(); render(); notify("Diagnóstico apagado"); break;
     case "onb-skip": skipOnboarding(); break;
+    case "onb-have-account": openAccountFromOnboarding(); break;
     case "onb-finish": finishOnboarding(); break;
     case "onb-restart": startOnboarding(); break;
     case "skip-to-content": {
@@ -27454,6 +27661,52 @@ function onClick(e) {
       setData((d) => ({ ...d, accounts: d.accounts.map((a) => a.id === id ? { ...a, archived: !a.archived, updatedAt:new Date().toISOString() } : a) }));
       notify("Estado da conta atualizado"); break;
     }
+    case "account-delete": {
+      const target = accountById(state.data, id);
+      if (!target) break;
+      const impacto = accountDeletionImpact(state.data, id);
+      const perdeVinculo = [
+        impacto.transactions ? `${plural(impacto.transactions, "lançamento volta", "lançamentos voltam")} a contar como histórico sem conta` : "",
+        impacto.cards ? `${plural(impacto.cards, "cartão fica", "cartões ficam")} sem conta de pagamento` : "",
+      ].filter(Boolean);
+      const saiJunto = [
+        impacto.transfers ? plural(impacto.transfers, "transferência", "transferências") : "",
+        impacto.payments ? plural(impacto.payments, "pagamento de fatura", "pagamentos de fatura") : "",
+        impacto.adjustments ? plural(impacto.adjustments, "conciliação", "conciliações") : "",
+      ].filter(Boolean);
+      const partes = [`A conta “${target.name}” sai da lista em todos os aparelhos.`];
+      if (perdeVinculo.length) partes.push(`${perdeVinculo.join(" e ")}.`);
+      // A frase da fatura só entra quando existe pagamento para reabrir. Sem a
+      // condição, ela aparecia numa conta que nunca pagou cartão nenhum e
+      // anunciava um efeito que não ia acontecer.
+      const totalSaiJunto = impacto.transfers + impacto.payments + impacto.adjustments;
+      if (saiJunto.length) partes.push(`${saiJunto.join(", ")} ${pluralWord(totalSaiJunto, "deixa", "deixam")} de existir junto com ela.`);
+      if (impacto.payments) partes.push(`As faturas pagas por essa conta voltam a aparecer em aberto.`);
+      if (!perdeVinculo.length && !saiJunto.length) partes.push("Nada está registrado nela, então nenhum outro número muda.");
+      requestConfirmation({
+        title: "Excluir esta conta?",
+        message: partes.join(" "),
+        confirmLabel: "Excluir conta",
+        tone: "danger",
+        // Arquivar continua sendo a saída certa para uma conta encerrada de
+        // verdade, cujo histórico ainda importa. A escolha fica na mesma caixa
+        // para ninguém apagar movimento por falta de alternativa à vista.
+        alternateLabel: target.archived ? null : "Só arquivar",
+        onAlternate: () => {
+          setData((d) => ({ ...d, accounts: d.accounts.map((a) => a.id === id ? { ...a, archived: true, updatedAt: new Date().toISOString() } : a) }));
+          notify("Conta arquivada");
+        },
+        onConfirm: () => {
+          setData((d) => removeAccountWithIntegrity(d, id));
+          if (state.accountsUi.reconcileId === id) { state.accountsUi.reconcileId = null; state.accountsUi.reconcileValue = ""; }
+          if (state.accountsUi.accountForm && state.accountsUi.accountForm.id === id) state.accountsUi.accountForm = null;
+          state.accountsUi.transferForm = null;
+          state.accountsUi.payment = null;
+          notify("Conta excluída");
+        },
+      });
+      break;
+    }
     case "account-reconcile-open": {
       const a = accountById(state.data,id); if (!a) break;
       state.accountsUi.reconcileId = id; state.accountsUi.reconcileValue = moneyDraft(accountBalance(state.data,id,todayIso())); render(); break;
@@ -27494,6 +27747,33 @@ function onClick(e) {
     case "card-archive":
       setData((d) => ({ ...d, creditCards:d.creditCards.map((c) => c.id === id ? { ...c, archived:!c.archived, updatedAt:new Date().toISOString() } : c) }));
       notify("Estado do cartão atualizado"); break;
+    case "card-delete": {
+      const card = creditCardById(state.data, id);
+      if (!card) break;
+      const impacto = cardDeletionImpact(state.data, id);
+      const partes = [`O cartão “${card.name}” sai da lista em todos os aparelhos.`];
+      if (impacto.transactions) partes.push(`${plural(impacto.transactions, "compra continua", "compras continuam")} no histórico, mas ${pluralWord(impacto.transactions, "passa", "passam")} a sair do saldo em contas na data em que ${pluralWord(impacto.transactions, "foi feita", "foram feitas")}.`);
+      if (impacto.payments) partes.push(`${plural(impacto.payments, "pagamento de fatura deixa", "pagamentos de fatura deixam")} de existir.`);
+      if (!impacto.total) partes.push("Nada está registrado nele, então nenhum outro número muda.");
+      requestConfirmation({
+        title: "Excluir este cartão?",
+        message: partes.join(" "),
+        confirmLabel: "Excluir cartão",
+        tone: "danger",
+        alternateLabel: card.archived ? null : "Só arquivar",
+        onAlternate: () => {
+          setData((d) => ({ ...d, creditCards: d.creditCards.map((c) => c.id === id ? { ...c, archived: true, updatedAt: new Date().toISOString() } : c) }));
+          notify("Cartão arquivado");
+        },
+        onConfirm: () => {
+          setData((d) => removeCreditCardWithIntegrity(d, id));
+          if (state.accountsUi.cardForm && state.accountsUi.cardForm.id === id) state.accountsUi.cardForm = null;
+          if (state.accountsUi.payment && state.accountsUi.payment.creditCardId === id) state.accountsUi.payment = null;
+          notify("Cartão excluído");
+        },
+      });
+      break;
+    }
     case "transfer-new": {
       const list = (state.data.accounts || []).filter((a) => !a.archived);
       state.accountsUi.transferForm = { fromAccountId:(list[0]||{}).id||"", toAccountId:(list[1]||{}).id||"", amount:"", date:todayIso(), description:"Transferência" };
@@ -29102,6 +29382,11 @@ function setData(updater) {
 // ter chegado ao disco, e ainda faria o aparelho reivindicar a alteração alheia.
 function setDataFromRemote(next) {
   state.data = next;
+  // Conteúdo que desceu da conta é prova de que a configuração inicial já foi
+  // feita. Sem esta linha, o assistente aberto por um banco local vazio
+  // continuava na frente da tela mesmo depois de os dados chegarem, e quem o
+  // respondia cadastrava a conta do banco uma segunda vez.
+  if (typeof refreshOnboardingGate === "function") refreshOnboardingGate();
   render();
   idleTask(syncAchievements);
   EventBus.emit(APP_EVENTS.DATA_CHANGED, { data: state.data, origin: "remote" });
@@ -30239,7 +30524,12 @@ async function init() {
   // Primeiro uso: a configuração de 4 passos assume a tela. Quem já usava o app
   // nunca cai aqui. `migrate` marca o onboarding como concluído para qualquer
   // base que já tenha lançamento, conta, meta ou renda (ver normalizeOnboarding).
-  state.onboarding.open = !(state.data.onboarding && state.data.onboarding.done);
+  // Abrir já dentro de uma conta segue a mesma regra do login: o banco daquela
+  // conta pode estar vazio neste aparelho só porque a descida ainda não veio, e
+  // um assistente na frente da tela nesse instante pede um cadastro que a conta
+  // já tem. `bootstrapAccountLink` libera o portão quando a descida termina.
+  if (FinanceStore.scope() !== GUEST_SCOPE) holdOnboardingGate();
+  else state.onboarding.open = !(state.data.onboarding && state.data.onboarding.done);
   state.backup.undoAvailable = !!FinanceStore.readUndoSnapshot();
   FinanceStore.onError(() => {
     state.storageOk = false;

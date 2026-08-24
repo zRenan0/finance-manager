@@ -9,6 +9,8 @@
 //   F-03  a tela de conta abria com erro quando /api devolvia HTML com 200
 //   F-04  data pura lida como UTC voltava um dia e inventava horário
 //   F-05  lançamentos anteriores à abertura sumiam do saldo sem aviso
+//   F-18  entrar na conta reabria o assistente e duplicava a conta do banco
+//   F-19  não havia como excluir uma conta do banco nem um cartão
 "use strict";
 const fs = require("fs");
 const vm = require("vm");
@@ -733,6 +735,199 @@ function blocoF17() {
   check("e a projeção de gastos do mês", /do último dia/.test(readSrc("js/screens/analytics.js")));
 }
 
+// ------------------------------------------------------------------------------
+// F-18. ENTRAR NA CONTA REABRIA O ASSISTENTE, E ISSO DUPLICAVA A CONTA DO BANCO
+// ------------------------------------------------------------------------------
+// Relatado no beta: "cadastrei uma conta de banco, mas duplicou na hora que fiz
+// login". A causa não estava na sincronização, que funde por id e não duplica
+// nada. Estava aqui: entrar numa conta abre um banco local NOVO e vazio, o
+// aplicativo lia esse vazio como "primeiro uso" e o assistente de quatro passos
+// tomava a tela inteira pedindo renda e conta do banco outra vez. O que a
+// pessoa digitava nascia com id próprio, e a conta que descia da nuvem chegava
+// em seguida: duas contas do mesmo banco, lado a lado.
+function blocoF18() {
+  section("F-18. Entrar na conta não pode reabrir o assistente");
+
+  run(`state.data = migrate({ ...defaultData(), onboarding: { done: false, skipped: false, completedAt: null } });`);
+  run(`state.onboarding = freshOnboarding(); state.onboarding.open = true; state.onboarding.held = false;`);
+
+  run(`holdOnboardingGate();`);
+  check("segurar fecha o assistente", run(`state.onboarding.open`) === false);
+  check("e registra que a decisão ainda não saiu", run(`state.onboarding.held`) === true);
+
+  // O caso do defeito: a descida traz o conteúdo da conta, e com ele a prova de
+  // que a configuração já foi feita em outro aparelho.
+  run(`state.onboarding.held = false; state.onboarding.open = true;`);
+  run(`state.data = { ...state.data, onboarding: { done: true, skipped: false, completedAt: "2026-08-20" } };`);
+  const fechou = run(`refreshOnboardingGate()`);
+  check("dado que chega da conta fecha o assistente", fechou === true && run(`state.onboarding.open`) === false);
+
+  // Negativo: sem liberação explícita, esta função NUNCA abre. Abrir a partir
+  // de uma descida vazia é justamente o que recriava o defeito.
+  run(`state.onboarding.open = false; state.onboarding.held = true;`);
+  run(`state.data = { ...state.data, onboarding: { done: false, skipped: false, completedAt: null } };`);
+  check("sem liberação, o portão não abre sozinho",
+    run(`refreshOnboardingGate()`) === false && run(`state.onboarding.open`) === false);
+
+  // Conta mesmo vazia: aí sim o assistente é o certo, e a liberação o abre.
+  check("liberado, uma conta vazia recebe o assistente",
+    run(`refreshOnboardingGate({ release: true })`) === true && run(`state.onboarding.open`) === true);
+
+  // Liberar uma conta que já tem configuração não pode reabrir nada.
+  run(`state.onboarding.open = false; state.onboarding.held = true;`);
+  run(`state.data = { ...state.data, onboarding: { done: true, skipped: false, completedAt: "2026-08-20" } };`);
+  check("liberar não reabre onde a configuração já existe",
+    run(`refreshOnboardingGate({ release: true })`) === false && run(`state.onboarding.open`) === false);
+
+  // Os quatro pontos onde o portão precisa estar preso ao ciclo de vida da conta.
+  const auth = readSrc("js/auth.js");
+  check("trocar para o escopo de uma conta segura o assistente",
+    /escopo !== GUEST_SCOPE\) holdOnboardingGate\(\)/.test(auth));
+  check("o fim do vínculo é quem libera",
+    /finishAccountBootstrapAndGate[\s\S]{0,200}refreshOnboardingGate\(\{ release: true \}\)/.test(auth));
+  check("abrir o app já dentro de uma conta também segura",
+    /scope\(\) !== GUEST_SCOPE\) holdOnboardingGate\(\)/.test(readSrc("js/app.js")));
+  check("o que desce da nuvem reavalia o portão",
+    /setDataFromRemote[\s\S]{0,400}refreshOnboardingGate\(\)/.test(readSrc("js/app.js")));
+
+  // A outra metade do defeito: não havia como entrar numa conta existente sem
+  // antes inventar renda e conta do banco, porque o assistente cobria tudo.
+  run(`state.onboarding = freshOnboarding(); state.onboarding.open = true; state.onboarding.legalAccepted = true;`);
+  const camada = run(`renderOnboardingLayer()`);
+  check("o assistente oferece a entrada na conta", /data-action="onb-have-account"/.test(camada));
+  check("com rótulo que diz o que faz", /Já tenho conta/.test(camada));
+  check("a ação está ligada no despachante",
+    /case "onb-have-account": openAccountFromOnboarding\(\);/.test(readSrc("js/actions.js")));
+
+  // Entrar na conta não pode gravar configuração nenhuma: se gravasse, a base
+  // de visitante passaria a contar como conteúdo e toda entrada exigiria a
+  // confirmação de "juntar dados".
+  const fonteOnb = readSrc("js/screens/onboarding.js");
+  const corpo = fonteOnb.slice(fonteOnb.indexOf("function openAccountFromOnboarding"));
+  check("entrar na conta grava só o aceite legal",
+    /privacy: acceptLegalTexts/.test(corpo.slice(0, 600)) && !/onboarding: \{ done: true/.test(corpo.slice(0, 600)));
+
+  run(`state.onboarding = freshOnboarding();`);
+}
+
+// ------------------------------------------------------------------------------
+// F-19. NÃO EXISTIA COMO APAGAR UMA CONTA DO BANCO NEM UM CARTÃO
+// ------------------------------------------------------------------------------
+// Arquivar era a única saída, e ela mantém o registro na tela, no total de
+// contas e no seletor de conciliação. Quem terminou com um cadastro duplicado
+// (ver F-18) não tinha nenhuma forma de desfazer.
+function blocoF19() {
+  section("F-19. Excluir conta do banco e cartão");
+
+  const base = `state.data = migrate({ ...defaultData(),
+    accounts: [
+      { id: "acc-um", name: "Nubank", type: "digital", openingBalance: 1000, openingDate: "2026-08-01", color: "#0B6B5C" },
+      { id: "acc-dois", name: "Itau", type: "corrente", openingBalance: 500, openingDate: "2026-08-01", color: "#3C6E8F" },
+    ],
+    creditCards: [{ id: "card-um", name: "Nubank Roxinho", accountId: "acc-um", limit: 2000, closingDay: 20, dueDay: 28, color: "#7B4BC4" }],
+    transactions: [
+      { id: "tx-conta", type: "expense", amount: 100, categoryId: "mercado", date: "2026-08-10", accountId: "acc-um" },
+      { id: "tx-cartao", type: "expense", amount: 60, categoryId: "lazer", date: "2026-08-10", creditCardId: "card-um" },
+      { id: "tx-outra", type: "expense", amount: 30, categoryId: "lazer", date: "2026-08-10", accountId: "acc-dois" },
+    ],
+    accountTransfers: [{ id: "tr-um", fromAccountId: "acc-um", toAccountId: "acc-dois", amount: 50, date: "2026-08-11" }],
+    cardPayments: [{ id: "pg-um", accountId: "acc-um", creditCardId: "card-um", amount: 60, statementKey: "2026-09", date: "2026-08-12" }],
+    accountAdjustments: [{ id: "aj-um", accountId: "acc-um", amount: 5, date: "2026-08-13" }],
+  });`;
+
+  run(base);
+  const impacto = run(`accountDeletionImpact(state.data, "acc-um")`);
+  check("o impacto conta o que está pendurado na conta",
+    impacto.transactions === 1 && impacto.transfers === 1 && impacto.payments === 1
+    && impacto.adjustments === 1 && impacto.cards === 1, impacto);
+  check("e uma base sem contas tem impacto zero",
+    run(`accountDeletionImpact(migrate(defaultData()), "acc-um")`).total === 0);
+
+  run(`state.data = migrate(removeAccountWithIntegrity(state.data, "acc-um"));`);
+  check("a conta sai da lista", run(`(state.data.accounts || []).some((a) => a.id === "acc-um")`) === false);
+  check("a outra conta continua intacta", run(`(state.data.accounts || []).some((a) => a.id === "acc-dois")`) === true);
+  check("o lançamento continua no histórico, sem conta",
+    run(`state.data.transactions.some((t) => t.id === "tx-conta")`) === true
+    && run(`(state.data.transactions.find((t) => t.id === "tx-conta") || {}).accountId`) == null);
+  check("o cartão continua existindo, sem conta de pagamento",
+    run(`state.data.creditCards.some((c) => c.id === "card-um")`) === true
+    && run(`(state.data.creditCards.find((c) => c.id === "card-um") || {}).accountId`) == null);
+  check("transferência, pagamento e conciliação saem junto",
+    run(`state.data.accountTransfers.length`) === 0 && run(`state.data.cardPayments.length`) === 0
+    && run(`state.data.accountAdjustments.length`) === 0);
+  check("a exclusão da conta deixa lápide", !!run(`state.data.graveyard.accounts["acc-um"]`));
+  check("e os dependentes também, senão o outro aparelho os devolve",
+    !!run(`state.data.graveyard.accountTransfers["tr-um"]`)
+    && !!run(`state.data.graveyard.cardPayments["pg-um"]`)
+    && !!run(`state.data.graveyard.accountAdjustments["aj-um"]`));
+
+  // A lápide precisa valer na mesclagem, senão a conta volta no próximo backup
+  // restaurado ou no vínculo dos dados de visitante.
+  run(`__antes = state.data;`);
+  // O backup carrega a data ORIGINAL do registro. A regra da lápide diz que um
+  // registro só ressuscita se foi editado DEPOIS da exclusão; um arquivo antigo
+  // não foi, e por isso a conta tem de continuar apagada.
+  run(`__voltou = mergeBackupInto(__antes, migrate({ ...defaultData(),
+    accounts: [{ id: "acc-um", name: "Nubank", type: "digital", openingBalance: 1000, openingDate: "2026-08-01",
+      color: "#0B6B5C", createdAt: "2026-08-01T10:00:00.000Z", updatedAt: "2026-08-01T10:00:00.000Z" }] }));`);
+  check("mesclar um backup antigo não ressuscita a conta excluída",
+    run(`__voltou.data.accounts.some((a) => a.id === "acc-um")`) === false);
+  // E o contrário também precisa valer: editar a conta em outro aparelho DEPOIS
+  // da exclusão ganha da lápide, senão uma exclusão antiga apagaria trabalho novo.
+  run(`__editada = mergeBackupInto(__antes, migrate({ ...defaultData(),
+    accounts: [{ id: "acc-um", name: "Nubank", type: "digital", openingBalance: 1000, openingDate: "2026-08-01",
+      color: "#0B6B5C", createdAt: "2026-08-01T10:00:00.000Z", updatedAt: "2099-01-01T10:00:00.000Z" }] }));`);
+  check("mas uma edição posterior à exclusão continua ganhando",
+    run(`__editada.data.accounts.some((a) => a.id === "acc-um")`) === true);
+
+  // Cartão.
+  run(base);
+  const impactoCartao = run(`cardDeletionImpact(state.data, "card-um")`);
+  check("o impacto do cartão conta compras e pagamentos",
+    impactoCartao.transactions === 1 && impactoCartao.payments === 1, impactoCartao);
+  run(`state.data = migrate(removeCreditCardWithIntegrity(state.data, "card-um"));`);
+  check("o cartão sai da lista", run(`state.data.creditCards.length`) === 0);
+  check("a compra continua no histórico, sem cartão",
+    run(`state.data.transactions.some((t) => t.id === "tx-cartao")`) === true
+    && run(`(state.data.transactions.find((t) => t.id === "tx-cartao") || {}).creditCardId`) == null);
+  check("o pagamento da fatura sai com lápide",
+    run(`state.data.cardPayments.length`) === 0 && !!run(`state.data.graveyard.cardPayments["pg-um"]`));
+  check("a conta do banco não é afetada pela exclusão do cartão",
+    run(`state.data.accounts.length`) === 2);
+
+  // A confirmação precisa dizer, em número, o que vai acontecer.
+  run(base);
+  const clique = (acao, id) => run(`onClick({ target: { closest: (sel) => (sel === "[data-action]"
+    ? { dataset: { action: ${JSON.stringify(acao)}, id: ${JSON.stringify(id)} }, classList: { contains: () => false } } : null) } });`);
+  clique("account-delete", "acc-um");
+  const caixa = run(`state.confirmation`);
+  check("excluir conta pede confirmação antes", !!caixa && caixa.tone === "danger", caixa && caixa.title);
+  check("a confirmação nomeia a conta", /Nubank/.test((caixa || {}).message || ""));
+  check("e diz o que acontece com o histórico",
+    /histórico sem conta/.test((caixa || {}).message || ""), (caixa || {}).message);
+  check("e avisa que as faturas pagas voltam a aparecer",
+    /voltam a aparecer em aberto/.test((caixa || {}).message || ""));
+  check("arquivar continua oferecido na mesma caixa", (caixa || {}).alternateLabel === "Só arquivar");
+  run(`state.confirmation.onConfirm();`);
+  check("confirmar exclui de verdade", run(`state.data.accounts.some((a) => a.id === "acc-um")`) === false);
+
+  run(base);
+  clique("card-delete", "card-um");
+  const caixaCartao = run(`state.confirmation`);
+  check("excluir cartão pede confirmação antes", !!caixaCartao && caixaCartao.tone === "danger");
+  check("a confirmação do cartão explica o efeito no saldo",
+    /passa a sair do saldo em contas/.test((caixaCartao || {}).message || ""), (caixaCartao || {}).message);
+  run(`state.confirmation = null;`);
+
+  // E os botões precisam existir na tela, senão nada disso é alcançável.
+  run(base);
+  const tela = run(`renderAccountsScreen()`);
+  check("a linha da conta tem o botão de excluir", /data-action="account-delete"/.test(tela));
+  check("o cartão também", /data-action="card-delete"/.test(tela));
+  check("com rótulo acessível", /aria-label="Excluir Nubank"/.test(tela));
+  check("e arquivar continua disponível", /data-action="account-archive"/.test(tela));
+}
+
 async function main() {
   blocoF01();
   blocoF02();
@@ -750,6 +945,8 @@ async function main() {
   blocoF15();
   blocoF16();
   blocoF17();
+  blocoF18();
+  blocoF19();
   console.log(`\n${fail === 0 ? "TODOS OS TESTES PASSARAM" : "FALHAS ENCONTRADAS"}: ${ok} ok, ${fail} falha(s)\n`);
   process.exit(fail === 0 ? 0 : 1);
 }

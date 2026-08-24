@@ -60,14 +60,14 @@ async function applyAccountScope(userId) {
   // Tudo que a tela guardava era daquele escopo: seleção, formulário aberto,
   // rascunho de importação, pré-visualização de backup. Nada disso vale para a
   // conta que entrou agora.
-  resetScopedUiState();
+  resetScopedUiState(desired);
   render();
   return true;
 }
 
 // Estado de tela derivado dos dados. Sem esta limpeza, um id selecionado na
 // conta anterior continuaria apontado depois da troca.
-function resetScopedUiState() {
+function resetScopedUiState(escopo) {
   state.form = freshTxForm();
   state.editingTxId = null;
   state.movementDetailId = null;
@@ -82,7 +82,19 @@ function resetScopedUiState() {
   state.aiInsight = { loading: false, text: null, error: null, analise: null };
   state.backup = { preview: null, error: null, mode: "merge", busy: false, undoAvailable: !!FinanceStore.readUndoSnapshot() };
   state.account.guestLink = freshGuestLink();
-  state.onboarding.open = !(state.data.onboarding && state.data.onboarding.done);
+  // ENTRAR NUMA CONTA NÃO É PRIMEIRO USO.
+  //
+  // O banco local da conta nasce vazio neste aparelho e só é preenchido pela
+  // primeira descida. Decidir aqui, olhando esse vazio, fazia o assistente
+  // abrir logo depois do login e pedir renda e conta do banco de novo; quem
+  // respondia ficava com a conta do banco duplicada. Ver holdOnboardingGate.
+  if (escopo && escopo !== GUEST_SCOPE) holdOnboardingGate();
+  else {
+    // Sair da conta volta ao critério normal, e o portão de uma entrada
+    // anterior não pode ficar pendurado aqui.
+    state.onboarding.held = false;
+    state.onboarding.open = !(state.data.onboarding && state.data.onboarding.done);
+  }
   // A memoização do app é por IDENTIDADE do snapshot; `switchStorageScope`
   // devolve um objeto novo, então os caches derivados erram por construção.
 }
@@ -136,6 +148,15 @@ function guestLinkFailureText(reason) {
   return "O vínculo não foi concluído. Seus dados continuam completos nos dois lados.";
 }
 
+// Fim da entrada na conta: o motor volta a enviar e o assistente de boas-vindas
+// volta a poder abrir, agora com o conteúdo da conta já em mãos. Enquanto esta
+// função não roda, o portão fica fechado; é ela que distingue "a conta está
+// mesmo vazia" de "a conta ainda não desceu".
+async function finishAccountBootstrapAndGate() {
+  if (typeof CloudSync !== "undefined") await CloudSync.finishAccountBootstrap();
+  if (typeof refreshOnboardingGate === "function" && refreshOnboardingGate({ release: true })) render();
+}
+
 // Executa o vínculo e devolve o controle para o motor. `opts.expectedRemoteRevision`
 // só existe no vínculo automático: é ela que faz o servidor recusar a adoção se
 // a conta tiver recebido qualquer operação nesse intervalo.
@@ -148,7 +169,7 @@ async function runGuestLink(token, escopo, visitante, opts) {
 
   if (!resultado.ok) {
     setGuestLink({ phase: "pending", busy: false, error: guestLinkFailureText(resultado.reason), errorCode: resultado.reason });
-    if (typeof CloudSync !== "undefined") await CloudSync.finishAccountBootstrap();
+    await finishAccountBootstrapAndGate();
     return;
   }
   state.data = FinanceStore.snapshot();
@@ -160,7 +181,7 @@ async function runGuestLink(token, escopo, visitante, opts) {
 // o lote e que nada daquele vínculo tenha sobrado na fila.
 async function concludeGuestLink(token, escopo, visitante) {
   const valido = () => token === __guestLinkToken && FinanceStore.scope() === escopo;
-  if (typeof CloudSync !== "undefined") await CloudSync.finishAccountBootstrap();
+  await finishAccountBootstrapAndGate();
   if (!valido()) return;
   state.data = FinanceStore.snapshot();
 
@@ -191,9 +212,14 @@ async function concludeGuestLink(token, escopo, visitante) {
 
 // A sequência completa, chamada depois de a sessão e o escopo estarem prontos.
 async function bootstrapAccountLink() {
-  if (typeof CloudSync === "undefined") return;
+  // Sem motor de sincronização não há descida para esperar, e o portão do
+  // assistente não pode ficar fechado à espera de uma decisão que não vem.
+  if (typeof CloudSync === "undefined") {
+    if (typeof refreshOnboardingGate === "function" && refreshOnboardingGate({ release: true })) render();
+    return;
+  }
   const escopo = FinanceStore.scope();
-  if (escopo === "guest") return;
+  if (escopo === GUEST_SCOPE) return;
   const token = ++__guestLinkToken;
   const userId = state.account.userId;
   const valido = () => token === __guestLinkToken && FinanceStore.scope() === escopo && state.account.authenticated;
@@ -213,12 +239,12 @@ async function bootstrapAccountLink() {
 
   if (!visitante || visitante.readable === false) {
     setGuestLink({ phase: "pending", error: guestLinkFailureText("unreadable"), errorCode: "guest_unreadable" });
-    await CloudSync.finishAccountBootstrap();
+    await finishAccountBootstrapAndGate();
     return;
   }
   if (!visitante.exists) {
     setGuestLink({ phase: "idle", summary: null, digest: "" });
-    await CloudSync.finishAccountBootstrap();
+    await finishAccountBootstrapAndGate();
     return;
   }
   setGuestLink({ summary: visitante, digest: visitante.digest || "" });
@@ -230,7 +256,7 @@ async function bootstrapAccountLink() {
   if (!valido()) return;
   if (diario && diario.status === "blocked") {
     setGuestLink({ phase: "confirm", errorCode: "remote_changed", error: "A conta mudou em outro aparelho. Confirme como juntar os dados." });
-    await CloudSync.finishAccountBootstrap();
+    await finishAccountBootstrapAndGate();
     return;
   }
   if (diario) {
@@ -247,12 +273,12 @@ async function bootstrapAccountLink() {
   const decidido = recibo && visitante.digest && recibo.sourceDigest === visitante.digest;
   if (decidido && recibo.status === "linked") {
     setGuestLink({ phase: "linked", stats: recibo.stats || null });
-    await CloudSync.finishAccountBootstrap();
+    await finishAccountBootstrapAndGate();
     return;
   }
   if (decidido && recibo.status === "dismissed") {
     setGuestLink({ phase: "dismissed" });
-    await CloudSync.finishAccountBootstrap();
+    await finishAccountBootstrapAndGate();
     return;
   }
 
@@ -263,7 +289,7 @@ async function bootstrapAccountLink() {
       error: preparo.error || "Sem conexão para conferir a conta. O vínculo espera a rede voltar.",
       errorCode: preparo.errorCode || "offline",
     });
-    await CloudSync.finishAccountBootstrap();
+    await finishAccountBootstrapAndGate();
     return;
   }
 
@@ -279,7 +305,7 @@ async function bootstrapAccountLink() {
   // Conta com história: só com confirmação, e sem nenhuma opção que substitua
   // ou apague um dos lados.
   setGuestLink({ phase: "confirm" });
-  await CloudSync.finishAccountBootstrap();
+  await finishAccountBootstrapAndGate();
 }
 
 // ---- Ações da tela de conta ----
@@ -475,6 +501,10 @@ async function refreshAccountSession() {
     if (state.account.authenticated) bootstrapAccountLink().catch(() => {});
     else CloudSync.disable();
   }
+  // Sem sessão não há descida para esperar. O portão precisa abrir aqui, senão
+  // uma consulta de sessão que falhou por falta de rede deixaria o assistente
+  // fechado para sempre num aparelho que nunca foi configurado.
+  if (!state.account.authenticated && typeof refreshOnboardingGate === "function") refreshOnboardingGate({ release: true });
   render();
 }
 

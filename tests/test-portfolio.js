@@ -33,6 +33,15 @@ const iso = (d) => { ctx.__dt = d; return run("isoOfDate(__dt)"); };
 const monthsAgoIso = (n, day = 10) => { const d = new Date(); return iso(new Date(d.getFullYear(), d.getMonth() - n, day)); };
 const monthKeyAgo = (n) => { const d = new Date(); return run(`keyOfDate(new Date(${d.getFullYear()}, ${d.getMonth() - n}, 1))`); };
 
+// PRAZO EM DIAS, NÃO EM MESES DE CALENDÁRIO.
+//
+// `monthsHeldOf` mede dias corridos e divide por 30,44. "12 meses atrás, dia
+// 10" tem entre 365 e 396 dias dependendo do dia de hoje, e vira de 11,99 a
+// 12,9 meses: o CDI do período saía de 10,0% a 10,8% sem nada ter mudado no
+// código, e a asserção quebrava sozinha depois do dia 10 de cada mês. Onde a
+// conferência é de PRECISÃO, o cenário precisa fixar o prazo em dias.
+const diasAtrasIso = (n) => iso(new Date(Date.now() - n * 86400000));
+
 function asset(partial) { ctx.__p = partial; return run("makeAsset(__p)"); }
 function build(data, opts) { ctx.__d = data; ctx.__o = opts || {}; return run("buildPortfolioModel(__d, __o)"); }
 function base(extra) { ctx.__e = extra || {}; return run("migrate({ ...defaultData(), ...__e })"); }
@@ -101,7 +110,7 @@ console.log("\n3. Rentabilidade, lucro e proventos");
 {
   const data = base({
     assets: [
-      asset({ class: "investimento", invType: "acao", name: "Ações XP", value: 12000, invested: 10000, dividends: 500, startedAt: monthsAgoIso(12) }),
+      asset({ class: "investimento", invType: "acao", name: "Ações XP", value: 12000, invested: 10000, dividends: 500, startedAt: diasAtrasIso(365) }),
       asset({ class: "investimento", invType: "tesouro-selic", name: "Tesouro Selic", value: 20000, invested: 20000, startedAt: monthsAgoIso(6) }),
     ],
   });
@@ -204,12 +213,13 @@ console.log("\n7. Evolução mensal a partir do histórico");
 console.log("\n8. Benchmark contra o CDI");
 {
   const mk = (value) => base({
-    assets: [asset({ class: "investimento", invType: "cdb", name: "CDB", value, invested: 10000, startedAt: monthsAgoIso(12) })],
+    assets: [asset({ class: "investimento", invType: "cdb", name: "CDB", value, invested: 10000, startedAt: diasAtrasIso(365) })],
     marketRates: { selic: 15, cdi: 10, ipca: 4.5, tr: 0.2, updatedAt: "2026-01-01" },
   });
 
   const ganhou = build(mk(11500));
   check("carteira acima do CDI é reconhecida", ganhou.benchmark.beatsCdi === true, ganhou.benchmark.portfolioPct);
+  check("o prazo apurado é de doze meses", near(ganhou.benchmark.months, 12, 0.05), ganhou.benchmark.months);
   check("CDI do período usa a premissa do usuário", near(ganhou.benchmark.cdiPct, 10, 0.3), ganhou.benchmark.cdiPct);
   check("elogio aparece nas recomendações", ganhou.insights.some((i) => i.id === "benchmark-ok"));
 

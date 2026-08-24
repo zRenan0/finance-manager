@@ -47,6 +47,21 @@ O commit `777dffe` resolveu seis defeitos, todos com teste de regressão:
 | F-05 | Lançamentos anteriores à abertura sumiam do saldo sem aviso | `js/data-sources.js`, `js/screens/accounts.js`, `js/screens/import.js` |
 | F-07 | Foco do teclado caía no `body` a cada render | `js/app.js` |
 
+Depois do commit `5db4d50`, mais dois achados da segunda rodada de beta:
+
+| Achado | Defeito | Onde |
+| --- | --- | --- |
+| F-18 | Entrar na conta reabria o assistente e duplicava a conta do banco | `js/screens/onboarding.js`, `js/auth.js`, `js/app.js`, `js/storage.js` |
+| F-19 | Não havia como excluir uma conta do banco nem um cartão | `js/accounts.js`, `js/actions.js`, `js/screens/accounts.js`, `js/storage.js` |
+
+O F-18 tinha três causas somadas: o assistente decidia "primeiro uso" olhando um
+banco local que ainda não recebera a descida da conta; não existia caminho para
+entrar numa conta existente sem antes inventar renda e conta do banco; e o
+instantâneo de orçamento criado pela migração fazia qualquer base recém-aberta
+parecer cheia, o que disparava o pedido de "juntar dados" sem haver nada para
+juntar. As três estão travadas em `tests/test-beta-fixes.js` (blocos F-18 e
+F-19) e em `tests/test-guest-link.js` (seção 7).
+
 As regressões estão travadas em `tests/test-beta-fixes.js`, com 53 asserções.
 É lá que os novos consertos devem ganhar teste, no mesmo formato: um bloco por
 achado, com asserção do caso positivo **e** do negativo.
@@ -81,6 +96,13 @@ Cada uma destas já custou tempo de diagnóstico:
   Divergir é esperado enquanto não houver deploy; não é falha.
 - Enter sintético de harness de automação não ativa botão (não gera `click`).
   Não conclua defeito de teclado a partir disso.
+- **Teste que usa "hoje" apodrece.** `test-health.js` e `test-portfolio.js` já
+  falharam sozinhos, sem nenhuma alteração de código, porque montavam cenário
+  com `new Date()` e comparavam com número exato: a compra passava do dia de
+  fechamento do cartão, ou o prazo de "12 meses atrás" virava 12,9 meses. Onde a
+  conferência é de precisão, fixe o prazo em DIAS (`diasAtrasIso(365)`) ou
+  congele o dia (`congelarHoje("2026-08-10")`, em `test-health.js`, que troca a
+  `todayIso` do contexto da VM e devolve a função de restaurar).
 
 ---
 

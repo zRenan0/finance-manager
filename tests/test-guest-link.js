@@ -274,6 +274,43 @@ const lancar = (ctx, tx) => ctx.run(
     check("uma conta cadastrada torna a base significativa", comConta.exists === true && comConta.accounts === 1, JSON.stringify(comConta));
   }
 
+  console.log("\n7. Aceite legal sozinho não vira conteúdo a vincular");
+  {
+    // A saída "Já tenho conta" do assistente grava UMA coisa no escopo de
+    // visitante: o aceite da política e dos termos, que é do aparelho e nunca
+    // sobe para a conta. Se esse aceite contasse como conteúdo, todo aparelho
+    // novo entraria na conta com um pedido de "juntar dados" na cara, que é
+    // exatamente o botão que o usuário não quer ter de apertar para ver o
+    // próprio dinheiro.
+    const storageE = fakeLocalStorage({ cofre_device_id: "device-aparelho-e05" });
+    const ctx = carregar(servidor.handler(servidor), storageE);
+    await ctx.run(`FinanceStore.init(new LocalStorageAdapter("guest"), { scope: "guest" })`);
+    ctx.run(`FinanceStore.persist({ ...FinanceStore.snapshot(), privacy: acceptLegalTexts(FinanceStore.snapshot().privacy) })`);
+    await ctx.run("FinanceStore.flush()");
+    const resumo = await ctx.run(`FinanceStore.peekScope("guest")`);
+    check("o aceite ficou gravado neste aparelho", ctx.run(`legalAccepted(FinanceStore.snapshot().privacy)`) === true);
+    check("mas a base continua sem conteúdo a vincular", resumo.exists === false, JSON.stringify(resumo));
+
+    // E a entrada na conta não pergunta nada: o aparelho recebe o que a conta
+    // tem e pronto.
+    const entrada = await entrarNaConta(ctx);
+    check("entrar não abre pedido de mesclagem", entrada.visitante.exists === false && entrada.adocao === null);
+    check("e o conteúdo da conta desce inteiro",
+      ctx.run(`FinanceStore.snapshot().transactions.some((t) => t.id === "tx-visitante")`)
+      && ctx.run(`FinanceStore.snapshot().accounts.some((a) => a.id === "acc-banco")`));
+
+    // O contrário precisa continuar valendo: teto definido pelo usuário É
+    // conteúdo, e o instantâneo do mês que o carrega tem de ser reconhecido.
+    const outro = carregar(servidor.handler(servidor), storageE);
+    await outro.run(`FinanceStore.init(new LocalStorageAdapter("guest"), { scope: "guest" })`);
+    outro.run(`FinanceStore.persist(withBudgetSnapshot({ ...FinanceStore.snapshot(),
+      categories: FinanceStore.snapshot().categories.map((c) => (c.id === "lazer" ? { ...c, budget: 300 } : c)) }))`);
+    await outro.run("FinanceStore.flush()");
+    const comTeto = await ctx.run(`FinanceStore.peekScope("guest")`);
+    check("um teto definido pelo usuário volta a contar como conteúdo",
+      comTeto.exists === true && comTeto.settings > 0, JSON.stringify(comTeto));
+  }
+
   console.log(`\n${fail === 0 ? "TODOS OS TESTES PASSARAM" : "FALHAS ENCONTRADAS"}: ${ok} ok, ${fail} falha(s)\n`);
   process.exit(fail === 0 ? 0 : 1);
 })();
