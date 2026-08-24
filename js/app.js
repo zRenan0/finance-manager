@@ -1776,11 +1776,28 @@ async function init() {
     // terminar no meio da troca. Ao ver `controllerchange`, perguntamos ao
     // worker QUAL pacote ele é, terminamos o que estava sendo salvo e só então
     // recarregamos, uma única vez por pacote.
-    navigator.serviceWorker.addEventListener("controllerchange", () => { handleControllerChange(); });
+    observeServiceWorkerControllerChanges(navigator.serviceWorker);
   }
 }
 
 const APP_RELOAD_GUARD_KEY = "cofre_build_reload";
+
+// A PRIMEIRA TOMADA DE CONTROLE NÃO É UMA ATUALIZAÇÃO.
+//
+// Na primeira visita, a página inteira já veio do pacote atual e começou sem
+// controller. O clients.claim() do worker dispara controllerchange mesmo assim.
+// Recarregar nesse momento apagava o rascunho do onboarding enquanto a pessoa
+// ainda preenchia o primeiro passo. Só uma troca que substitui um controller já
+// existente precisa terminar gravações e recarregar o pacote.
+function observeServiceWorkerControllerChanges(serviceWorker) {
+  let controllerAnterior = serviceWorker.controller;
+  serviceWorker.addEventListener("controllerchange", () => {
+    const anterior = controllerAnterior;
+    controllerAnterior = serviceWorker.controller;
+    if (!anterior) return;
+    handleControllerChange();
+  });
+}
 
 // O worker responde pelo canal que enviamos, e não pelo `postMessage` da
 // janela: assim a resposta não se confunde com nenhuma outra mensagem, e uma

@@ -73,10 +73,16 @@ A suíte saiu de 5 cenários aprovados e 7 falhas para 12 aprovados. O auxiliar
 `escolherPrimeiraCategoria(page)` conclui a folha de subcategorias quando ela
 existe e espera que ela feche, evitando contaminar a página compartilhada. O
 cenário da compra parcelada declara fechamento 20 e vencimento 28, e usa o dia
-1 do mês atual para manter a fatura pagável em qualquer data. O onboarding
-passou em três execuções completas consecutivas durante o diagnóstico e nas
-duas execuções posteriores, por isso não foi alterado. Todo o conserto ficou em
-`tests/browser/run-browser.js`.
+1 do mês atual para manter a fatura pagável em qualquer data.
+
+A primeira run enviada ao GitHub confirmou a falha restante no passo 1 do
+onboarding. A primeira instalação do service worker fazia `clients.claim()`, o
+aplicativo confundia essa tomada de controle com atualização e recarregava a
+página, apagando o aceite ainda não salvo. `js/app.js` agora ignora somente a
+transição inicial de nenhum controller para o primeiro worker. Uma troca
+posterior continua fazendo flush e reload. O teste unitário cobre as duas
+transições, o cenário de navegador aguarda o primeiro controller e o cache foi
+promovido para v54.
 
 Também passaram `npm run build`, `node scripts/lint.js`,
 `node tests/run-all.js` e `node tests/browser/run-browser.js`.
@@ -102,6 +108,11 @@ Cada uma destas já custou tempo de diagnóstico:
 - O service worker agora funciona e usa *stale-while-revalidate*. Em
   desenvolvimento, depois de editar código, o navegador serve o bundle
   **anterior**. Recarregue duas vezes ou use `location.reload()`.
+- **Primeiro controller não significa atualização.** `clients.claim()` dispara
+  `controllerchange` também na primeira instalação. Se a página começou sem
+  controller, recarregá-la apaga qualquer formulário ainda não persistido. Só a
+  substituição de um controller existente deve seguir o fluxo de flush e
+  recarga por pacote.
 - Navegar mudando só o hash (`#/rota`) **não** recarrega o documento nem o
   módulo ES. Para exercitar código novo, faça reload de verdade.
 - Não use viewport emulada com dimensões personalizadas em automação de

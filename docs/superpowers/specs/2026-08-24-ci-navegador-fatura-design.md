@@ -1,9 +1,10 @@
-# CI do navegador: categoria e fatura pagável
+# CI do navegador: categoria, fatura e onboarding preservado
 
 ## Objetivo
 
 Fazer a suíte de navegador representar os fluxos reais de escolha de categoria
-e pagamento de fatura sem depender do dia do mês. A regra do produto para
+e pagamento de fatura sem depender do dia do mês. A primeira instalação do PWA
+também deve preservar o onboarding em andamento. A regra do produto para
 faturas futuras permanece inalterada.
 
 ## Defeitos confirmados
@@ -18,11 +19,17 @@ O teste de compra parcelada cria um cartão que fecha no dia 20 e vence no dia
 vai para a fatura seguinte, que corretamente não oferece pagamento. A asserção
 espera uma fatura pagável e, por isso, falha conforme o calendário.
 
-O teste do onboarding passou em três execuções completas consecutivas. Ele roda
-antes das chamadas ao novo auxiliar de categoria e usa contextos próprios. Não
-há evidência para alterar esse fluxo neste conserto.
+O onboarding passou em três execuções locais, mas a primeira run após o push
+falhou no passo 1 da viewport de 320 por 480. A reprodução controlada confirmou
+que o aceite habilitava o botão e, segundos depois, a primeira instalação do
+service worker assumia a aba, recarregava a página e recriava o passo 1 sem o
+rascunho. `clients.claim()` dispara `controllerchange` tanto na primeira tomada
+de controle quanto numa atualização, e o aplicativo tratava os dois casos como
+troca de pacote.
 
 ## Abordagens consideradas
+
+### Fatura
 
 1. Fixar a compra no primeiro dia do mês atual e declarar no cenário os dias 20
    e 28 do cartão. Esta é a escolha adotada porque mantém a fatura no mês atual
@@ -31,6 +38,16 @@ há evidência para alterar esse fluxo neste conserto.
    mas amplia o alcance da fixture e pode interferir em outros usos de data.
 3. Derivar fechamento e vencimento do dia atual. Não cobre o dia 31, quando não
    existe um vencimento posterior dentro do intervalo aceito pelo formulário.
+
+### Primeiro controle do PWA
+
+1. Distinguir a primeira tomada de controle de uma substituição de controller.
+   Esta é a escolha adotada porque corrige a perda real de rascunho e preserva a
+   recarga segura quando uma versão posterior substitui a anterior.
+2. Bloquear service workers no contexto Playwright. Estabilizaria o teste, mas
+   esconderia o mesmo defeito para quem instala o Cofre pela primeira vez.
+3. Esperar a recarga inicial antes de preencher. Acoplaria o teste ao defeito e
+   manteria a perda de dados no produto.
 
 ## Desenho escolhido
 
@@ -45,13 +62,21 @@ aplicação e troca apenas o dia por `01`. Assim a compra não fica no futuro, c
 antes do fechamento e produz uma fatura do mês atual. O botão Pagar deve então
 existir e o fluxo continua pela interface.
 
-Nenhum arquivo de `js/` precisa mudar. A condição que esconde o pagamento de
-faturas futuras continua protegendo o comportamento correto do produto.
+O observador de `controllerchange` guarda o controller anterior. A transição de
+nenhum controller para o primeiro worker apenas atualiza essa referência. Uma
+transição posterior, de um worker existente para outro, continua chamando o
+fluxo que termina gravações, aplica a guarda por pacote e recarrega. A versão do
+cache sobe para v54 para entregar o novo pacote a instalações existentes.
+
+O teste unitário executa o observador com as transições `null` para v53 e v53
+para v54. O cenário de navegador aguarda o primeiro controller no passo 1 e
+confirma que o aceite continua marcado. Um auxiliar de avanço inclui cenário,
+passo e estado do formulário na mensagem, evitando outro timeout sem contexto.
 
 ## Verificação
 
-Após a correção da data, a suíte de navegador inteira deve passar. Em seguida
-serão executados `npm run build`, `node scripts/lint.js`, `node tests/run-all.js`
-e uma nova execução da suíte de navegador. O resultado será registrado em
-`CHANGELOG.md` e `docs/PROXIMA-SESSAO.md` antes do único commit e do envio
-explícito de `HEAD` para `origin/main`.
+Após cada correção, a suíte de navegador inteira deve passar. Antes do novo
+envio serão executados `npm run build`, `node scripts/lint.js`,
+`node tests/run-all.js` e uma nova execução da suíte de navegador. A run remota
+também precisa concluir os jobs `test` e `browser`; um resultado apenas local
+não encerra este conserto.

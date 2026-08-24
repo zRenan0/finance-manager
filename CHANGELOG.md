@@ -4,7 +4,8 @@
 
 ### A suíte de navegador parou de falhar em cascata ou conforme o dia
 
-Os dois defeitos estavam no teste, não na regra do aplicativo.
+Os dois primeiros defeitos estavam no teste. A run remota revelou um terceiro
+no aplicativo, durante a primeira instalação do PWA.
 
 - **A escolha de categoria agora termina antes de salvar.**
   `escolherPrimeiraCategoria(page)` toca o primeiro chip e, quando ele abre a
@@ -15,10 +16,17 @@ Os dois defeitos estavam no teste, não na regra do aplicativo.
   fechamento no dia 20 e vencimento no dia 28, e registra a compra no dia 1 do
   mês atual. A fatura continua no mês atual qualquer que seja o dia da execução,
   sem mudar a regra que esconde o pagamento de faturas futuras.
-- **O onboarding não foi alterado sem evidência.** Ele passou em três execuções
-  completas consecutivas durante o diagnóstico e nas duas execuções feitas
-  depois da correção da data.
-- **A verificação terminou verde.** Passaram `npm run build`,
+- **A primeira instalação não apaga mais o onboarding.** O primeiro
+  `clients.claim()` do service worker assume a aba e dispara `controllerchange`,
+  mas não está trocando um pacote antigo. O aplicativo recarregava mesmo assim
+  e perdia o aceite do passo 1. Agora essa primeira tomada de controle preserva
+  a página; uma substituição posterior continua terminando gravações e
+  recarregando com a guarda por versão. O cache passou para v54.
+- **A falha do onboarding ganhou localização e estado.** O cenário aguarda o
+  primeiro controller e confirma que o aceite sobreviveu. Se um passo voltar a
+  bloquear, a mensagem informa viewport, passo, motivo, campos presentes e
+  estado de recarga, em vez de esperar 30 segundos sem dizer onde parou.
+- **A verificação local terminou verde.** Passaram `npm run build`,
   `node scripts/lint.js`, `node tests/run-all.js` e
   `node tests/browser/run-browser.js`; a última suíte de navegador terminou com
   12 de 12 cenários aprovados.

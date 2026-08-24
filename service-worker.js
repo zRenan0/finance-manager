@@ -21,7 +21,9 @@
 // vez, e a rede de seguranca vale desde o primeiro acesso.
 // v53: os módulos publicados agora levam o SHA-256 no nome. A troca de
 // controller pode identificar o pacote novo antes de pedir a recarga da aba.
-const VERSION = "v53";
+// v54: a primeira tomada de controle deixou de recarregar o onboarding. O
+// pacote do aplicativo mudou e precisa substituir o app.generated.js em cache.
+const VERSION = "v54";
 const BUILD_ID = VERSION;
 const CACHE_NAME = "financas-cache-" + VERSION;
 // A PÁGINA COMERCIAL TEM CACHE PRÓPRIO.

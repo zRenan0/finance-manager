@@ -242,6 +242,34 @@ async function assertOnboardingFocusRingM4(page, selector, label) {
   `${label}: o anel de foco de ${selector} saiu do corpo: ${JSON.stringify(measurement)}`);
 }
 
+async function advanceOnboardingM4(page, label) {
+  const button = page.locator("#onb-advance");
+  try {
+    const status = await button.evaluate((node) => ({
+      disabled: node.disabled,
+      reason: document.getElementById("onb-block-reason")?.textContent.trim() || "",
+    }));
+    assert(!status.disabled, `Continuar desabilitado${status.reason ? `: ${status.reason}` : ""}`);
+    await button.click({ timeout: 5000 });
+  } catch (error) {
+    // Se uma navegação trocar o botão entre a leitura e o clique, o estado da
+    // nova página explica qual requisito voltou a bloquear o passo.
+    const state = await page.evaluate(() => ({
+      progress: document.querySelector(".onb__progress")?.getAttribute("aria-label") || "ausente",
+      disabled: document.getElementById("onb-advance")?.disabled ?? null,
+      reason: document.getElementById("onb-block-reason")?.textContent.trim() || "",
+      legal: document.querySelector('[data-action-select="onb-legal"]')?.checked ?? null,
+      income: document.getElementById("onb-income")?.value ?? null,
+      accountName: document.getElementById("onb-acc-name")?.value ?? null,
+      accountBalance: document.getElementById("onb-acc-balance")?.value ?? null,
+      controller: !!(navigator.serviceWorker && navigator.serviceWorker.controller),
+      reloadGuard: sessionStorage.getItem("cofre_build_reload") || "",
+      navigation: performance.getEntriesByType("navigation")[0]?.type || "desconhecida",
+    })).catch((diagnosticError) => ({ diagnosticError: diagnosticError.message }));
+    throw new Error(`${label}: ${error.message.split("\n")[0]}; estado=${JSON.stringify(state)}`);
+  }
+}
+
 async function runOnboardingViewportM4(browser, scenario) {
   const fresh = await openFresh(browser, scenario.viewport, { hasTouch: true, reducedMotion: "reduce", ...scenario.contextOptions });
   const page = fresh.page;
@@ -255,13 +283,18 @@ async function runOnboardingViewportM4(browser, scenario) {
     assert(await page.locator(".onb-legal-summary").getAttribute("open") !== null,
       `${scenario.label}: o resumo legal não abriu`);
     await assertOnboardingGeometryM4(page, `${scenario.label}, passo 1 com resumo legal`, { expectBodyOverflow: true });
-    await page.locator('[data-action-select="onb-legal"]').check();
+    const legal = page.locator('[data-action-select="onb-legal"]');
+    await legal.check();
+    // O primeiro clients.claim() controla a aba sem trocar o pacote carregado.
+    // Esperar por ele aqui prova que essa aquisição não apaga o aceite em curso.
+    await page.waitForFunction(() => !!(navigator.serviceWorker && navigator.serviceWorker.controller));
+    assert(await legal.isChecked(), `${scenario.label}, passo 1: o primeiro controle do service worker apagou o aceite`);
     await assertOnboardingFocusRingM4(page, '[data-action-select="onb-legal"]', `${scenario.label}, passo 1`);
     await page.locator('[data-action="onb-focus"][data-value="debt"]').click();
     await page.fill("#onb-name", "Teste M4");
     await assertOnboardingFocusRingM4(page, "#onb-name", `${scenario.label}, passo 1`);
     await scrollOnboardingBodyToEndM4(page);
-    await page.locator("#onb-advance").click();
+    await advanceOnboardingM4(page, `${scenario.label}, passo 1`);
 
     await step(2).waitFor();
     await assertOnboardingScrollResetM4(page, `${scenario.label}, Próximo para o passo 2`);
@@ -269,7 +302,7 @@ async function runOnboardingViewportM4(browser, scenario) {
     await page.fill("#onb-income", "5000,00");
     await assertOnboardingFocusRingM4(page, "#onb-income", `${scenario.label}, passo 2`);
     await scrollOnboardingBodyToEndM4(page);
-    await page.locator("#onb-advance").click();
+    await advanceOnboardingM4(page, `${scenario.label}, passo 2`);
 
     await step(3).waitFor();
     await assertOnboardingScrollResetM4(page, `${scenario.label}, Próximo para o passo 3`);
@@ -279,7 +312,7 @@ async function runOnboardingViewportM4(browser, scenario) {
     await page.fill("#onb-acc-balance", "2000,00");
     await assertOnboardingFocusRingM4(page, "#onb-acc-balance", `${scenario.label}, passo 3`);
     await scrollOnboardingBodyToEndM4(page);
-    await page.locator("#onb-advance").click();
+    await advanceOnboardingM4(page, `${scenario.label}, passo 3`);
 
     await step(4).waitFor();
     await assertOnboardingScrollResetM4(page, `${scenario.label}, Próximo para o passo 4`);
@@ -292,7 +325,7 @@ async function runOnboardingViewportM4(browser, scenario) {
     await assertOnboardingScrollResetM4(page, `${scenario.label}, Voltar para o passo 3`);
     await assertOnboardingGeometryM4(page, `${scenario.label}, passo 3 após Voltar`);
     await scrollOnboardingBodyToEndM4(page);
-    await page.locator("#onb-advance").click();
+    await advanceOnboardingM4(page, `${scenario.label}, passo 3 após Voltar`);
 
     await step(4).waitFor();
     await assertOnboardingScrollResetM4(page, `${scenario.label}, novo Próximo para o passo 4`);

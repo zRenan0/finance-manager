@@ -8,6 +8,21 @@ const { spawnSync } = require("child_process");
 const ROOT = path.join(__dirname, "..");
 const read = (file) => fs.readFileSync(path.join(ROOT, file), "utf8");
 
+function functionSource(source, name) {
+  const start = source.indexOf(`function ${name}(`);
+  if (start < 0) return "";
+  const opening = source.indexOf("{", start);
+  let depth = 0;
+  for (let index = opening; index < source.length; index += 1) {
+    if (source[index] === "{") depth += 1;
+    if (source[index] === "}") {
+      depth -= 1;
+      if (depth === 0) return source.slice(start, index + 1);
+    }
+  }
+  return "";
+}
+
 let pass = 0;
 let fail = 0;
 function check(label, condition, detail) {
@@ -42,7 +57,7 @@ function executarWorker(codigo) {
 console.log("\n1. Identidade do service worker");
 const workerFonte = read("service-worker.js");
 const versao = Number((workerFonte.match(/const VERSION = "v(\d+)";/) || [])[1]);
-check("a versão de cache foi promovida", versao >= 53, versao);
+check("a versão de cache foi promovida", versao >= 54, versao);
 check("o fonte usa a versão como identidade de desenvolvimento", /const BUILD_ID = VERSION;/.test(workerFonte));
 
 const handlersFonte = executarWorker(workerFonte);
@@ -78,6 +93,32 @@ if (build.status === 0) {
 console.log("\n3. Recarga protegida no aplicativo");
 const appSource = read("js/app.js");
 check("aplicativo observa a troca de controller", /serviceWorker\.addEventListener\("controllerchange"/.test(appSource));
+check("primeiro controle não é tratado como atualização", /let controllerAnterior = serviceWorker\.controller;/.test(appSource)
+  && /controllerAnterior = serviceWorker\.controller;\s*if \(!anterior\) return;/.test(appSource));
+const observerSource = functionSource(appSource, "observeServiceWorkerControllerChanges");
+let observerError = null;
+let controllerChange = null;
+let updateCount = 0;
+const observerContext = { handleControllerChange() { updateCount += 1; } };
+vm.createContext(observerContext);
+try { vm.runInContext(observerSource, observerContext); } catch (error) { observerError = error; }
+const serviceWorker = {
+  controller: null,
+  addEventListener(type, handler) { if (type === "controllerchange") controllerChange = handler; },
+};
+if (!observerError && typeof observerContext.observeServiceWorkerControllerChanges === "function") {
+  observerContext.observeServiceWorkerControllerChanges(serviceWorker);
+  serviceWorker.controller = { build: "v53" };
+  if (typeof controllerChange === "function") controllerChange();
+}
+check("observador de controller é executável", !observerError && typeof controllerChange === "function",
+  observerError && observerError.message);
+check("primeira aquisição preserva a página", updateCount === 0, updateCount);
+if (typeof controllerChange === "function") {
+  serviceWorker.controller = { build: "v54" };
+  controllerChange();
+}
+check("troca posterior ainda pede recarga", updateCount === 1, updateCount);
 check("aplicativo consulta a identidade ativa", /GET_BUILD/.test(appSource) && /MessageChannel/.test(appSource));
 check("gravações terminam antes da recarga", /FinanceStore\.flush\(\)/.test(appSource) && /location\.reload\(\)/.test(appSource));
 check("a guarda de recarga é separada por pacote", /sessionStorage\.getItem/.test(appSource) && /sessionStorage\.setItem/.test(appSource));
