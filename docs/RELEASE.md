@@ -50,12 +50,25 @@ um quebraria o compartilhamento em vez de melhorá-lo. Quem resolve é o build,
 quando o ambiente informa o endereço, na ordem `SITE_URL`,
 `VERCEL_PROJECT_PRODUCTION_URL`, `VERCEL_URL`.
 
-**Onde o aviso aparece e onde não deve aparecer:** `vercel.json` já usa
+**Onde o aviso aparece, e por que produção está correta:** `vercel.json` usa
 `buildCommand: npm run build:dist`, e a Vercel injeta
-`VERCEL_PROJECT_PRODUCTION_URL` no ambiente de build. O aviso é esperado em build
-local, onde nenhuma das três variáveis existe, e não deve aparecer no build de
-produção. `dist/` é ignorado pelo Git, então a cópia local relativa nunca é a
-publicada.
+`VERCEL_PROJECT_PRODUCTION_URL` no ambiente de build. O aviso só acontece em
+build local, onde nenhuma das três variáveis existe. `dist/` é ignorado pelo
+Git, então a cópia local relativa nunca é a publicada.
+
+**Conferido em produção (25/08/2026):** os quatro atributos saem absolutos, com
+o domínio canônico:
+
+```
+<link rel="canonical" href="https://www.financemanager.dev.br/" data-lp-absolute />
+<meta property="og:url" content="https://www.financemanager.dev.br/" data-lp-absolute />
+<meta property="og:image" content="https://www.financemanager.dev.br/icons/icon-512.png" data-lp-absolute />
+<meta name="twitter:image" content="https://www.financemanager.dev.br/icons/icon-512.png" data-lp-absolute />
+```
+
+Ou seja, este aviso **não é uma pendência de publicação**: é ruído de build
+local. Definir `SITE_URL` continua sendo melhoria útil, mas só pelas
+pré-visualizações.
 
 **Ação recomendada:** definir `SITE_URL` explicitamente nas variáveis de ambiente
 do projeto na Vercel, com esquema e domínio canônico (`https://dominio`). Ela vem
