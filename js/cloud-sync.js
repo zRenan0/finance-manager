@@ -802,7 +802,9 @@ const CloudSync = (() => {
         // a sessão mudar exatamente enquanto a resposta volta.
         remoteDeleted = true;
         assertCurrentCycle(context);
-        if (FinanceStore.observeRemoteRev(result.resetRev) !== true) {
+        // `observeResetRev`, não `observeRemoteRev`: a marca do reset nasce acima
+        // de toda a conta e pode passar do teto de 24h do caminho comum.
+        if (FinanceStore.observeResetRev(result.resetRev) !== true) {
           throw syncError("O aparelho não conseguiu registrar a versão da exclusão remota.", "reset_rev_observe_failed");
         }
         try { await FinanceStore.outboxClear(context.scope); }

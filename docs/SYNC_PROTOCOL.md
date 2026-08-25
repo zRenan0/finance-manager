@@ -63,7 +63,17 @@ ordem correta. As regras:
 - leitura remota: o aparelho **absorve** a marca recebida, de modo que a próxima
   escrita dele seja necessariamente maior que ela;
 - marcas mais de 24 h à frente do relógio local são ignoradas, para que um
-  aparelho quebrado não empurre o relógio de todos.
+  aparelho quebrado não empurre o relógio de todos;
+- o contador **vira**: cheio em `999999`, ele zera e o milissegundo avança um.
+  Somar um sem virar produziria sete dígitos, largura fora do padrão, e o
+  registro passaria a ser lido como se não tivesse marca. É a mesma regra do
+  `cofre_hlc_successor` no servidor.
+
+O teto de 24 h tem **uma exceção declarada**: a barreira de reset confirmada
+pelo servidor (ver "Exclusão"). Ela nasce acima de toda marca da conta e, se
+algum aparelho escreveu com o relógio muito adiantado, pode passar do teto.
+Recusá-la faria a primeira criação depois de apagar perder para as lápides.
+Nenhuma outra operação remota escapa do limite.
 
 O escritor usa o id persistente do aparelho com um sufixo por aba
 (`:tab_<id>`). Isso impede duas abas do mesmo navegador, com o mesmo
@@ -307,6 +317,32 @@ para a pessoa como confirmação de mesclagem.
   vivo. As lápides descem para os outros aparelhos, que então apagam. Truncar as
   linhas apagaria só no servidor, e o próximo aparelho a sincronizar devolveria
   a base inteira.
+
+  **`reset_rev` é dominante.** `cofre_reset_data` não copia mais a HLC do
+  aparelho que pediu: ela calcula, sob o mesmo lock de `cofre_sync_state` que
+  serializa `cofre_apply_ops`, o sucessor da maior marca já gravada na conta
+  (`cofre_hlc_successor`), considerando puts **e** lápides antigas. Antes, um
+  aparelho com o relógio adiantado podia ter escrito acima da lápide, rejeitar
+  a exclusão e devolver o registro na edição seguinte. A marca resultante fica
+  em `cofre_mutations.result_hlc`, para que o replay do mesmo `mutation_id`
+  devolva a mesma barreira em vez de uma nova.
+
+  **A comparação usa `COLLATE "C"`.** O cliente compara HLC como texto ASCII. A
+  collation padrão do projeto não faz parte do protocolo e poderia ordenar
+  maiúsculas, minúsculas e pontuação de outro modo, o que faria servidor e
+  aparelho escolherem vencedores diferentes para o mesmo par de marcas. Toda
+  decisão de vencedor nos RPC fixa a collation.
+
+  **A barreira sobrevive ao purge e ao recarregamento.** O aparelho que pediu a
+  exclusão absorve `reset_rev` por `FinanceStore.observeResetRev`, que grava em
+  `financas_db_reset_barrier` (por escopo). `purge()` apaga o relógio
+  (`financas_db_clock`) de propósito, porque ele descrevia a base removida, mas
+  **preserva a barreira**, que descreve as lápides que continuam na conta. Sem
+  ela, a exclusão era confirmada, o purge levava o relógio junto e o primeiro
+  lançamento criado depois nascia menor que as lápides e sumia no ciclo
+  seguinte. `observeResetRev` devolve `false` quando não consegue gravar: sem
+  persistência a barreira não sobreviveria ao recarregamento, e quem chamou
+  precisa avisar que a preparação local ficou incompleta.
 - **Exclusão da conta** (`cofre_purge_account`): remove operações, estado,
   checkpoints e mutações, e revoga todos os aparelhos no mesmo ato, para que
   nenhum consiga gravar de volta depois.

@@ -969,6 +969,63 @@ const lancar = (a, tx) => a.run(`FinanceStore.persist({ ...FinanceStore.snapshot
         && !/Nada foi apagado/.test(item.message)), JSON.stringify(actionCtx.__notifications));
   }
 
+  console.log("\n24. Barreira do reset sobrevive ao purge e ao recarregamento");
+  {
+    // O servidor carimba o reset acima de TODA marca da conta. Se algum
+    // aparelho escreveu com o relogio dias adiantado, a marca do reset nasce
+    // alem do teto de 24h do caminho remoto comum. Antes, o aparelho
+    // confirmava a exclusao mas nao absorvia a barreira, e o purge ainda
+    // apagava o relogio: o primeiro lancamento criado depois nascia MENOR que
+    // as lapides e sumia no ciclo seguinte.
+    const servidor = servidorFalso();
+    const a = await ligarAparelho(servidor, "device-aparelho-a03");
+    const futuro = Date.now() + 48 * 60 * 60 * 1000;
+    // Contador cheio de proposito: somar um sem virada produziria sete digitos
+    // e uma marca invalida, tratada como ausencia de marca.
+    const barreira = `${String(futuro).padStart(15, "0")}.999999.server_reset:testebarreira`;
+    a.ctx.__barreira = barreira;
+    a.run(`
+      CloudAdapter.prototype.resetRemote = async () => (
+        { revision: "9", resetRev: __barreira, applied: 3 }
+      );
+    `);
+
+    const capped = a.run("FinanceStore.observeRemoteRev(__barreira)");
+    check("o caminho remoto comum mantem o teto de 24 horas", capped === false, String(capped));
+
+    const reset = await a.run("CloudSync.resetRemote()");
+    check("a exclusao com marca alem de 24h conclui a preparacao local",
+      reset && reset.ok === true && reset.remoteDeleted === true && reset.localPrepared === true
+        && reset.reason === null && reset.resetRev === barreira, JSON.stringify(reset));
+
+    const purgado = await a.run("FinanceStore.purge()");
+    check("o purge da conta conclui", purgado === true, String(purgado));
+    check("o purge apaga o relogio do escopo",
+      a.storage.getItem("financas_db_clock__u_ana") === null,
+      String(a.storage.getItem("financas_db_clock__u_ana")));
+    check("o purge preserva a barreira do reset",
+      a.storage.getItem("financas_db_reset_barrier__u_ana") === barreira,
+      String(a.storage.getItem("financas_db_reset_barrier__u_ana")));
+
+    // Recarregar de verdade: contexto novo, mesmo localStorage.
+    const depois = await ligarAparelho(servidor, "device-aparelho-a03", Object.fromEntries(a.storage._map));
+    const novaMarca = depois.run("FinanceStore.mintRev()");
+    check("depois de recarregar, a marca nova vence a barreira do reset",
+      novaMarca > barreira, JSON.stringify({ novaMarca, barreira }));
+    check("a marca nova continua no formato valido da HLC",
+      /^\d{15}\.\d{6}\.[A-Za-z0-9][A-Za-z0-9:_-]{0,79}$/.test(novaMarca), String(novaMarca));
+
+    // O lancamento criado depois do reset precisa chegar ao servidor e vencer
+    // as lapides, que e o efeito pratico da barreira.
+    lancar(depois, { id: "tx-pos-reset", type: "expense", amount: 12, date: "2026-08-25", categoryId: "lazer" });
+    await flush(depois);
+    await depois.run("CloudSync.syncNow()");
+    const enviado = servidor.recebidos[servidor.recebidos.length - 1];
+    const opPos = (enviado.ops || []).find((op) => op.entityId === "tx-pos-reset");
+    check("o lancamento criado depois do reset sobe com marca maior que a barreira",
+      !!opPos && opPos.rev > barreira, JSON.stringify(opPos));
+  }
+
   await espera(10);
   console.log(`\n${fail === 0 ? "TODOS OS TESTES PASSARAM" : "FALHAS ENCONTRADAS"}: ${ok} ok, ${fail} falha(s)\n`);
   process.exit(fail === 0 ? 0 : 1);

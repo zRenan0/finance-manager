@@ -20,6 +20,38 @@
   que a atividade comum substitua o nome legível por "Este dispositivo" e
   permite distinguir computador, celular, tablet e navegador desconhecido.
 
+### "Apagar tudo" vence toda versão anterior, inclusive depois de recarregar
+
+- **O servidor carimba a exclusão acima de toda a conta.** `cofre_reset_data`
+  calcula `reset_rev` com `cofre_hlc_successor` sobre a maior marca já gravada,
+  puts e lápides antigas incluídos, em vez de copiar a HLC do aparelho que
+  pediu. Antes, um aparelho com o relógio adiantado podia ter escrito acima da
+  lápide, rejeitar a exclusão e devolver o registro na edição seguinte. A marca
+  fica em `cofre_mutations.result_hlc`, então o replay do mesmo `mutation_id`
+  devolve a mesma barreira.
+- **A comparação de marcas no PostgreSQL usa `COLLATE "C"`.** O cliente compara
+  HLC como texto ASCII; a collation padrão do projeto não faz parte do protocolo
+  e poderia ordenar maiúsculas, minúsculas e pontuação de outro modo, fazendo
+  servidor e aparelho escolherem vencedores diferentes para o mesmo par.
+- **A barreira do reset sobrevive ao purge e ao recarregamento.** A marca
+  dominante pode nascer mais de 24 h à frente do relógio local, que é justamente
+  o caso recusado pelo teto do caminho remoto comum. Ela passa agora por
+  `FinanceStore.observeResetRev`, que não aplica o teto e grava em
+  `financas_db_reset_barrier`, chave que `purge()` preserva de propósito. Sem
+  isso, a exclusão era confirmada, o purge apagava o relógio junto com os dados
+  e o primeiro lançamento criado depois nascia menor que as lápides e sumia no
+  ciclo seguinte. O teto de 24 h continua valendo em `observeRemoteRev` e nas
+  operações remotas comuns.
+- **O contador de seis dígitos passou a virar.** Ao absorver uma barreira com o
+  contador cheio, somar um produzia sete dígitos, marca fora do padrão que o app
+  trata como ausência de marca e que perderia para qualquer lápide. Agora o
+  contador zera e o milissegundo avança um, igual ao `cofre_hlc_successor`.
+- **A regressão está travada em `tests/test-cloud-sync.js`, seção 24.** O
+  cenário usa `resetRev` 48 h à frente com o contador em `999999`, confirma a
+  exclusão, faz o purge, recarrega num contexto novo com o mesmo `localStorage`
+  e exige que o próximo `mintRev()` seja maior que a barreira e continue no
+  formato válido da HLC.
+
 ### Revogar acesso passou a encerrar a sessão de verdade
 
 - **Atividade comum nunca mais limpa uma revogação.** O carimbo de último acesso

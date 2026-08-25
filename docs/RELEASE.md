@@ -10,8 +10,67 @@
 6. Execute `npm run test:browser` com o Chromium do Playwright instalado.
 7. Envie a branch e aguarde a integração contínua concluir sem falhas.
 8. Se contas estiverem habilitadas, execute também o checklist de `docs/BACKEND_SETUP.md` no ambiente de homologação.
-9. Confirme que `20260825001552_add_device_type.sql` foi aplicada antes de publicar o cliente que envia `X-Device-Type`.
+9. Aplique as migrações pendentes **em ordem de nome** e confirme cada uma no banco alvo antes de publicar; não presuma que produção já recebeu alguma:
+   1. `20260825001552_add_device_type.sql`, antes de publicar o cliente que envia `X-Device-Type`;
+   2. `20260825003000_reset_dominant_tombstones.sql`, antes de publicar o cliente que absorve `reset_rev` como barreira. Ela recria `cofre_apply_ops` e `cofre_reset_data` na mesma transação e adiciona `cofre_mutations.result_hlc`.
 10. Publique cliente e funções do contrato `X-Account-Id` juntos. Abas antigas falham fechado e mantêm a fila local até recarregar; não trate esse `400 invalid_account_scope` como perda de dados.
+
+## Avisos abertos desta release
+
+Os avisos abaixo não reprovam `npm run verify:release`. Ficam registrados aqui
+para não virarem ruído aceito sem dono. Estado conferido em 25/08/2026.
+
+### 1. Sete campos do controlador ainda são marcadores
+
+`npm run check:release` avisa: `AVISO: 7 campo(s) do controlador ainda com
+marcador`. São `name`, `document`, `address`, `supportEmail`, `dpoName`,
+`dpoEmail` e `incidentEmail`, em `LEGAL_CONTROLLER` (`js/storage.js`), todos
+ainda em `LEGAL_PENDING`.
+
+**Não é dívida técnica e não se resolve no código.** São dados jurídicos reais e
+verificáveis que só o dono do aplicativo conhece. Preencher com valor inventado
+publicaria identificação falsa de controlador, o que é pior do que o marcador.
+Enquanto ele existir, o app se identifica como versão local em desenvolvimento e
+a cláusula 12 dos termos declara isso, de modo que o estado atual é coerente.
+
+**Ação:** preencher com dados reais antes de oferecer a instalação ao público, e
+subir `LEGAL_TEXT_VERSION` e `LEGAL_REVIEW_DATE` na mesma edição. A tabela com a
+base legal de cada campo está em `docs/LEGAL-LAUNCH.md`. Publicar beta continua
+liberado; oferecer ao público, não.
+
+### 2 e 3. Endereços de compartilhamento relativos e `SITE_URL`
+
+São o mesmo aviso visto de dois lados. `npm run build:dist` avisa: `AVISO: 4
+endereço(s) de compartilhamento em landing.html continuam relativos`. Os quatro
+atributos marcados com `data-lp-absolute` em `landing.html` são o `canonical`, o
+`og:url` e as duas imagens (`og:image` e `twitter:image`).
+
+A fonte fica relativa de propósito: o domínio não está no repositório, e chutar
+um quebraria o compartilhamento em vez de melhorá-lo. Quem resolve é o build,
+quando o ambiente informa o endereço, na ordem `SITE_URL`,
+`VERCEL_PROJECT_PRODUCTION_URL`, `VERCEL_URL`.
+
+**Onde o aviso aparece e onde não deve aparecer:** `vercel.json` já usa
+`buildCommand: npm run build:dist`, e a Vercel injeta
+`VERCEL_PROJECT_PRODUCTION_URL` no ambiente de build. O aviso é esperado em build
+local, onde nenhuma das três variáveis existe, e não deve aparecer no build de
+produção. `dist/` é ignorado pelo Git, então a cópia local relativa nunca é a
+publicada.
+
+**Ação recomendada:** definir `SITE_URL` explicitamente nas variáveis de ambiente
+do projeto na Vercel, com esquema e domínio canônico (`https://dominio`). Ela vem
+primeiro na ordem, então fixa o `canonical` também nas pré-visualizações e evita
+uma prévia disputar indexação com a página real. Sem ela, produção ainda sai
+correta, mas cada prévia se declara canônica.
+
+**Como conferir depois de publicar:**
+
+```
+curl -s https://SEU-DOMINIO/ | grep -o '<link rel="canonical"[^>]*>'
+```
+
+O `href` precisa vir absoluto. Se voltar `href="/"`, nenhuma das três variáveis
+chegou ao build.
 
 ## Homologação
 

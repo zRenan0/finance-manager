@@ -1,5 +1,6 @@
 // Arquivo gerado por scripts/build-app-module.js.
 // Edite os arquivos de origem em js/ e execute npm run build.
+
 // source: js/utils.js
 // utils.js; funções auxiliares puras, sem dependência de DOM
 // ------------------------------------------------------------------------------
@@ -1670,6 +1671,11 @@ function rememberStorageScope(scope) {
 // que a comparação de texto simples (a < b) já seja a comparação correta.
 const HLC_PATTERN = /^\d{15}\.\d{6}\.[A-Za-z0-9][A-Za-z0-9:_-]{0,79}$/;
 const HLC_MAX_DRIFT_MS = 24 * 60 * 60 * 1000;   // 24h: além disso o relógio remoto é ignorado
+// Largura fixa do formato. Estourar qualquer um dos dois produziria uma marca
+// fora do padrão, que o app trata como "sem marca" e perde para qualquer
+// lápide. São os mesmos limites do `cofre_hlc_successor` no servidor.
+const HLC_MAX_COUNTER = 999999;
+const HLC_MAX_MILLIS = 999999999999999;
 const SYNC_WRITER_TOKEN = (() => {
   let token = "";
   try {
@@ -1711,9 +1717,20 @@ const SyncClock = (() => {
   }
 
   // Escrita local: avança o relógio e devolve a marca desta alteração.
+  //
+  // O contador tem SEIS dígitos. Depois de absorver uma barreira de reset com o
+  // contador cheio, somar um produziria sete dígitos: marca inválida, tratada
+  // como ausência de marca, que perde para as lápides que a barreira deveria
+  // vencer. Ao encher, o contador vira e o milissegundo avança um, igual ao
+  // `cofre_hlc_successor` do servidor.
   function tick() {
     const now = Date.now();
     if (now > lastMillis) { lastMillis = now; counter = 0; }
+    else if (counter >= HLC_MAX_COUNTER) {
+      // Relógio no fim da largura: mantém a última marca válida em vez de
+      // devolver texto que nenhuma comparação entende. Inalcançável na prática.
+      if (lastMillis < HLC_MAX_MILLIS) { lastMillis += 1; counter = 0; }
+    }
     else counter += 1;
     return format(lastMillis, counter, deviceId);
   }
@@ -1727,6 +1744,21 @@ const SyncClock = (() => {
     if (!parsed) return false;
     const now = Date.now();
     if (parsed.millis > now + HLC_MAX_DRIFT_MS) return false;
+    if (parsed.millis > lastMillis) { lastMillis = parsed.millis; counter = parsed.counter; }
+    else if (parsed.millis === lastMillis && parsed.counter > counter) counter = parsed.counter;
+    return true;
+  }
+
+  // Absorção CONFIÁVEL, sem o teto de 24h. Existe só para a barreira de reset
+  // confirmada pelo servidor: o RPC carimba a exclusão acima de TODA marca que a
+  // conta já conhecia, inclusive a de um aparelho com o relógio muito
+  // adiantado, e nesse caso ela nasce além do teto. Recusar essa marca faria o
+  // primeiro lançamento criado depois de apagar nascer menor que as lápides e
+  // sumir no ciclo seguinte. As operações remotas comuns continuam em
+  // `observe`, onde o teto vale.
+  function absorb(rev) {
+    const parsed = parse(rev);
+    if (!parsed) return false;
     if (parsed.millis > lastMillis) { lastMillis = parsed.millis; counter = parsed.counter; }
     else if (parsed.millis === lastMillis && parsed.counter > counter) counter = parsed.counter;
     return true;
@@ -1747,7 +1779,7 @@ const SyncClock = (() => {
 
   function reset() { lastMillis = 0; counter = 0; }
 
-  return { setDevice, tick, observe, parse, state, restore, reset, device: () => deviceId };
+  return { setDevice, tick, observe, absorb, parse, state, restore, reset, device: () => deviceId };
 })();
 
 function isSyncRev(value) { return typeof value === "string" && HLC_PATTERN.test(value); }
@@ -4434,7 +4466,43 @@ const FinanceStore = (() => {
   // deixaria de valer.
   function clockKey() { return scopedName("financas_db_clock", scope); }
 
+  // A barreira do reset NÃO é o relógio, e por isso mora em chave separada.
+  // `purge()` apaga o relógio deste escopo de propósito: ele descrevia a base
+  // que acabou de ser removida. Já a marca dominante devolvida pelo servidor
+  // descreve as LÁPIDES que continuam na conta, e precisa sobreviver ao purge e
+  // ao recarregamento. Sem ela, a primeira criação depois de apagar nasce menor
+  // que as lápides e some no ciclo seguinte.
+  function resetBarrierKey() { return scopedName("financas_db_reset_barrier", scope); }
+
+  function storedResetBarrier() {
+    try { return normalizeSyncRev(localStorage.getItem(resetBarrierKey()) || ""); }
+    catch (e) { return ""; }
+  }
+
+  function loadResetBarrier() {
+    const rev = storedResetBarrier();
+    // `absorb` e não `observe`: a barreira é justamente o caso em que a marca
+    // pode estar acima do teto de 24h.
+    if (rev) SyncClock.absorb(rev);
+    return rev;
+  }
+
+  // Guarda sempre a MAIOR barreira conhecida: uma resposta atrasada de um reset
+  // antigo não pode rebaixar a marca de um reset mais novo.
+  function saveResetBarrier(rev) {
+    const next = normalizeSyncRev(rev);
+    if (!next) return false;
+    const current = storedResetBarrier();
+    if (current && current >= next) return true;
+    try { localStorage.setItem(resetBarrierKey(), next); return true; }
+    catch (e) { return false; }
+  }
+
   function loadClockState() {
+    // A barreira vem PRIMEIRO e fora do try do relógio. Depois do purge a chave
+    // do relógio não existe mais, e o `return` antecipado abaixo deixaria a
+    // marca dominante sem efeito exatamente no caso que ela protege.
+    loadResetBarrier();
     try {
       const parsed = JSON.parse(localStorage.getItem(clockKey()) || "null");
       if (!parsed || typeof parsed !== "object") return;
@@ -5493,6 +5561,10 @@ const FinanceStore = (() => {
       scopedName("financas_db_outbox", targetScope),
       scopedName("financas_db_meta", targetScope),
       scopedName("financas_db_recovery", targetScope),
+      // `financas_db_reset_barrier` fica FORA desta lista de propósito: ela
+      // descreve as lápides que continuam na conta depois do reset, não os
+      // dados apagados aqui. Apagá-la faria a próxima criação nascer menor
+      // que elas.
       scopedName("financas_db_clock", targetScope),
       scopedName(LS_MIRROR_KEY, targetScope),
       scopedName(LS_UNDO_KEY, targetScope),
@@ -6263,6 +6335,23 @@ const FinanceStore = (() => {
       const observed = SyncClock.observe(rev);
       if (observed) saveClockState();
       return observed;
+    },
+    // Barreira do reset CONFIRMADO pelo servidor. Só o resultado do RPC de
+    // exclusão entra por aqui. Diferente de `observeRemoteRev`, não aplica o
+    // teto de 24h, porque o servidor carimba a exclusão acima de toda marca da
+    // conta, e persiste a marca numa chave que `purge()` preserva.
+    //
+    // Devolve false quando a marca não pôde ser gravada: sem persistência a
+    // barreira não sobrevive ao recarregamento, e quem chamou precisa avisar
+    // que a preparação local ficou incompleta.
+    observeResetRev: (value) => {
+      const rev = normalizeSyncRev(value);
+      if (!rev) return false;
+      loadClockState();
+      if (!saveResetBarrier(rev)) return false;
+      SyncClock.absorb(rev);
+      saveClockState();
+      return true;
     },
     isReady: () => ready,
     isHealthy: () => healthy,
@@ -9412,7 +9501,9 @@ const CloudSync = (() => {
         // a sessão mudar exatamente enquanto a resposta volta.
         remoteDeleted = true;
         assertCurrentCycle(context);
-        if (FinanceStore.observeRemoteRev(result.resetRev) !== true) {
+        // `observeResetRev`, não `observeRemoteRev`: a marca do reset nasce acima
+        // de toda a conta e pode passar do teto de 24h do caminho comum.
+        if (FinanceStore.observeResetRev(result.resetRev) !== true) {
           throw syncError("O aparelho não conseguiu registrar a versão da exclusão remota.", "reset_rev_observe_failed");
         }
         try { await FinanceStore.outboxClear(context.scope); }
@@ -29106,9 +29197,10 @@ function onClick(e) {
         // `purge()` remove também o relógio persistido deste escopo. Depois de
         // um reset remoto, gravamos de novo somente a HLC dominante devolvida
         // pelo servidor, para uma criação após recarregar não perder para as
-        // lápides que acabaram de ser geradas.
-        const clockPrepared = !resetRev || (typeof FinanceStore.observeRemoteRev === "function"
-          && FinanceStore.observeRemoteRev(resetRev) === true);
+        // lápides que acabaram de ser geradas. A gravação vai para a chave da
+        // barreira, que o purge preserva, e não para o relógio que ele apaga.
+        const clockPrepared = !resetRev || (typeof FinanceStore.observeResetRev === "function"
+          && FinanceStore.observeResetRev(resetRev) === true);
         if (clockPrepared) clearSafeErrors();
         else if (typeof reportSafeError === "function") {
           reportSafeError("storage", null, "reset_rev_observe_failed");

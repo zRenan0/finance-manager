@@ -151,9 +151,10 @@ function onClick(e) {
         // `purge()` remove também o relógio persistido deste escopo. Depois de
         // um reset remoto, gravamos de novo somente a HLC dominante devolvida
         // pelo servidor, para uma criação após recarregar não perder para as
-        // lápides que acabaram de ser geradas.
-        const clockPrepared = !resetRev || (typeof FinanceStore.observeRemoteRev === "function"
-          && FinanceStore.observeRemoteRev(resetRev) === true);
+        // lápides que acabaram de ser geradas. A gravação vai para a chave da
+        // barreira, que o purge preserva, e não para o relógio que ele apaga.
+        const clockPrepared = !resetRev || (typeof FinanceStore.observeResetRev === "function"
+          && FinanceStore.observeResetRev(resetRev) === true);
         if (clockPrepared) clearSafeErrors();
         else if (typeof reportSafeError === "function") {
           reportSafeError("storage", null, "reset_rev_observe_failed");
