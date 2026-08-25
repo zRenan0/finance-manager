@@ -184,10 +184,28 @@ A rota de revogação pedirá representação ou contagem e somente devolverá
 sucesso quando alterar um aparelho ativo da própria conta. Um alvo ausente ou
 já revogado receberá resposta específica.
 
-Conta, sincronização e análise limparão os cookies ao detectar aparelho
-revogado, desconhecido ou sessão inválida. O motor emitirá um evento de sessão
-inválida; a camada de conta desativará o estado autenticado e trocará a
-interface para o escopo visitante sem apagar o banco local da conta.
+Sondas automáticas de conta, sincronização e análise não limparão cookies ao
+detectar aparelho revogado, desconhecido ou sessão inválida. Uma resposta
+antiga não consegue provar que ainda pertence à geração atual da sessão e não
+pode apagar os cookies emitidos por um login que terminou depois. Logout,
+revogação explícita do aparelho atual e exclusão da conta continuam limpando
+cookies. O motor emitirá um evento de sessão inválida; a camada de conta
+desativará o estado autenticado e trocará a interface para o escopo visitante
+sem apagar o banco local da conta.
+
+Falhas do Supabase serão separadas entre credenciais terminais e
+indisponibilidade. Token inválido, refresh revogado, sessão ausente ou expirada
+confirmam o encerramento. Timeout, falha de transporte e HTTP 5xx preservam o
+estado como desconhecido e podem ser tentados novamente sem apagar cookies.
+
+Toda rota de sincronização, análise e ação autenticada de conta exigirá
+`X-Account-Id` com UUID igual ao usuário da sessão, validado antes de consultar
+configuração, revisão ou dados. Isso inclui `password`, `devices`,
+`revoke-device`, `delete` e `logout` quando existe sessão. Cabeçalho ausente ou
+malformado recebe `400 invalid_account_scope`; divergência recebe
+`403 account_scope_changed`. Nenhum desses erros limpa cookies. Continuam sem o
+cabeçalho `session`, `login`, `register`, `recover`, `resend`, `exchange` e
+`verify`; logout sem sessão permanece idempotente e limpa os cookies locais.
 
 A revogação impede novos acessos ao servidor, mas não promete apagar à distância
 uma cópia que já estava armazenada no outro aparelho. Essa limitação aparecerá
@@ -274,8 +292,12 @@ aparelho ficará abaixo do texto quando não houver largura.
 - Falha no download: cursor não avança e a tela mantém os dados locais anteriores.
 - Aba encerrada durante envio: a fila reaparece na próxima inicialização.
 - Revogação durante atividade: o PATCH condicionado não altera a linha revogada.
-- Revogação percebida pelo sync: cookies são limpos, motor para e conta sai da
-  aparência autenticada.
+- Revogação percebida pelo sync: a chamada é recusada, o motor para e a conta
+  sai da aparência autenticada sem uma resposta antiga apagar um login novo.
+- Supabase indisponível: a falha mantém código transitório, não vira sessão
+  expirada e não envia `Set-Cookie` destrutivo.
+- Escopo ausente ou divergente: sincronização, análise e ações autenticadas de
+  conta falham antes de qualquer leitura financeira e preservam os cookies.
 - Lista de dispositivos falha: os itens atuais permanecem na tela com aviso;
   uma falha de atualização não produz lista vazia falsa.
 
@@ -296,7 +318,10 @@ aparelho ficará abaixo do texto quando não houver largura.
 - alvo inexistente não devolve sucesso;
 - lista de conectados não inclui revogados;
 - sucesso da revogação encerra `busy` e remove a linha;
-- `device_revoked` limpa cookies nos endpoints de conta, sync e análise;
+- sondas sem sessão e respostas `device_revoked` não enviam cookies de exclusão;
+- timeout, falha de transporte e HTTP 5xx não viram `session_expired`;
+- sync, análise e ações autenticadas de conta sem `X-Account-Id` ou com UUID
+  divergente falham antes de ler dados;
 - evento de sessão inválida volta a interface ao modo local sem apagar a cópia.
 - toda chamada de sincronização envia o UUID esperado em `X-Account-Id`;
 - `account_scope_changed` reconsulta a sessão e não aplica o corpo da resposta;
@@ -334,16 +359,15 @@ esperas reais de 15 ou 20 segundos.
 ## Publicação
 
 1. criar e aplicar a migração de `device_type` em homologação;
-2. publicar backend compatível com clientes antigos;
-3. publicar o cliente e promover a versão do service worker;
+2. publicar backend e cliente com `X-Account-Id` no mesmo release;
+3. promover a versão do service worker e orientar a recarga de abas antigas;
 4. executar o cenário com dois aparelhos na prévia;
 5. rodar a verificação de deploy e então publicar em produção.
 
 O backend aceitará por uma versão clientes que ainda não enviam tipo ou rótulo,
-preservando o valor existente. O cabeçalho `X-Account-Id` passa a fazer parte do
-contrato de isolamento: o cliente novo o envia em todas as chamadas e entende
-`account_scope_changed`. A mudança não altera a forma das operações financeiras
-nem descarta filas locais.
+preservando o valor existente. `X-Account-Id`, porém, é obrigatório: clientes
+em cache que ainda não o enviam param de sincronizar até recarregar. A fila
+local permanece intacta, então a mudança não descarta alterações pendentes.
 
 ## Critérios finais de aceite
 
