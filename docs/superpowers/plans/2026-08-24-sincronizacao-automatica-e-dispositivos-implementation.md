@@ -19,7 +19,8 @@ a lista indistinta de dispositivos por um extrato de acessos verificável.
 - Não adicionar Supabase Realtime nesta entrega.
 - Não aplicar migração remota, publicar ou executar `git push`.
 - Preservar o IndexedDB e a fila como fonte local durante falhas de rede.
-- Manter clientes antigos aceitos pelo backend durante a atualização.
+- Preservar a fila de clientes em cache que parem de sincronizar até recarregar
+  e passar a enviar o cabeçalho obrigatório de escopo.
 
 ## Invariantes
 
@@ -52,7 +53,7 @@ Casos obrigatórios:
 5. atividade iniciada antes da revogação não limpa `revoked_at`;
 6. alvo revogado ou inexistente não devolve sucesso falso;
 7. endpoint de dispositivos lista apenas ativos;
-8. erro de revogação limpa cookies em conta, sync e análise;
+8. sondas sem sessão e erro de revogação não limpam cookies automaticamente;
 9. sucesso da revogação encerra `busy` e remove a linha;
 10. tipos diferentes renderizam ícones e rótulos diferentes.
 
@@ -94,8 +95,13 @@ Passos:
 5. no login explícito, rotacionar segredo e limpar revogação;
 6. listar apenas `revoked_at=is.null`;
 7. revogar somente um alvo ativo e validar a resposta do banco;
-8. centralizar a limpeza de cookies mortos e usá-la nos três endpoints;
-9. manter a checagem própria de aparelho em toda rota protegida.
+8. manter limpeza de cookies somente em logout, revogação explícita do aparelho
+   atual e exclusão da conta;
+9. manter a checagem própria de aparelho em toda rota protegida;
+10. distinguir códigos terminais do Auth de timeout, transporte e HTTP 5xx;
+11. validar `X-Account-Id` antes de dados em sync, análise e ações autenticadas
+    de conta, com 400 para formato inválido e 403 para identidade divergente;
+12. liberar `X-Account-Id` no preflight CORS da análise.
 
 ## Tarefa 4. Corrigir estado de sessão e recuperação automática
 
@@ -122,6 +128,8 @@ Passos:
 11. emitir invalidação de sessão ao receber `device_revoked` ou
     `session_expired`;
 12. voltar a interface ao escopo visitante sem apagar o banco da conta.
+13. enviar `X-Account-Id` em sincronização, análise e ações autenticadas de
+    conta, tratando `account_scope_changed` sem aplicar resposta antiga.
 
 ## Tarefa 5. Refazer o extrato de acessos
 
