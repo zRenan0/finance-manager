@@ -187,16 +187,18 @@ já revogado receberá resposta específica.
 Sondas automáticas de conta, sincronização e análise não limparão cookies ao
 detectar aparelho revogado, desconhecido ou sessão inválida. Uma resposta
 antiga não consegue provar que ainda pertence à geração atual da sessão e não
-pode apagar os cookies emitidos por um login que terminou depois. Logout,
-revogação explícita do aparelho atual e exclusão da conta continuam limpando
-cookies. O motor emitirá um evento de sessão inválida; a camada de conta
+pode apagar os cookies emitidos por um login que terminou depois. Logout com
+access verificável ou sem qualquer credencial, revogação explícita do aparelho
+atual e exclusão da conta continuam limpando cookies. O motor emitirá um evento
+de sessão inválida; a camada de conta
 desativará o estado autenticado e trocará a interface para o escopo visitante
 sem apagar o banco local da conta.
 
 Falhas do Supabase serão separadas entre credenciais terminais e
-indisponibilidade. Token inválido, refresh revogado, sessão ausente ou expirada
-confirmam o encerramento. Timeout, falha de transporte e HTTP 5xx preservam o
-estado como desconhecido e podem ser tentados novamente sem apagar cookies.
+indisponibilidade. A sonda de sessão confirma o encerramento quando token e
+refresh são recusados. Uma rota com escopo e access terminal não consome o
+refresh restante. Timeout, falha de transporte e HTTP 5xx preservam o estado
+como desconhecido e podem ser tentados novamente sem apagar cookies.
 
 Toda rota de sincronização, análise e ação autenticada de conta exigirá
 `X-Account-Id` com UUID igual ao usuário da sessão, validado antes de consultar
@@ -205,7 +207,19 @@ configuração, revisão ou dados. Isso inclui `password`, `devices`,
 malformado recebe `400 invalid_account_scope`; divergência recebe
 `403 account_scope_changed`. Nenhum desses erros limpa cookies. Continuam sem o
 cabeçalho `session`, `login`, `register`, `recover`, `resend`, `exchange` e
-`verify`; logout sem sessão permanece idempotente e limpa os cookies locais.
+`verify`; logout realmente sem cookies de sessão permanece idempotente e limpa
+os cookies locais.
+
+Rotas com `X-Account-Id` nunca consomem nem rotacionam refresh token. Elas
+validam o formato do cabeçalho antes do Auth e podem decodificar o `sub` do
+access JWT somente para antecipar uma divergência; esse claim não verificado
+nunca autoriza uma chamada. A autorização continua dependendo do usuário
+validado pelo Supabase. Se o access estiver ausente ou terminal e ainda houver
+refresh, a rota devolve `401 session_refresh_required`, sem `Set-Cookie` e sem
+acessar banco, limite ou modelo. `GET /api/account/session` é o único ponto que
+pode renovar a sessão; o cliente confirma ali a mesma identidade antes de
+repetir a operação uma vez. Logout com refresh-only também devolve esse erro e
+não apaga cookies, pois não consegue provar a conta sem consumir o token.
 
 A revogação impede novos acessos ao servidor, mas não promete apagar à distância
 uma cópia que já estava armazenada no outro aparelho. Essa limitação aparecerá
@@ -297,7 +311,11 @@ aparelho ficará abaixo do texto quando não houver largura.
 - Supabase indisponível: a falha mantém código transitório, não vira sessão
   expirada e não envia `Set-Cookie` destrutivo.
 - Escopo ausente ou divergente: sincronização, análise e ações autenticadas de
-  conta falham antes de qualquer leitura financeira e preservam os cookies.
+  conta falham antes de Auth, dispositivo ou qualquer leitura financeira e
+  preservam os cookies.
+- Access ausente ou terminal com refresh presente: a rota com escopo devolve
+  `session_refresh_required`; somente a sonda de sessão renova antes da única
+  repetição do pedido original.
 - Lista de dispositivos falha: os itens atuais permanecem na tela com aviso;
   uma falha de atualização não produz lista vazia falsa.
 
@@ -321,7 +339,11 @@ aparelho ficará abaixo do texto quando não houver largura.
 - sondas sem sessão e respostas `device_revoked` não enviam cookies de exclusão;
 - timeout, falha de transporte e HTTP 5xx não viram `session_expired`;
 - sync, análise e ações autenticadas de conta sem `X-Account-Id` ou com UUID
-  divergente falham antes de ler dados;
+  divergente falham antes de Auth, refresh, dispositivo ou dados;
+- rotas com escopo e access ausente ou terminal devolvem
+  `401 session_refresh_required` sem refresh, banco ou `Set-Cookie`;
+- `/account/session` continua renovando refresh-only e o cliente repete a rota
+  original apenas depois de confirmar a mesma conta;
 - evento de sessão inválida volta a interface ao modo local sem apagar a cópia.
 - toda chamada de sincronização envia o UUID esperado em `X-Account-Id`;
 - `account_scope_changed` reconsulta a sessão e não aplica o corpo da resposta;

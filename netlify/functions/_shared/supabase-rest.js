@@ -30,6 +30,13 @@ const UPSTREAM_ERRORS = {
   weak_password:              { statusCode: 400, code: "weak_password",         message: "Escolha uma senha mais forte." },
   same_password:              { statusCode: 400, code: "same_password",         message: "A nova senha precisa ser diferente da atual." },
   invalid_credentials:        { statusCode: 401, code: "invalid_credentials",   message: "Email ou senha incorretos." },
+  bad_jwt:                    { statusCode: 401, code: "bad_jwt",               message: "A sessão não é mais válida." },
+  refresh_token_not_found:    { statusCode: 401, code: "refresh_token_not_found", message: "A sessão não é mais válida." },
+  refresh_token_already_used: { statusCode: 401, code: "refresh_token_already_used", message: "A sessão não é mais válida." },
+  session_not_found:          { statusCode: 401, code: "session_not_found",     message: "A sessão não é mais válida." },
+  session_expired:            { statusCode: 401, code: "session_expired",       message: "A sessão expirou." },
+  request_timeout:            { statusCode: 504, code: "request_timeout",       message: "O serviço de conta demorou demais para responder." },
+  conflict:                   { statusCode: 409, code: "conflict",              message: "O serviço de conta recebeu pedidos concorrentes. Tente novamente." },
   otp_expired:                { statusCode: 400, code: "link_expired",          message: "O link do email expirou. Peça um novo." },
   flow_state_expired:         { statusCode: 400, code: "link_expired",          message: "O link do email expirou. Peça um novo." },
   flow_state_not_found:       { statusCode: 400, code: "link_invalid",          message: "Este link não vale mais. Peça um novo." },
@@ -69,6 +76,8 @@ function upstreamFailure(status, body) {
   if (conhecido) return conhecido;
   if (status === 429) return { statusCode: 429, code: "rate_limited", message: "Muitas tentativas. Aguarde e tente novamente." };
   if (status === 401) return { statusCode: 401, code: "invalid_session", message: "A operação foi recusada." };
+  if (status === 408) return { statusCode: 504, code: "request_timeout", message: "O serviço de conta demorou demais para responder." };
+  if (status >= 500) return { statusCode: status, code: "upstream_unavailable", message: "O serviço de conta não respondeu corretamente." };
   return { statusCode: 400, code: "request_rejected", message: "A operação foi recusada." };
 }
 
@@ -93,33 +102,44 @@ async function request(path, options = {}) {
   if (options.body !== undefined) headers["Content-Type"] = "application/json";
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15000);
-  let response;
   try {
-    response = await fetch(`${cfg.url}${path}`, {
-      method: options.method || "GET", headers,
-      body: options.body === undefined ? undefined : JSON.stringify(options.body),
-      signal: controller.signal, cache: "no-store",
-    });
-  } catch (_) {
-    const error = new Error("O serviço de conta não respondeu");
-    error.statusCode = 502;
-    error.code = "upstream_unavailable";
-    throw error;
-  } finally { clearTimeout(timer); }
-  const text = await response.text();
-  let body = null;
-  if (text) { try { body = JSON.parse(text); } catch (_) { body = null; } }
-  if (!response.ok) {
-    const traduzido = upstreamFailure(response.status, body);
-    const error = new Error(traduzido.message);
-    error.statusCode = traduzido.statusCode;
-    error.code = traduzido.code;
-    if (traduzido.exposeMessage) error.exposeMessage = true;
-    error.upstream = body;
-    error.upstreamStatus = response.status;
-    throw error;
+    let response;
+    let text;
+    try {
+      response = await fetch(`${cfg.url}${path}`, {
+        method: options.method || "GET", headers,
+        body: options.body === undefined ? undefined : JSON.stringify(options.body),
+        signal: controller.signal, cache: "no-store",
+      });
+      // O fetch resolve ao receber os cabeçalhos. O mesmo limite precisa
+      // continuar valendo enquanto o corpo chega, ou uma resposta incompleta
+      // prende toda a renovação de sessão até a função ser encerrada.
+      text = await response.text();
+    } catch (cause) {
+      const timedOut = !!(cause && cause.name === "AbortError");
+      const error = new Error(timedOut
+        ? "O serviço de conta demorou demais para responder"
+        : "O serviço de conta não respondeu");
+      error.statusCode = timedOut ? 504 : 502;
+      error.code = timedOut ? "request_timeout" : "upstream_unavailable";
+      throw error;
+    }
+    let body = null;
+    if (text) { try { body = JSON.parse(text); } catch (_) { body = null; } }
+    if (!response.ok) {
+      const traduzido = upstreamFailure(response.status, body);
+      const error = new Error(traduzido.message);
+      error.statusCode = traduzido.statusCode;
+      error.code = traduzido.code;
+      if (traduzido.exposeMessage) error.exposeMessage = true;
+      error.upstream = body;
+      error.upstreamStatus = response.status;
+      throw error;
+    }
+    return body;
+  } finally {
+    clearTimeout(timer);
   }
-  return body;
 }
 
 const auth = {

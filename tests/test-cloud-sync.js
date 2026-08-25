@@ -20,6 +20,7 @@ const vm = require("vm");
 const path = require("path");
 const ROOT = path.join(__dirname, "..");
 const read = (file) => fs.readFileSync(path.join(ROOT, file), "utf8");
+const TEST_ACCOUNT_ID = "00000000-0000-4000-8000-000000000001";
 
 let ok = 0;
 let fail = 0;
@@ -45,18 +46,21 @@ function fakeLocalStorage(seed) {
 
 // `const` e `function` de topo em `vm` ficam no escopo do SCRIPT, não viram
 // propriedade do objeto de contexto: todo acesso passa por avaliação.
-function carregar(fetchImpl, storage) {
+function carregar(fetchImpl, storage, extras) {
   const ctx = {
     console, fetch: fetchImpl, Response, AbortController, URL, crypto,
     setTimeout, clearTimeout, setInterval, clearInterval,
     localStorage: storage || fakeLocalStorage({ cofre_device_id: "device-de-teste-0001" }),
     accountDeviceId: () => "device-de-teste-0001",
     navigator: { onLine: true },
+    ...(extras || {}),
   };
   ctx.globalThis = ctx;
   vm.createContext(ctx);
   FONTES.forEach((file) => vm.runInContext(read(file), ctx, { filename: file }));
   ctx.run = (code) => vm.runInContext(code, ctx);
+  ctx.__accountId = TEST_ACCOUNT_ID;
+  ctx.run("CloudSync.configure({ getExpectedAccountId: () => __accountId })");
   return ctx;
 }
 
@@ -71,8 +75,10 @@ function servidorFalso(opcoes) {
   const linhas = new Map();     // chave -> { seq, entity, entityId, op, rev, payload }
   let seq = 0;
   const recebidos = [];
+  const cabecalhosRecebidos = [];
   return {
-    linhas, recebidos,
+    linhas, recebidos, cabecalhosRecebidos,
+    activeAccountId: (opcoes && opcoes.accountId) || TEST_ACCOUNT_ID,
     serverProtocol: (opcoes && opcoes.serverProtocol) || 3,
     minimumWriteProtocol: (opcoes && opcoes.minimumWriteProtocol) || 2,
     revision: () => String(seq),
@@ -109,12 +115,16 @@ function servidorFalso(opcoes) {
         const metodo = (options && options.method) || "GET";
         const texto = String(url);
         const cabecalhos = (options && options.headers) || {};
+        servidor.cabecalhosRecebidos.push(cabecalhos);
         const falado = Number(cabecalhos["X-Sync-Protocol"] || 3) || 3;
         const envelope = {
           protocol: falado,
           serverProtocol: servidor.serverProtocol,
           minimumWriteProtocol: servidor.minimumWriteProtocol,
         };
+        if (cabecalhos["X-Account-Id"] !== servidor.activeAccountId) {
+          return json({ ...envelope, status: "error", code: "account_scope_changed", message: "A conta mudou." }, 409);
+        }
         if (texto.includes("/health")) return json({ ...envelope, status: "ok", revision: servidor.revision() });
         if (metodo === "GET" && texto.includes("/changes")) {
           const since = (texto.match(/since=(\d+)/) || [])[1] || "0";
@@ -177,6 +187,13 @@ const lancar = (a, tx) => a.run(`FinanceStore.persist({ ...FinanceStore.snapshot
     check("o envio contém operações, não a base inteira", Array.isArray(corpo.ops) && corpo.ops.length > 0, JSON.stringify(corpo).slice(0, 120));
     check("a operação carrega marca do relógio lógico", corpo.ops.every((op) => /^\d{15}\.\d{6}\./.test(op.rev)));
     check("o servidor guardou o lançamento", servidor.linhas.has("transactions tx-a"));
+    const headers = servidor.cabecalhosRecebidos[0] || {};
+    check("a sincronização envia o rótulo do aparelho", typeof headers["X-Device-Label"] === "string" && headers["X-Device-Label"].length > 0,
+      JSON.stringify(headers));
+    check("a sincronização envia o tipo do aparelho", ["desktop", "phone", "tablet", "unknown"].includes(headers["X-Device-Type"]),
+      JSON.stringify(headers));
+    check("a sincronização envia a identidade esperada da conta", headers["X-Account-Id"] === TEST_ACCOUNT_ID,
+      JSON.stringify(headers));
 
     const b = await ligarAparelho(servidor, "device-aparelho-b02");
     check("o segundo aparelho recebeu o lançamento", b.run(`FinanceStore.snapshot().transactions.some((t) => t.id === "tx-a")`));
@@ -266,7 +283,15 @@ const lancar = (a, tx) => a.run(`FinanceStore.persist({ ...FinanceStore.snapshot
     }, storage);
     ctx.run(`accountDeviceId = () => "device-aparelho-a01";`);
     await ctx.run(`FinanceStore.init(new LocalStorageAdapter("u_ana"), { scope: "u_ana" })`);
-    ctx.run(`CloudSync.configure({ readLocal: () => FinanceStore.snapshot(), applyRemote: (d) => { __ultimo = d; }, onStatus: () => {} })`);
+    ctx.run(`
+      __invalidacoes = [];
+      CloudSync.configure({
+        readLocal: () => FinanceStore.snapshot(),
+        applyRemote: (d) => { __ultimo = d; },
+        onStatus: () => {},
+        onAuthInvalid: (details) => { __invalidacoes.push(details); },
+      });
+    `);
     await ctx.run("CloudSync.enable()");
 
     cair = true;
@@ -298,7 +323,15 @@ const lancar = (a, tx) => a.run(`FinanceStore.persist({ ...FinanceStore.snapshot
     }, storage);
     ctx.run(`accountDeviceId = () => "device-aparelho-a01";`);
     await ctx.run(`FinanceStore.init(new LocalStorageAdapter("u_ana"), { scope: "u_ana" })`);
-    ctx.run(`CloudSync.configure({ readLocal: () => FinanceStore.snapshot(), applyRemote: (d) => { __ultimo = d; }, onStatus: () => {} })`);
+    ctx.run(`
+      __invalidacoes = [];
+      CloudSync.configure({
+        readLocal: () => FinanceStore.snapshot(),
+        applyRemote: (d) => { __ultimo = d; },
+        onStatus: () => {},
+        onAuthInvalid: (details) => { __invalidacoes.push(details); },
+      });
+    `);
     await ctx.run("CloudSync.enable()");
     expirar = true;
     ctx.run(`FinanceStore.persist({ ...FinanceStore.snapshot(), transactions: [{ id: "tx-sessao", type: "expense", amount: 1, date: "2026-08-07", categoryId: "lazer" }] })`);
@@ -307,6 +340,8 @@ const lancar = (a, tx) => a.run(`FinanceStore.persist({ ...FinanceStore.snapshot
 
     check("a sincronização parou", ctx.run("CloudSync.isEnabled()") === false);
     check("a mensagem pede para entrar de novo", /Entre novamente/.test(ctx.run("CloudSync.status().error") || ""));
+    check("a camada de conta é avisada da sessão inválida", ctx.run("__invalidacoes.length") === 1
+      && ctx.run("__invalidacoes[0].code") === "session_expired", ctx.run("JSON.stringify(__invalidacoes)"));
     const fila = await ctx.run("FinanceStore.outboxRead(0)");
     check("a fila NÃO é apagada ao desligar", fila.length > 0, JSON.stringify(fila).slice(0, 100));
   }
@@ -438,9 +473,9 @@ const lancar = (a, tx) => a.run(`FinanceStore.persist({ ...FinanceStore.snapshot
   console.log("\n12. Registro sem marca ganha uma, e ela vai para o disco");
   {
     // Backup restaurado antes de existir conta chega sem marca de relógio. A
-    // semeadura precisa cunhar uma, mandar, e GRAVAR: se a marca ficasse só na
-    // memória, o carregamento seguinte traria o registro sem marca de novo e
-    // ele perderia uma disputa que deveria vencer.
+    // restauração dentro do escopo da conta precisa cunhar uma, enfileirar e
+    // GRAVAR imediatamente. Esperar o motor ligar abriria uma janela em que a
+    // base restaurada existiria sem a operação que deve levá-la ao servidor.
     const servidor = servidorFalso();
     const storage = fakeLocalStorage({ cofre_device_id: "device-aparelho-a01" });
     const ctx = carregar(servidor.handler(servidor), storage);
@@ -448,7 +483,8 @@ const lancar = (a, tx) => a.run(`FinanceStore.persist({ ...FinanceStore.snapshot
     await ctx.run(`FinanceStore.init(new LocalStorageAdapter("u_ana"), { scope: "u_ana" })`);
     await ctx.run(`FinanceStore.replaceAll({ ...FinanceStore.snapshot(),
       transactions: [{ id: "tx-sem-marca", type: "expense", amount: 33, date: "2026-08-12", categoryId: "lazer" }] })`);
-    check("o registro entrou sem marca", ctx.run(`FinanceStore.syncRevOf(FinanceStore.snapshot().transactions[0])`) === "",
+    check("o registro restaurado já entrou com marca",
+      /^\d{15}\.\d{6}\.device-aparelho-a01:tab_[A-Za-z0-9]{12}$/.test(ctx.run(`FinanceStore.syncRevOf(FinanceStore.snapshot().transactions[0])`)),
       ctx.run(`FinanceStore.syncRevOf(FinanceStore.snapshot().transactions[0])`));
 
     ctx.run(`CloudSync.configure({ readLocal: () => FinanceStore.snapshot(),
@@ -457,12 +493,480 @@ const lancar = (a, tx) => a.run(`FinanceStore.persist({ ...FinanceStore.snapshot
 
     check("o registro sem marca chegou ao servidor", servidor.linhas.has("transactions tx-sem-marca"));
     check("e ganhou marca deste aparelho",
-      /^\d{15}\.\d{6}\.device-aparelho-a01$/.test(ctx.run(`FinanceStore.syncRevOf(FinanceStore.snapshot().transactions[0])`)),
+      /^\d{15}\.\d{6}\.device-aparelho-a01:tab_[A-Za-z0-9]{12}$/.test(ctx.run(`FinanceStore.syncRevOf(FinanceStore.snapshot().transactions[0])`)),
       ctx.run(`FinanceStore.syncRevOf(FinanceStore.snapshot().transactions[0])`));
 
     // O que importa: a marca tem de estar no BANCO, nao so no snapshot em memoria.
     const gravado = await ctx.run(`FinanceStore.reload().then((d) => FinanceStore.syncRevOf(d.transactions[0]))`);
     check("a marca foi gravada no banco", /^\d{15}\.\d{6}\./.test(String(gravado)), String(gravado));
+  }
+
+  console.log("\n13. Ocultar a página tenta enviar sem perder a fila");
+  {
+    const servidor = servidorFalso();
+    const a = await ligarAparelho(servidor, "device-aparelho-a01");
+    lancar(a, { id: "tx-ocultar", type: "expense", amount: 18, date: "2026-08-13", categoryId: "lazer" });
+    a.run("CloudSync.schedule()");
+    await a.run("CloudSync.flushOnHide()");
+    check("o envio começa durante a ocultação", servidor.linhas.has("transactions tx-ocultar"));
+    check("a fila fica vazia quando a tentativa conclui", (await a.run("FinanceStore.outboxRead(0)")).length === 0);
+  }
+
+  console.log("\n14. Gravação agenda envio em menos de um segundo");
+  {
+    const servidor = servidorFalso();
+    const a = await ligarAparelho(servidor, "device-aparelho-a01");
+    lancar(a, { id: "tx-debounce", type: "expense", amount: 7, date: "2026-08-14", categoryId: "lazer" });
+    a.run("CloudSync.schedule()");
+    await espera(900);
+    check("o debounce envia sem botão manual", servidor.linhas.has("transactions tx-debounce"));
+    const debounce = Number((read("js/cloud-sync.js").match(/CLOUD_SYNC_DEBOUNCE_MS\s*=\s*(\d+)/) || [])[1]);
+    const poll = Number((read("js/cloud-sync.js").match(/CLOUD_SYNC_POLL_MS\s*=\s*(\d+)/) || [])[1]);
+    check("o prazo configurado não passa de 1 segundo", debounce > 0 && debounce <= 1000, debounce);
+    check("o polling visível não passa de 15 segundos", poll > 0 && poll <= 15000, poll);
+  }
+
+  console.log("\n15. Troca de identidade nunca aplica payload no escopo antigo");
+  {
+    const servidor = servidorFalso();
+    const a = await ligarAparelho(servidor, "device-aparelho-a01");
+    a.run(`__scopeChanged = 0; CloudSync.configure({
+      onAccountScopeChanged: () => { __scopeChanged += 1; },
+    })`);
+    servidor.activeAccountId = "00000000-0000-4000-8000-000000000002";
+    await a.run("CloudSync.syncNow()");
+    await Promise.resolve();
+    check("o erro de escopo chama a recuperação de identidade", a.run("__scopeChanged") === 1, a.run("__scopeChanged"));
+    check("o motor antigo para sem declarar logout", a.run("CloudSync.isEnabled()") === false
+      && a.run("CloudSync.status().errorCode") === "account_scope_changed", JSON.stringify(a.run("CloudSync.status()")));
+    check("nenhum payload de outra conta entrou no banco", a.run("FinanceStore.snapshot().transactions.length") === 0);
+  }
+
+  console.log("\n16. Ciclo em voo é cancelado antes de tocar no novo escopo");
+  {
+    const servidor = servidorFalso();
+    const a = await ligarAparelho(servidor, "device-aparelho-a01");
+    servidor.aplicar([{
+      entity: "transactions", entityId: "tx-antiga", op: "put",
+      rev: "000000000000010.000001.device-remoto-a",
+      payload: { id: "tx-antiga", type: "expense", amount: 99, date: "2026-08-15", categoryId: "lazer" },
+    }]);
+    const baseFetch = servidor.handler(servidor);
+    let liberar;
+    let iniciou;
+    const iniciouPromise = new Promise((resolve) => { iniciou = resolve; });
+    let segurar = true;
+    a.ctx.fetch = (url, options) => {
+      if (segurar && String(url).includes("/changes") && (!options || !options.method || options.method === "GET")) {
+        segurar = false;
+        iniciou();
+        return new Promise((resolve) => { liberar = () => baseFetch(url, options).then(resolve); });
+      }
+      return baseFetch(url, options);
+    };
+    const ciclo = a.run("CloudSync.syncNow()");
+    await iniciouPromise;
+    a.run("CloudSync.disable()");
+    await a.run("FinanceStore.switchScope('u_outra-conta')");
+    liberar();
+    await ciclo;
+    check("a resposta antiga não foi aplicada no banco novo",
+      !a.run("FinanceStore.snapshot().transactions.some((t) => t.id === 'tx-antiga')"));
+    check("o cursor do banco novo não avançou", await a.run("FinanceStore.localMetaGet(META_CURSOR)") == null,
+      await a.run("FinanceStore.localMetaGet(META_CURSOR)"));
+  }
+
+  console.log("\n17. Restauração nunca aceita checkpoint parcial");
+  {
+    const servidor = servidorFalso();
+    const a = await ligarAparelho(servidor, "device-aparelho-a01");
+    lancar(a, { id: "tx-preservado", type: "expense", amount: 25, date: "2026-08-16", categoryId: "lazer" });
+    await flush(a);
+    await a.run("CloudSync.syncNow()");
+    a.run(`
+      __restoreApplyCalls = 0;
+      __restoreOutboxCalls = 0;
+      __checkpointReads = 0;
+      __originalApplyRemoteOps = FinanceStore.applyRemoteOps;
+      __originalOutboxAppend = FinanceStore.outboxAppend;
+      FinanceStore.applyRemoteOps = async (...args) => {
+        __restoreApplyCalls += 1;
+        return __originalApplyRemoteOps(...args);
+      };
+      FinanceStore.outboxAppend = async (...args) => {
+        __restoreOutboxCalls += 1;
+        return __originalOutboxAppend(...args);
+      };
+      CloudAdapter.prototype.createCheckpoint = async () => ({ id: "checkpoint-seguranca" });
+      CloudAdapter.prototype.readCheckpoint = async (_id, after) => {
+        __checkpointReads += 1;
+        return {
+          ops: [{ entity: "transactions", entityId: "tx-parcial", op: "put", payload: {
+            id: "tx-parcial", type: "expense", amount: 1, date: "2026-08-01", categoryId: "lazer"
+          } }],
+          hasMore: true,
+          after: String(after || ""),
+        };
+      };
+    `);
+    const stalled = await a.run(`CloudSync.restoreCheckpoint("checkpoint-travado")`);
+    check("cursor parado cancela a restauração", stalled.ok === false && stalled.reason === "cursor_stalled", JSON.stringify(stalled));
+    check("checkpoint parcial não toca na base nem na fila", a.run("__restoreApplyCalls") === 0
+      && a.run("__restoreOutboxCalls") === 0
+      && a.run(`FinanceStore.snapshot().transactions.some((t) => t.id === "tx-preservado")`));
+
+    a.run(`
+      __restoreApplyCalls = 0;
+      __restoreOutboxCalls = 0;
+      __checkpointReads = 0;
+      CloudAdapter.prototype.readCheckpoint = async () => {
+        __checkpointReads += 1;
+        return { ops: [], hasMore: true, after: String(__checkpointReads) };
+      };
+    `);
+    const limited = await a.run(`CloudSync.restoreCheckpoint("checkpoint-sem-fim")`);
+    check("limite de páginas cancela a restauração", limited.ok === false && limited.reason === "page_limit"
+      && a.run("__checkpointReads") === 200, JSON.stringify({ limited, reads: a.run("__checkpointReads") }));
+    check("limite nunca transforma leitura parcial em exclusões", a.run("__restoreApplyCalls") === 0
+      && a.run("__restoreOutboxCalls") === 0
+      && a.run(`FinanceStore.snapshot().transactions.some((t) => t.id === "tx-preservado")`));
+    await a.run("CloudSync.disable()");
+  }
+
+  console.log("\n18. Restauração e fila sobrevivem juntas ao cancelamento da sessão");
+  {
+    const servidor = servidorFalso();
+    const a = await ligarAparelho(servidor, "device-aparelho-a01");
+    let enterWrite;
+    let releaseWrite;
+    const writeEntered = new Promise((resolve) => { enterWrite = resolve; });
+    const writeReleased = new Promise((resolve) => { releaseWrite = resolve; });
+    a.ctx.__waitRestoreWrite = () => {
+      enterWrite();
+      return writeReleased;
+    };
+    a.run(`
+      __atomicRestoreCommit = null;
+      __blockRestoreWrite = true;
+      __originalRestoreWrite = LocalStorageAdapter.prototype.writeChanges;
+      LocalStorageAdapter.prototype.writeChanges = async function(changeSet, commit) {
+        if (__blockRestoreWrite && changeSet && commit && Array.isArray(commit.outboxAdds)
+          && commit.outboxAdds.some((entry) => entry.entityId === "tx-restaurado")) {
+          __blockRestoreWrite = false;
+          __atomicRestoreCommit = { queued: commit.outboxAdds.length };
+          await __waitRestoreWrite();
+        }
+        return __originalRestoreWrite.call(this, changeSet, commit);
+      };
+      CloudAdapter.prototype.createCheckpoint = async () => ({ id: "checkpoint-seguranca" });
+      CloudAdapter.prototype.readCheckpoint = async () => ({
+        ops: [{ entity: "transactions", entityId: "tx-restaurado", op: "put", payload: {
+          id: "tx-restaurado", type: "expense", amount: 77, date: "2026-08-20", categoryId: "lazer"
+        } }],
+        hasMore: false,
+        after: "",
+      });
+    `);
+
+    const restoring = a.run(`CloudSync.restoreCheckpoint("checkpoint-atomico")`);
+    await writeEntered;
+    a.run("CloudSync.disable()");
+    releaseWrite();
+    const result = await restoring;
+    const queue = await a.run("FinanceStore.outboxRead(0)");
+    const restoredInMemory = a.run(`FinanceStore.snapshot().transactions.some((item) => item.id === "tx-restaurado")`);
+    const atomicCommit = a.run("__atomicRestoreCommit");
+
+    check("o ciclo interrompido informa cancelamento", result.ok === false && result.reason === "sync_cancelled", JSON.stringify(result));
+    check("a restauração foi gravada com a fila na mesma operação", atomicCommit && atomicCommit.queued > 0
+      && queue.some((entry) => entry.entityId === "tx-restaurado"), JSON.stringify({ atomicCommit, queue }));
+    check("não existe restauração local sem operação pendente para subir", restoredInMemory
+      && queue.some((entry) => entry.entityId === "tx-restaurado"));
+  }
+
+  console.log("\n19. Voltar a um valor remoto depois de editar continua sendo alteração local");
+  {
+    const servidor = servidorFalso();
+    servidor.aplicar([{
+      entity: "settings", entityId: "monthlyIncome", op: "put",
+      rev: "000000000000030.000001.device-remoto-a", payload: 1000,
+    }]);
+    const a = await ligarAparelho(servidor, "device-aparelho-a01");
+    check("o valor remoto chegou", a.run("FinanceStore.snapshot().monthlyIncome") === 1000);
+    a.run(`FinanceStore.persist({ ...FinanceStore.snapshot(), monthlyIncome: 2000 })`);
+    await flush(a);
+    a.run(`FinanceStore.persist({ ...FinanceStore.snapshot(), monthlyIncome: 1000 })`);
+    await flush(a);
+    const values = (await a.run("FinanceStore.outboxRead(0)"))
+      .filter((entry) => entry.entity === "settings" && entry.entityId === "monthlyIncome")
+      .map((entry) => entry.payload);
+    check("editar e depois voltar gera as duas operações", values.join(",") === "2000,1000", JSON.stringify(values));
+  }
+
+  console.log("\n20. Apagar tudo exclui uma resposta capturada antes do reset");
+  {
+    const servidor = servidorFalso();
+    const a = await ligarAparelho(servidor, "device-aparelho-a01");
+    servidor.aplicar([{
+      entity: "transactions", entityId: "tx-antes-do-reset", op: "put",
+      rev: "000000000000090.000001.device-remoto-a",
+      payload: { id: "tx-antes-do-reset", type: "expense", amount: 44, date: "2026-08-24", categoryId: "lazer" },
+    }]);
+
+    const baseFetch = servidor.handler(servidor);
+    let releaseResponse;
+    let markStarted;
+    const started = new Promise((resolve) => { markStarted = resolve; });
+    let holdFirstPull = true;
+    a.ctx.fetch = (url, options) => {
+      const method = (options && options.method) || "GET";
+      if (holdFirstPull && method === "GET" && String(url).includes("/changes")) {
+        holdFirstPull = false;
+        markStarted();
+        return new Promise((resolve) => {
+          releaseResponse = () => baseFetch(url, options).then(resolve);
+        });
+      }
+      return baseFetch(url, options);
+    };
+    a.run(`
+      __resetLockCalls = [];
+      __resetPurged = false;
+      __resetCalls = 0;
+      navigator.locks = {
+        request: async (name, options, callback) => {
+          __resetLockCalls.push({ name, wait: !Object.prototype.hasOwnProperty.call(options || {}, "ifAvailable") });
+          return callback({ name });
+        },
+      };
+      CloudAdapter.prototype.resetRemote = async () => {
+        __resetCalls += 1;
+        return { revision: "1", resetRev: "001787000000000.000900.server_reset:test1", applied: 1 };
+      };
+    `);
+
+    const oldCycle = a.run("CloudSync.syncNow()");
+    await started;
+    const deleting = a.run(`(async () => {
+      const reset = await CloudSync.resetRemote();
+      if (reset && reset.remoteDeleted) {
+        await FinanceStore.purge();
+        __resetPurged = true;
+      }
+      return reset;
+    })()`);
+
+    // Sem exclusão mútua, o reset antigo terminava nestas microtarefas e o
+    // purge acontecia enquanto a resposta velha ainda estava presa na rede.
+    for (let turn = 0; turn < 20; turn++) await Promise.resolve();
+    const purgedBeforeRelease = a.run("__resetPurged");
+    releaseResponse();
+    const [cycleResult, resetResult] = await Promise.all([oldCycle, deleting]);
+    const lockCalls = a.run("__resetLockCalls.slice()");
+
+    check("o purge espera o ciclo capturado terminar", purgedBeforeRelease === false, String(purgedBeforeRelease));
+    check("o ciclo velho é cancelado e o reset conclui", cycleResult === false
+      && resetResult && resetResult.ok === true && resetResult.remoteDeleted === true
+      && resetResult.localPrepared === true && resetResult.reason === null
+      && a.run("__resetCalls") === 1, JSON.stringify({ cycleResult, resetResult, resetCalls: a.run("__resetCalls") }));
+    check("o reset aguarda o lock exclusivo do escopo", lockCalls.length >= 2 && lockCalls[lockCalls.length - 1].wait === true,
+      JSON.stringify(lockCalls));
+    check("o reset concluído não deixa a conta em sincronização infinita",
+      a.run(`CloudSync.status().phase`) !== "syncing", JSON.stringify(a.run(`CloudSync.status()`)));
+    check("a resposta anterior nunca reaparece depois do purge",
+      !a.run(`FinanceStore.snapshot().transactions.some((item) => item.id === "tx-antes-do-reset")`)
+      && !a.aplicados.some((data) => (data.transactions || []).some((item) => item.id === "tx-antes-do-reset")));
+  }
+
+  console.log("\n21. Confirmação remota sobrevive a falhas na preparação local");
+  {
+    const servidor = servidorFalso();
+    const a = await ligarAparelho(servidor, "device-aparelho-a01");
+    a.run(`
+      __resetCalls = 0;
+      __originalOutboxClear = FinanceStore.outboxClear;
+      CloudAdapter.prototype.resetRemote = async () => {
+        __resetCalls += 1;
+        return { revision: "31", resetRev: "001787000000000.000901.server_reset:test2", applied: 1 };
+      };
+      FinanceStore.outboxClear = async () => {
+        const error = new Error("falha simulada na fila");
+        error.code = "storage_test_failure";
+        throw error;
+      };
+    `);
+    const result = await a.run("CloudSync.resetRemote()");
+    const status = a.run(`({ ...CloudSync.status() })`);
+    a.run("FinanceStore.outboxClear = __originalOutboxClear");
+
+    check("falha ao limpar a fila preserva a confirmação do servidor",
+      result.ok === false && result.remoteDeleted === true && result.localPrepared === false
+        && result.reason === "outbox_clear_failed" && a.run("__resetCalls") === 1,
+      JSON.stringify({ result, status }));
+    check("falha ao limpar a fila termina fora de syncing",
+      status.phase === "error" && status.errorCode === "outbox_clear_failed", JSON.stringify(status));
+  }
+  {
+    const servidor = servidorFalso();
+    const a = await ligarAparelho(servidor, "device-aparelho-a02");
+    a.run(`
+      __resetCalls = 0;
+      __originalLocalMetaPut = FinanceStore.localMetaPut;
+      CloudAdapter.prototype.resetRemote = async () => {
+        __resetCalls += 1;
+        return { revision: "47", resetRev: "001787000000000.000902.server_reset:test3", applied: 1 };
+      };
+      FinanceStore.localMetaPut = async (key, value, targetScope) => {
+        if (key === META_CURSOR) {
+          const error = new Error("falha simulada no cursor");
+          error.code = "storage_test_failure";
+          throw error;
+        }
+        return __originalLocalMetaPut(key, value, targetScope);
+      };
+    `);
+    const result = await a.run("CloudSync.resetRemote()");
+    const status = a.run(`({ ...CloudSync.status() })`);
+    a.run("FinanceStore.localMetaPut = __originalLocalMetaPut");
+
+    check("falha ao gravar o cursor preserva a confirmação do servidor",
+      result.ok === false && result.remoteDeleted === true && result.localPrepared === false
+        && result.reason === "cursor_write_failed" && a.run("__resetCalls") === 1,
+      JSON.stringify({ result, status }));
+    check("falha ao gravar o cursor termina fora de syncing",
+      status.phase === "error" && status.errorCode === "cursor_write_failed", JSON.stringify(status));
+  }
+
+  console.log("\n22. Timeout continua ativo enquanto o corpo da resposta é lido");
+  {
+    let nextTimerId = 0;
+    let latestTimerId = 0;
+    const timerCallbacks = new Map();
+    const activeTimers = new Set();
+    let markBodyStarted;
+    const bodyStarted = new Promise((resolve) => { markBodyStarted = resolve; });
+    const fakeTimers = {
+      setTimeout: (callback) => {
+        const id = ++nextTimerId;
+        latestTimerId = id;
+        timerCallbacks.set(id, callback);
+        activeTimers.add(id);
+        return id;
+      },
+      clearTimeout: (id) => { activeTimers.delete(id); },
+    };
+    const hangingBodyFetch = async (_url, options) => ({
+      ok: true,
+      status: 200,
+      headers: {
+        get: (name) => String(name).toLowerCase() === "content-type" ? "application/json" : null,
+      },
+      text: () => {
+        markBodyStarted();
+        return new Promise((_resolve, reject) => {
+          const abort = () => {
+            const error = new Error("leitura abortada");
+            error.name = "AbortError";
+            reject(error);
+          };
+          if (options.signal.aborted) abort();
+          else options.signal.addEventListener("abort", abort, { once: true });
+        });
+      },
+    });
+    const ctx = carregar(hangingBodyFetch, null, fakeTimers);
+    const pending = ctx.run(`(async () => {
+      try {
+        const cloud = new CloudAdapter({
+          enabled: true, baseUrl: "/api/sync", token: "token-teste",
+          deviceId: "device-timeout", accountId: __accountId, timeoutMs: 1000,
+        });
+        await cloud.init();
+        return { ok: true };
+      } catch (error) {
+        return { ok: false, code: error && error.code, name: error && error.name };
+      }
+    })()`);
+    await bodyStarted;
+    const activeWhileReading = activeTimers.has(latestTimerId);
+    timerCallbacks.get(latestTimerId)();
+    const result = await Promise.race([
+      pending,
+      new Promise((resolve) => setTimeout(() => resolve({ timeout: true }), 1000)),
+    ]);
+
+    check("o timer não é limpo quando chegam apenas os cabeçalhos", activeWhileReading === true,
+      JSON.stringify({ activeWhileReading, latestTimerId }));
+    check("abortar a leitura do corpo vira timeout de sincronização",
+      !result.timeout && result.ok === false && result.code === "timeout", JSON.stringify(result));
+    check("o timer é limpo quando a chamada inteira termina", activeTimers.has(latestTimerId) === false,
+      JSON.stringify(Array.from(activeTimers)));
+  }
+
+  console.log("\n23. Troca de conta durante a exclusão não apaga o escopo novo");
+  {
+    const actionCtx = {
+      console, Promise,
+      GUEST_SCOPE: "guest",
+      state: {},
+      __scope: "u_conta_a",
+      __generation: 10,
+      __purgeCalls: 0,
+      __notifications: [],
+      marcarAppEmUso() {},
+      render() {},
+      clearSafeErrors() {},
+      applyTheme() {},
+      freshOnboarding: () => ({}),
+      freshTxForm: () => ({}),
+      accountForgetThisDevice: async () => true,
+      reportSafeError() {},
+    };
+    actionCtx.notify = (message, tone) => actionCtx.__notifications.push({ message, tone: tone || "" });
+    actionCtx.requestConfirmation = (options) => { actionCtx.__confirmation = options; };
+    actionCtx.FinanceStore = {
+      scope: () => actionCtx.__scope,
+      generation: () => actionCtx.__generation,
+      purge: async () => { actionCtx.__purgeCalls += 1; return true; },
+      snapshot: () => ({}),
+    };
+    let resolveReset;
+    actionCtx.CloudSync = {
+      resetRemote: () => new Promise((resolve) => { resolveReset = resolve; }),
+    };
+    actionCtx.globalThis = actionCtx;
+    vm.createContext(actionCtx);
+    vm.runInContext(read("js/actions.js"), actionCtx, { filename: "js/actions.js" });
+    const openConfirmation = () => vm.runInContext(`onClick({ target: { closest: () => ({
+      dataset: { action: "privacy-delete-all", id: "", value: "" },
+      classList: { contains: () => false }
+    }) } })`, actionCtx);
+
+    openConfirmation();
+    const deleting = actionCtx.__confirmation.onConfirm();
+    actionCtx.__scope = "u_conta_b";
+    actionCtx.__generation = 11;
+    resolveReset({ ok: true, remoteDeleted: true, localPrepared: true, reason: null });
+    await deleting;
+
+    check("a confirmação da conta A não apaga o banco aberto da conta B", actionCtx.__purgeCalls === 0,
+      String(actionCtx.__purgeCalls));
+    check("a mensagem distingue a conta remota apagada da conta atual preservada",
+      actionCtx.__notifications.some((item) => /conta anterior no servidor/.test(item.message)
+        && /conta aberta agora não foi alterada/.test(item.message)), JSON.stringify(actionCtx.__notifications));
+
+    actionCtx.__notifications = [];
+    actionCtx.CloudSync.resetRemote = async () => ({
+      ok: false, remoteDeleted: false, localPrepared: false, reason: "timeout",
+    });
+    openConfirmation();
+    await actionCtx.__confirmation.onConfirm();
+    check("resultado remoto desconhecido preserva a cópia local", actionCtx.__purgeCalls === 0,
+      String(actionCtx.__purgeCalls));
+    check("timeout não afirma que o servidor deixou tudo intacto",
+      actionCtx.__notifications.some((item) => /Não foi possível confirmar a exclusão na conta/.test(item.message)
+        && /cópia deste aparelho não foi apagada/.test(item.message)
+        && !/Nada foi apagado/.test(item.message)), JSON.stringify(actionCtx.__notifications));
   }
 
   await espera(10);

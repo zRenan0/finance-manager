@@ -8,6 +8,7 @@ const read = (file) => fs.readFileSync(path.join(ROOT, file), "utf8");
 const schema = require(path.join(ROOT, "netlify/functions/_shared/finance-schema"));
 const http = require(path.join(ROOT, "netlify/functions/_shared/http"));
 const api = require(path.join(ROOT, "netlify/functions/_shared/supabase-rest"));
+const USER_ID = "00000000-0000-4000-8000-000000000001";
 
 let pass = 0, fail = 0;
 function check(label, condition, detail) {
@@ -17,7 +18,10 @@ function check(label, condition, detail) {
 function event(method, action, body, extraHeaders) {
   return {
     httpMethod: method, path: `/api/account/${action}`, queryStringParameters: { action },
-    headers: { origin: "https://cofre.test", host: "cofre.test", "x-forwarded-proto": "https", "x-device-id": "device-test-1234", ...(extraHeaders || {}) },
+    headers: {
+      origin: "https://cofre.test", host: "cofre.test", "x-forwarded-proto": "https",
+      "x-device-id": "device-test-1234", "x-account-id": USER_ID, ...(extraHeaders || {}),
+    },
     body: body == null ? null : JSON.stringify(body),
   };
 }
@@ -48,11 +52,18 @@ async function main() {
   process.env.ALLOWED_ORIGIN = "https://cofre.test";
   const originalAuth = { ...api.auth };
   const originalDb = api.db;
-  api.auth.signIn = async (email) => ({ access_token: "access-secret", refresh_token: "refresh-secret", expires_in: 3600, user: { id: "00000000-0000-4000-8000-000000000001", email, email_confirmed_at: "2026-08-01T12:00:00Z" } });
+  api.auth.signIn = async (email) => ({ access_token: "access-secret", refresh_token: "refresh-secret", expires_in: 3600, user: { id: USER_ID, email, email_confirmed_at: "2026-08-01T12:00:00Z" } });
   // `email_confirmed_at` presente porque a sessão passou a exigi-lo: conta sem
   // email confirmado não entra e não sincroniza. Ver test-account-confirmation.js.
-  api.auth.user = async () => ({ id: "00000000-0000-4000-8000-000000000001", email: "pessoa@example.com", email_confirmed_at: "2026-08-01T12:00:00Z" });
-  api.db = async (route, options) => route.includes("cofre_devices?") && (!options || options.method === undefined) ? [] : null;
+  api.auth.user = async () => ({ id: USER_ID, email: "pessoa@example.com", email_confirmed_at: "2026-08-01T12:00:00Z" });
+  api.db = async (route, options) => {
+    if (route === "rpc/cofre_rate_hit") return [{ allowed: true, retry_after: 0, hits: 1 }];
+    if (route.includes("cofre_devices?") && (!options || options.method === undefined)) return [];
+    if (route.startsWith("cofre_devices?") && options && options.method === "POST") {
+      return [{ device_id: "device-test-1234" }];
+    }
+    return null;
+  };
   delete require.cache[require.resolve(path.join(ROOT, "netlify/functions/account"))];
   const account = require(path.join(ROOT, "netlify/functions/account"));
   const login = await account.handler(event("POST", "login", { email: "pessoa@example.com", password: "senha-segura-123" }));
@@ -64,7 +75,8 @@ async function main() {
   const denied = await account.handler(event("POST", "login", { email: "pessoa@example.com", password: "senha-segura-123" }, { origin: "https://attacker.test" }));
   check("origem externa é bloqueada", denied.statusCode === 403, denied.statusCode);
   const missingDevice = await account.handler(event("GET", "session", null, { cookie: "cofre_access=access-secret" }));
-  check("sessão sem segredo do dispositivo é bloqueada", missingDevice.statusCode === 403 && (missingDevice.multiValueHeaders["Set-Cookie"] || []).length === 4, missingDevice.statusCode);
+  check("sessão sem segredo do dispositivo é bloqueada sem apagar outro login",
+    missingDevice.statusCode === 403 && !missingDevice.multiValueHeaders, missingDevice.statusCode);
 
   console.log("\n3. Operações incrementais no backend financeiro");
   const deviceSecret = "device-secret-for-test";
@@ -72,7 +84,11 @@ async function main() {
   const cookieHeader = `cofre_access=access-secret; cofre_refresh=refresh-secret; cofre_device=${deviceSecret}`;
   let rpcResult = { status: "applied", revision: 7, applied: 1 };
   let rpcOptions = null;
+  let resetRpcResult = { status: "applied", revision: 8, applied: 1, reset_rev: "001787043200000.000002.server_reset:teste" };
+  let resetRpcOptions = null;
   let opsRows = [];
+  let checkpointRows = [];
+  const checkpointQueries = [];
   // A versão mínima de escrita é CONFIGURAÇÃO do backend, versionada no banco.
   // Ela é o que permite a janela de transição: durante ela um cliente 2 continua
   // gravando; no corte, o mesmo backend passa a recusá-lo com HTTP 426.
@@ -81,8 +97,28 @@ async function main() {
     if (route.startsWith("cofre_devices?")) return [{ device_id: "device-test-1234", secret_hash: secretHash, revoked_at: null }];
     if (route.startsWith("cofre_sync_config?")) return syncConfigRow ? [syncConfigRow] : [];
     if (route.startsWith("cofre_sync_state?")) return [{ revision: 7 }];
+    if (route.startsWith("cofre_sync_checkpoint_rows?")) {
+      checkpointQueries.push(route);
+      const query = new URLSearchParams(route.split("?")[1] || "");
+      const logical = String(query.get("or") || "");
+      let rows = checkpointRows.slice().sort((left, right) => (
+        left.entity === right.entity
+          ? String(left.entity_id).localeCompare(String(right.entity_id))
+          : String(left.entity).localeCompare(String(right.entity))
+      ));
+      if (logical) {
+        const match = logical.match(/^\(entity\.gt\.([^,]+),and\(entity\.eq\.([^,]+),entity_id\.gt\.([^)]+)\)\)$/);
+        if (!match || match[1] !== match[2]) throw new Error(`Filtro composto inválido: ${logical}`);
+        const [, cursorEntity, , cursorEntityId] = match;
+        rows = rows.filter((row) => row.entity > cursorEntity
+          || (row.entity === cursorEntity && row.entity_id > cursorEntityId));
+      }
+      const requested = Math.max(0, Number(query.get("limit")) || 0);
+      return rows.slice(0, requested);
+    }
     if (route.startsWith("cofre_sync_ops?")) return opsRows;
     if (route === "rpc/cofre_apply_ops") { rpcOptions = options; return [rpcResult]; }
+    if (route === "rpc/cofre_reset_data") { resetRpcOptions = options; return [resetRpcResult]; }
     return null;
   };
   delete require.cache[require.resolve(path.join(ROOT, "netlify/functions/sync"))];
@@ -93,7 +129,8 @@ async function main() {
     httpMethod: "POST", path: "/api/sync/changes", queryStringParameters: { action: "changes" },
     headers: {
       origin: "https://cofre.test", host: "cofre.test", "x-forwarded-proto": "https", cookie: cookieHeader,
-      "x-device-id": "device-test-1234", "x-sync-protocol": "2", "idempotency-key": mutationId, ...(headers || {}),
+      "x-device-id": "device-test-1234", "x-account-id": USER_ID,
+      "x-sync-protocol": "2", "idempotency-key": mutationId, ...(headers || {}),
     },
     body: JSON.stringify({ protocol: 2, mutationId, since: "0", ops, ...(body || {}) }),
   });
@@ -118,6 +155,7 @@ async function main() {
   rpcResult = { status: "device_revoked", revision: 0, applied: 0 };
   const revoked = await sync.handler(syncEvent([put]));
   check("aparelho revogado é bloqueado", revoked.statusCode === 403, revoked.statusCode);
+  check("revogação percebida durante a escrita não apaga outro login", !revoked.multiValueHeaders);
   rpcResult = { status: "applied", revision: 8, applied: 1 };
 
   const wrongKey = await sync.handler(syncEvent([put], { "idempotency-key": "different" }));
@@ -131,6 +169,40 @@ async function main() {
   const idDivergente = await sync.handler(syncEvent([{ ...put, entityId: "tx-2" }]));
   check("id da operação precisa bater com o do registro", idDivergente.statusCode === 400, idDivergente.statusCode);
 
+  const resetMutationId = "123e4567-e89b-42d3-a456-426614174002";
+  const resetHint = "001787000000000.000001.device-test-1234";
+  const resetEvent = () => ({
+    httpMethod: "POST", path: "/api/sync/reset", queryStringParameters: { action: "reset" },
+    headers: {
+      origin: "https://cofre.test", host: "cofre.test", "x-forwarded-proto": "https", cookie: cookieHeader,
+      "x-device-id": "device-test-1234", "x-account-id": USER_ID,
+      "x-sync-protocol": "3", "idempotency-key": resetMutationId,
+    },
+    body: JSON.stringify({ protocol: 3, mutationId: resetMutationId, rev: resetHint }),
+  });
+  const resetConfirmed = await sync.handler(resetEvent());
+  const resetBody = JSON.parse(resetConfirmed.body);
+  check("reset devolve a HLC dominante confirmada pelo banco",
+    resetConfirmed.statusCode === 200 && resetBody.status === "applied"
+      && resetBody.resetRev === resetRpcResult.reset_rev,
+    resetConfirmed.body);
+  check("hint do aparelho e versão do protocolo chegam ao RPC de reset",
+    resetRpcOptions && resetRpcOptions.body.p_rev_prefix === resetHint
+      && resetRpcOptions.body.p_protocol === 3,
+    JSON.stringify(resetRpcOptions && resetRpcOptions.body));
+
+  resetRpcResult = { status: "idempotency_mismatch", revision: 8, applied: 0, reset_rev: null };
+  const resetMismatch = await sync.handler(resetEvent());
+  check("mismatch do reset nunca vira confirmação HTTP 200",
+    resetMismatch.statusCode === 409 && JSON.parse(resetMismatch.body).code === "idempotency_mismatch",
+    resetMismatch.body);
+  resetRpcResult = { status: "resultado_desconhecido", revision: 8, applied: 0, reset_rev: null };
+  const resetUnknown = await sync.handler(resetEvent());
+  check("status desconhecido do RPC não autoriza apagar a cópia local",
+    resetUnknown.statusCode === 502 && JSON.parse(resetUnknown.body).code === "invalid_commit",
+    resetUnknown.body);
+  resetRpcResult = { status: "applied", revision: 8, applied: 1, reset_rev: "001787043200000.000002.server_reset:teste" };
+
   // Leitura por cursor: é isto que substitui o snapshot inteiro por ciclo.
   opsRows = [
     { seq: 8, entity: "transactions", entity_id: "tx-9", op: "put", rev, payload: { id: "tx-9", type: "expense", amount: 5, date: "2026-08-13" } },
@@ -138,7 +210,7 @@ async function main() {
   ];
   const pull = await sync.handler({
     httpMethod: "GET", path: "/api/sync/changes", queryStringParameters: { action: "changes", since: "7", limit: "50" },
-    headers: { host: "cofre.test", "x-forwarded-proto": "https", cookie: cookieHeader, "x-device-id": "device-test-1234", "x-sync-protocol": "2" },
+    headers: { host: "cofre.test", "x-forwarded-proto": "https", cookie: cookieHeader, "x-device-id": "device-test-1234", "x-account-id": USER_ID, "x-sync-protocol": "2" },
   });
   const pullBody = JSON.parse(pull.body);
   check("leitura incremental devolve as operações do cursor", pull.statusCode === 200 && pullBody.ops.length === 2, pull.body);
@@ -147,15 +219,51 @@ async function main() {
 
   const cursorInvalido = await sync.handler({
     httpMethod: "GET", path: "/api/sync/changes", queryStringParameters: { action: "changes", since: "-1" },
-    headers: { host: "cofre.test", "x-forwarded-proto": "https", cookie: cookieHeader, "x-device-id": "device-test-1234", "x-sync-protocol": "2" },
+    headers: { host: "cofre.test", "x-forwarded-proto": "https", cookie: cookieHeader, "x-device-id": "device-test-1234", "x-account-id": USER_ID, "x-sync-protocol": "2" },
   });
   check("cursor inválido é recusado", cursorInvalido.statusCode === 400, cursorInvalido.statusCode);
+
+  // A chave do checkpoint é (entity, entity_id). Se o cursor carregar somente
+  // o id, duas entidades com o mesmo identificador podem cair em páginas
+  // diferentes e a segunda nunca chega ao cliente.
+  const checkpointId = "123e4567-e89b-42d3-a456-426614174001";
+  checkpointRows = [
+    { entity: "accounts", entity_id: "same-id", op: "put", rev, payload: { id: "same-id", name: "Conta" } },
+    { entity: "categories", entity_id: "same-id", op: "put", rev, payload: { id: "same-id", name: "Categoria" } },
+    { entity: "transactions", entity_id: "tx-z", op: "put", rev, payload: { id: "tx-z", type: "expense", amount: 1, date: "2026-08-14" } },
+  ];
+  const checkpointEvent = (after) => ({
+    httpMethod: "GET", path: "/api/sync/checkpoint",
+    queryStringParameters: { action: "checkpoint", id: checkpointId, limit: "1", ...(after ? { after } : {}) },
+    headers: {
+      host: "cofre.test", "x-forwarded-proto": "https", cookie: cookieHeader,
+      "x-device-id": "device-test-1234", "x-account-id": USER_ID, "x-sync-protocol": "3",
+    },
+  });
+  const checkpointPages = [];
+  let checkpointAfter = "";
+  for (let page = 0; page < 3; page++) {
+    const response = await sync.handler(checkpointEvent(checkpointAfter));
+    const body = JSON.parse(response.body);
+    checkpointPages.push(...body.ops);
+    checkpointAfter = body.after;
+    if (!body.hasMore) break;
+  }
+  check("checkpoint pagina pela chave completa sem pular ids iguais",
+    checkpointPages.map((row) => `${row.entity}:${row.entityId}`).join(",")
+      === "accounts:same-id,categories:same-id,transactions:tx-z",
+    JSON.stringify(checkpointPages));
+  check("cursor do checkpoint é opaco e a consulta usa a mesma ordem composta",
+    checkpointAfter !== "tx-z"
+      && checkpointQueries.every((route) => route.includes("order=entity.asc,entity_id.asc"))
+      && checkpointQueries.slice(1).every((route) => route.includes("&or=")),
+    JSON.stringify(checkpointQueries));
 
   // Protocolo 1 não grava mais: aceitar a base inteira desfaria exclusões que
   // o log já registrou.
   const legado = await sync.handler({
     httpMethod: "PUT", path: "/api/sync/snapshot", queryStringParameters: { action: "snapshot" },
-    headers: { origin: "https://cofre.test", host: "cofre.test", "x-forwarded-proto": "https", cookie: cookieHeader, "x-device-id": "device-test-1234", "x-sync-protocol": "1", "idempotency-key": mutationId, "if-match": "0" },
+    headers: { origin: "https://cofre.test", host: "cofre.test", "x-forwarded-proto": "https", cookie: cookieHeader, "x-device-id": "device-test-1234", "x-account-id": USER_ID, "x-sync-protocol": "1", "idempotency-key": mutationId, "if-match": "0" },
     body: JSON.stringify({ protocol: 1, baseRevision: "0", mutationId, data: schema.emptySnapshot() }),
   });
   check("gravação por snapshot inteiro é recusada", legado.statusCode === 426 && JSON.parse(legado.body).code === "protocol_upgrade_required", legado.body);
@@ -173,7 +281,8 @@ async function main() {
       httpMethod: "POST", path: "/api/sync/changes", queryStringParameters: { action: "changes" },
       headers: {
         origin: "https://cofre.test", host: "cofre.test", "x-forwarded-proto": "https", cookie: cookieHeader,
-        "x-device-id": "device-test-1234", "x-sync-protocol": "3", "idempotency-key": mutationId,
+        "x-device-id": "device-test-1234", "x-account-id": USER_ID,
+        "x-sync-protocol": "3", "idempotency-key": mutationId,
       },
       body: JSON.stringify({ protocol: 3, mutationId, since: "0", ops, ...(body || {}) }),
     });
@@ -194,7 +303,8 @@ async function main() {
       httpMethod: "POST", path: "/api/sync/changes", queryStringParameters: { action: "changes" },
       headers: {
         origin: "https://cofre.test", host: "cofre.test", "x-forwarded-proto": "https", cookie: cookieHeader,
-        "x-device-id": "device-test-1234", "x-sync-protocol": "3", "idempotency-key": mutationId,
+        "x-device-id": "device-test-1234", "x-account-id": USER_ID,
+        "x-sync-protocol": "3", "idempotency-key": mutationId,
       },
       body: JSON.stringify({ protocol: 2, mutationId, since: "0", ops: [] }),
     });
@@ -207,7 +317,7 @@ async function main() {
     check("escrita abaixo do mínimo recebe 426", cortado.statusCode === 426 && JSON.parse(cortado.body).code === "protocol_upgrade_required", cortado.body);
     const leituraAposCorte = await sync.handler({
       httpMethod: "GET", path: "/api/sync/changes", queryStringParameters: { action: "changes", since: "0", limit: "50" },
-      headers: { host: "cofre.test", "x-forwarded-proto": "https", cookie: cookieHeader, "x-device-id": "device-test-1234", "x-sync-protocol": "2" },
+      headers: { host: "cofre.test", "x-forwarded-proto": "https", cookie: cookieHeader, "x-device-id": "device-test-1234", "x-account-id": USER_ID, "x-sync-protocol": "2" },
     });
     check("leitura do cliente 2 continua permitida depois do corte", leituraAposCorte.statusCode === 200, leituraAposCorte.statusCode);
     syncConfigRow = { server_protocol: 3, minimum_write_protocol: 2 };
@@ -236,11 +346,17 @@ async function main() {
   const migration = [
     read("supabase/migrations/202608120001_accounts_finance.sql"),
     read("supabase/migrations/202608180001_sync_oplog.sql"),
+    read("supabase/migrations/202608200001_sync_protocol_3_prepare.sql"),
+    read("supabase/migrations/20260825001552_add_device_type.sql"),
+    read("supabase/migrations/20260825003000_reset_dominant_tombstones.sql"),
   ].join("\n");
   check("frontend usa cookies e não localStorage para token", /credentials: "include"/.test(authSource) && !/access_token|refresh_token/.test(authSource));
   check("exclusão de conta exige senha e confirmação", /auth-delete-password/.test(accountScreen) && /APAGAR CONTA/.test(accountScreen));
   check("RLS e função atômica estão na migração", /enable row level security/.test(migration) && /for update/.test(migration) && /cofre_mutations/.test(migration));
   check("segredo do dispositivo não pode ser lido pelo usuário", /secret_hash text not null/.test(migration) && !/grant select \([^\n]*secret_hash/.test(migration));
+  check("tipo do dispositivo tem lista fechada", /device_type in \('desktop', 'phone', 'tablet', 'unknown'\)/.test(migration));
+  check("restrição do tipo pode coexistir com preparo manual", /from pg_constraint/.test(migration) && /conname = 'cofre_devices_device_type_check'/.test(migration));
+  check("tipo do dispositivo tem somente leitura para a conta", /grant select \(device_type\)[^\n]+to authenticated/.test(migration));
   check("função de gravação não é executável pelo usuário", /grant execute[^\n]+to service_role/.test(migration) && /revoke all[^\n]+authenticated/.test(migration));
   check("chave de serviço não aparece no frontend", !read("js/modules/app.generated.js").includes("SUPABASE_SERVICE_ROLE_KEY"));
   check("service worker nunca guarda respostas de conta ou sincronização", /url\.pathname\.indexOf\("\/api\/"\) === 0/.test(read("service-worker.js")));
@@ -250,6 +366,14 @@ async function main() {
   check("uma linha viva por registro mantém o log compactado", /create unique index[\s\S]*?cofre_sync_ops \(user_id, entity, entity_id\)/.test(migration));
   check("exclusão da conta revoga os aparelhos", /cofre_purge_account/.test(migration) && /update public\.cofre_devices set revoked_at = now\(\)/.test(migration));
   check("apagar tudo grava lápide em vez de sumir com as linhas", /cofre_reset_data/.test(migration) && /'delete'/.test(migration));
+  check("reset cria lápide acima da maior HLC e devolve a barreira",
+    /cofre_hlc_successor/.test(migration) && /reset_rev text/.test(migration)
+      && /result_hlc/.test(migration) && /server_reset:/.test(migration));
+  check("comparação SQL usa a mesma ordem byte a byte do navegador",
+    /collate "C"/i.test(migration));
+  check("reset revalida idempotência depois do bloqueio",
+    /for update;[\s\S]*Duas entregas simultâneas[\s\S]*select \* into v_prior/i.test(migration)
+      && /for update;[\s\S]*Revalida sob o mesmo lock[\s\S]*select \* into v_prior/i.test(migration));
   check("função nova de gravação não é executável pelo usuário", /revoke all on function public\.cofre_apply_ops[\s\S]*?from public, anon, authenticated/.test(migration));
   check("checkpoint mantém apenas as versões recentes", /cofre_create_checkpoint/.test(migration) && /order by c2\.created_at desc limit/.test(migration));
 
@@ -272,7 +396,7 @@ async function main() {
     };
     let apagouUsuario = false;
     api.auth.deleteUser = async () => { apagouUsuario = true; return {}; };
-    api.auth.signIn = async () => ({ access_token: "access-secret", refresh_token: "refresh-secret", expires_in: 3600, user: { id: "00000000-0000-4000-8000-000000000001", email: "pessoa@example.com", email_confirmed_at: "2026-08-01T12:00:00Z" } });
+    api.auth.signIn = async () => ({ access_token: "access-secret", refresh_token: "refresh-secret", expires_in: 3600, user: { id: USER_ID, email: "pessoa@example.com", email_confirmed_at: "2026-08-01T12:00:00Z" } });
 
     const apagar = await account.handler(event("POST", "delete", { password: "senha-segura-123", confirmation: "APAGAR CONTA" }, { cookie: cookieHeader }));
     const corpo = JSON.parse(apagar.body);

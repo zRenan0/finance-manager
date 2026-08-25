@@ -20,6 +20,8 @@ Consequência prática: **sem as variáveis do Supabase configuradas, as anális
    | `202608120001_accounts_finance.sql` | `cofre_devices`, `cofre_mutations`, snapshots | Entrar e criar conta. |
    | `202608180001_sync_oplog.sql` | `cofre_sync_state`, `cofre_sync_ops`, checkpoints e as funções `cofre_apply_ops` / `cofre_reset_data` / `cofre_purge_account` | **A sincronização inteira**, e o apagar conta. |
    | `202608180002_rate_limit.sql` | `cofre_rate_hit` | O limite de tentativas compartilhado (cai num limite pior, por instância). |
+   | `202608200001_sync_protocol_3_prepare.sql` | entidades de contas e cartões por registro, compatibilidade e corte gradual do protocolo | Contas, cartões, transferências, pagamentos e conciliações entre aparelhos. |
+   | `20260825001552_add_device_type.sql` | tipo visual do aparelho e restrição de valores aceitos | Identificação correta de computador, celular, tablet e acesso desconhecido. |
 
    **Rodar só a primeira é o erro mais fácil de cometer aqui**, e ele não aparece na tela de entrar: login e cadastro funcionam, porque o que eles usam é `cofre_devices`. Quem falha é a sincronização, e antes ela só sabia dizer "Sincronização com falha". Hoje ela repete o motivo que veio do banco ("o projeto está sem as tabelas desta função"), mas conferir aqui continua sendo mais barato que descobrir depois.
 
@@ -124,28 +126,33 @@ Não coloque a chave de serviço em arquivo JavaScript, `.env` publicado, backup
 1. Cadastre uma conta e confirme o email.
 2. Saia e entre novamente.
 3. Solicite recuperação e defina uma nova senha pelo link.
-4. Entre em dois navegadores, confira a lista de dispositivos e revogue um deles.
-5. Confirme que a revogação bloqueia as rotas de conta e de dados financeiros.
+4. Entre em dois navegadores, confira tipo, nome e selo do aparelho atual na lista de acessos.
+5. Revogue o outro navegador, confirme que ele some da lista e que as rotas de conta, sincronização e análise passam a recusá-lo.
 6. Envie o mesmo `mutationId` duas vezes e confirme que a revisão avança apenas uma vez.
 7. Envie uma revisão antiga e confirme a resposta `409` sem sobrescrever o snapshot atual.
 8. Teste exclusão da conta e confirme que os registros do Supabase são removidos em cascata.
 9. Confira que o app local continua abrindo e salvando sem conexão.
-10. Lance algo no navegador A, abra o navegador B com a mesma conta e confirme que o lançamento aparece.
-11. Exclua esse lançamento em B e confirme que ele não reaparece em A na sincronização seguinte.
-12. Deixe A sem rede, lance algo, devolva a rede e confirme que o envio acontece sozinho.
-13. Confirme que as análises com IA respondem `401` quando não há sessão.
+10. Com A e B abertos na mesma conta, lance algo em A e confirme que B mostra a alteração em até 20 segundos, sem abrir a tela de sincronização.
+11. Recarregue B e confirme que a primeira descida termina sem ação manual.
+12. Exclua esse lançamento em B e confirme que ele não reaparece em A na sincronização seguinte.
+13. Deixe A sem rede, lance algo, devolva a rede e confirme que o envio acontece sozinho.
+14. Derrube temporariamente a rota de sessão, recarregue e confirme que a conta fica em estado desconhecido e se recupera ao voltar a rede, sem ser tratada como logout.
+15. Confirme que as análises com IA respondem `401` quando não há sessão.
+16. Envie sync, análise e `GET /devices` sem `X-Account-Id` e confirme `400 invalid_account_scope`, sem consulta a `cofre_devices`, dados financeiros ou `Set-Cookie`.
+17. Envie `X-Account-Id` de outra conta com uma sessão válida e confirme `403 account_scope_changed`, também sem efeito colateral.
+18. Teste uma sessão apenas com refresh token: rotas com escopo devem responder `401 session_refresh_required`; somente `GET /api/account/session` pode renovar e emitir cookies.
 
 ## Como o conflito é resolvido
 
-Não existe tela pedindo ao usuário para escolher entre duas versões. A cada ciclo o aplicativo lê o snapshot remoto, funde dentro do local e devolve o resultado ao servidor:
+Não existe tela pedindo ao usuário para escolher entre duas versões. A cada ciclo o aplicativo envia a fila local e recebe as operações posteriores ao seu cursor:
 
-- União por identificador. Um lançamento que só existe de um lado passa a existir dos dois.
-- Empate de mesmo identificador fica com o `updatedAt` mais recente.
+- União por entidade e identificador. Um registro que só existe de um lado passa a existir dos dois.
+- No mesmo identificador, vence a maior revisão lógica `rev`; ela combina tempo, contador e aparelho para produzir a mesma ordem nos dois lados.
 - Exclusão é registrada em lápide e vale nos dois sentidos: o que você apagou não volta pelo outro aparelho.
 - Preferências de aparelho (tema, layout do Início, consentimentos de privacidade) não são impostas pelo outro lado.
 
-Se o servidor responder `409`, outro aparelho gravou entre a leitura e o envio; o ciclo recomeça já incluindo o que ele mandou, até três vezes.
+O `409 remote_changed` fica reservado ao primeiro vínculo de dados de visitante: ele impede que uma confirmação preparada sobre uma conta antiga ignore alterações que chegaram no intervalo.
 
 ## Limite desta etapa
 
-Contas e cartões são arquivados, nunca excluídos, então não têm lápide: arquivar em um aparelho vale nos outros, mas não existe exclusão definitiva a propagar. Compartilhamento de conta entre pessoas (orçamento de casal) continua fora do escopo: o snapshot é de um usuário só.
+O conflito é resolvido pelo registro inteiro, não campo a campo. Duas edições simultâneas em campos diferentes do mesmo lançamento ainda resultam em uma versão vencedora. Compartilhamento de conta entre pessoas, como orçamento de casal, continua fora do escopo: cada conta pertence a um usuário.

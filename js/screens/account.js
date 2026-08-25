@@ -50,6 +50,74 @@ function accountDeviceDate(value) {
   return Number.isNaN(date.getTime()) ? "data indisponível" : date.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
 }
 
+const ACCOUNT_DEVICE_ICONS = {
+  desktop: "monitor",
+  phone: "phone",
+  tablet: "tablet",
+  unknown: "globe",
+};
+
+function accountDeviceType(device) {
+  const informed = String((device && (device.type || device.deviceType)) || "").toLowerCase();
+  if (ACCOUNT_DEVICE_ICONS[informed]) return informed;
+  const label = String((device && device.label) || "").toLowerCase();
+  if (/ipad|tablet/.test(label)) return "tablet";
+  if (/iphone|android|celular|mobile/.test(label)) return "phone";
+  if (/windows|macos|mac os|linux|chrome os|desktop|notebook/.test(label)) return "desktop";
+  return "unknown";
+}
+
+function accountDeviceLastSeen(value, current) {
+  if (current) return "Ativo agora";
+  const date = new Date(value || "");
+  if (Number.isNaN(date.getTime())) return "Último acesso indisponível";
+  const now = new Date();
+  const day = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const todayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const today = todayDate.getTime();
+  const yesterdayDate = new Date(todayDate);
+  yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+  const time = date.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  if (day === today) return `Hoje, ${time}`;
+  if (day === yesterdayDate.getTime()) return `Ontem, ${time}`;
+  return date.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+}
+
+function accountDevicesCard(account) {
+  const devices = (Array.isArray(account.devices) ? account.devices : [])
+    .filter((device) => !device.revokedAt)
+    .sort((a, b) => Number(!!b.current) - Number(!!a.current) || new Date(b.lastSeenAt || 0) - new Date(a.lastSeenAt || 0));
+  const activeCount = devices.length;
+  const rows = devices.map((device) => {
+    const type = accountDeviceType(device);
+    const current = !!device.current;
+    return `<div class="account-device account-device--${type}${current ? " account-device--current" : ""}">
+      <span class="account-device__rail" aria-hidden="true"></span>
+      <span class="account-device__icon">${svgIcon(ACCOUNT_DEVICE_ICONS[type], 20)}</span>
+      <span class="account-device__body">
+        <span class="account-device__identity"><strong>${escapeHtml(device.label || "Navegador não identificado")}</strong>${current ? `<span class="account-device__badge">Este aparelho</span>` : ""}</span>
+        <small>${escapeHtml(accountDeviceLastSeen(device.lastSeenAt, current))}</small>
+      </span>
+      ${current ? "" : `<button class="btn btn--ghost btn--sm account-device__revoke" data-action="account-revoke" data-id="${escapeHtml(device.id)}" ${account.busy ? "disabled" : ""}>Revogar acesso</button>`}
+    </div>`;
+  }).join("");
+
+  return `<section class="card account-access" aria-labelledby="account-access-title">
+    <div class="account-access__header">
+      <div class="account-access__heading">
+        <p class="eyebrow">Segurança da conta</p>
+        <h2 class="card-title" id="account-access-title">Dispositivos com acesso</h2>
+        <p class="card-subtitle">Confira onde sua conta está aberta e encerre qualquer acesso que você não reconheça.</p>
+      </div>
+      <div class="account-access__tools">
+        <span class="account-access__count">${escapeHtml(activeCount === 1 ? "1 ativo" : `${activeCount} ativos`)}</span>
+        <button class="btn btn--secondary btn--sm account-access__refresh" data-action="account-refresh" ${account.busy ? "disabled" : ""}>${svgIcon("refresh", 15)} Atualizar</button>
+      </div>
+    </div>
+    <div class="account-device-list">${rows || `<p class="account-access__empty">Nenhum dispositivo com acesso.</p>`}</div>
+  </section>`;
+}
+
 // Estado da sincronização em linguagem de usuário. A regra de escrita aqui é
 // não assustar: em toda situação de falha o aparelho continua com tudo, e a
 // frase precisa dizer isso, senão a pessoa acha que perdeu o extrato.
@@ -74,10 +142,10 @@ function accountSyncCard() {
   // que nada se perdeu embaixo. Antes, um excluía o outro, e no caso de falha o
   // motivo era exatamente o que sumia.
   const garantia = phase === "error" && sync.error ? view.note : "";
-  // Falha precisa de saída. O botão só existia com o motor LIGADO, e a falha
-  // que mais acontece (ligar e não conseguir) desliga o motor: sobrava
-  // recarregar a página, sem nada na tela dizendo isso.
-  const podeTentar = sync.enabled || phase === "error";
+  // O caminho saudável é automático. A ação manual só aparece quando houve
+  // uma falha e a pessoa precisa de uma saída imediata além da recuperação do
+  // próprio motor.
+  const podeTentar = phase === "error";
   return `<div class="card account-sync">
     <div class="account-sync__head">
       <span class="account-sync__icon account-sync__icon--${escapeHtml(phase)}">${svgIcon(view.icon, 18)}</span>
@@ -89,7 +157,7 @@ function accountSyncCard() {
         ${phase === "error" && sync.errorCode ? `<p class="field-hint">Código da falha: ${escapeHtml(sync.errorCode)}</p>` : ""}
       </div>
     </div>
-    ${podeTentar ? `<button class="btn btn--secondary btn--sm" data-action="account-sync-now" ${sync.phase === "syncing" ? "disabled" : ""}>${svgIcon("refresh", 15)} ${sync.enabled ? "Sincronizar agora" : "Tentar de novo"}</button>` : ""}
+    ${podeTentar ? `<button class="btn btn--secondary btn--sm" data-action="account-sync-now">${svgIcon("refresh", 15)} Tentar novamente</button>` : ""}
   </div>`;
 }
 
@@ -202,14 +270,20 @@ function accountSignedIn() {
   ${accountSyncCard()}
   ${accountGuestLinkCard()}
   ${a.mode === "password" ? `<div class="card"><p class="card-title">Definir nova senha</p><div class="field"><label class="field__label" for="account-new-password">Nova senha</label><input id="account-new-password" class="input" type="password" data-field="auth-new-password" minlength="10" maxlength="128" value="${escapeHtml(a.form.newPassword)}" autocomplete="new-password" /></div><button class="btn btn--primary" data-action="account-submit" data-value="password" ${a.busy ? "disabled" : ""}>Salvar nova senha</button></div>` : ""}
-  <div class="card"><div class="settings-row-header"><div><p class="card-title">Dispositivos conectados</p><p class="card-subtitle">Revogue qualquer acesso que você não reconheça.</p></div><button class="icon-btn" data-action="account-refresh" aria-label="Atualizar dispositivos">${svgIcon("refresh", 16)}</button></div>
-    <div class="account-device-list">${a.devices.length ? a.devices.map((device) => `<div class="account-device"><span class="account-device__icon">${svgIcon("phone", 18)}</span><span><b>${escapeHtml(device.label || "Dispositivo")}${device.current ? " (este)" : ""}</b><small>Último acesso: ${escapeHtml(accountDeviceDate(device.lastSeenAt))}${device.revokedAt ? " · acesso revogado" : ""}</small></span>${device.revokedAt ? "" : `<button class="btn btn--ghost btn--sm" data-action="account-revoke" data-id="${escapeHtml(device.id)}">Revogar</button>`}</div>`).join("") : `<p class="field-hint">Nenhum dispositivo listado.</p>`}</div>
-  </div>
-  <div class="card account-danger"><p class="card-title">Apagar conta online</p><p class="card-subtitle">Apaga a conta e os dados guardados no servidor. Seus dados locais ficam neste aparelho até você apagá-los em Privacidade.</p>
-    <div class="field"><label class="field__label" for="account-delete-password">Senha atual</label><input id="account-delete-password" class="input" type="password" data-field="auth-delete-password" maxlength="128" value="${escapeHtml(a.form.deletePassword)}" autocomplete="current-password" /></div>
-    <div class="field"><label class="field__label" for="account-delete-text">Digite APAGAR CONTA</label><input id="account-delete-text" class="input" data-field="auth-delete-text" maxlength="20" value="${escapeHtml(a.form.deleteText)}" autocomplete="off" /></div>
-    <button class="btn btn--danger" data-action="account-delete-request" ${a.busy ? "disabled" : ""}>Apagar conta online</button>
-  </div>`;
+  ${accountDevicesCard(a)}
+  <details class="card account-danger">
+    <summary class="account-danger__summary">
+      <span class="account-danger__icon">${svgIcon("trash", 18)}</span>
+      <span class="account-danger__heading"><span class="card-title">Apagar conta e dados</span><span class="card-subtitle">Exclua a conta e os dados guardados no servidor e neste aparelho.</span></span>
+      <span class="account-danger__chevron">${svgIcon("chevronDown", 18)}</span>
+    </summary>
+    <div class="account-danger__body">
+      <p class="card-subtitle">A cópia deste aparelho também será apagada. Outros aparelhos perderão o acesso ao servidor, mas manterão o que já estiver salvo neles.</p>
+      <div class="field"><label class="field__label" for="account-delete-password">Senha atual</label><input id="account-delete-password" class="input" type="password" data-field="auth-delete-password" maxlength="128" value="${escapeHtml(a.form.deletePassword)}" autocomplete="current-password" /></div>
+      <div class="field"><label class="field__label" for="account-delete-text">Digite APAGAR CONTA</label><input id="account-delete-text" class="input" data-field="auth-delete-text" maxlength="20" value="${escapeHtml(a.form.deleteText)}" autocomplete="off" /></div>
+      <button class="btn btn--danger" data-action="account-delete-request" ${a.busy ? "disabled" : ""}>Apagar conta e dados</button>
+    </div>
+  </details>`;
 }
 
 function renderAccountScreen() {

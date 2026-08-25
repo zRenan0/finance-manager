@@ -1,17 +1,413 @@
-.account-status,.account-profile__head{display:flex;gap:14px;align-items:flex-start}.account-status>svg,.account-profile__icon{flex:0 0 auto;color:var(--brand)}
-.account-auth-card{max-width:560px;margin-inline:auto}.account-auth-card .field,.account-danger .field{margin-top:16px}.account-auth-links{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:14px}
-.account-profile{display:flex;justify-content:space-between;align-items:center;gap:18px}.account-profile__head{min-width:0}.account-profile__head h2{overflow-wrap:anywhere}
-.account-device-list{display:grid;gap:10px;margin-top:14px}.account-device{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;padding:12px;border:1px solid var(--border);border-radius:var(--radius-sm)}
-.account-device__icon{color:var(--ink-faint)}.account-device b,.account-device small{display:block}.account-device small{color:var(--ink-faint);margin-top:3px}.account-danger{border-color:color-mix(in srgb,var(--negative) 35%,var(--border))}.account-message{display:flex;gap:8px;align-items:center;padding:12px 14px;border-radius:var(--radius-sm);background:color-mix(in srgb,var(--positive) 12%,transparent);color:var(--positive)}
-.account-sync{display:flex;justify-content:space-between;align-items:center;gap:18px;flex-wrap:wrap}.account-sync__head{display:flex;gap:14px;align-items:flex-start;min-width:0}.account-sync__head .card-subtitle,.account-sync__head .field-hint{margin-top:4px}
-.account-sync__icon{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50%;background:var(--brand-soft);color:var(--brand)}
-.account-sync__icon--synced{background:var(--positive-soft);color:var(--positive)}.account-sync__icon--error{background:var(--negative-soft);color:var(--negative)}.account-sync__icon--offline,.account-sync__icon--idle{background:var(--goal-soft);color:var(--goal)}
-.account-sync__icon--syncing svg{animation:account-sync-spin 1s linear infinite}@keyframes account-sync-spin{to{transform:rotate(360deg)}}
-@media(prefers-reduced-motion:reduce){.account-sync__icon--syncing svg{animation:none}}
-@media(max-width:640px){.account-profile{align-items:stretch;flex-direction:column}.account-device{grid-template-columns:auto 1fr}.account-device .btn{grid-column:1/-1;min-height:44px}.account-sync{align-items:stretch;flex-direction:column}.account-sync .btn{min-height:44px}}
-.account-sync__icon--linked{background:var(--positive-soft);color:var(--positive)}
-.account-sync__icon--pending{background:var(--negative-soft);color:var(--negative)}
-.account-sync__icon--confirm,.account-sync__icon--waiting,.account-sync__icon--dismissed{background:var(--goal-soft);color:var(--goal)}
-.account-sync__icon--checking svg,.account-sync__icon--linking svg{animation:account-sync-spin 1s linear infinite}
-@media(prefers-reduced-motion:reduce){.account-sync__icon--checking svg,.account-sync__icon--linking svg{animation:none}}
-.account-link__actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px}
+.account-status,
+.account-profile__head {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.account-status > svg,
+.account-profile__icon {
+  flex: 0 0 auto;
+  color: var(--brand);
+}
+
+.account-auth-card {
+  max-width: 560px;
+  margin-inline: auto;
+}
+
+.account-auth-card .field,
+.account-danger .field {
+  margin-top: 16px;
+}
+
+.account-auth-links,
+.account-link__actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+
+.account-profile {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 18px;
+}
+
+.account-profile__head {
+  min-width: 0;
+}
+
+.account-profile__head h2 {
+  overflow-wrap: anywhere;
+}
+
+.account-sync {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.account-sync__head {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.account-sync__head .card-subtitle,
+.account-sync__head .field-hint {
+  margin-top: 4px;
+}
+
+.account-sync__icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+
+.account-sync__icon--synced,
+.account-sync__icon--linked {
+  background: var(--positive-soft);
+  color: var(--positive);
+}
+
+.account-sync__icon--error,
+.account-sync__icon--pending {
+  background: var(--negative-soft);
+  color: var(--negative);
+}
+
+.account-sync__icon--offline,
+.account-sync__icon--idle,
+.account-sync__icon--confirm,
+.account-sync__icon--waiting,
+.account-sync__icon--dismissed {
+  background: var(--goal-soft);
+  color: var(--goal);
+}
+
+.account-sync__icon--syncing svg,
+.account-sync__icon--checking svg,
+.account-sync__icon--linking svg {
+  animation: account-sync-spin 1s linear infinite;
+}
+
+@keyframes account-sync-spin {
+  to { transform: rotate(360deg); }
+}
+
+.account-access {
+  padding: 0;
+  overflow: hidden;
+}
+
+.account-access__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+  padding: 22px 22px 18px;
+  border-bottom: 1px solid var(--border-soft);
+  background: linear-gradient(145deg, color-mix(in srgb, var(--brand) 7%, var(--card)), var(--card));
+}
+
+.account-access__heading {
+  min-width: 0;
+}
+
+.account-access__heading .eyebrow {
+  margin-bottom: 5px;
+  color: var(--brand);
+}
+
+.account-access__heading .card-subtitle {
+  max-width: 520px;
+  margin-top: 5px;
+}
+
+.account-access__tools {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 0 0 auto;
+}
+
+.account-access__count,
+.account-device__badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: var(--positive-soft);
+  color: color-mix(in srgb, var(--positive) 68%, var(--ink));
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: .015em;
+  white-space: nowrap;
+}
+
+.account-access__refresh {
+  min-height: 36px;
+}
+
+.account-device-list {
+  position: relative;
+  display: grid;
+  padding: 2px 22px 10px;
+}
+
+.account-device {
+  position: relative;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  gap: 13px;
+  align-items: center;
+  min-height: 82px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.account-device:last-child {
+  border-bottom: 0;
+}
+
+.account-device__rail {
+  position: absolute;
+  left: 21px;
+  top: 54px;
+  bottom: -29px;
+  width: 2px;
+  background: var(--border);
+  pointer-events: none;
+}
+
+.account-device:last-child .account-device__rail {
+  display: none;
+}
+
+.account-device__icon {
+  position: relative;
+  z-index: 1;
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid color-mix(in srgb, var(--brand) 16%, var(--border));
+  border-radius: 15px;
+  background: var(--brand-soft);
+  color: var(--brand);
+  box-shadow: var(--sheen);
+}
+
+.account-device--phone .account-device__icon {
+  border-color: color-mix(in srgb, var(--positive) 18%, var(--border));
+  background: var(--positive-soft);
+  color: var(--positive);
+}
+
+.account-device--tablet .account-device__icon {
+  border-color: color-mix(in srgb, var(--goal) 20%, var(--border));
+  background: var(--goal-soft);
+  color: var(--goal);
+}
+
+.account-device--unknown .account-device__icon {
+  border-color: var(--border);
+  background: var(--card-alt);
+  color: var(--ink-faint);
+}
+
+.account-device__body,
+.account-device__identity,
+.account-device__body small {
+  display: block;
+}
+
+.account-device__body {
+  min-width: 0;
+}
+
+.account-device__identity {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.account-device__identity strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 13.5px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-device__body small {
+  margin-top: 5px;
+  color: var(--ink-faint);
+  font-size: 11.5px;
+  font-weight: 550;
+}
+
+.account-device__badge {
+  min-height: 24px;
+  padding: 3px 8px;
+}
+
+.account-device__revoke {
+  min-height: 40px;
+  color: var(--negative);
+}
+
+.account-device__revoke:hover {
+  background: var(--negative-soft);
+}
+
+.account-access__empty {
+  margin: 0;
+  padding: 22px 0 14px;
+  color: var(--ink-faint);
+  font-size: 12.5px;
+}
+
+.account-danger {
+  padding: 0;
+  border-color: color-mix(in srgb, var(--negative) 18%, var(--border));
+  overflow: hidden;
+}
+
+.account-danger__summary {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  min-height: 74px;
+  padding: 14px 18px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.account-danger__summary::-webkit-details-marker {
+  display: none;
+}
+
+.account-danger__summary:focus-visible {
+  outline: none;
+  box-shadow: inset var(--ring);
+}
+
+.account-danger__icon {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: var(--negative-soft);
+  color: var(--negative);
+}
+
+.account-danger__heading,
+.account-danger__heading > span {
+  display: block;
+}
+
+.account-danger__heading .card-subtitle {
+  margin-top: 3px;
+}
+
+.account-danger__chevron {
+  display: grid;
+  color: var(--ink-faint);
+  transition: transform var(--dur) var(--ease);
+}
+
+.account-danger[open] .account-danger__chevron {
+  transform: rotate(180deg);
+}
+
+.account-danger__body {
+  padding: 0 18px 18px 68px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.account-danger__body > .card-subtitle {
+  padding-top: 16px;
+}
+
+.account-message {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--positive) 12%, transparent);
+  color: var(--positive);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .account-sync__icon--syncing svg,
+  .account-sync__icon--checking svg,
+  .account-sync__icon--linking svg {
+    animation: none;
+  }
+
+  .account-danger__chevron {
+    transition: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .account-profile,
+  .account-sync,
+  .account-access__header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .account-access__header,
+  .account-device-list {
+    padding-inline: 16px;
+  }
+
+  .account-access__tools {
+    justify-content: space-between;
+  }
+
+  .account-access__refresh,
+  .account-sync .btn,
+  .account-device .btn {
+    min-height: 44px;
+  }
+
+  .account-device {
+    grid-template-columns: 44px minmax(0, 1fr);
+  }
+
+  .account-device__revoke {
+    grid-column: 2;
+    justify-self: start;
+    margin-top: -3px;
+  }
+
+  .account-device__rail {
+    bottom: -73px;
+  }
+
+  .account-danger__body {
+    padding: 0 16px 18px;
+  }
+}

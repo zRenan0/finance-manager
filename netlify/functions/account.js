@@ -11,6 +11,13 @@ const VERIFIER = "cofre_pkce";
 const DEVICE_SECRET = "cofre_device";
 const RATE_WINDOW_SECONDS = 10 * 60;
 const RATE_MAX_ATTEMPTS = 30;
+const DEVICE_TYPES = new Set(["desktop", "phone", "tablet", "unknown"]);
+const TERMINAL_SESSION_CODES = new Set([
+  "invalid_session", "invalid_credentials", "bad_jwt", "user_not_found",
+  "refresh_token_not_found", "refresh_token_already_used",
+  "session_not_found", "session_expired",
+]);
+const ACCOUNT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // TETO POR CONTA, ALÉM DO TETO POR ENDEREÇO.
 //
@@ -155,17 +162,43 @@ function sessionCookies(event, session) {
 }
 function clearSession(event) { return [clearCookie(ACCESS, event), clearCookie(REFRESH, event), clearCookie(VERIFIER, event), clearCookie(DEVICE_SECRET, event)]; }
 
-async function sessionOf(event) {
+function terminalSessionFailure(error) {
+  return !!(error && TERMINAL_SESSION_CODES.has(error.code));
+}
+
+function sessionRefreshRequired() {
+  return Object.assign(new Error("A sessão precisa ser renovada antes de continuar."), {
+    statusCode: 401, code: "session_refresh_required",
+  });
+}
+
+async function sessionOf(event, options = {}) {
   const values = cookiesOf(event);
+  const allowRefresh = options.allowRefresh !== false;
+  const requireExplicitRefresh = options.refreshRequired === true;
+  const withoutRefresh = () => {
+    if (values[REFRESH] && requireExplicitRefresh) throw sessionRefreshRequired();
+    return null;
+  };
   if (!values[ACCESS] && !values[REFRESH]) return null;
   if (values[ACCESS]) {
-    try { return { token: values[ACCESS], user: await api.auth.user(values[ACCESS]), cookies: [] }; } catch (_) {}
+    try {
+      return { token: values[ACCESS], user: await api.auth.user(values[ACCESS]), cookies: [] };
+    } catch (error) {
+      // Só uma rejeição definitiva do token justifica tentar o refresh. Uma
+      // queda do provedor precisa chegar ao cliente como indisponibilidade.
+      if (!terminalSessionFailure(error)) throw error;
+    }
   }
+  if (!allowRefresh) return withoutRefresh();
   if (!values[REFRESH]) return null;
   try {
     const renewed = await api.auth.refresh(values[REFRESH]);
     return { token: renewed.access_token, user: renewed.user || await api.auth.user(renewed.access_token), cookies: sessionCookies(event, renewed) };
-  } catch (_) { return null; }
+  } catch (error) {
+    if (terminalSessionFailure(error)) return null;
+    throw error;
+  }
 }
 
 function deviceSecretHash(secret) { return crypto.createHash("sha256").update(String(secret)).digest("hex"); }
@@ -182,38 +215,185 @@ function hashesConferem(a, b) {
   return crypto.timingSafeEqual(x, y);
 }
 
-async function touchDevice(userId, event, allowCreate = false) {
-  const deviceId = deviceIdOf(event);
-  const label = String(headersOf(event)["x-device-label"] || "Este dispositivo").replace(/[<>\u0000-\u001f]/g, "").slice(0, 50) || "Este dispositivo";
-  let secret = String(cookiesOf(event)[DEVICE_SECRET] || "");
-  let setSecret = false;
-  const path = `cofre_devices?user_id=eq.${encodeURIComponent(userId)}&device_id=eq.${encodeURIComponent(deviceId)}&select=device_id,secret_hash,revoked_at`;
-  const existing = await api.db(path, { service: true });
-  const row = existing && existing[0];
-  const matches = !!(row && secret && hashesConferem(row.secret_hash, deviceSecretHash(secret)));
-  if (!row && !allowCreate) throw Object.assign(new Error("Este dispositivo precisa entrar novamente"), { statusCode: 403, code: "device_unknown" });
-  if (row && (!matches || row.revoked_at) && !allowCreate) {
-    throw Object.assign(new Error("Este dispositivo teve o acesso revogado"), { statusCode: 403, code: "device_revoked" });
-  }
-  if (!secret || !matches || (row && row.revoked_at)) { secret = crypto.randomBytes(32).toString("base64url"); setSecret = true; }
-  const now = new Date().toISOString();
-  if (row) {
-    await api.db(`cofre_devices?user_id=eq.${encodeURIComponent(userId)}&device_id=eq.${encodeURIComponent(deviceId)}`, { method: "PATCH", service: true, body: { label, secret_hash: deviceSecretHash(secret), last_seen_at: now, revoked_at: null }, headers: { Prefer: "return=minimal" } });
-  } else {
-    await api.db("cofre_devices", { method: "POST", service: true, body: { user_id: userId, device_id: deviceId, secret_hash: deviceSecretHash(secret), label, last_seen_at: now }, headers: { Prefer: "return=minimal" } });
-  }
-  return { deviceId, cookies: setSecret ? [cookie(DEVICE_SECRET, secret, event, { maxAge: 60 * 60 * 24 * 365 })] : [] };
+function deviceMetadataOf(event) {
+  const headers = headersOf(event);
+  const rawLabel = Object.prototype.hasOwnProperty.call(headers, "x-device-label")
+    ? String(headers["x-device-label"] || "")
+    : "";
+  const cleanedLabel = rawLabel.replace(/[<>\u0000-\u001f]/g, "").trim().slice(0, 50);
+  const rawType = String(headers["x-device-type"] || "").trim().toLowerCase();
+  return {
+    // Ausência e valor que virou vazio depois da limpeza significam
+    // "preserve o que já existe", não "troque pelo texto padrão".
+    label: cleanedLabel || null,
+    type: DEVICE_TYPES.has(rawType) ? rawType : null,
+  };
 }
 
-async function requireSession(event) {
-  const session = await sessionOf(event);
+function deviceLookupPath(userId, deviceId) {
+  return `cofre_devices?user_id=eq.${encodeURIComponent(userId)}`
+    + `&device_id=eq.${encodeURIComponent(deviceId)}`
+    + "&select=device_id,secret_hash,label,device_type,revoked_at";
+}
+
+function deviceAccessError(code) {
+  const unknown = code === "device_unknown";
+  return Object.assign(new Error(unknown
+    ? "Este dispositivo precisa entrar novamente"
+    : "Este dispositivo teve o acesso revogado"), {
+    statusCode: 403,
+    code: unknown ? "device_unknown" : "device_revoked",
+  });
+}
+
+// Atividade comum nunca cria, reautoriza, troca segredo nem escreve
+// `revoked_at`. A condição do PATCH repete tudo que autorizou esta chamada:
+// aparelho, segredo e estado ativo. Assim, uma revogação ou um novo login
+// que aconteça entre o SELECT e o PATCH faz a atualização retornar zero linhas.
+async function touchDevice(userId, event) {
+  const deviceId = deviceIdOf(event);
+  const secret = String(cookiesOf(event)[DEVICE_SECRET] || "");
+  const secretHash = secret ? deviceSecretHash(secret) : "";
+  const existing = await api.db(deviceLookupPath(userId, deviceId), { service: true });
+  const row = existing && existing[0];
+  if (!row) throw deviceAccessError("device_unknown");
+  if (row.revoked_at || !secret || !hashesConferem(row.secret_hash, secretHash)) {
+    throw deviceAccessError("device_revoked");
+  }
+
+  const metadata = deviceMetadataOf(event);
+  const body = { last_seen_at: new Date().toISOString() };
+  if (metadata.label) body.label = metadata.label;
+  if (metadata.type) body.device_type = metadata.type;
+  const updated = await api.db(
+    `cofre_devices?user_id=eq.${encodeURIComponent(userId)}`
+      + `&device_id=eq.${encodeURIComponent(deviceId)}`
+      + `&secret_hash=eq.${secretHash}&revoked_at=is.null&select=device_id`,
+    {
+      method: "PATCH", service: true, body,
+      headers: { Prefer: "return=representation" },
+    },
+  );
+  if (!Array.isArray(updated) || !updated[0]) throw deviceAccessError("device_revoked");
+  return { deviceId, cookies: [] };
+}
+
+// Somente um fluxo que acabou de comprovar a identidade no provedor pode
+// chegar aqui. Ele sempre cria um segredo novo, inclusive quando o aparelho já
+// estava ativo, tornando inúteis cookies copiados ou revogados anteriormente.
+async function authorizeDevice(userId, event) {
+  const deviceId = deviceIdOf(event);
+  const metadata = deviceMetadataOf(event);
+  const existing = await api.db(deviceLookupPath(userId, deviceId), { service: true });
+  const row = existing && existing[0];
+  const secret = crypto.randomBytes(32).toString("base64url");
+  const now = new Date().toISOString();
+  const body = {
+    secret_hash: deviceSecretHash(secret),
+    label: metadata.label || (row && row.label) || "Este dispositivo",
+    device_type: metadata.type || (row && row.device_type) || "unknown",
+    last_seen_at: now,
+    revoked_at: null,
+  };
+
+  if (row) {
+    const updated = await api.db(
+      `cofre_devices?user_id=eq.${encodeURIComponent(userId)}`
+        + `&device_id=eq.${encodeURIComponent(deviceId)}&select=device_id`,
+      { method: "PATCH", service: true, body, headers: { Prefer: "return=representation" } },
+    );
+    if (!Array.isArray(updated) || !updated[0]) {
+      throw Object.assign(new Error("O servidor não confirmou este dispositivo"), {
+        statusCode: 502, code: "device_authorization_failed",
+      });
+    }
+  } else {
+    const inserted = await api.db("cofre_devices?select=device_id", {
+      method: "POST", service: true,
+      body: { user_id: userId, device_id: deviceId, ...body },
+      headers: { Prefer: "return=representation" },
+    });
+    if (!Array.isArray(inserted) || !inserted[0]) {
+      throw Object.assign(new Error("O servidor não confirmou este dispositivo"), {
+        statusCode: 502, code: "device_authorization_failed",
+      });
+    }
+  }
+  return {
+    deviceId,
+    cookies: [cookie(DEVICE_SECRET, secret, event, { maxAge: 60 * 60 * 24 * 365 })],
+  };
+}
+
+function accountIdOf(event) {
+  const accountId = String(headersOf(event)["x-account-id"] || "").trim();
+  if (!ACCOUNT_ID_PATTERN.test(accountId)) {
+    throw Object.assign(new Error("Identificação da conta inválida"), {
+      statusCode: 400, code: "invalid_account_scope",
+    });
+  }
+  return accountId;
+}
+
+function accountScopeChanged() {
+  return Object.assign(new Error("A conta ativa mudou. Atualize e tente novamente."), {
+    statusCode: 403, code: "account_scope_changed",
+  });
+}
+
+function jwtSubjectOf(token) {
+  const parts = String(token || "").split(".");
+  if (parts.length !== 3 || !parts[1]) return "";
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+    const subject = String(payload && payload.sub || "").trim();
+    return ACCOUNT_ID_PATTERN.test(subject) ? subject : "";
+  } catch (_) {
+    return "";
+  }
+}
+
+// O payload ainda NÃO foi autenticado. Portanto ele só pode provar que esta
+// chamada deve ser recusada cedo; igualdade nunca autoriza nada e a conta será
+// comparada novamente com o usuário devolvido pelo Supabase.
+function rejectClaimedAccountMismatch(event, accountId) {
+  const claimed = jwtSubjectOf(cookiesOf(event)[ACCESS]);
+  if (claimed && claimed.toLowerCase() !== accountId.toLowerCase()) {
+    throw accountScopeChanged();
+  }
+}
+
+async function requireSession(event, options = {}) {
+  let accountId = "";
+  if (options.accountScope) {
+    accountId = accountIdOf(event);
+    rejectClaimedAccountMismatch(event, accountId);
+  }
+  // Rota com escopo nunca rotaciona refresh. Ela pede ao cliente que passe
+  // primeiro pelo único ponto de renovação: GET /api/account/session.
+  const session = await sessionOf(event, options.accountScope
+    ? { allowRefresh: false, refreshRequired: true }
+    : undefined);
   if (!session) throw Object.assign(new Error("Sua sessão expirou"), { statusCode: 401, code: "session_expired" });
   // Vale para tudo que exige sessão, inclusive a sincronização: dados de uma
   // conta não confirmada não sobem para o servidor.
   requireConfirmedEmail(session.user);
-  const device = await touchDevice(session.user.id, event, false);
+  // Rotas que recebem o identificador esperado precisam conferir a conta
+  // antes até de ler ou atualizar o aparelho. Sem essa ordem, uma resposta da
+  // conta B poderia alterar o `last_seen_at` enquanto o cliente já está em A.
+  if (options.accountScope) requireAccountScope(event, session, accountId);
+  const device = await touchDevice(session.user.id, event);
   session.cookies.push(...device.cookies);
   return session;
+}
+
+function requireAccountScope(event, session, preparedAccountId) {
+  const accountId = preparedAccountId || accountIdOf(event);
+  const expected = String(session && session.user && session.user.id || "");
+  if (accountId.toLowerCase() !== expected.toLowerCase()) {
+    throw accountScopeChanged();
+  }
+  return accountId;
 }
 
 async function handler(event) {
@@ -224,19 +404,19 @@ async function handler(event) {
     if (!cfg.configured) return json(200, { ok: true, configured: false, authenticated: false });
     if (method !== "GET") assertSameOrigin(event);
     // Limite compartilhado entre instâncias e persistido (ver _shared/rate-limit.js).
-    if (["register", "login", "recover", "resend", "exchange", "verify", "password", "delete"].includes(action)) {
+    if (["register", "login", "recover", "resend", "exchange", "verify"].includes(action)) {
       await rateLimit.enforce(event, { bucket: "conta", limit: RATE_MAX_ATTEMPTS, windowSeconds: RATE_WINDOW_SECONDS });
     }
 
     if (action === "session" && method === "GET") {
       const session = await sessionOf(event);
-      if (!session) return json(200, { ok: true, configured: true, authenticated: false }, { cookies: clearSession(event) });
+      if (!session) return json(200, { ok: true, configured: true, authenticated: false });
       // Sessão de email não confirmado não é sessão. Só recusar no `login`
       // deixaria passar o que já tivesse sido emitido antes desta regra.
       if (!emailConfirmed(session.user)) {
-        return json(200, { ok: true, configured: true, authenticated: false, pendingConfirmation: true, email: session.user.email || "" }, { cookies: clearSession(event) });
+        return json(200, { ok: true, configured: true, authenticated: false, pendingConfirmation: true, email: session.user.email || "" });
       }
-      const device = await touchDevice(session.user.id, event, false);
+      const device = await touchDevice(session.user.id, event);
       return json(200, { ok: true, configured: true, authenticated: true, email: session.user.email || "", userId: session.user.id, deviceId: device.deviceId }, { cookies: [...session.cookies, ...device.cookies] });
     }
     if (action === "register" && method === "POST") {
@@ -245,7 +425,7 @@ async function handler(event) {
       await limitarPorEmail(event, email);
       const result = await api.auth.signUp(email, passwordOf(body.password), appCallbackUrl(event, "signup"), flow.challenge);
       const cookies = [cookie(VERIFIER, `signup:${flow.verifier}`, event, { maxAge: VERIFIER_MAX_AGE })];
-      if (result.access_token) { const device = await touchDevice(result.user.id, event, true); cookies.push(...sessionCookies(event, result), ...device.cookies); }
+      if (result.access_token) { const device = await authorizeDevice(result.user.id, event); cookies.push(...sessionCookies(event, result), ...device.cookies); }
       // `email` volta do que foi PEDIDO, não do que o Supabase devolveu: para
       // um endereço que já tem conta ele responde com um usuário fabricado, e
       // é esse endereço que a tela precisa para oferecer o reenvio.
@@ -259,7 +439,7 @@ async function handler(event) {
       await limitarPorEmail(event, email);
       const result = await api.auth.signIn(email, passwordOf(body.password));
       requireConfirmedEmail(result.user);
-      const device = await touchDevice(result.user.id, event, true);
+      const device = await authorizeDevice(result.user.id, event);
       return json(200, { ok: true, configured: true, authenticated: true, email: result.user.email || "", userId: result.user.id, deviceId: device.deviceId }, { cookies: [...sessionCookies(event, result), ...device.cookies] });
     }
     if (action === "recover" && method === "POST") {
@@ -305,7 +485,7 @@ async function handler(event) {
       if (!result || !result.access_token || !result.user || !result.user.id) {
         throw Object.assign(new Error("Este link não vale mais. Entre com seu email e senha."), { statusCode: 400, code: "link_invalid" });
       }
-      const device = await touchDevice(result.user.id, event, true);
+      const device = await authorizeDevice(result.user.id, event);
       return json(200, {
         ok: true, authenticated: true, purpose: type === "recovery" ? "recovery" : "signup",
         email: result.user.email || "", userId: result.user.id,
@@ -325,32 +505,75 @@ async function handler(event) {
       // recuperação é a tela, que conhece o `auth_callback` do endereço.
       if (at < 1) throw Object.assign(new Error("Este link foi aberto em outro navegador."), { statusCode: 400, code: "verifier_missing" });
       const purpose = stored.slice(0, at); const result = await api.auth.exchange(String(body.code).slice(0, 2048), stored.slice(at + 1));
-      const device = await touchDevice(result.user.id, event, true);
+      const device = await authorizeDevice(result.user.id, event);
       return json(200, { ok: true, authenticated: true, purpose, email: result.user.email || "", userId: result.user.id }, { cookies: [...sessionCookies(event, result), ...device.cookies, clearCookie(VERIFIER, event)] });
     }
     if (action === "logout" && method === "POST") {
-      const session = await sessionOf(event); if (session) { try { await api.auth.logout(session.token); } catch (_) {} }
+      const sessionValues = cookiesOf(event);
+      const hasSessionCookie = !!(sessionValues[ACCESS] || sessionValues[REFRESH]);
+      let preparedAccountId = "";
+      if (hasSessionCookie) {
+        preparedAccountId = accountIdOf(event);
+        rejectClaimedAccountMismatch(event, preparedAccountId);
+      }
+      // Logout explícito sem credenciais continua idempotente. Se ainda existe
+      // refresh, porém, não sabemos a qual conta ele pertence sem consumi-lo;
+      // nesse caso o cliente precisa renovar em /account/session primeiro.
+      const session = await sessionOf(event, {
+        allowRefresh: false,
+        refreshRequired: hasSessionCookie,
+      });
+      if (session) {
+        requireAccountScope(event, session, preparedAccountId);
+        try { await api.auth.logout(session.token); } catch (_) {}
+      }
       return json(200, { ok: true, authenticated: false }, { cookies: clearSession(event) });
     }
     if (action === "password" && method === "POST") {
-      const session = await requireSession(event); const body = readJson(event, 16 * 1024);
+      const session = await requireSession(event, { accountScope: true });
+      await rateLimit.enforce(event, { bucket: "conta", limit: RATE_MAX_ATTEMPTS, windowSeconds: RATE_WINDOW_SECONDS });
+      const body = readJson(event, 16 * 1024);
       await api.auth.updateUser(session.token, { password: passwordOf(body.password) });
       return json(200, { ok: true }, { cookies: session.cookies });
     }
     if (action === "devices" && method === "GET") {
-      const session = await requireSession(event); const current = deviceIdOf(event);
-      const rows = await api.db("cofre_devices?select=device_id,label,first_seen_at,last_seen_at,revoked_at&order=last_seen_at.desc", { token: session.token });
-      return json(200, { ok: true, devices: (rows || []).map((row) => ({ id: row.device_id, label: row.label, firstSeenAt: row.first_seen_at, lastSeenAt: row.last_seen_at, revokedAt: row.revoked_at, current: row.device_id === current })) }, { cookies: session.cookies });
+      const session = await requireSession(event, { accountScope: true });
+      const current = deviceIdOf(event);
+      const rows = await api.db("cofre_devices?select=device_id,label,device_type,first_seen_at,last_seen_at&revoked_at=is.null&order=last_seen_at.desc", { token: session.token });
+      return json(200, { ok: true, devices: (rows || []).map((row) => ({
+        id: row.device_id,
+        label: row.label,
+        type: DEVICE_TYPES.has(row.device_type) ? row.device_type : "unknown",
+        firstSeenAt: row.first_seen_at,
+        lastSeenAt: row.last_seen_at,
+        current: row.device_id === current,
+      })) }, { cookies: session.cookies });
     }
     if (action === "revoke-device" && method === "POST") {
-      const session = await requireSession(event); const body = readJson(event, 16 * 1024); const target = String(body.deviceId || "");
+      const session = await requireSession(event, { accountScope: true });
+      const body = readJson(event, 16 * 1024); const target = String(body.deviceId || "");
       if (!/^[A-Za-z0-9][A-Za-z0-9:_-]{7,79}$/.test(target)) throw Object.assign(new Error("Dispositivo inválido"), { statusCode: 400, code: "invalid_device" });
-      await api.db(`cofre_devices?user_id=eq.${encodeURIComponent(session.user.id)}&device_id=eq.${encodeURIComponent(target)}`, { method: "PATCH", service: true, body: { revoked_at: new Date().toISOString() }, headers: { Prefer: "return=minimal" } });
+      const revoked = await api.db(
+        `cofre_devices?user_id=eq.${encodeURIComponent(session.user.id)}`
+          + `&device_id=eq.${encodeURIComponent(target)}&revoked_at=is.null&select=device_id`,
+        {
+          method: "PATCH", service: true,
+          body: { revoked_at: new Date().toISOString() },
+          headers: { Prefer: "return=representation" },
+        },
+      );
+      if (!Array.isArray(revoked) || !revoked[0]) {
+        throw Object.assign(new Error("Este dispositivo não possui acesso ativo"), {
+          statusCode: 404, code: "device_not_active",
+        });
+      }
       const isCurrent = target === deviceIdOf(event);
       return json(200, { ok: true, currentRevoked: isCurrent }, { cookies: isCurrent ? clearSession(event) : session.cookies });
     }
     if (action === "delete" && method === "POST") {
-      const session = await requireSession(event); const body = readJson(event, 16 * 1024);
+      const session = await requireSession(event, { accountScope: true });
+      await rateLimit.enforce(event, { bucket: "conta", limit: RATE_MAX_ATTEMPTS, windowSeconds: RATE_WINDOW_SECONDS });
+      const body = readJson(event, 16 * 1024);
       if (body.confirmation !== "APAGAR CONTA") throw Object.assign(new Error("Digite APAGAR CONTA para confirmar"), { statusCode: 400, code: "confirmation_required" });
       await api.auth.signIn(session.user.email, passwordOf(body.password));
 
@@ -388,10 +611,8 @@ async function handler(event) {
     }
     return json(404, { ok: false, code: "not_found", message: "Rota não encontrada" });
   } catch (error) {
-    const failure = safeFailure(error);
-    if (error && (error.code === "device_revoked" || error.code === "device_unknown")) failure.multiValueHeaders = { "Set-Cookie": clearSession(event) };
-    return failure;
+    return safeFailure(error);
   }
 }
 
-module.exports = { handler, sessionOf, requireSession };
+module.exports = { handler, sessionOf, requireSession, requireAccountScope, clearSession };

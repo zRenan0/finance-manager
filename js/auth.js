@@ -2,25 +2,83 @@
 
 const ACCOUNT_ENDPOINT = "/api/account";
 const ACCOUNT_DEVICE_KEY = "cofre_device_id";
+const ACCOUNT_REQUEST_TIMEOUT_MS = 12000;
+const ACCOUNT_RECOVERY_DEDUP_MS = 750;
+const ACCOUNT_RECOVERY_RETRY_MS = 30000;
+const ACCOUNT_SCOPED_ACTIONS = new Set(["password", "devices", "revoke-device", "delete", "logout"]);
+const ACCOUNT_COOKIE_ACTIONS = new Set(["session", "login", "register", "recover", "resend", "verify", "exchange", "logout", "revoke-device", "delete"]);
+
+// Alguns modos privados permitem ler o localStorage, mas recusam a gravação.
+// Sem uma cópia em memória, cada chamada criava outro id e o mesmo navegador
+// aparecia como vários aparelhos durante a mesma visita.
+let __accountDeviceIdMemory = "";
+
+function newAccountDeviceId() {
+  return typeof crypto !== "undefined" && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `device_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
+}
 
 function accountDeviceId() {
+  if (/^[A-Za-z0-9][A-Za-z0-9:_-]{7,79}$/.test(__accountDeviceIdMemory)) return __accountDeviceIdMemory;
   try {
     let value = localStorage.getItem(ACCOUNT_DEVICE_KEY);
-    if (/^[A-Za-z0-9][A-Za-z0-9:_-]{7,79}$/.test(value || "")) return value;
-    value = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `device_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
-    localStorage.setItem(ACCOUNT_DEVICE_KEY, value);
+    if (/^[A-Za-z0-9][A-Za-z0-9:_-]{7,79}$/.test(value || "")) {
+      __accountDeviceIdMemory = value;
+      return value;
+    }
+    value = newAccountDeviceId();
+    __accountDeviceIdMemory = value;
+    try { localStorage.setItem(ACCOUNT_DEVICE_KEY, value); } catch (_) { /* vale nesta visita */ }
     return value;
-  } catch (_) { return `device_${Date.now()}_memory`; }
+  } catch (_) {
+    __accountDeviceIdMemory = newAccountDeviceId();
+    return __accountDeviceIdMemory;
+  }
 }
 
 function accountDeviceLabel() {
-  const platform = typeof navigator !== "undefined" ? String(navigator.userAgentData && navigator.userAgentData.platform || navigator.platform || "") : "";
-  return platform ? `Navegador em ${platform}`.slice(0, 50) : "Este navegador";
+  if (typeof navigator === "undefined") return "Este navegador";
+  const ua = String(navigator.userAgent || "");
+  const rawPlatform = String(navigator.userAgentData && navigator.userAgentData.platform || navigator.platform || "");
+  const browser = /Edg\//.test(ua) ? "Edge"
+    : /OPR\//.test(ua) ? "Opera"
+      : /Firefox\//.test(ua) ? "Firefox"
+        : /CriOS\//.test(ua) ? "Chrome"
+          : /Chrome\//.test(ua) ? "Chrome"
+            : /FxiOS\//.test(ua) ? "Firefox"
+              : /Safari\//.test(ua) ? "Safari"
+                : "Navegador";
+  const platform = /Win/i.test(rawPlatform) ? "Windows"
+    : /Android/i.test(ua) ? "Android"
+      : /iPhone|iPod/i.test(ua) ? "iPhone"
+        : /iPad/i.test(ua) || (rawPlatform === "MacIntel" && Number(navigator.maxTouchPoints) > 1) ? "iPad"
+          : /Mac/i.test(rawPlatform) ? "macOS"
+            : /CrOS/i.test(`${ua} ${rawPlatform}`) ? "ChromeOS"
+              : /Linux/i.test(rawPlatform) ? "Linux"
+                : rawPlatform.replace(/[\x00-\x1F\x7F]/g, " ").trim().slice(0, 24);
+  return (platform ? `${browser} no ${platform}` : browser).slice(0, 50);
+}
+
+function accountCurrentDeviceType() {
+  if (typeof navigator === "undefined") return "unknown";
+  const ua = String(navigator.userAgent || "");
+  const platform = String(navigator.platform || "");
+  if (/iPad|Tablet|PlayBook|Silk/i.test(ua) || (platform === "MacIntel" && Number(navigator.maxTouchPoints) > 1)) return "tablet";
+  if ((navigator.userAgentData && navigator.userAgentData.mobile === true) || /Mobi|iPhone|iPod|Android.*Mobile/i.test(ua)) return "phone";
+  if (/Android/i.test(ua)) return "tablet";
+  if (/Windows|Macintosh|Linux|X11/i.test(`${ua} ${platform}`)) return "desktop";
+  return "unknown";
+}
+
+function accountExpectedUserId() {
+  try { return String(state && state.account && state.account.userId || "").trim().toLowerCase(); }
+  catch (_) { return ""; }
 }
 
 function freshAccountState() {
   return {
-    loading: true, configured: null, authenticated: false, email: "", userId: "", mode: "login", busy: false, error: "", message: "",
+    loading: true, configured: null, authenticated: false, knownAccount: false, sessionStatus: "unknown", email: "", userId: "", mode: "login", busy: false, error: "", message: "",
     // Email cadastrado que ainda espera confirmação. Enquanto ele existe, a
     // tela mostra o cartão de "confirmação pendente" com o botão de reenvio;
     // antes disto, quem não recebia o email não tinha para onde ir.
@@ -47,22 +105,36 @@ function freshAccountState() {
 // conta remota já tem, e isso só existe depois da primeira descida; misturar as
 // duas coisas aqui era o que fazia o aplicativo perguntar (ou deixar de
 // perguntar) antes de ter a informação.
+let __accountScopeQueue = Promise.resolve();
+
 async function applyAccountScope(userId) {
   const desired = storageScopeFor(userId);
-  if (desired === FinanceStore.scope()) return false;
+  const task = async () => {
+    if (desired === FinanceStore.scope()) {
+      FinanceStore.setOutboxEnabled(desired !== GUEST_SCOPE);
+      return false;
+    }
 
-  // O que estava na fila pertence ao escopo que está saindo; grave antes.
-  try { await FinanceStore.flush(); } catch (_) {}
-  if (typeof CloudSync !== "undefined") CloudSync.disable();
+    // Invalidar primeiro impede que uma resposta remota já em voo toque no
+    // banco que será aberto a seguir. A fila antiga é gravada logo depois.
+    if (typeof CloudSync !== "undefined") CloudSync.disable();
+    try { await FinanceStore.flush(); } catch (_) {}
 
-  state.data = await switchStorageScope(desired);
-  state.storageOk = isStorageAvailable();
-  // Tudo que a tela guardava era daquele escopo: seleção, formulário aberto,
-  // rascunho de importação, pré-visualização de backup. Nada disso vale para a
-  // conta que entrou agora.
-  resetScopedUiState(desired);
-  render();
-  return true;
+    state.data = await switchStorageScope(desired);
+    // O /health pode falhar, mas toda edição deste escopo já precisa nascer com
+    // marca e fila para subir na recuperação automática.
+    FinanceStore.setOutboxEnabled(desired !== GUEST_SCOPE);
+    state.storageOk = isStorageAvailable();
+    // Tudo que a tela guardava era daquele escopo: seleção, formulário aberto,
+    // rascunho de importação, pré-visualização de backup. Nada disso vale para a
+    // conta que entrou agora.
+    resetScopedUiState(desired);
+    render();
+    return true;
+  };
+  const run = __accountScopeQueue.then(task, task);
+  __accountScopeQueue = run.catch(() => {});
+  return run;
 }
 
 // Estado de tela derivado dos dados. Sem esta limpeza, um id selecionado na
@@ -162,6 +234,7 @@ async function finishAccountBootstrapAndGate() {
 // a conta tiver recebido qualquer operação nesse intervalo.
 async function runGuestLink(token, escopo, visitante, opts) {
   const valido = () => token === __guestLinkToken && FinanceStore.scope() === escopo;
+  if (!valido()) return;
   let resultado;
   try { resultado = await FinanceStore.adoptScope("guest", opts); }
   catch (error) { resultado = { ok: false, reason: "write_failed", error }; }
@@ -317,12 +390,15 @@ async function accountLinkGuest() {
   if (!state.account.authenticated) return;
   const escopo = FinanceStore.scope();
   const token = ++__guestLinkToken;
+  const userId = state.account.userId;
+  const remoteRevision = state.account.guestLink.remoteRevision;
+  const valido = () => token === __guestLinkToken && FinanceStore.scope() === escopo;
   setGuestLink({ phase: "linking", busy: true, error: "", errorCode: "" });
 
   let visitante = null;
   try { visitante = await FinanceStore.peekScope("guest"); }
   catch (_) { visitante = null; }
-  if (token !== __guestLinkToken || FinanceStore.scope() !== escopo) return;
+  if (!valido()) return;
   if (!visitante || !visitante.exists) {
     setGuestLink({ phase: "idle", busy: false, summary: null });
     return;
@@ -330,9 +406,10 @@ async function accountLinkGuest() {
   setGuestLink({ summary: visitante, digest: visitante.digest || "", busy: false });
 
   try { await FinanceStore.releaseGuestLink(); } catch (_) { /* sem diário */ }
+  if (!valido()) return;
   await runGuestLink(token, escopo, visitante, {
-    userId: state.account.userId,
-    remoteRevision: state.account.guestLink.remoteRevision,
+    userId,
+    remoteRevision,
   });
 }
 
@@ -340,6 +417,9 @@ async function accountLinkGuest() {
 // Fechar a tela NÃO passa por aqui, e é isso que impede o marcador silencioso
 // que existia antes.
 async function accountDismissGuestLink() {
+  const escopo = FinanceStore.scope();
+  const token = ++__guestLinkToken;
+  const valido = () => token === __guestLinkToken && FinanceStore.scope() === escopo;
   const digest = state.account.guestLink && state.account.guestLink.digest;
   if (!digest) {
     // Sem impressão (navegador sem WebCrypto) nada é gravado: preferimos
@@ -349,6 +429,7 @@ async function accountDismissGuestLink() {
   }
   try { await FinanceStore.dismissGuestLink(digest, "guest"); }
   catch (_) { /* a pergunta volta na próxima entrada */ }
+  if (!valido()) return;
   setGuestLink({ phase: "dismissed", error: "", errorCode: "" });
   notify("Os dados deste aparelho continuam separados da conta");
 }
@@ -376,54 +457,160 @@ async function accountReviewGuestLink() {
 }
 
 const AccountAPI = (() => {
-  async function request(path, options) {
+  let cookieQueue = Promise.resolve();
+
+  function withCookieLock(task) {
+    const locks = typeof navigator !== "undefined" && navigator.locks;
+    if (locks && typeof locks.request === "function") {
+      return locks.request("cofre-account-cookie", () => task());
+    }
+    const run = cookieQueue.then(task, task);
+    cookieQueue = run.catch(() => {});
+    return run;
+  }
+
+  async function singleRequest(path, options) {
     const o = options || {};
     if (typeof location !== "undefined" && location.protocol === "file:") {
       if (path === "session") return { ok: true, configured: false, authenticated: false };
       throw new Error("O serviço de conta exige o site publicado.");
     }
-    let response;
+    const externalSignal = o.signal;
+    const controller = typeof AbortController === "function" ? new AbortController() : null;
+    let abortKind = "";
+    let timeoutId = null;
+    let onExternalAbort = null;
+    const abortRequest = (kind) => {
+      if (!controller || controller.signal.aborted) return;
+      abortKind = kind;
+      controller.abort();
+    };
+    const requestFailure = (cause) => {
+      if (cause && cause.name === "AbortError") {
+        const timedOut = abortKind === "timeout";
+        const aborted = new Error(timedOut
+          ? "O serviço de conta não respondeu a tempo."
+          : "A verificação anterior da conta foi cancelada.");
+        aborted.code = timedOut ? "timeout" : "request_aborted";
+        return aborted;
+      }
+      const error = new Error("Não foi possível acessar o serviço de conta.");
+      error.code = "network_error";
+      return error;
+    };
+    if (controller) {
+      onExternalAbort = () => abortRequest("external");
+      if (externalSignal && externalSignal.aborted) onExternalAbort();
+      else if (externalSignal && typeof externalSignal.addEventListener === "function") {
+        externalSignal.addEventListener("abort", onExternalAbort, { once: true });
+      }
+      timeoutId = setTimeout(() => abortRequest("timeout"), ACCOUNT_REQUEST_TIMEOUT_MS);
+    }
+
     try {
-      response = await fetch(`${ACCOUNT_ENDPOINT}/${path}`, {
-        method: o.method || "GET", credentials: "include", cache: "no-store",
-        headers: { "Accept": "application/json", "Content-Type": "application/json", "X-Device-Id": accountDeviceId(), "X-Device-Label": accountDeviceLabel() },
-        body: o.body === undefined ? undefined : JSON.stringify(o.body),
-      });
-    } catch (_) { throw new Error("Não foi possível acessar o serviço de conta."); }
-    // AUSÊNCIA DE BACKEND NÃO É ERRO DO USUÁRIO.
-    //
-    // Publicação estática, o servidor de desenvolvimento (`npm start`) e portais
-    // de Wi-Fi respondem `/api/*` com o HTML do próprio aplicativo e status 200.
-    // O `404` já era tratado; o `200 text/html` não era, caía no erro genérico e
-    // a tela de conta abria com alerta vermelho antes de o usuário digitar
-    // qualquer coisa. Resposta sem JSON significa que não há serviço de conta
-    // aqui, que é o "modo local", estado que a tela já sabe apresentar.
-    const tipoConteudo = String(response.headers.get("content-type") || "");
-    const respostaEhJson = tipoConteudo.indexOf("json") !== -1;
-    if (path === "session" && (response.status === 404 || !respostaEhJson)) {
-      return { ok: true, configured: false, authenticated: false };
+      let response;
+      try {
+        response = await fetch(`${ACCOUNT_ENDPOINT}/${path}`, {
+          method: o.method || "GET", credentials: "include", cache: "no-store",
+          headers: {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "X-Device-Id": accountDeviceId(),
+            "X-Device-Label": accountDeviceLabel(),
+            "X-Device-Type": accountCurrentDeviceType(),
+            ...(ACCOUNT_SCOPED_ACTIONS.has(path) ? { "X-Account-Id": o.expectedAccountId } : {}),
+          },
+          body: o.body === undefined ? undefined : JSON.stringify(o.body),
+          signal: controller ? controller.signal : externalSignal,
+        });
+      } catch (cause) {
+        throw requestFailure(cause);
+      }
+
+      // AUSÊNCIA DE BACKEND NÃO É ERRO DO USUÁRIO.
+      //
+      // Publicação estática, o servidor de desenvolvimento (`npm start`) e portais
+      // de Wi-Fi respondem `/api/*` com o HTML do próprio aplicativo e status 200.
+      // O `404` já era tratado; o `200 text/html` não era, caía no erro genérico e
+      // a tela de conta abria com alerta vermelho antes de o usuário digitar
+      // qualquer coisa. Resposta sem JSON significa que não há serviço de conta
+      // aqui, que é o "modo local", estado que a tela já sabe apresentar.
+      const tipoConteudo = String(response.headers.get("content-type") || "");
+      const respostaEhJson = tipoConteudo.indexOf("json") !== -1;
+      if (path === "session" && (response.status === 404 || !respostaEhJson)) {
+        return { ok: true, configured: false, authenticated: false };
+      }
+      if (!respostaEhJson) {
+        const semServico = new Error("O serviço de conta não está disponível nesta publicação.");
+        semServico.code = "account_unavailable";
+        throw semServico;
+      }
+      let payload = null;
+      try { payload = await response.json(); }
+      catch (cause) {
+        // Abortar o fetch depois dos cabeçalhos também interrompe a leitura do
+        // corpo. Esse cancelamento precisa conservar a causa; JSON inválido
+        // continua seguindo o tratamento de resposta malformada já existente.
+        if (cause && cause.name === "AbortError") throw requestFailure(cause);
+      }
+      if (!response.ok || !payload || payload.ok === false) {
+        const error = new Error(payload && payload.message || "Não foi possível concluir a operação.");
+        error.code = payload && payload.code || "request_failed";
+        throw error;
+      }
+      return payload;
+    } finally {
+      if (timeoutId !== null) clearTimeout(timeoutId);
+      if (externalSignal && onExternalAbort && typeof externalSignal.removeEventListener === "function") {
+        externalSignal.removeEventListener("abort", onExternalAbort);
+      }
     }
-    if (!respostaEhJson) {
-      const semServico = new Error("O serviço de conta não está disponível nesta publicação.");
-      semServico.code = "account_unavailable";
-      throw semServico;
-    }
-    const payload = await response.json().catch(() => null);
-    if (!response.ok || !payload || payload.ok === false) {
-      const error = new Error(payload && payload.message || "Não foi possível concluir a operação.");
-      error.code = payload && payload.code || "request_failed";
+  }
+
+  async function request(path, options) {
+    const scoped = ACCOUNT_SCOPED_ACTIONS.has(path);
+    const original = options || {};
+    const o = {
+      ...original,
+      expectedAccountId: scoped
+        ? String(original.expectedAccountId || accountExpectedUserId()).trim().toLowerCase()
+        : "",
+    };
+    let result;
+    try {
+      // O lock termina junto desta única ida HTTP. Recuperar a sessão aqui
+      // dentro tentaria adquirir o mesmo lock e prenderia a fila para sempre.
+      result = ACCOUNT_COOKIE_ACTIONS.has(path)
+        ? await withCookieLock(() => singleRequest(path, o))
+        : await singleRequest(path, o);
+    } catch (error) {
+      if (scoped && error && error.code === "session_refresh_required"
+        && o.retrySession !== false && !o.sessionRetried) {
+        // A ação nasceu para esta identidade. Se login/logout mudou a conta
+        // enquanto a resposta viajava, ela não pode ser repetida na conta nova.
+        if (!o.expectedAccountId || accountExpectedUserId() !== o.expectedAccountId) {
+          const changed = new Error("A conta desta sessão mudou durante a operação.");
+          changed.code = "account_scope_changed";
+          throw changed;
+        }
+        const refreshed = await refreshAccountSession();
+        if (refreshed && refreshed.status === "active" && accountExpectedUserId() === o.expectedAccountId) {
+          return request(path, { ...o, sessionRetried: true });
+        }
+      }
       throw error;
     }
-    return payload;
+    return result;
   }
   return {
-    session: () => request("session"), register: (body) => request("register", { method: "POST", body }),
+    session: (options) => request("session", options), register: (body) => request("register", { method: "POST", body }),
     login: (body) => request("login", { method: "POST", body }), recover: (body) => request("recover", { method: "POST", body }),
     resend: (email) => request("resend", { method: "POST", body: { email } }),
     exchange: (code) => request("exchange", { method: "POST", body: { code } }),
     verify: (tokenHash, type) => request("verify", { method: "POST", body: { tokenHash, type } }),
     logout: () => request("logout", { method: "POST", body: {} }),
-    password: (password) => request("password", { method: "POST", body: { password } }), devices: () => request("devices"),
+    password: (password) => request("password", { method: "POST", body: { password } }),
+    devices: (options) => request("devices", options),
     revokeDevice: (deviceId) => request("revoke-device", { method: "POST", body: { deviceId } }),
     deleteAccount: (password, confirmation) => request("delete", { method: "POST", body: { password, confirmation } }),
   };
@@ -435,77 +622,331 @@ function accountSetBusy(busy, error) {
   render();
 }
 
-async function refreshAccountSession() {
-  // "O servidor respondeu" é diferente de "o servidor disse que não há sessão".
-  // Só a segunda pode trocar o escopo de dados; a primeira, num aparelho sem
-  // rede, faria a conta parecer vazia.
-  let sessionKnown = false;
-  try {
-    const result = await AccountAPI.session();
-    sessionKnown = true;
-    state.account.configured = result.configured !== false;
-    state.account.authenticated = !!result.authenticated;
-    state.account.email = result.email || "";
-    state.account.userId = result.userId || "";
-    state.account.loading = false;
-    // O servidor devolve a sessão pendente em vez de simplesmente negar: é
-    // assim que a tela sabe oferecer o reenvio para o endereço certo.
-    if (result.pendingConfirmation) state.account.pendingEmail = result.email || state.account.pendingEmail;
-    else if (state.account.authenticated) state.account.pendingEmail = "";
-    if (state.account.authenticated) {
-      try {
-        const devices = await AccountAPI.devices();
-        state.account.devices = devices.devices || [];
-      } catch (error) {
-        state.account.devices = [];
-        if (error.code === "device_revoked" || error.code === "session_expired") {
-          state.account.authenticated = false;
-          state.account.email = "";
-          state.account.error = error.message;
-        }
-      }
-    } else state.account.devices = [];
-  } catch (error) {
-    state.account.loading = false;
-    state.account.configured = true;
-    state.account.authenticated = false;
-    // Esta consulta é automática: roda ao abrir o aplicativo, sem ninguém pedir.
-    // Falha aqui não descreve nada que o usuário tenha feito, e um alerta
-    // vermelho na abertura da tela só destrói a confiança em quem ia se
-    // cadastrar. O formulário continua disponível; se a tentativa real de
-    // entrar falhar, aí sim o erro aparece, com a causa certa e na hora certa.
-    state.account.error = "";
-  }
+let __accountSessionRefreshPromise = null;
+let __accountSessionRefreshEpoch = -1;
+let __accountSessionAbortController = null;
+let __accountAuthEpoch = 0;
+let __accountInvalidationPromise = null;
+let __accountScopeChangePromise = null;
+let __accountReadyScope = "";
+let __accountRecoveryPromise = null;
+let __accountRecoveryLastAt = 0;
+let __accountRecoveryListenersStarted = false;
+let __accountRecoveryTimer = null;
+let __accountDisconnecting = false;
 
-  // O banco carregado precisa ser o da sessão ANTES de qualquer sincronização;
-  // ligar o sync antes da troca enviaria os dados de uma conta para a outra.
-  if (sessionKnown) {
-    try { await applyAccountScope(state.account.authenticated ? state.account.userId : ""); }
+function accountRefreshIsCurrent(epoch) {
+  return epoch === __accountAuthEpoch;
+}
+
+function invalidateAccountRefresh() {
+  __accountAuthEpoch += 1;
+  if (__accountSessionAbortController) {
+    try { __accountSessionAbortController.abort(); } catch (_) {}
+  }
+  __accountSessionRefreshPromise = null;
+  __accountSessionRefreshEpoch = -1;
+  __accountSessionAbortController = null;
+  return __accountAuthEpoch;
+}
+
+function clearAccountRecoveryRetry() {
+  if (__accountRecoveryTimer !== null) {
+    clearTimeout(__accountRecoveryTimer);
+    __accountRecoveryTimer = null;
+  }
+}
+
+function scheduleAccountRecoveryRetry() {
+  clearAccountRecoveryRetry();
+  const epoch = __accountAuthEpoch;
+  const rememberedScope = FinanceStore.scope();
+  if (rememberedScope === GUEST_SCOPE && !state.account.knownAccount) return;
+  __accountRecoveryTimer = setTimeout(() => {
+    __accountRecoveryTimer = null;
+    if (!accountRefreshIsCurrent(epoch) || FinanceStore.scope() !== rememberedScope) return;
+    recoverAccountSession("retry").catch((error) => {
+      if (typeof reportSafeError === "function") reportSafeError("sync", error, "account_recover_retry");
+    });
+  }, ACCOUNT_RECOVERY_RETRY_MS);
+}
+
+function invalidAccountSessionCode(error) {
+  const code = String(error && error.code || "");
+  return code === "device_revoked" || code === "device_unknown" || code === "session_expired";
+}
+
+function changedAccountScopeCode(error) {
+  return String(error && error.code || "") === "account_scope_changed";
+}
+
+// Revogação e expiração trocam apenas o ESCOPO carregado. O banco da conta e
+// sua fila ficam no aparelho para um login posterior continuar de onde parou.
+async function invalidateAccountSession(details) {
+  if (__accountInvalidationPromise) return __accountInvalidationPromise;
+  const info = details || {};
+  invalidateAccountRefresh();
+  clearAccountRecoveryRetry();
+  __accountInvalidationPromise = (async () => {
+    ++__guestLinkToken;
+    __accountReadyScope = "";
+    // Uma gravação local que já estava confirmada pela interface precisa chegar
+    // à fila da conta antes que o motor pare de enfileirar.
+    try { await FinanceStore.flush(); }
     catch (error) {
-      if (typeof reportSafeError === "function") reportSafeError("storage", error, "scope_switch");
-      notify("Não foi possível abrir os dados desta conta neste aparelho", "danger");
-      render();
-      return;
+      if (typeof reportSafeError === "function") reportSafeError("storage", error, "session_invalid_flush");
     }
+    if (typeof CloudSync !== "undefined") CloudSync.disable();
+    state.account.authenticated = false;
+    state.account.knownAccount = false;
+    state.account.sessionStatus = "guest";
+    state.account.loading = false;
+    state.account.email = "";
+    state.account.userId = "";
+    state.account.devices = [];
+    state.account.busy = false;
+    state.account.error = info.message || "A sessão terminou. Entre novamente para voltar a sincronizar.";
+    try {
+      await applyAccountScope("");
+    } catch (error) {
+      if (typeof reportSafeError === "function") reportSafeError("storage", error, "invalid_session_scope");
+      notify("A sessão terminou, mas não foi possível abrir os dados locais deste aparelho", "danger");
+    }
+    if (typeof refreshOnboardingGate === "function") refreshOnboardingGate({ release: true });
+    render();
+    return { status: "guest", invalidated: true };
+  })();
+  try { return await __accountInvalidationPromise; }
+  finally { __accountInvalidationPromise = null; }
+}
+
+// Consultas concorrentes de pageshow, foco e online compartilham a mesma
+// promessa. Isso impede duas trocas de escopo e duas primeiras descidas.
+async function refreshAccountSession() {
+  const epoch = __accountAuthEpoch;
+  if (__accountSessionRefreshPromise && __accountSessionRefreshEpoch === epoch) return __accountSessionRefreshPromise;
+  const controller = typeof AbortController === "function" ? new AbortController() : null;
+  const promise = performAccountSessionRefresh(epoch, controller && controller.signal);
+  __accountSessionRefreshPromise = promise;
+  __accountSessionRefreshEpoch = epoch;
+  __accountSessionAbortController = controller;
+  return promise.finally(() => {
+    if (__accountSessionRefreshPromise === promise) {
+      __accountSessionRefreshPromise = null;
+      __accountSessionRefreshEpoch = -1;
+      __accountSessionAbortController = null;
+    }
+  });
+}
+
+async function performAccountSessionRefresh(epoch, signal) {
+  // "O servidor respondeu" é diferente de "o servidor disse que não há sessão".
+  // Falha de transporte mantém autenticação, escopo e fila como estavam.
+  let result;
+  try {
+    result = await AccountAPI.session({ signal });
+  } catch (error) {
+    if (!accountRefreshIsCurrent(epoch) || error.code === "request_aborted") return { status: "stale" };
+    if (invalidAccountSessionCode(error)) return invalidateAccountSession(error);
+    const rememberedAccount = FinanceStore.scope() !== GUEST_SCOPE;
+    state.account.knownAccount = state.account.knownAccount || rememberedAccount;
+    // No cold reload não temos email nem id em memória. Manter o estado de
+    // verificação evita renderizar o formulário guest como se houvesse logout;
+    // dashboard e banco local continuam disponíveis enquanto a rede se recupera.
+    state.account.loading = rememberedAccount && !state.account.authenticated;
+    if (state.account.configured === null) state.account.configured = true;
+    state.account.sessionStatus = "unknown";
+    // Esta consulta é automática. O estado de sincronização já apresenta a
+    // falta de rede sem transformar a abertura do app num erro de formulário.
+    state.account.error = "";
+    render();
+    scheduleAccountRecoveryRetry();
+    return { status: "unknown", error };
   }
 
-  // A sincronização segue a sessão: liga quando há conta confirmada e para
-  // assim que ela deixa de existir. `enable()` já faz a primeira volta completa
-  // (puxa o remoto, funde e devolve), então é aqui que um aparelho novo recebe
-  // o histórico. Não é aguardado para não segurar a pintura da tela de conta.
-  // A sincronização segue a sessão. Ela não é mais ligada "solta": a entrada
-  // numa conta passa pela sequência de vínculo, que desce primeiro, decide, e só
-  // então libera a fila e a semeadura. Não é aguardada para não segurar a
-  // pintura da tela de conta.
-  if (typeof CloudSync !== "undefined") {
-    if (state.account.authenticated) bootstrapAccountLink().catch(() => {});
-    else CloudSync.disable();
+  if (!accountRefreshIsCurrent(epoch)) return { status: "stale" };
+
+  state.account.loading = false;
+  state.account.configured = result.configured !== false;
+
+  // Uma publicação sem serviço de conta não confirmou logout nenhum. Se este
+  // navegador já estava num escopo autenticado, ele continua disponível localmente.
+  if (result.configured === false) {
+    const rememberedAccount = FinanceStore.scope() !== GUEST_SCOPE;
+    state.account.knownAccount = state.account.knownAccount || rememberedAccount;
+    state.account.sessionStatus = rememberedAccount ? "unknown" : "guest";
+    if (!rememberedAccount) state.account.authenticated = false;
+    if (!rememberedAccount && typeof refreshOnboardingGate === "function") refreshOnboardingGate({ release: true });
+    render();
+    return { status: state.account.sessionStatus, configured: false };
   }
-  // Sem sessão não há descida para esperar. O portão precisa abrir aqui, senão
-  // uma consulta de sessão que falhou por falta de rede deixaria o assistente
-  // fechado para sempre num aparelho que nunca foi configurado.
-  if (!state.account.authenticated && typeof refreshOnboardingGate === "function") refreshOnboardingGate({ release: true });
+
+  if (!result.authenticated) {
+    clearAccountRecoveryRetry();
+    ++__guestLinkToken;
+    __accountReadyScope = "";
+    state.account.authenticated = false;
+    state.account.knownAccount = false;
+    state.account.sessionStatus = "guest";
+    state.account.email = result.email || "";
+    state.account.userId = "";
+    state.account.devices = [];
+    if (result.pendingConfirmation) state.account.pendingEmail = result.email || state.account.pendingEmail;
+    try {
+      await applyAccountScope("");
+    } catch (error) {
+      if (typeof reportSafeError === "function") reportSafeError("storage", error, "scope_switch");
+      notify("Não foi possível abrir os dados deste aparelho", "danger");
+      render();
+      return { status: "guest", error };
+    }
+    if (!accountRefreshIsCurrent(epoch)) return { status: "stale" };
+    if (typeof CloudSync !== "undefined") CloudSync.disable();
+    if (typeof refreshOnboardingGate === "function") refreshOnboardingGate({ release: true });
+    render();
+    return { status: "guest" };
+  }
+
+  // Uma resposta autenticada sem identidade não é autorização para escolher um
+  // banco. Preservamos o escopo atual e tentamos de novo no próximo gatilho.
+  if (!result.userId) {
+    state.account.sessionStatus = "unknown";
+    render();
+    scheduleAccountRecoveryRetry();
+    return { status: "unknown", error: new Error("A sessão não informou a identidade da conta.") };
+  }
+
+  const previousUserId = String(state.account.userId || "");
+  state.account.authenticated = true;
+  state.account.knownAccount = true;
+  state.account.sessionStatus = "active";
+  state.account.email = result.email || state.account.email || "";
+  state.account.userId = result.userId;
+  state.account.pendingEmail = "";
+  if (previousUserId && previousUserId !== String(result.userId)) state.account.devices = [];
+  clearAccountRecoveryRetry();
+
+  let mudouEscopo = false;
+  try {
+    mudouEscopo = await applyAccountScope(result.userId);
+  } catch (error) {
+    if (typeof reportSafeError === "function") reportSafeError("storage", error, "scope_switch");
+    notify("Não foi possível abrir os dados desta conta neste aparelho", "danger");
+    render();
+    return { status: "active", error };
+  }
+  if (!accountRefreshIsCurrent(epoch)) return { status: "stale" };
+
+  // Uma falha ao atualizar a lista não inventa uma lista vazia. Revogação ou
+  // expiração, por outro lado, são confirmações de que o acesso acabou.
+  try {
+    const devices = await AccountAPI.devices({ retrySession: false });
+    if (!accountRefreshIsCurrent(epoch)) return { status: "stale" };
+    state.account.devices = Array.isArray(devices.devices) ? devices.devices : [];
+  } catch (error) {
+    if (!accountRefreshIsCurrent(epoch)) return { status: "stale" };
+    if (changedAccountScopeCode(error)) return handleAccountScopeChanged(error);
+    if (invalidAccountSessionCode(error)) return invalidateAccountSession(error);
+  }
+
+  if (typeof CloudSync !== "undefined" && state.account.authenticated) {
+    const currentScope = FinanceStore.scope();
+    const precisaPreparar = mudouEscopo || __accountReadyScope !== currentScope || !CloudSync.isEnabled();
+    if (precisaPreparar) await bootstrapAccountLink();
+    else await CloudSync.syncNow();
+    if (!accountRefreshIsCurrent(epoch)) return { status: "stale" };
+    if (state.account.authenticated && CloudSync.isEnabled()) __accountReadyScope = currentScope;
+  } else if (typeof refreshOnboardingGate === "function") {
+    refreshOnboardingGate({ release: true });
+  }
   render();
+  return { status: state.account.sessionStatus };
+}
+
+function handleAccountScopeChanged(details) {
+  if (__accountScopeChangePromise) return __accountScopeChangePromise;
+  invalidateAccountRefresh();
+  clearAccountRecoveryRetry();
+  ++__guestLinkToken;
+  __accountReadyScope = "";
+  if (typeof CloudSync !== "undefined") CloudSync.disable();
+  state.account.authenticated = false;
+  state.account.knownAccount = FinanceStore.scope() !== GUEST_SCOPE;
+  state.account.sessionStatus = "unknown";
+  state.account.loading = state.account.knownAccount;
+  state.account.devices = [];
+  state.account.busy = false;
+  state.account.error = "";
+  render();
+
+  const promise = refreshAccountSession();
+  __accountScopeChangePromise = promise;
+  return promise.finally(() => {
+    if (__accountScopeChangePromise === promise) __accountScopeChangePromise = null;
+  });
+}
+
+async function handleSessionRefreshRequired(details) {
+  const expected = String(details && details.expectedAccountId || "").trim().toLowerCase();
+  // Uma resposta que chegou depois de outro login não ganha o direito de
+  // consultar ou religar nada para a identidade nova.
+  if (!expected || accountExpectedUserId() !== expected) return { status: "stale" };
+  const result = await refreshAccountSession();
+  if (!result || result.status !== "active" || accountExpectedUserId() !== expected) {
+    return { status: result && result.status || "stale" };
+  }
+  // A consulta pode ter sido compartilhada com uma recuperação que decidiu
+  // sincronizar enquanto o motor ainda estava ligado. Se esse ciclo recebeu o
+  // pedido de refresh e desligou o motor antes de a consulta terminar, a
+  // resposta `active` sozinha não o religa. Reavaliamos depois da promessa e
+  // preparamos novamente somente para a mesma identidade confirmada.
+  if (typeof CloudSync !== "undefined" && !CloudSync.isEnabled()) {
+    const expectedScope = FinanceStore.scope();
+    await bootstrapAccountLink();
+    if (accountExpectedUserId() !== expected || FinanceStore.scope() !== expectedScope) return { status: "stale" };
+    if (state.account.authenticated && CloudSync.isEnabled()) __accountReadyScope = expectedScope;
+  }
+  return result;
+}
+
+function recoverAccountSession(reason) {
+  // Foco, pageshow e online podem disparar enquanto o usuário está saindo ou
+  // apagando a cópia local. Uma consulta concorrente nesse intervalo poderia
+  // revalidar o cookie e baixar novamente o que acabou de ser removido.
+  if (__accountDisconnecting) return Promise.resolve(false);
+  if (__accountRecoveryPromise) return __accountRecoveryPromise;
+  const now = Date.now();
+  if (reason !== "online" && now - __accountRecoveryLastAt < ACCOUNT_RECOVERY_DEDUP_MS) return Promise.resolve(false);
+  __accountRecoveryLastAt = now;
+  const promise = (async () => {
+    if (state.account.sessionStatus === "active"
+      && typeof CloudSync !== "undefined" && CloudSync.isEnabled()) {
+      return CloudSync.syncNow();
+    }
+    return refreshAccountSession();
+  })();
+  __accountRecoveryPromise = promise;
+  return promise.finally(() => {
+    if (__accountRecoveryPromise === promise) __accountRecoveryPromise = null;
+  });
+}
+
+function startAccountRecoveryListeners() {
+  if (__accountRecoveryListenersStarted || typeof window === "undefined") return;
+  __accountRecoveryListenersStarted = true;
+  const recover = (reason) => {
+    recoverAccountSession(reason).catch((error) => {
+      if (typeof reportSafeError === "function") reportSafeError("sync", error, `account_recover_${reason}`);
+    });
+  };
+  window.addEventListener("online", () => recover("online"));
+  window.addEventListener("pageshow", () => recover("pageshow"));
+  window.addEventListener("focus", () => recover("focus"));
+  if (typeof document !== "undefined") {
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") recover("visible");
+    });
+  }
 }
 
 // ------------------------------------------------------------------------------
@@ -542,7 +983,14 @@ function authLinkErrorMessage(codigo) {
   return "O link não trouxe um código válido.";
 }
 
+let __accountBootstrapPromise = null;
+
 async function bootstrapAccount() {
+  if (!__accountBootstrapPromise) __accountBootstrapPromise = performAccountBootstrap();
+  return __accountBootstrapPromise;
+}
+
+async function performAccountBootstrap() {
   const params = new URLSearchParams(location.search || "");
   const code = params.get("code");
   const tokenHash = params.get("token_hash");
@@ -557,10 +1005,13 @@ async function bootstrapAccount() {
   // modelo de email seja trocado enquanto ainda ha link antigo circulando.
   if (tokenHash) {
     consumiu = true;
+    invalidateAccountRefresh();
     try {
       const result = await AccountAPI.verify(tokenHash, params.get("type") || (recuperacao ? "recovery" : "signup"));
       state.account.authenticated = true;
+      state.account.sessionStatus = "active";
       state.account.email = result.email || "";
+      state.account.userId = result.userId || "";
       state.account.pendingEmail = "";
       state.account.mode = result.purpose === "recovery" ? "password" : "login";
       state.account.message = result.purpose === "recovery"
@@ -569,10 +1020,13 @@ async function bootstrapAccount() {
     } catch (error) { state.account.error = error.message; }
   } else if (code) {
     consumiu = true;
+    invalidateAccountRefresh();
     try {
       const result = await AccountAPI.exchange(code);
       state.account.authenticated = true;
+      state.account.sessionStatus = "active";
       state.account.email = result.email || "";
+      state.account.userId = result.userId || "";
       state.account.pendingEmail = "";
       state.account.mode = result.purpose === "recovery" ? "password" : "login";
       state.account.message = result.purpose === "recovery" ? "Defina uma nova senha para concluir a recuperação." : "Email confirmado. Sua conta está pronta.";
@@ -610,7 +1064,20 @@ async function bootstrapAccount() {
     const hash = erroNoHash ? "" : (location.hash || "");
     history.replaceState(history.state, "", `${location.pathname}${query ? `?${query}` : ""}${hash}`);
   }
-  await refreshAccountSession();
+  const refreshed = await refreshAccountSession();
+  // O login por link já confirmou a sessão e definiu o cookie. Se a consulta
+  // seguinte encontrou uma queda de rede, essa queda não desfaz a confirmação:
+  // abrimos o escopo e iniciamos a descida usando o resultado explícito.
+  if (refreshed && refreshed.status === "unknown" && state.account.authenticated && state.account.userId) {
+    state.account.sessionStatus = "active";
+    const mudouEscopo = await applyAccountScope(state.account.userId);
+    if (typeof CloudSync !== "undefined") {
+      const currentScope = FinanceStore.scope();
+      if (mudouEscopo || __accountReadyScope !== currentScope || !CloudSync.isEnabled()) await bootstrapAccountLink();
+      else await CloudSync.syncNow();
+      if (state.account.authenticated && CloudSync.isEnabled()) __accountReadyScope = currentScope;
+    }
+  }
 }
 
 async function accountSubmit(kind) {
@@ -623,6 +1090,7 @@ async function accountSubmit(kind) {
     if (kind !== "recover" && form.password.length < 10) errors["account-password"] = "Use pelo menos 10 caracteres.";
   }
   if (Object.keys(errors).length) { showFormErrors(errors, "Revise os dados da conta."); return; }
+  if (kind === "login" || kind === "register") invalidateAccountRefresh();
   accountSetBusy(true, "");
   try {
     let result;
@@ -647,13 +1115,33 @@ async function accountSubmit(kind) {
       // diz as duas saídas, sem revelar qual delas é a sua.
       state.account.pendingEmail = result.email || form.email;
       state.account.message = "Se este email ainda não tinha conta, o link de confirmação foi enviado. Se já tinha, entre com sua senha.";
-    } else { state.account.authenticated = !!result.authenticated; state.account.email = result.email || form.email; state.account.pendingEmail = ""; state.account.message = kind === "register" ? "Conta criada." : "Acesso confirmado."; }
+    } else {
+      const previousUserId = String(state.account.userId || "");
+      state.account.authenticated = !!result.authenticated;
+      if (state.account.authenticated) state.account.sessionStatus = "active";
+      state.account.email = result.email || form.email;
+      state.account.userId = result.userId || state.account.userId || "";
+      if (previousUserId && previousUserId !== String(state.account.userId || "")) state.account.devices = [];
+      state.account.pendingEmail = "";
+      state.account.message = kind === "register" ? "Conta criada." : "Acesso confirmado.";
+    }
     state.account.busy = false;
-    await refreshAccountSession();
+    const refreshed = await refreshAccountSession();
+    if (refreshed && refreshed.status === "unknown" && state.account.authenticated && state.account.userId) {
+      state.account.sessionStatus = "active";
+      const mudouEscopo = await applyAccountScope(state.account.userId);
+      if (typeof CloudSync !== "undefined") {
+        const currentScope = FinanceStore.scope();
+        if (mudouEscopo || __accountReadyScope !== currentScope || !CloudSync.isEnabled()) await bootstrapAccountLink();
+        else await CloudSync.syncNow();
+        if (state.account.authenticated && CloudSync.isEnabled()) __accountReadyScope = currentScope;
+      }
+    }
   } catch (error) {
     // Também no erro: senha errada continua sendo senha, e a tentativa seguinte
     // é digitada do zero.
     form.password = "";
+    if (changedAccountScopeCode(error)) { await handleAccountScopeChanged(error); return; }
     // Entrar com email não confirmado deixa de ser recusa muda: a tela passa a
     // mostrar o cartão de confirmação pendente, com o reenvio à mão.
     if (error.code === "email_not_confirmed") state.account.pendingEmail = form.email;
@@ -674,48 +1162,185 @@ async function accountResend() {
 }
 
 async function accountLogout() {
-  accountSetBusy(true, "");
-  // Última chance de enviar o que ainda estava na fila: depois do logout o
-  // cookie some e o envio passa a ser recusado. Falhar aqui não impede a saída,
-  // porque os dados continuam inteiros neste aparelho.
-  if (typeof CloudSync !== "undefined") {
-    try { await CloudSync.syncNow(); } catch (error) { /* sai mesmo assim */ }
-    CloudSync.disable();
-  }
+  if (__accountDisconnecting) return false;
+  __accountDisconnecting = true;
   try {
-    await AccountAPI.logout();
+    invalidateAccountRefresh();
+    clearAccountRecoveryRetry();
+    accountSetBusy(true, "");
+    // Última chance de enviar o que ainda estava na fila: depois do logout o
+    // cookie some e o envio passa a ser recusado. Falhar aqui não impede a saída,
+    // porque os dados continuam inteiros neste aparelho.
+    if (typeof CloudSync !== "undefined") {
+      try { await CloudSync.syncNow(); } catch (error) { /* sai mesmo assim */ }
+      CloudSync.disable();
+    }
+    try {
+      await AccountAPI.logout();
+      // Se o banco visitante não abrir, sair ainda precisa esconder o snapshot
+      // da conta. A base permanece guardada no escopo próprio para um login
+      // futuro, mas não continua exposta na tela sem sessão.
+      state.data = defaultData();
+      state.account = freshAccountState();
+      state.account.loading = false;
+      state.account.configured = true;
+      state.account.sessionStatus = "guest";
+      // Sair descarrega o banco da conta e volta para o de visitante. Sem isto,
+      // o snapshot da conta continuaria em memória e na tela, e a próxima conta
+      // a entrar neste aparelho o veria.
+      await applyAccountScope("");
+      render();
+      return true;
+    } catch (error) {
+      if (changedAccountScopeCode(error)) { await handleAccountScopeChanged(error); return false; }
+      accountSetBusy(false, error.message);
+      return false;
+    }
+  } finally {
+    __accountDisconnecting = false;
+  }
+}
+
+// A alternativa da tela de Privacidade tem uma ordem mais rígida que o logout
+// comum: primeiro o servidor precisa confirmar que o cookie acabou; somente
+// depois é seguro destruir a base local. Se a rede falhar, nada local é
+// apagado, pois uma sessão ainda válida baixaria a conta inteira outra vez.
+async function accountForgetThisDevice() {
+  if (__accountDisconnecting) return false;
+  __accountDisconnecting = true;
+  try {
+    invalidateAccountRefresh();
+    clearAccountRecoveryRetry();
+    ++__guestLinkToken;
+    __accountReadyScope = "";
+    accountSetBusy(true, "");
+    if (typeof CloudSync !== "undefined") CloudSync.disable();
+
+    try {
+      await AccountAPI.logout();
+    } catch (error) {
+      if (changedAccountScopeCode(error)) {
+        await handleAccountScopeChanged(error);
+        return false;
+      }
+      accountSetBusy(false, error.message);
+      return false;
+    }
+
+    // Uma recuperação de sessão feita pelo próprio pedido de logout pode ter
+    // religado o motor antes da repetição HTTP. Invalidamos de novo antes da
+    // exclusão local.
+    if (typeof CloudSync !== "undefined") CloudSync.disable();
+    let localPurged = false;
+    try { localPurged = (await FinanceStore.purge()) === true; }
+    catch (_) { localPurged = false; }
+
+    // Mesmo se abrir o escopo visitante falhar logo abaixo, a interface não
+    // pode continuar apontando para o snapshot financeiro da conta que acabou
+    // de perder a sessão. Se o navegador recusou o purge, ocultamos a cópia que
+    // ainda pode existir no IndexedDB e explicamos a limpeza manual.
+    state.data = localPurged ? FinanceStore.snapshot() : defaultData();
+
     state.account = freshAccountState();
     state.account.loading = false;
     state.account.configured = true;
-    // Sair descarrega o banco da conta e volta para o de visitante. Sem isto,
-    // o snapshot da conta continuaria em memória e na tela, e a próxima conta
-    // a entrar neste aparelho o veria.
-    await applyAccountScope("");
+    state.account.sessionStatus = "guest";
+    let guestOpened = false;
+    try {
+      await applyAccountScope("");
+      guestOpened = true;
+    } catch (error) {
+      if (typeof reportSafeError === "function") reportSafeError("storage", error, "privacy_disconnect_scope");
+    }
+    if (typeof refreshOnboardingGate === "function") refreshOnboardingGate({ release: true });
+    if (localPurged && typeof clearSafeErrors === "function") clearSafeErrors();
     render();
-  } catch (error) { accountSetBusy(false, error.message); }
+
+    if (!guestOpened && localPurged) {
+      notify("A conta foi desconectada e a cópia local foi apagada, mas não foi possível abrir os dados de visitante deste aparelho.", "danger");
+      return false;
+    }
+    if (!guestOpened) {
+      notify("A conta foi desconectada, mas não foi possível apagar a cópia local nem abrir os dados de visitante. Limpe os dados deste site no navegador.", "danger");
+      return false;
+    }
+    if (!localPurged) {
+      notify("A conta foi desconectada, mas o navegador não permitiu apagar a cópia local. Limpe os dados deste site no navegador.", "danger");
+      return false;
+    }
+    notify("Dados apagados deste aparelho. A conta foi desconectada aqui.");
+    return true;
+  } finally {
+    __accountDisconnecting = false;
+  }
 }
 
 async function accountRevoke(deviceId) {
+  const expectedAccount = accountExpectedUserId();
+  const accountState = state.account;
   accountSetBusy(true, "");
-  try { const result = await AccountAPI.revokeDevice(deviceId); if (result.currentRevoked) { await accountLogout(); return; } await refreshAccountSession(); notify("Acesso do dispositivo revogado"); }
-  catch (error) { accountSetBusy(false, error.message); }
+  try {
+    const result = await AccountAPI.revokeDevice(deviceId);
+    if (result.currentRevoked) { await accountLogout(); return; }
+    // A resposta já confirmou a alteração. A linha sai sem esperar outra ida à
+    // rede; a consulta seguinte apenas reconcilia atividade dos demais aparelhos.
+    state.account.devices = (state.account.devices || []).filter((device) => String(device.id) !== String(deviceId));
+    await refreshAccountSession();
+    // Um refresh de foco pode ter começado antes do PATCH e reapresentado a
+    // lista antiga. A confirmação da revogação manda mais que essa resposta.
+    // Se outra conta entrou no intervalo, não tocamos no estado dela.
+    if (state.account !== accountState || accountExpectedUserId() !== expectedAccount) return;
+    state.account.devices = (state.account.devices || []).filter((device) => String(device.id) !== String(deviceId));
+    state.account.busy = false;
+    render();
+    notify("Acesso do dispositivo revogado");
+  } catch (error) {
+    if (changedAccountScopeCode(error)) { await handleAccountScopeChanged(error); return; }
+    accountSetBusy(false, error.message);
+  } finally {
+    // Falha inesperada durante o refresh não pode deixar toda a seção travada.
+    if (state.account === accountState && state.account.busy) {
+      state.account.busy = false;
+      render();
+    }
+  }
 }
 
 async function accountDelete() {
-  accountSetBusy(true, "");
-  // Parar antes de apagar: um ciclo em andamento recriaria o snapshot no
-  // servidor logo depois da exclusão.
-  if (typeof CloudSync !== "undefined") CloudSync.disable();
+  if (__accountDisconnecting) return false;
+  __accountDisconnecting = true;
   try {
-    await AccountAPI.deleteAccount(state.account.form.deletePassword, state.account.form.deleteText);
-    // Apagar a conta apaga também a cópia local dela. Deixar o banco da conta
-    // excluída neste navegador manteria vivo exatamente o dado que o usuário
-    // pediu para destruir, e num aparelho compartilhado isso é um vazamento.
-    // `purge()` já apaga o `localMeta` do escopo, e com ele o recibo e o diário
-    // de vínculo daquela conta. Nada sobra apontando para dados que não existem.
-    try { await FinanceStore.purge(); } catch (_) {}
-    state.account = freshAccountState(); state.account.loading = false; state.account.configured = true;
-    await applyAccountScope("");
-    render(); notify("Conta apagada no servidor e neste aparelho.");
-  } catch (error) { accountSetBusy(false, error.message); }
+    invalidateAccountRefresh();
+    clearAccountRecoveryRetry();
+    accountSetBusy(true, "");
+    // Parar antes de apagar: um ciclo em andamento recriaria o snapshot no
+    // servidor logo depois da exclusão.
+    if (typeof CloudSync !== "undefined") CloudSync.disable();
+    try {
+      await AccountAPI.deleteAccount(state.account.form.deletePassword, state.account.form.deleteText);
+      // Apagar a conta apaga também a cópia local dela. Deixar o banco da conta
+      // excluída neste navegador manteria vivo exatamente o dado que o usuário
+      // pediu para destruir, e num aparelho compartilhado isso é um vazamento.
+      // `purge()` já apaga o `localMeta` do escopo, e com ele o recibo e o diário
+      // de vínculo daquela conta. Nada sobra apontando para dados que não existem.
+      let localPurged = false;
+      try { localPurged = (await FinanceStore.purge()) === true; } catch (_) { localPurged = false; }
+      // A exclusão do servidor já foi confirmada. Mesmo que o navegador falhe
+      // ao apagar o IndexedDB ou abrir o escopo visitante, a tela não pode
+      // conservar o snapshot financeiro da conta removida.
+      state.data = localPurged ? FinanceStore.snapshot() : defaultData();
+      state.account = freshAccountState(); state.account.loading = false; state.account.configured = true; state.account.sessionStatus = "guest";
+      await applyAccountScope("");
+      render();
+      if (localPurged) notify("Conta apagada no servidor e neste aparelho.");
+      else notify("A conta foi apagada no servidor, mas o navegador não permitiu apagar a cópia local. Limpe os dados deste site no navegador.", "danger");
+      return true;
+    } catch (error) {
+      if (changedAccountScopeCode(error)) { await handleAccountScopeChanged(error); return false; }
+      accountSetBusy(false, error.message);
+      return false;
+    }
+  } finally {
+    __accountDisconnecting = false;
+  }
 }

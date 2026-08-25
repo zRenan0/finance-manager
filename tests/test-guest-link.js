@@ -20,6 +20,7 @@ const vm = require("vm");
 const path = require("path");
 const ROOT = path.join(__dirname, "..");
 const read = (file) => fs.readFileSync(path.join(ROOT, file), "utf8");
+const TEST_ACCOUNT_ID = "00000000-0000-4000-8000-000000000001";
 
 let ok = 0;
 let fail = 0;
@@ -57,6 +58,8 @@ function carregar(fetchImpl, storage) {
   vm.createContext(ctx);
   FONTES.forEach((file) => vm.runInContext(read(file), ctx, { filename: file }));
   ctx.run = (code) => vm.runInContext(code, ctx);
+  ctx.__accountId = TEST_ACCOUNT_ID;
+  ctx.run("CloudSync.configure({ getExpectedAccountId: () => __accountId })");
   return ctx;
 }
 

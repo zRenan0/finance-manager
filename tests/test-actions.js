@@ -48,6 +48,8 @@ check("cache foi renovado nesta release", cacheAtual >= 46, `v${cacheAtual}`);
 console.log("\n3. Popup com escolha alternativa");
 check("confirmação aceita uma ação alternativa", /alternateLabel: o\.alternateLabel/.test(app));
 check("fechamento executa onAlternate somente quando essa opção foi escolhida", /pending\.choice === "alternate"[\s\S]*pending\.onAlternate/.test(app));
+check("exclusão local de uma conta confirma logout antes de apagar", /onAlternate:\s*async\s*\(\)\s*=>\s*\{\s*await accountForgetThisDevice\(\)/.test(actions));
+check("banco de conta continua sendo tratado como nuvem com o motor parado", /const naNuvem = FinanceStore\.scope\(\) !== GUEST_SCOPE/.test(actions));
 check("ações tratam a escolha de saldo anterior", /case "confirmation-alternate"/.test(actions));
 check("cancelar a confirmação não apaga o formulário da meta", /case "confirmation-cancel": dismissOverlay\("confirmation"\); break;/.test(actions));
 

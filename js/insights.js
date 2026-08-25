@@ -210,7 +210,7 @@ const ANALYZE_ENDPOINT = "/api/analyze";
 // `Origin` sozinho não segura um `curl`). Isso significa cookie de sessão, que
 // só viaja com `credentials: "include"`, e o mesmo `X-Device-Id` que o resto
 // do app usa; sem ele o servidor não reconhece o aparelho e devolve 403.
-function analyzeHeaders() {
+function analyzeHeaders(expectedAccountId) {
   const headers = { "Content-Type": "application/json" };
   if (typeof accountDeviceId === "function") {
     try {
@@ -218,7 +218,43 @@ function analyzeHeaders() {
       if (typeof accountDeviceLabel === "function") headers["X-Device-Label"] = accountDeviceLabel();
     } catch (e) { /* sem localStorage: o servidor recusa e a UI explica */ }
   }
+  if (typeof accountExpectedUserId === "function") {
+    try { headers["X-Account-Id"] = String(expectedAccountId == null ? accountExpectedUserId() : expectedAccountId); }
+    catch (e) { headers["X-Account-Id"] = ""; }
+  }
   return headers;
+}
+
+function handleAnalyzeAccountScope(code, message, expectedAccountId) {
+  if (code !== "account_scope_changed" || typeof handleAccountScopeChanged !== "function") return;
+  if (typeof accountExpectedUserId === "function" && expectedAccountId
+    && accountExpectedUserId() !== expectedAccountId) return;
+  Promise.resolve(handleAccountScopeChanged({ code, message: message || "" })).catch((error) => {
+    if (typeof reportSafeError === "function") reportSafeError("sync", error, "analyze_account_scope");
+  });
+}
+
+async function fetchAnalyzeWithSessionRetry(requestBody, signal, expectedAccountId, retried) {
+  const res = await fetch(ANALYZE_ENDPOINT, {
+    method: "POST",
+    credentials: "include",
+    headers: analyzeHeaders(expectedAccountId),
+    body: JSON.stringify(requestBody),
+    signal,
+  });
+  let body = null;
+  try { body = await res.json(); } catch (e) { body = null; }
+  const code = body && body.code;
+  if (!res.ok && code === "session_refresh_required" && !retried
+    && typeof refreshAccountSession === "function"
+    && typeof accountExpectedUserId === "function"
+    && expectedAccountId && accountExpectedUserId() === expectedAccountId) {
+    const refreshed = await refreshAccountSession();
+    if (refreshed && refreshed.status === "active" && accountExpectedUserId() === expectedAccountId) {
+      return fetchAnalyzeWithSessionRetry(requestBody, signal, expectedAccountId, true);
+    }
+  }
+  return { res, body };
 }
 const ANALYZE_TIMEOUT_MS = 30000;
 
@@ -385,21 +421,18 @@ async function requestStructuredAnalysis(data, monthKey, options) {
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ANALYZE_TIMEOUT_MS);
+  const expectedAccountId = typeof accountExpectedUserId === "function" ? accountExpectedUserId() : "";
 
   try {
-    const res = await fetch(ANALYZE_ENDPOINT, {
-      method: "POST",
-      credentials: "include",
-      headers: analyzeHeaders(),
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-    });
-
-    let body = null;
-    try { body = await res.json(); } catch (e) { body = null; }
+    const { res, body } = await fetchAnalyzeWithSessionRetry(payload, controller.signal, expectedAccountId, false);
+    if (expectedAccountId && typeof accountExpectedUserId === "function"
+      && accountExpectedUserId() !== expectedAccountId) {
+      throw new InsightError("account_scope_changed", "A análise pertencia à conta anterior.");
+    }
 
     if (!res.ok) {
       const code = (body && body.code) || "SERVER";
+      handleAnalyzeAccountScope(code, body && body.message, expectedAccountId);
       throw new InsightError(code, messageForCode(code, res.status));
     }
     if (!body) throw new InsightError("BAD_RESPONSE", "A resposta da IA veio em um formato inesperado.");
@@ -433,6 +466,9 @@ function messageForCode(code, status) {
     case "DEVICE_REVOKED": return "O acesso deste aparelho foi revogado. Entre na conta novamente.";
     case "DEVICE_INVALID": return "Não foi possível identificar este aparelho. Recarregue a página e tente de novo.";
     case "ACCOUNT_UNAVAILABLE": return "As análises com IA exigem conta, e o serviço de contas não está configurado neste site.";
+    case "account_scope_changed": return "A conta desta sessão mudou. Aguarde a atualização e tente novamente.";
+    case "invalid_account_scope": return "Não foi possível confirmar qual conta deve receber esta análise.";
+    case "session_refresh_required": return "Não foi possível renovar a sessão para concluir a análise. Tente novamente.";
     case "BAD_JSON": return "Houve um problema ao montar os dados da análise.";
     default: return `Não foi possível gerar a análise agora (erro ${status || "desconhecido"}).`;
   }
@@ -452,23 +488,22 @@ async function requestNaturalEntryParse(text, categories) {
   }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15000);
+  const expectedAccountId = typeof accountExpectedUserId === "function" ? accountExpectedUserId() : "";
   try {
-    const res = await fetch(ANALYZE_ENDPOINT, {
-      method: "POST",
-      credentials: "include",
-      headers: analyzeHeaders(),
-      body: JSON.stringify({
-        modo: "lancamento",
-        texto: String(text || "").slice(0, 240),
-        hoje: todayIso(),
-        categorias: (categories || []).map((c) => ({ id: c.id, nome: c.name })).slice(0, 40),
-      }),
-      signal: controller.signal,
-    });
-    let body = null;
-    try { body = await res.json(); } catch (e) { body = null; }
+    const requestBody = {
+      modo: "lancamento",
+      texto: String(text || "").slice(0, 240),
+      hoje: todayIso(),
+      categorias: (categories || []).map((c) => ({ id: c.id, nome: c.name })).slice(0, 40),
+    };
+    const { res, body } = await fetchAnalyzeWithSessionRetry(requestBody, controller.signal, expectedAccountId, false);
+    if (expectedAccountId && typeof accountExpectedUserId === "function"
+      && accountExpectedUserId() !== expectedAccountId) {
+      throw new InsightError("account_scope_changed", "A análise pertencia à conta anterior.");
+    }
     if (!res.ok) {
       const code = (body && body.code) || "SERVER";
+      handleAnalyzeAccountScope(code, body && body.message, expectedAccountId);
       throw new InsightError(code, messageForCode(code, res.status));
     }
     if (!body || !body.lancamento) throw new InsightError("BAD_RESPONSE", "Não consegui entender essa frase.");

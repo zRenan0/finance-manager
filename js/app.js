@@ -82,7 +82,7 @@ let state = {
   toastTone: null,
   confirmation: null,
   privacyDeleteText: "",
-  account: typeof freshAccountState === "function" ? freshAccountState() : { loading: true, configured: false, authenticated: false, email: "", mode: "login", busy: false, error: "", message: "", form: { email: "", password: "", newPassword: "", deletePassword: "", deleteText: "" }, devices: [] },
+  account: typeof freshAccountState === "function" ? freshAccountState() : { loading: true, configured: false, authenticated: false, knownAccount: false, sessionStatus: "unknown", email: "", mode: "login", busy: false, error: "", message: "", form: { email: "", password: "", newPassword: "", deletePassword: "", deleteText: "" }, devices: [] },
   calculationDetail: null,
   contextualAssistant: { open: false, responseId: null },
   form: null,
@@ -1647,6 +1647,13 @@ async function init() {
   }
   state.booting = false;
   state.storageOk = isStorageAvailable();
+  // O escopo lembrado é uma conta conhecida, mesmo quando a rede ainda não
+  // confirmou o cookie nesta abertura. Alterações feitas offline precisam virar
+  // fila desde já; uma resposta guest troca o banco e reinicializa esta flag.
+  if (FinanceStore.scope() !== GUEST_SCOPE) {
+    FinanceStore.setOutboxEnabled(true);
+    state.account.knownAccount = true;
+  }
   state.form = freshTxForm();
   // Primeiro uso: a configuração de 4 passos assume a tela. Quem já usava o app
   // nunca cai aqui. `migrate` marca o onboarding como concluído para qualquer
@@ -1699,8 +1706,13 @@ async function init() {
     CloudSync.configure({
       applyRemote: (merged) => setDataFromRemote(merged),
       onStatus: () => scheduleRender(render),
+      onAuthInvalid: (details) => invalidateAccountSession(details),
+      onAccountScopeChanged: (details) => handleAccountScopeChanged(details),
+      onSessionRefreshRequired: (details) => handleSessionRefreshRequired(details),
+      getExpectedAccountId: () => state.account.authenticated ? state.account.userId : "",
     });
   }
+  if (typeof startAccountRecoveryListeners === "function") startAccountRecoveryListeners();
 
   // Outra aba do mesmo navegador gravou: esta aqui releu o banco e agora
   // precisa redesenhar com o que chegou. Sem isto, a aba parada continuaria
@@ -1734,7 +1746,14 @@ async function init() {
   // histórico e desbloquearia dezenas de medalhas de uma vez; um paredão de
   // celebrações que não celebra nada. Registramos o passado sem alarde; a
   // comemoração fica reservada para o que for conquistado daqui em diante.
-  bootstrapAccount();
+  try {
+    await bootstrapAccount();
+  } catch (error) {
+    if (typeof reportSafeError === "function") reportSafeError("sync", error, "account_bootstrap");
+    state.account.loading = !!state.account.knownAccount && !state.account.authenticated;
+    state.account.sessionStatus = "unknown";
+    render();
+  }
   idleTask(() => syncAchievements({ silent: true }));
   // [M8] Mesma decisão para as notificações: o histórico antigo entra já lido.
   idleTask(() => syncNotifications({ silent: !normalizeNotifications(state.data.notifications).initialized }));

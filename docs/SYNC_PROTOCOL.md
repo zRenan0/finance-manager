@@ -1,8 +1,10 @@
 # Protocolo de sincronização
 
-Versão atual do contrato: `2` (log de operações). O contrato `1` (snapshot
-inteiro) continua atendido **apenas para leitura**, para que um aparelho que
-ainda não recarregou a página consiga baixar seus dados e migrar.
+Versão atual do contrato: `3` (operações por registro para todas as coleções
+financeiras). O servidor ainda entende o corpo do contrato `2` e o contrato `1`
+(snapshot inteiro) apenas para leitura. Essa compatibilidade não dispensa o
+cabeçalho de isolamento `X-Account-Id`: uma página antiga que não o envia falha
+fechado até recarregar o aplicativo novo, sem descartar sua fila local.
 
 O aplicativo local continua sendo a fonte usada pela interface. O adaptador da
 nuvem não substitui o IndexedDB: a interface lê sempre da memória alimentada
@@ -24,7 +26,7 @@ que só apareciam com uso real:
    Acima disso a sincronização parava sem caminho de volta.
 5. **Nada sobrevivia ao fechamento da aba.** O que não tinha subido, se perdia.
 
-## Modelo do contrato 2
+## Modelo dos contratos 2 e 3
 
 Cada alteração é uma **operação**:
 
@@ -38,8 +40,10 @@ Cada alteração é uma **operação**:
 }
 ```
 
-`entity` é uma das coleções (`transactions`, `categories`, `goals`, `assets`) ou
-`settings`. `op` é `put` ou `delete`. Exclusão é uma operação de primeira
+`entity` identifica uma coleção sincronizável. No contrato 3, lançamentos,
+categorias, metas, patrimônio, contas, cartões, transferências, pagamentos de
+fatura e conciliações viajam por registro; preferências financeiras continuam
+em `settings`. `op` é `put` ou `delete`. Exclusão é uma operação de primeira
 classe: ela persiste no log e propaga, em vez de ser a ausência de um registro
 num documento.
 
@@ -48,7 +52,7 @@ num documento.
 Relógio lógico híbrido, gerado no cliente:
 
 ```
-<milissegundos com 15 dígitos>.<contador com 6 dígitos>.<id do aparelho>
+<milissegundos com 15 dígitos>.<contador com 6 dígitos>.<id do escritor>
 ```
 
 A largura é fixa para que a comparação de texto simples já seja a comparação de
@@ -61,8 +65,14 @@ ordem correta. As regras:
 - marcas mais de 24 h à frente do relógio local são ignoradas, para que um
   aparelho quebrado não empurre o relógio de todos.
 
+O escritor usa o id persistente do aparelho com um sufixo por aba
+(`:tab_<id>`). Isso impede duas abas do mesmo navegador, com o mesmo
+milissegundo e contador em memória, de cunharem a mesma revisão para conteúdos
+diferentes. Revisões anteriores sem o sufixo continuam válidas e reconhecidas
+como pertencentes ao aparelho.
+
 Consequência: quem escreveu **depois de ver** a alteração alheia vence, mesmo
-com o relógio atrasado. O desempate final é o id do aparelho, então os dois
+com o relógio atrasado. O desempate final é o id do escritor, então os dois
 lados chegam ao mesmo vencedor sem conversar.
 
 ### Compactação
@@ -120,21 +130,39 @@ o que sumiu vira lápide: restaurar é declarar o estado de agora, e a declaraç
 precisa vencer no outro aparelho em vez de ser desfeita por ele na volta
 seguinte.
 
+Restaurar um checkpoint só começa a alterar a base depois de ler todas as
+páginas. Cursor sem avanço e limite de páginas atingido cancelam a operação
+antes de criar qualquer exclusão. O cursor carrega a chave completa
+`(entity, entity_id)`, na mesma ordem da consulta, para não pular dois registros
+de entidades diferentes que compartilhem o mesmo id. Quando a leitura termina,
+base restaurada e fila de propagação são confirmadas na mesma transação local.
+
+Recarga, limpeza, restauração de backup e inicialização também capturam escopo,
+adaptador e geração; se a conta mudar no meio de um `await`, o resultado antigo
+é descartado sem marcar a conta nova como danificada. A recarga ainda confirma
+o debounce antes de ler e rejeita uma leitura que tenha começado antes de uma
+nova edição local. Descida, semeadura e vínculo do visitante capturam a versão
+que começaram a gravar; se uma edição chegar durante a transação, ela é
+reaplicada sobre o resultado e confirmada em seguida. Enquanto um novo escopo
+ainda está abrindo, ações da tela anterior são recusadas e não escrevem mirror.
+
 ### Quando o ciclo roda
 
 | Gatilho | Quando |
 |---------|--------|
-| alteração local | 4 s depois da última gravação (rajada vira um envio só) |
-| volta da rede | evento `online` |
-| retorno ao app | `visibilitychange`, tendo ou não fila para enviar |
-| volta periódica | a cada 60 s, **só** com o app à vista |
+| alteração local | até 1 s depois da última gravação (rajada vira um envio só) |
+| login ou recarga | primeira descida durante o bootstrap da conta |
+| volta da rede | evento `online`, inclusive para recuperar sessão desconhecida |
+| retorno ao app | `pageshow`, foco ou `visibilitychange`, tendo ou não fila para enviar |
+| app ocultado | tentativa curta de envio; a fila permanece se a página for interrompida |
+| volta periódica | a cada 15 s, **só** com o app à vista |
 | nova tentativa | 30 s depois de uma falha de rede |
 
 A volta periódica existe porque os outros gatilhos são todos de **saída**. Sem
 ela, dois aparelhos abertos ao mesmo tempo nunca ficavam iguais: quem estava
 parado não tinha o que enviar e ninguém ia buscar o que havia chegado. Ela não
-avisa a interface quando não encontra novidade, para não reconstruir a tela de
-minuto em minuto.
+avisa a interface quando não encontra novidade, para não reconstruir a tela a
+cada consulta de 15 segundos.
 
 ### Uma aba por vez
 
@@ -143,6 +171,12 @@ O ciclo roda dentro de um bloqueio nomeado (`navigator.locks`,
 desiste na hora: a outra já está enviando a mesma fila. Entre abas, gravações
 são anunciadas por `BroadcastChannel` e a aba avisada **relê o banco** antes de
 gravar de novo, para não reescrever por cima do que a outra fez.
+
+As chamadas de conta que podem escrever cookies usam outro bloqueio,
+`cofre-account-cookie`. Assim, uma renovação de sessão iniciada numa aba não
+consegue responder depois de um login feito em outra e sobrescrever os cookies
+novos. Sem Web Locks, a fila equivalente continua valendo dentro da própria aba;
+o cabeçalho de conta ainda impede leitura ou escrita no escopo errado.
 
 ## Isolamento por conta
 
@@ -153,10 +187,24 @@ conta após confirmação explícita do usuário.
 
 ## Sessão
 
-Toda chamada exige a sessão em cookie HttpOnly, `X-Device-Id` e
-`X-Sync-Protocol`. O servidor obtém o usuário pela sessão validada, nunca por um
-identificador enviado no corpo. O `CloudAdapter` ainda aceita Bearer para testes
-e servidores compatíveis, mas a publicação usa `authMode: "cookie"`.
+Toda chamada exige a sessão em cookie HttpOnly, `X-Account-Id`, `X-Device-Id` e
+`X-Sync-Protocol`. O cliente também envia `X-Device-Label` e `X-Device-Type`
+(`desktop`, `phone`, `tablet` ou `unknown`) como metadados de exibição, sem IP,
+modelo exato ou fingerprint. O servidor valida a sessão e compara seu usuário
+com `X-Account-Id` antes de consultar aparelho ou dados. O cabeçalho nunca
+autoriza sozinho. O `CloudAdapter` ainda aceita Bearer para testes e servidores
+compatíveis, mas a publicação usa `authMode: "cookie"`.
+
+Rotas com escopo não consomem refresh token. Quando o access token terminou e
+ainda existe refresh, elas respondem `401 session_refresh_required`, sem banco e
+sem `Set-Cookie`. O cliente passa pelo único ponto de renovação,
+`GET /api/account/session`, confirma a identidade e só então repete a operação.
+Se outra aba trocou de conta, `403 account_scope_changed` também não toca nos
+dados: a sessão é consultada novamente e o banco local correto é aberto.
+
+Atividade comum só atualiza um aparelho que ainda está ativo e nunca limpa
+`revoked_at`. Revogar encerra o acesso remoto daquele aparelho; somente um novo
+login explícito pode cadastrar ou reativar o identificador com outro segredo.
 
 ## Rotas
 
@@ -197,9 +245,10 @@ backend novo faria todo aparelho ainda no protocolo 2 recusar as respostas por
 ## Versões e a janela de atualização
 
 `minimumWriteProtocol` é configuração versionada do backend (`cofre_sync_config`),
-igual para todos os usuários. Durante a transição ela vale `2`: um cliente antigo
-continua gravando. No corte ela passa a `3`, e uma escrita abaixo do mínimo recebe
-**HTTP 426** com `protocol_upgrade_required`.
+igual para todos os usuários. Durante a transição ela vale `2`: o servidor ainda
+aceita esse formato quando o chamador já cumpre o contrato de isolamento por
+conta. No corte ela passa a `3`, e uma escrita abaixo do mínimo recebe **HTTP
+426** com `protocol_upgrade_required`.
 
 426, e não 409: o cliente trata 409 como conflito de documento, e descartaria a
 fila. Com 426 ele para o motor, mantém a fila local intacta e sobe tudo assim que
@@ -238,8 +287,11 @@ para a pessoa como confirmação de mesclagem.
   (`idempotency_mismatch`).
 - Operação com marca menor ou igual à gravada é ignorada: o servidor guarda a
   **vencedora**, não a última que chegou.
-- Aparelho revogado recebe `403` (`device_revoked`) e o cliente para o ciclo, sem
-  apagar a fila local.
+- Aparelho revogado recebe `403` (`device_revoked`) e o cliente volta ao escopo
+  visitante sem apagar a fila nem o banco local da conta. Respostas automáticas
+  não emitem cookies de exclusão, pois uma resposta antiga poderia apagar um
+  login mais novo; logout, exclusão da conta e revogação do aparelho atual são
+  os fluxos explícitos que limpam cookies.
 
 ## Limites
 

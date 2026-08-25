@@ -2,6 +2,86 @@
 
 ## Não publicado
 
+### A conta sincroniza sem depender da tela de sincronização
+
+- **Gravações passam a subir em até um segundo.** A fila continua no IndexedDB
+  quando a rede falha e uma tentativa curta também acontece ao ocultar o app.
+- **O outro aparelho busca mudanças sozinho.** Login, recarga, volta da rede,
+  `pageshow`, foco e retorno à aba disparam uma descida. Com o app visível, a
+  consulta periódica caiu de 60 para 15 segundos.
+- **Falha temporária de sessão não vira logout.** O estado fica desconhecido,
+  preserva o banco da conta e tenta se recuperar nos eventos do navegador. O
+  botão manual não aparece no caminho saudável; depois de uma falha, continua
+  disponível como tentativa imediata.
+- **Consulta de sessão não fica pendurada para sempre.** Cabeçalhos e corpo da
+  resposta têm limite de 12 segundos. Depois disso, o app preserva a conta
+  local, libera a tentativa compartilhada e volta a consultar na recuperação.
+- **O adaptador envia nome e tipo em toda rota de sincronização.** Isso impede
+  que a atividade comum substitua o nome legível por "Este dispositivo" e
+  permite distinguir computador, celular, tablet e navegador desconhecido.
+
+### Revogar acesso passou a encerrar a sessão de verdade
+
+- **Atividade comum nunca mais limpa uma revogação.** O carimbo de último acesso
+  exige aparelho, segredo e `revoked_at` vazio na mesma atualização. Se outro
+  aparelho revogar no intervalo, zero linhas são alteradas e a chamada antiga é
+  recusada.
+- **Só um novo login explícito reativa o aparelho.** Ele rotaciona o segredo e
+  registra novamente o acesso. Conta, sincronização e análise recusam os cookies
+  antigos; respostas automáticas não apagam um login mais novo por `Set-Cookie`
+  atrasado.
+- **A lista mostra somente acessos ativos e confirma a revogação no banco.** Um
+  alvo ausente ou já revogado não devolve mais sucesso falso. A migração
+  `20260825001552_add_device_type.sql` adiciona o tipo com uma lista fechada de
+  valores e leitura limitada à coluna necessária.
+- **Uma consulta antiga não recoloca o acesso revogado na tela.** A confirmação
+  do PATCH volta a filtrar a lista depois de qualquer refresh que já estivesse
+  em andamento.
+
+### A tela de acessos ganhou hierarquia e ações mais seguras
+
+- **Cada tipo tem ícone e cor próprios.** O extrato mostra contagem ativa,
+  horário, selo "Este aparelho" e uma linha visual entre os acessos. O aparelho
+  atual não oferece a ação de revogar.
+- **Revogados somem e cada ação diz o que faz.** "Atualizar" e "Revogar acesso"
+  deixam de depender de ícones sem texto, com alvos de toque de pelo menos 44 px
+  no celular.
+- **Apagar conta começa recolhido.** A área destrutiva não domina mais a tela e
+  só expõe senha e confirmação depois de ser aberta.
+- **"Apagar só aqui" agora encerra a sessão antes do purge.** Se o logout não
+  for confirmado, nada local é removido. Se a troca para visitante falhar após
+  sair ou excluir a conta, o snapshot financeiro antigo deixa de ser renderizado.
+
+### Abas diferentes não misturam contas nem sobrescrevem login
+
+- **Toda rota autenticada recebe `X-Account-Id`.** O backend compara a identidade
+  esperada com a sessão antes de consultar dispositivo, sincronização ou análise.
+  Uma aba antiga falha fechado e nunca aplica dados no banco local de outra conta.
+- **Apenas `/api/account/session` renova o refresh token.** As demais rotas
+  respondem `session_refresh_required` sem tocar no banco ou nos cookies; o
+  cliente confirma a sessão e repete somente para a mesma identidade.
+- **Chamadas que alteram cookies são serializadas entre abas.** O Web Lock
+  `cofre-account-cookie` impede uma renovação antiga de responder depois de um
+  login novo. Ciclos, cursores, fila, reset e restauração também carregam geração
+  e escopo, então respostas atrasadas são descartadas.
+- **Operações locais também ficam presas ao escopo em que começaram.** Recarga
+  entre abas, gravação pendente, restauração de backup, limpeza e inicialização
+  não podem terminar usando o adaptador de uma conta aberta depois. Uma
+  restauração de versão também para sem alterar nada se a paginação travar ou
+  exceder o limite seguro.
+- **Restauração não pode ficar pela metade.** O estado restaurado e a fila que o
+  envia aos outros aparelhos são gravados juntos. A paginação usa entidade e id
+  no cursor, e uma leitura atrasada da mesma conta não apaga uma edição feita
+  enquanto o banco estava sendo relido.
+- **Edição durante sincronização não some.** Descida, semeadura e vínculo do
+  visitante preservam uma alteração que chegue enquanto o IndexedDB grava. Uma
+  ação da tela antiga também é recusada enquanto o banco da nova conta abre, sem
+  criar mirror nem dados no escopo novo.
+- **Cada aba tem um desempate próprio no relógio lógico.** Duas gravações do
+  mesmo navegador, no mesmo milissegundo e contador, não recebem mais a mesma
+  revisão. Marcas antigas continuam sendo reconhecidas como pertencentes ao
+  aparelho.
+
 ### A suíte de navegador parou de falhar em cascata ou conforme o dia
 
 Os dois primeiros defeitos estavam no teste. A run remota revelou um terceiro

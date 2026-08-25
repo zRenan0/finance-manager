@@ -99,6 +99,7 @@ async function main() {
     baseUrl: "https://sync.example/api",
     token: "token-seguro",
     deviceId: "device-1",
+    accountId: "00000000-0000-4000-8000-000000000001",
     allowCrossOrigin: true,
     fetchImpl: async (url, options) => { calls.push({ url, options }); return queue.shift(); },
   };
@@ -122,6 +123,7 @@ async function main() {
     baseUrl: "https://sync.example/api",
     authMode: "cookie",
     deviceId: "device-cookie-1",
+    accountId: "00000000-0000-4000-8000-000000000001",
     allowCrossOrigin: true,
     fetchImpl: async (url, options) => { cookieCalls.push({ url, options }); return response(200, { protocol: 3, serverProtocol: 3, minimumWriteProtocol: 2, status: "ok", revision: "1" }); },
   };

@@ -81,9 +81,17 @@ async function main() {
 
   api.db = async (rota, opcoes) => {
     if (rota === "rpc/cofre_rate_hit") return [{ allowed: true, retry_after: 0, hits: 1 }];
-    // Só a LEITURA devolve a linha; a gravação (PATCH/POST) não é consultada.
     if (String(rota).startsWith("cofre_devices?") && (!opcoes || opcoes.method === undefined)) {
-      return [{ device_id: "device-confirm-1234", secret_hash: HASH_APARELHO, revoked_at: null }];
+      return [{
+        device_id: "device-confirm-1234", secret_hash: HASH_APARELHO,
+        label: "Este dispositivo", device_type: "unknown", revoked_at: null,
+      }];
+    }
+    // Atividade e autorização exigem a representação da linha alterada;
+    // zero linhas agora significa revogação concorrente, não sucesso.
+    if (String(rota).startsWith("cofre_devices?") && opcoes
+      && (opcoes.method === "PATCH" || opcoes.method === "POST")) {
+      return [{ device_id: "device-confirm-1234" }];
     }
     return null;
   };
@@ -133,7 +141,7 @@ async function main() {
   check("sessão sem confirmação não autentica", pendente.statusCode === 200 && corpoPendente.authenticated === false, pendente.body);
   check("a resposta avisa que falta confirmar", corpoPendente.pendingConfirmation === true, pendente.body);
   check("a resposta informa o email para o reenvio", corpoPendente.email === EMAIL, pendente.body);
-  check("a sessão pendente é limpa dos cookies", cookiesDe(pendente).length === 4, String(cookiesDe(pendente).length));
+  check("a sonda pendente não apaga cookies de um login mais novo", cookiesDe(pendente).length === 0, String(cookiesDe(pendente).length));
 
   api.auth.user = async () => ({ id: USER, email: EMAIL, email_confirmed_at: "2026-08-01T12:00:00Z" });
   const viva = await account.handler(event("GET", "session", null, { cookie: COOKIE_SESSAO }));

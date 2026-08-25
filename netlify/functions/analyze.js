@@ -72,7 +72,7 @@ function corsHeaders(originValue) {
   return {
     "Content-Type": "application/json; charset=utf-8",
     "Access-Control-Allow-Origin": originValue,
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Headers": "Content-Type, X-Account-Id, X-Device-Id, X-Device-Label, X-Device-Type",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Vary": "Origin",
     "Cache-Control": "no-store",
@@ -361,6 +361,22 @@ function sessionFailure(error) {
   if (code === "device_revoked" || code === "device_unknown") {
     return json(403, { error: "Este dispositivo teve o acesso revogado. Entre novamente.", code: "DEVICE_REVOKED" });
   }
+  if (code === "invalid_account_scope") {
+    return json(400, { error: "Identificação da conta inválida.", code: "invalid_account_scope" });
+  }
+  if (code === "account_scope_changed") {
+    return json(403, { error: "A conta ativa mudou. Atualize e tente novamente.", code: "account_scope_changed" });
+  }
+  if (code === "session_refresh_required") {
+    return json(401, { error: "A sessão precisa ser renovada antes de continuar.", code: "session_refresh_required" });
+  }
+  if (code === "request_timeout") {
+    return json(504, { error: "O serviço de conta demorou demais para responder.", code: "request_timeout" });
+  }
+  const statusCode = Number(error && error.statusCode) || 0;
+  if (statusCode >= 500) {
+    return json(statusCode, { error: "O serviço de conta não respondeu corretamente.", code: code || "upstream_unavailable" });
+  }
   return json(401, { error: "Entre na sua conta para usar as análises com IA.", code: "AUTH_REQUIRED" });
 }
 
@@ -486,8 +502,13 @@ exports.handler = async (event) => {
     res = sessionFailure({ code: "not_configured" });
   } else {
     let session;
-    try { session = await requireSession(event); }
-    catch (error) { session = null; res = sessionFailure(error); }
+    try {
+      session = await requireSession(event, { accountScope: true });
+    }
+    catch (error) {
+      session = null;
+      res = sessionFailure(error);
+    }
     if (session) {
       res = await route(event, session);
       // Renovação de sessão e carimbo de dispositivo precisam voltar ao cliente,

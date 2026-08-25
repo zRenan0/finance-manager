@@ -10,6 +10,8 @@
 6. Execute `npm run test:browser` com o Chromium do Playwright instalado.
 7. Envie a branch e aguarde a integração contínua concluir sem falhas.
 8. Se contas estiverem habilitadas, execute também o checklist de `docs/BACKEND_SETUP.md` no ambiente de homologação.
+9. Confirme que `20260825001552_add_device_type.sql` foi aplicada antes de publicar o cliente que envia `X-Device-Type`.
+10. Publique cliente e funções do contrato `X-Account-Id` juntos. Abas antigas falham fechado e mantêm a fila local até recarregar; não trate esse `400 invalid_account_scope` como perda de dados.
 
 ## Homologação
 
@@ -52,4 +54,9 @@ Se a verificação após a publicação falhar, promova na Vercel a última publ
 - O modo offline carrega o app completo.
 - Backup e restauração funcionam com a versão anterior.
 - A função de IA recusa origem e sessão inválidas.
+- Uma alteração salva no aparelho A aparece no B em até 20 segundos, sem abrir a tela de sincronização.
+- Recarregar ou voltar à aba no aparelho B busca alterações imediatamente.
+- Revogar B o remove da lista de acessos e faz conta, sincronização e análise recusarem os cookies antigos.
+- Em duas abas, entre na conta B enquanto A está aberta e confirme que A troca de escopo sem enviar, analisar, revogar ou apagar dados de B com a identidade antiga.
+- Deixe o access token expirar e confirme que sync/análise recebem `session_refresh_required`, passam por `/api/account/session` e retomam sem logout.
 - Nenhuma chave ou arquivo `.env` entrou na publicação.

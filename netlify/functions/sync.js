@@ -19,7 +19,7 @@ const crypto = require("crypto");
 const api = require("./_shared/supabase-rest");
 const { requireSession } = require("./account");
 const { headersOf, assertSameOrigin, readJson, json, safeFailure, deviceIdOf } = require("./_shared/http");
-const { validateOps, foldOps, emptySnapshot, MAX_OPS_PER_BATCH } = require("./_shared/finance-schema");
+const { validateOps, foldOps, emptySnapshot, MAX_OPS_PER_BATCH, OP_ENTITIES } = require("./_shared/finance-schema");
 
 const PROTOCOL = 3;
 const MINIMUM_WRITE_PROTOCOL = 2;
@@ -28,6 +28,7 @@ const SUPPORTED_PROTOCOLS = new Set([LEGACY_PROTOCOL, 2, PROTOCOL]);
 const PAGE_DEFAULT = 500;
 const PAGE_MAX = 1000;
 const CHECKPOINT_KEEP = 5;
+const HLC_PATTERN = /^\d{15}\.\d{6}\.[A-Za-z0-9][A-Za-z0-9:_-]{0,79}$/;
 
 function routeOf(event) {
   const fromQuery = event && event.queryStringParameters && event.queryStringParameters.action;
@@ -102,6 +103,36 @@ function cursorOf(event) {
   const limitRaw = Number(params.limit);
   const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(Math.floor(limitRaw), PAGE_MAX) : PAGE_DEFAULT;
   return { since, limit };
+}
+
+const CHECKPOINT_CURSOR_ID = /^[A-Za-z0-9][A-Za-z0-9:_-]{0,79}$/;
+
+function invalidCheckpointCursor() {
+  return Object.assign(new Error("Cursor da versão inválido"), { statusCode: 400, code: "invalid_cursor" });
+}
+
+// A chave primária da versão inclui entidade e id. O cursor precisa carregar
+// os dois campos e a consulta precisa usar a mesma ordem, senão duas entidades
+// com o mesmo id podem cair em páginas diferentes e a segunda ser ignorada.
+function checkpointCursorOf(raw) {
+  if (!raw) return null;
+  try {
+    if (String(raw).length > 256) throw invalidCheckpointCursor();
+    const decoded = JSON.parse(Buffer.from(String(raw), "base64url").toString("utf8"));
+    const entity = Array.isArray(decoded) ? String(decoded[0] || "") : "";
+    const entityId = Array.isArray(decoded) ? String(decoded[1] || "") : "";
+    if (decoded.length !== 2 || OP_ENTITIES.indexOf(entity) === -1 || !CHECKPOINT_CURSOR_ID.test(entityId)) {
+      throw invalidCheckpointCursor();
+    }
+    return { entity, entityId };
+  } catch (error) {
+    if (error && error.code === "invalid_cursor") throw error;
+    throw invalidCheckpointCursor();
+  }
+}
+
+function encodeCheckpointCursor(row) {
+  return Buffer.from(JSON.stringify([String(row.entity), String(row.entity_id)]), "utf8").toString("base64url");
 }
 
 async function revisionOf(session) {
@@ -182,7 +213,7 @@ async function handler(event) {
     if (!api.config().configured) return json(503, withProtocol(spoken, config, { status: "unavailable", code: "not_configured" }));
     const method = String(event.httpMethod || "GET").toUpperCase();
     if (method !== "GET") assertSameOrigin(event);
-    const session = await requireSession(event);
+    const session = await requireSession(event, { accountScope: true });
     const route = routeOf(event);
     config = await syncConfig();
 
@@ -255,9 +286,26 @@ async function handler(event) {
       if (result && result.status === "protocol_upgrade_required") {
         throw Object.assign(new Error("Atualize o aplicativo para continuar sincronizando"), { statusCode: 426, code: "protocol_upgrade_required" });
       }
+      if (result && result.status === "idempotency_mismatch") {
+        throw Object.assign(new Error("A exclusão repetida não corresponde ao pedido original"), {
+          statusCode: 409, code: "idempotency_mismatch",
+        });
+      }
+      if (!result || (result.status !== "applied" && result.status !== "replayed")) {
+        throw Object.assign(new Error("O servidor não confirmou a exclusão remota"), {
+          statusCode: 502, code: "invalid_commit",
+        });
+      }
+      const revision = String(result.revision || "");
+      const resetRev = String(result.reset_rev || "");
+      if (!/^\d{1,18}$/.test(revision) || !HLC_PATTERN.test(resetRev)) {
+        throw Object.assign(new Error("O servidor devolveu uma confirmação inválida para a exclusão"), {
+          statusCode: 502, code: "invalid_commit",
+        });
+      }
       return json(200, withProtocol(spoken, config, {
-        status: (result && result.status) || "applied",
-        revision: String((result && result.revision) || "0"), applied: Number(result && result.applied) || 0,
+        status: result.status, revision, resetRev,
+        applied: Number(result.applied) || 0,
       }), { cookies: session.cookies });
     }
 
@@ -297,10 +345,13 @@ async function handler(event) {
       }
       const { limit } = cursorOf(event);
       const after = String(params.after || "");
-      const filter = after ? `&entity_id=gt.${encodeURIComponent(after)}` : "";
+      const cursor = checkpointCursorOf(after);
+      const filter = cursor
+        ? `&or=(entity.gt.${encodeURIComponent(cursor.entity)},and(entity.eq.${encodeURIComponent(cursor.entity)},entity_id.gt.${encodeURIComponent(cursor.entityId)}))`
+        : "";
       const rows = await api.db(
         `cofre_sync_checkpoint_rows?select=entity,entity_id,op,rev,payload&checkpoint_id=eq.${encodeURIComponent(id)}${filter}`
-        + `&order=entity_id.asc&limit=${limit + 1}`,
+        + `&order=entity.asc,entity_id.asc&limit=${limit + 1}`,
         { token: session.token },
       );
       const list = Array.isArray(rows) ? rows : [];
@@ -308,7 +359,7 @@ async function handler(event) {
       const page = hasMore ? list.slice(0, limit) : list;
       return json(200, withProtocol(spoken, config, {
         status: "ok", hasMore,
-        after: page.length ? page[page.length - 1].entity_id : after,
+        after: page.length ? encodeCheckpointCursor(page[page.length - 1]) : after,
         ops: page.map((row) => ({ entity: row.entity, entityId: row.entity_id, op: row.op, rev: row.rev, payload: row.payload })),
       }), { cookies: session.cookies });
     }

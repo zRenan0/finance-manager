@@ -101,6 +101,19 @@ function rememberStorageScope(scope) {
 // que a comparação de texto simples (a < b) já seja a comparação correta.
 const HLC_PATTERN = /^\d{15}\.\d{6}\.[A-Za-z0-9][A-Za-z0-9:_-]{0,79}$/;
 const HLC_MAX_DRIFT_MS = 24 * 60 * 60 * 1000;   // 24h: além disso o relógio remoto é ignorado
+const SYNC_WRITER_TOKEN = (() => {
+  let token = "";
+  try {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      token = crypto.randomUUID().replace(/[^A-Za-z0-9]/g, "");
+    }
+  } catch (_error) { /* usa a alternativa local abaixo */ }
+  if (!token) {
+    token = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
+      .replace(/[^A-Za-z0-9]/g, "");
+  }
+  return (token || "localwriter").padEnd(12, "0").slice(0, 12);
+})();
 
 const SyncClock = (() => {
   let lastMillis = 0;
@@ -200,6 +213,25 @@ function syncDeviceId() {
     if (/^[A-Za-z0-9][A-Za-z0-9:_-]{7,79}$/.test(value || "")) return value;
   } catch (e) { /* armazenamento bloqueado */ }
   return "device-local";
+}
+
+// Duas abas compartilham o id persistente do aparelho, mas cada uma mantém o
+// contador HLC em memória. Sem um desempate por aba, duas escritas no mesmo
+// milissegundo podem receber exatamente a mesma revisão e representar conteúdos
+// diferentes. O sufixo continua dentro do componente opaco aceito pelo servidor.
+// O prefixo persistente continua identificando o dono para reenvio de lápides.
+function syncWriterId() {
+  const suffix = `:tab_${SYNC_WRITER_TOKEN}`;
+  return `${syncDeviceId().slice(0, 80 - suffix.length)}${suffix}`;
+}
+
+function isLocalSyncWriter(value) {
+  const writer = String(value || "");
+  const stable = syncDeviceId();
+  if (writer === stable) return true; // revisões criadas antes do sufixo por aba
+  const marker = ":tab_";
+  const baseLength = 80 - marker.length - SYNC_WRITER_TOKEN.length;
+  return writer.startsWith(`${stable.slice(0, baseLength)}${marker}`);
 }
 const SCHEMA_VERSION = 22;  // v22; privacidade, consentimentos e controles do usuário
 const LEGAL_REVIEW_DATE = "2026-08-18";
@@ -2120,9 +2152,9 @@ class IndexedDBAdapter extends StorageAdapter {
   }
 
   // ---- Fila persistente de sincronização ----
-  // Gravada na MESMA transação nunca: a fila é escrita depois do dado local,
-  // porque perder uma entrada da fila custa uma reenvio; perder o dado custa o
-  // lançamento do usuário.
+  // Quando a alteração nasce junto de uma operação que precisa subir, dado e
+  // fila entram na mesma transação por `writeChanges`. O método separado existe
+  // apenas para operações que não alteram a base financeira.
   async outboxAppend(entries) {
     if (!entries.length) return true;
     return this.writeChanges(null, { outboxAdds: entries });
@@ -2424,7 +2456,10 @@ async function cloudErrorBody(res) {
     // a conta avançou enquanto este aparelho preparava o vínculo.
     const revision = /^\d{1,18}$/.test(String(dados.revision == null ? "" : dados.revision)) ? String(dados.revision) : null;
     return { code, message, revision };
-  } catch (e) { return {}; }
+  } catch (e) {
+    if (e && e.name === "AbortError") throw e;
+    return {};
+  }
 }
 
 class CloudSyncError extends Error {
@@ -2450,11 +2485,14 @@ class CloudAdapter extends StorageAdapter {
     baseUrl = "/api/sync",
     token = null,
     deviceId = null,
+    deviceLabel = "Este navegador",
+    deviceType = "unknown",
+    accountId = "",
     fetchImpl = null,
     timeoutMs = 12000,
     allowCrossOrigin = false,
-      allowDestructive = false,
-      authMode = "bearer",
+    allowDestructive = false,
+    authMode = "bearer",
   } = {}) {
     super();
     if (!enabled) throw new CloudSyncError("A sincronização em nuvem está desativada.", "disabled");
@@ -2479,6 +2517,14 @@ class CloudAdapter extends StorageAdapter {
     this.authMode = authMode === "cookie" ? "cookie" : "bearer";
     this.token = this.authMode === "cookie" ? "" : token.trim();
     this.deviceId = normalizeRecordId(deviceId, "device");
+    const cleanLabel = String(deviceLabel || "")
+      .replace(/[\x00-\x1F\x7F]/g, " ").replace(/\s+/g, " ").trim().slice(0, 50);
+    this.deviceLabel = cleanLabel || "Este navegador";
+    this.deviceType = ["desktop", "phone", "tablet", "unknown"].includes(deviceType) ? deviceType : "unknown";
+    this.accountId = String(accountId || "").trim().toLowerCase();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(this.accountId)) {
+      throw new CloudSyncError("A sincronização não recebeu a identidade válida da conta.", "invalid_account_scope");
+    }
     this.fetch = fetchImpl || ((...a) => fetch(...a));
     this.timeoutMs = clamp(Number(timeoutMs) || 12000, 1000, 30000);
     this.allowDestructive = allowDestructive === true;
@@ -2494,6 +2540,9 @@ class CloudAdapter extends StorageAdapter {
       "Content-Type": "application/json",
       "Accept": "application/json",
       "X-Device-Id": this.deviceId,
+      "X-Device-Label": this.deviceLabel,
+      "X-Device-Type": this.deviceType,
+      "X-Account-Id": this.accountId,
       "X-Sync-Protocol": String(CLOUD_SYNC_PROTOCOL),
       ...(extra || {}),
     };
@@ -2517,13 +2566,13 @@ class CloudAdapter extends StorageAdapter {
         referrerPolicy: "no-referrer",
       });
     } catch (error) {
+      clearTimeout(timer);
       if (error && error.name === "AbortError") throw new CloudSyncError("O servidor de sincronização não respondeu a tempo.", "timeout");
       throw new CloudSyncError("Não foi possível acessar o servidor de sincronização.", "network_error");
-    } finally {
-      clearTimeout(timer);
     }
 
-    if (!res.ok) {
+    try {
+      if (!res.ok) {
       // A RAZÃO DA FALHA VEM NO CORPO, E ERA JOGADA FORA.
       //
       // O servidor deste app responde erro com `{ code, message }` escrito para
@@ -2531,43 +2580,60 @@ class CloudAdapter extends StorageAdapter {
       // tabelas no banco", "origem recusada" e "email não confirmado" viravam a
       // mesma frase sem conteúdo, e a tela mostrava "Sincronização com falha"
       // sem nunca dizer a falha.
-      const detalhe = await cloudErrorBody(res);
+        const detalhe = await cloudErrorBody(res);
+      // A identidade é conferida antes de o backend devolver qualquer operação.
+      // Preserve o código para a camada de sessão trocar de escopo sem tratar a
+      // conta nova como logout nem aplicar um payload da conta errada.
+        if (detalhe.code === "account_scope_changed" || detalhe.code === "invalid_account_scope"
+          || detalhe.code === "session_refresh_required") {
+          throw new CloudSyncError(detalhe.message || "A conta desta sessão mudou.", detalhe.code, res.status);
+        }
       // `remote_changed` é o único 409 que NÃO é conflito de documento: ele diz
       // que a conta remota avançou entre a leitura e a confirmação do vínculo.
       // Tratá-lo como conflito faria o motor descartar a fila do vínculo.
-      if (res.status === 409) {
-        if (detalhe.code === "remote_changed") {
-          const erro = new CloudSyncError(detalhe.message || "A conta mudou durante a operação.", "remote_changed", res.status);
-          erro.revision = detalhe.revision != null ? String(detalhe.revision) : null;
-          throw erro;
+        if (res.status === 409) {
+          if (detalhe.code === "remote_changed") {
+            const erro = new CloudSyncError(detalhe.message || "A conta mudou durante a operação.", "remote_changed", res.status);
+            erro.revision = detalhe.revision != null ? String(detalhe.revision) : null;
+            throw erro;
+          }
+          throw new CloudSyncConflictError(res.headers && res.headers.get ? res.headers.get("x-sync-revision") : null);
         }
-        throw new CloudSyncConflictError(res.headers && res.headers.get ? res.headers.get("x-sync-revision") : null);
-      }
-      if (res.status === 401 || res.status === 403) {
+        if (res.status === 401 || res.status === 403) {
         // O código continua sendo um dos DOIS que o motor sabe tratar (parar em
         // vez de insistir); só a frase passa a ser a de verdade.
-        const codigo = detalhe.code === "device_revoked" ? "device_revoked" : "session_expired";
-        throw new CloudSyncError(detalhe.message || "A sessão de sincronização expirou.", codigo, res.status);
+          const codigo = detalhe.code === "device_revoked" || detalhe.code === "device_unknown"
+            ? detalhe.code
+            : "session_expired";
+          throw new CloudSyncError(detalhe.message || "A sessão de sincronização expirou.", codigo, res.status);
+        }
+        throw new CloudSyncError(detalhe.message || `O servidor de sincronização recusou a operação (${res.status}).`, detalhe.code || "server_error", res.status);
       }
-      throw new CloudSyncError(detalhe.message || `O servidor de sincronização recusou a operação (${res.status}).`, detalhe.code || "server_error", res.status);
-    }
-    if (res.status === 204) return null;
+      if (res.status === 204) return null;
 
-    const contentType = String(res.headers && res.headers.get ? res.headers.get("content-type") : "").toLowerCase();
-    const contentLength = Number(res.headers && res.headers.get ? res.headers.get("content-length") : 0);
-    if (!contentType.includes("application/json")) throw new CloudSyncError("Resposta de sincronização em formato inválido.", "invalid_content_type");
-    if (Number.isFinite(contentLength) && contentLength > CLOUD_MAX_RESPONSE_BYTES) {
-      throw new CloudSyncError("A resposta de sincronização excede o limite permitido.", "response_too_large");
+      const contentType = String(res.headers && res.headers.get ? res.headers.get("content-type") : "").toLowerCase();
+      const contentLength = Number(res.headers && res.headers.get ? res.headers.get("content-length") : 0);
+      if (!contentType.includes("application/json")) throw new CloudSyncError("Resposta de sincronização em formato inválido.", "invalid_content_type");
+      if (Number.isFinite(contentLength) && contentLength > CLOUD_MAX_RESPONSE_BYTES) {
+        throw new CloudSyncError("A resposta de sincronização excede o limite permitido.", "response_too_large");
+      }
+      const text = await res.text();
+      if (text.length > CLOUD_MAX_RESPONSE_BYTES) throw new CloudSyncError("A resposta de sincronização excede o limite permitido.", "response_too_large");
+      let payload;
+      try { payload = JSON.parse(text); }
+      catch (e) { throw new CloudSyncError("Resposta de sincronização inválida.", "invalid_json"); }
+      if (!payload || payload.protocol !== CLOUD_SYNC_PROTOCOL) {
+        throw new CloudSyncError("Versão incompatível do protocolo de sincronização.", "protocol_mismatch");
+      }
+      return payload;
+    } catch (error) {
+      if (error && error.name === "AbortError") {
+        throw new CloudSyncError("O servidor de sincronização não respondeu a tempo.", "timeout");
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
     }
-    const text = await res.text();
-    if (text.length > CLOUD_MAX_RESPONSE_BYTES) throw new CloudSyncError("A resposta de sincronização excede o limite permitido.", "response_too_large");
-    let payload;
-    try { payload = JSON.parse(text); }
-    catch (e) { throw new CloudSyncError("Resposta de sincronização inválida.", "invalid_json"); }
-    if (!payload || payload.protocol !== CLOUD_SYNC_PROTOCOL) {
-      throw new CloudSyncError("Versão incompatível do protocolo de sincronização.", "protocol_mismatch");
-    }
-    return payload;
   }
 
   async init() {
@@ -2646,8 +2712,19 @@ class CloudAdapter extends StorageAdapter {
       headers: { "Idempotency-Key": mutationId },
       body: { protocol: CLOUD_SYNC_PROTOCOL, mutationId, rev },
     });
-    this.revision = result && typeof result.revision === "string" ? result.revision : this.revision;
-    return { revision: this.revision, applied: Number(result && result.applied) || 0 };
+    if (!result || (result.status !== "applied" && result.status !== "replayed")) {
+      const code = result && result.status === "idempotency_mismatch" ? "idempotency_mismatch" : "invalid_commit";
+      throw new CloudSyncError("O servidor não confirmou a exclusão remota.", code);
+    }
+    if (!/^\d{1,18}$/.test(String(result.revision || "")) || !isSyncRev(result.resetRev)) {
+      throw new CloudSyncError("O servidor devolveu uma confirmação inválida para a exclusão.", "invalid_commit");
+    }
+    this.revision = String(result.revision);
+    return {
+      revision: this.revision,
+      resetRev: result.resetRev,
+      applied: Number(result.applied) || 0,
+    };
   }
 
   async createCheckpoint(label) {
@@ -2665,9 +2742,9 @@ class CloudAdapter extends StorageAdapter {
     return (result && Array.isArray(result.checkpoints)) ? result.checkpoints : [];
   }
 
-  // Conteúdo de uma versão, paginado por id de registro. Paginado porque uma
-  // versão tem o tamanho da base, e é justamente o corpo único gigante que o
-  // protocolo 2 existe para evitar.
+  // Conteúdo de uma versão, paginado por cursor opaco da chave completa.
+  // Paginado porque uma versão tem o tamanho da base, e é justamente o corpo
+  // único gigante que o protocolo 2 existe para evitar.
   async readCheckpoint(checkpointId, after) {
     this._requireReady(false);
     const query = `?id=${encodeURIComponent(String(checkpointId || ""))}&limit=500${after ? `&after=${encodeURIComponent(after)}` : ""}`;
@@ -2692,7 +2769,9 @@ class CloudAdapter extends StorageAdapter {
 const FinanceStore = (() => {
   let adapter = null;
   let scope = GUEST_SCOPE;         // conta dona dos dados carregados agora
+  let storageGeneration = 0;
   let snapshot = defaultData();
+  let snapshotVersion = 0;        // invalida leituras iniciadas antes de uma mutação
   let lastPersisted = null;        // cópia usada como base do diff
   let ready = false;
   let healthy = true;
@@ -2711,6 +2790,35 @@ const FinanceStore = (() => {
   let outboxEnabled = false;       // só enfileira quando há conta ligada
   const errorListeners = [];
   const recoveryListeners = [];
+
+  function storeContextIsCurrent(expectedScope, expectedAdapter, expectedGeneration) {
+    return scope === expectedScope
+      && adapter === expectedAdapter
+      && (expectedGeneration == null || storageGeneration === expectedGeneration);
+  }
+
+  function storageCancelledError() {
+    const error = new Error("O armazenamento mudou de escopo durante a sincronização.");
+    error.code = "sync_cancelled";
+    return error;
+  }
+
+  function installSnapshot(next) {
+    snapshot = next;
+    snapshotVersion += 1;
+    return snapshot;
+  }
+
+  function assertStoreScope(expectedScope, expectedAdapter, expectedGeneration) {
+    if (!expectedScope) return;
+    if (!storeContextIsCurrent(expectedScope, expectedAdapter || adapter, expectedGeneration)) {
+      throw storageCancelledError();
+    }
+  }
+
+  function storageOperationCancelled(error) {
+    return !!(error && error.code === "sync_cancelled");
+  }
 
   // Impressão digital por REFERÊNCIA: se o objeto não foi substituído, ele não
   // mudou (o app usa atualização imutável). Só serializamos quando a referência
@@ -2766,6 +2874,18 @@ const FinanceStore = (() => {
     } catch (e) { settingRevs = {}; }
   }
 
+  function observeSnapshotClock(data) {
+    loadClockState();
+    SYNC_ENTITY_FIELDS.forEach((field) => {
+      ((data && data[field]) || []).forEach((record) => SyncClock.observe(record && record.syncRev));
+    });
+    const graveyard = normalizeGraveyard(data && data.graveyard);
+    SYNC_ENTITY_FIELDS.forEach((field) => {
+      Object.values(graveyard[field] || {}).forEach((entry) => SyncClock.observe(entry && entry.rev));
+    });
+    saveClockState();
+  }
+
   function saveClockState() {
     try { localStorage.setItem(clockKey(), JSON.stringify({ clock: SyncClock.state(), settings: settingRevs })); }
     catch (e) { /* cota cheia: o relógio ainda funciona nesta sessão */ }
@@ -2817,8 +2937,8 @@ const FinanceStore = (() => {
         // dele, e a edição não podia ser descartada.
         const key = `${field} ${rec.id}`;
         const echo = remoteApplied.get(key);
+        if (echo !== undefined) remoteApplied.delete(key);
         if (echo !== undefined && echo === fingerprintOf(rec)) {
-          remoteApplied.delete(key);
           SyncClock.observe(rec.syncRev);
           return;
         }
@@ -2842,7 +2962,7 @@ const FinanceStore = (() => {
         // aponta para outro aparelho. Sem esta checagem, cada exclusão remota
         // gerava um eco que o outro lado reenviava de volta.
         const parsed = SyncClock.parse(rev);
-        if (parsed && parsed.device !== SyncClock.device()) return;
+        if (parsed && !isLocalSyncWriter(parsed.device)) return;
         ops.push({ entity: field, entityId: id, op: "delete", rev });
       });
     }
@@ -2851,10 +2971,10 @@ const FinanceStore = (() => {
       // Mesmo eco, do lado das configurações: se o valor gravado é exatamente o
       // que acabou de chegar do servidor, ele não é uma alteração deste
       // aparelho e não deve ser reivindicado como tal.
-      if (Object.prototype.hasOwnProperty.call(remoteSettingEcho, key)
-        && remoteSettingEcho[key] === JSON.stringify(changeSet.settings[key])) {
+      if (Object.prototype.hasOwnProperty.call(remoteSettingEcho, key)) {
+        const isEcho = remoteSettingEcho[key] === JSON.stringify(changeSet.settings[key]);
         delete remoteSettingEcho[key];
-        return;
+        if (isEcho) return;
       }
       const rev = SyncClock.tick();
       settingRevs[key] = rev;
@@ -2898,16 +3018,31 @@ const FinanceStore = (() => {
     return expanded;
   }
 
-  async function applyRemoteOps(ops) {
+  async function applyRemoteOps(ops, expectedScope, options) {
+    if (!ready) throw storageCancelledError();
     const rawList = Array.isArray(ops) ? ops : [];
-    if (!rawList.length) return { changed: false, data: snapshot, applied: 0 };
+    const outboxAdds = Array.isArray(options && options.outboxAdds) ? options.outboxAdds : [];
+    const storageAttempt = Math.max(0, Number(options && options._storageAttempt) || 0);
+    if (!rawList.length && !outboxAdds.length) return { changed: false, data: snapshot, applied: 0 };
+    const targetScope = expectedScope || scope;
+    const targetAdapter = adapter;
+    const targetGeneration = storageGeneration;
+    assertStoreScope(targetScope, targetAdapter, targetGeneration);
     const flushed = await flush();
     if (!flushed || !adapter) throw new Error("Não foi possível preparar o armazenamento para a descida");
+    assertStoreScope(targetScope, targetAdapter, targetGeneration);
+    const baseSnapshot = snapshot;
+    const baseVersion = snapshotVersion;
     const list = expandLegacyListOps(rawList);
+    const retryAfterStorageChange = async (error) => {
+      if (!storageChangedDuringOperation(error) || storageAttempt >= 3) throw error;
+      await reload({ scope: targetScope, adapter: targetAdapter, generation: targetGeneration });
+      return applyRemoteOps(rawList, targetScope, { ...(options || {}), _storageAttempt: storageAttempt + 1 });
+    };
 
     const maps = {};
-    SYNC_ENTITY_FIELDS.forEach((f) => { maps[f] = indexById(snapshot[f] || []); });
-    let graveyard = normalizeGraveyard(snapshot.graveyard);
+    SYNC_ENTITY_FIELDS.forEach((f) => { maps[f] = indexById(baseSnapshot[f] || []); });
+    let graveyard = normalizeGraveyard(baseSnapshot.graveyard);
     const settings = {};
     const nextSettingRevs = { ...settingRevs };
     const nextSettingEcho = { ...remoteSettingEcho };
@@ -2958,31 +3093,79 @@ const FinanceStore = (() => {
     });
 
     if (!changed) {
+      try {
+        await enqueueScopedWrite(targetScope, targetAdapter, targetGeneration, async () => {
+          await assertPhysicalSnapshot(targetScope, targetAdapter, targetGeneration, baseSnapshot);
+          if (outboxAdds.length) await targetAdapter.writeChanges(null, { outboxAdds });
+        });
+      } catch (error) {
+        return retryAfterStorageChange(error);
+      }
+      assertStoreScope(targetScope, targetAdapter, targetGeneration);
       observedRevs.forEach((rev) => SyncClock.observe(rev));
       saveClockState();
+      if (outboxAdds.length) markHealthy();
       return { changed: false, data: snapshot, applied: 0 };
     }
 
     const assembled = {
-      ...snapshot,
+      ...baseSnapshot,
       ...settings,
       graveyard,
     };
     SYNC_ENTITY_FIELDS.forEach((field) => { assembled[field] = Array.from(maps[field].values()); });
     const next = migrate(assembled);
-    const changeSet = computeChangeSet(snapshot, next);
+    const changeSet = computeChangeSet(baseSnapshot, next);
     // Operação remota que a normalização anula (um carimbo que `migrate`
     // reescreve para o mesmo valor) não gera gravação. Isso não é falha: o
     // conteúdo já está aqui. O que ela não pode fazer é avançar o cursor sem
     // registrar a revisão observada, e por isso a marca continua sendo salva.
     if (changeSet) {
-      if (!adapter) throw new Error("Armazenamento local indisponível para a descida");
+      assertStoreScope(targetScope, targetAdapter, targetGeneration);
       const stamp = Date.now();
       changeSet.settings.lastPersistAt = stamp;
       next.lastPersistAt = stamp;
-      await enqueueWrite(() => adapter.writeChanges(changeSet));
     }
-    snapshot = next;
+    try {
+      await enqueueScopedWrite(targetScope, targetAdapter, targetGeneration, async () => {
+        await assertPhysicalSnapshot(targetScope, targetAdapter, targetGeneration, baseSnapshot);
+        if (changeSet || outboxAdds.length) {
+          await targetAdapter.writeChanges(changeSet, outboxAdds.length ? { outboxAdds } : undefined);
+        }
+      });
+      assertStoreScope(targetScope, targetAdapter, targetGeneration);
+    } catch (error) {
+      return retryAfterStorageChange(error);
+    }
+    if (snapshotVersion !== baseVersion) {
+      // Uma edição local pode acontecer enquanto a transação remota aguarda o
+      // IndexedDB. O banco já contém `next`; reaplicamos somente a diferença
+      // feita depois de `baseSnapshot`, sobre esse estado remoto, e a gravamos
+      // com uma revisão posterior. Nenhum dos dois lados desaparece.
+      const concurrentSnapshot = snapshot;
+      const localChanges = computeChangeSet(baseSnapshot, concurrentSnapshot);
+      settingRevs = nextSettingRevs;
+      remoteSettingEcho = nextSettingEcho;
+      Object.keys((localChanges && localChanges.settings) || {}).forEach((key) => {
+        delete remoteSettingEcho[key];
+      });
+      observedRevs.forEach((rev) => SyncClock.observe(rev));
+      let rebasedSnapshot = overlayChangeSet(next, localChanges);
+      // A lápide pode ter nascido antes de observarmos a revisão remota que
+      // estava em voo. Recarimbá-la agora garante que uma exclusão feita depois
+      // da edição remota vença também no servidor e nos outros aparelhos.
+      rebasedSnapshot = restampConcurrentDeletes(baseSnapshot, concurrentSnapshot, rebasedSnapshot);
+      saveClockState();
+      lastPersisted = shallowSnapshot(next);
+      installSnapshot(rebasedSnapshot);
+      const rebased = await flush();
+      if (!rebased) throw storageCancelledError();
+      assertStoreScope(targetScope, targetAdapter, targetGeneration);
+      markHealthy();
+      announceWrite();
+      return { changed: true, data: snapshot, applied };
+    }
+    installSnapshot(next);
     lastPersisted = shallowSnapshot(next);
     settingRevs = nextSettingRevs;
     remoteSettingEcho = nextSettingEcho;
@@ -3045,7 +3228,8 @@ const FinanceStore = (() => {
     return igualAoPadrao(limpo, modelo);
   }
 
-  function collectSyncOps(restamp) {
+  function collectSyncOps(restamp, sourceData) {
+    const source = sourceData || snapshot;
     const ops = [];
     const stamped = { puts: {}, deletes: {}, settings: {} };
     const stampedSettings = new Set();
@@ -3057,7 +3241,7 @@ const FinanceStore = (() => {
       modelos[field] = padrao ? indexById(padrao[field] || []) : new Map();
     });
     GRAVEYARD_COLLECTIONS.forEach((field) => {
-      (snapshot[field] || []).forEach((rec) => {
+      (source[field] || []).forEach((rec) => {
         if (!rec || !rec.id) return;
         let rev = restamp ? "" : normalizeSyncRev(rec.syncRev);
         if (!rev) {
@@ -3071,27 +3255,27 @@ const FinanceStore = (() => {
         ops.push({ entity: field, entityId: rec.id, op: "put", rev, payload: rec });
       });
     });
-    stampedSettings.forEach((field) => { stamped.settings[field] = snapshot[field]; });
+    stampedSettings.forEach((field) => { stamped.settings[field] = source[field]; });
     SETTING_KEYS.forEach((key) => {
       if (SYNC_SKIP_SETTINGS.has(key)) return;
-      if (snapshot[key] === undefined) return;
+      if (source[key] === undefined) return;
       let rev = restamp ? "" : normalizeSyncRev(settingRevs[key]);
       if (!rev) {
-        if (padrao && igualAoPadrao(snapshot[key], padrao[key])) return;
+        if (padrao && igualAoPadrao(source[key], padrao[key])) return;
         rev = SyncClock.tick();
         settingRevs[key] = rev;
       }
-      ops.push({ entity: "settings", entityId: key, op: "put", rev, payload: snapshot[key] });
+      ops.push({ entity: "settings", entityId: key, op: "put", rev, payload: source[key] });
     });
     // Exclusões feitas AQUI enquanto não havia para onde mandar. As de outro
     // aparelho ficam de fora pelo mesmo motivo de `stampChangeSet`: reenviar a
     // exclusão alheia seria reivindicá-la como nossa.
-    const grave = normalizeGraveyard(snapshot.graveyard);
+    const grave = normalizeGraveyard(source.graveyard);
     GRAVEYARD_COLLECTIONS.forEach((field) => {
       Object.keys(grave[field] || {}).forEach((id) => {
         const rev = normalizeSyncRev((grave[field][id] || {}).rev);
         const parsed = rev ? SyncClock.parse(rev) : null;
-        if (!parsed || parsed.device !== SyncClock.device()) return;
+        if (!parsed || !isLocalSyncWriter(parsed.device)) return;
         ops.push({ entity: field, entityId: id, op: "delete", rev });
       });
     });
@@ -3101,36 +3285,68 @@ const FinanceStore = (() => {
 
   // Marcas, fila e diário de semeadura confirmam juntos. O recibo definitivo
   // nasce somente quando o servidor reconhecer o lote e a fila ficar vazia.
-  async function seedOutbox() {
+  async function seedOutbox(expectedScope, storageAttempt) {
     if (!outboxEnabled || !adapter) return { seedId: null, queued: 0, empty: true };
+    const attempt = Math.max(0, Number(storageAttempt) || 0);
+    const targetScope = expectedScope || scope;
+    const targetAdapter = adapter;
+    const targetGeneration = storageGeneration;
+    assertStoreScope(targetScope, targetAdapter, targetGeneration);
     const flushed = await flush();
     if (!flushed) throw new Error("Não foi possível concluir os dados antes da semeadura");
-    const { ops, stamped } = collectSyncOps(false);
-    if (!ops.length) return { seedId: null, queued: 0, empty: true };
-    const seedId = syncEntryKey({}).replace(/^op_/, "seed_");
-    const entries = ops.map((op, index) => ({
-      ...op, seedId, entryKey: `${seedId}_${String(index).padStart(6, "0")}`,
-    }));
-    await adapter.writeChanges(stamped, {
-      outboxAdds: entries,
-      metaPuts: { [META_SEED_JOURNAL]: { version: 1, seedId, status: "queued", queued: entries.length, createdAt: new Date().toISOString() } },
-    });
-    lastPersisted = shallowSnapshot(snapshot);
+    assertStoreScope(targetScope, targetAdapter, targetGeneration);
+    const seedBase = shallowSnapshot(snapshot);
+    const seedVersion = snapshotVersion;
+    let outcome;
+    try {
+      outcome = await enqueueScopedWrite(targetScope, targetAdapter, targetGeneration, async () => {
+        await assertPhysicalSnapshot(targetScope, targetAdapter, targetGeneration, seedBase);
+        const { ops, stamped } = collectSyncOps(false, seedBase);
+        if (!ops.length) return { seedId: null, queued: 0, empty: true, persisted: null };
+        const seededSnapshot = shallowSnapshot(seedBase);
+        const seedId = syncEntryKey({}).replace(/^op_/, "seed_");
+        const entries = ops.map((op, index) => ({
+          ...op, seedId, entryKey: `${seedId}_${String(index).padStart(6, "0")}`,
+        }));
+        await targetAdapter.writeChanges(stamped, {
+          outboxAdds: entries,
+          metaPuts: { [META_SEED_JOURNAL]: { version: 1, seedId, status: "queued", queued: entries.length, createdAt: new Date().toISOString() } },
+        });
+        return { seedId, queued: entries.length, empty: false, persisted: seededSnapshot };
+      });
+    } catch (error) {
+      if (!storageChangedDuringOperation(error) || attempt >= 3) throw error;
+      await reload({ scope: targetScope, adapter: targetAdapter, generation: targetGeneration });
+      return seedOutbox(targetScope, attempt + 1);
+    }
+    assertStoreScope(targetScope, targetAdapter, targetGeneration);
+    if (outcome.persisted) lastPersisted = outcome.persisted;
+    if (snapshotVersion !== seedVersion) {
+      const rebased = await flush();
+      if (!rebased) throw storageCancelledError();
+      assertStoreScope(targetScope, targetAdapter, targetGeneration);
+    }
     markHealthy();
-    return { seedId, queued: entries.length, empty: false };
+    return { seedId: outcome.seedId, queued: outcome.queued, empty: outcome.empty };
   }
 
   // Troca da base inteira: o que sumiu precisa de lápide, senão volta do outro
   // aparelho na primeira descida. A marca é nova porque restaurar é um ato de
   // agora, não a repetição do passado.
-  function stampReplacement(previous) {
+  function stampReplacement(previousSources, replacement) {
+    const prepared = shallowSnapshot(replacement || snapshot);
+    const sources = Array.isArray(previousSources) ? previousSources : [previousSources];
     GRAVEYARD_COLLECTIONS.forEach((field) => {
-      const vivos = indexById(snapshot[field] || []);
-      const ids = (((previous && previous[field]) || []).map((rec) => (rec && rec.id) || ""))
-        .filter((id) => id && !vivos.has(id));
-      if (ids.length) snapshot.graveyard = withTombstones(snapshot.graveyard, field, ids);
+      const vivos = indexById(prepared[field] || []);
+      const ids = new Set();
+      sources.forEach((previous) => {
+        ((previous && previous[field]) || []).forEach((rec) => {
+          if (rec && rec.id && !vivos.has(rec.id)) ids.add(rec.id);
+        });
+      });
+      if (ids.size) prepared.graveyard = withTombstones(prepared.graveyard, field, Array.from(ids));
     });
-    return collectSyncOps(true);
+    return { ...collectSyncOps(true, prepared), data: prepared };
   }
 
   function computeChangeSet(prev, next) {
@@ -3162,6 +3378,32 @@ const FinanceStore = (() => {
     });
 
     return dirty ? changeSet : null;
+  }
+
+  function overlayChangeSet(base, changeSet) {
+    if (!changeSet) return base;
+    const next = shallowSnapshot(base);
+    const pairs = [[STORE_TX, "transactions"], [STORE_CAT, "categories"], [STORE_GOALS, "goals"], [STORE_ASSETS, "assets"]];
+    pairs.forEach(([storeName, field]) => {
+      const records = indexById(next[field] || []);
+      ((changeSet.deletes || {})[storeName] || []).forEach((id) => records.delete(id));
+      ((changeSet.puts || {})[storeName] || []).forEach((record) => records.set(record.id, record));
+      next[field] = Array.from(records.values());
+    });
+    Object.entries(changeSet.settings || {}).forEach(([key, value]) => { next[key] = value; });
+    return next;
+  }
+
+  function restampConcurrentDeletes(base, local, rebased) {
+    let graveyard = rebased.graveyard;
+    SYNC_ENTITY_FIELDS.forEach((field) => {
+      const before = indexById((base && base[field]) || []);
+      const after = indexById((local && local[field]) || []);
+      const deleted = [];
+      before.forEach((_record, id) => { if (!after.has(id)) deleted.push(id); });
+      if (deleted.length) graveyard = withTombstones(graveyard, field, deleted);
+    });
+    return graveyard === rebased.graveyard ? rebased : { ...rebased, graveyard };
   }
 
   // Cópia rasa por coleção: preserva as referências dos registros (essenciais
@@ -3255,10 +3497,13 @@ const FinanceStore = (() => {
     // Trocar de escopo é o passo que impede o vazamento entre contas: fecha o
     // banco anterior, zera a memória e recomeça do zero no banco novo.
     const nextScope = normalizeStorageScope(opts.scope == null ? scope : opts.scope);
+    storageGeneration += 1;
+    const initGeneration = storageGeneration;
+    const initRequestIsCurrent = () => storageGeneration === initGeneration && scope === nextScope;
     if (adapter && typeof adapter.close === "function") { try { adapter.close(); } catch (e) {} }
     scope = nextScope;
     adapter = null;
-    snapshot = defaultData();
+    installSnapshot(defaultData());
     lastPersisted = null;
     ready = false;
     healthy = true;
@@ -3273,7 +3518,7 @@ const FinanceStore = (() => {
     remoteSettingEcho = {};
     remoteApplied.clear();
     SyncClock.reset();
-    SyncClock.setDevice(syncDeviceId());
+    SyncClock.setDevice(syncWriterId());
     loadClockState();
     attachBus();
     // Promessas penduradas de um escopo que não existe mais precisam de
@@ -3286,86 +3531,106 @@ const FinanceStore = (() => {
 
     for (const cand of candidates) {
       try {
-        await cand.init();
+        await withStorageScopeLock(nextScope, () => cand.init());
+        if (!initRequestIsCurrent()) {
+          if (adapter !== cand && typeof cand.close === "function") { try { cand.close(); } catch (e) {} }
+          throw storageCancelledError();
+        }
         adapter = cand;
         lastErr = null;
         break;
-      } catch (err) { lastErr = err; }
+      } catch (err) {
+        if (!initRequestIsCurrent()) {
+          if (adapter !== cand && typeof cand.close === "function") { try { cand.close(); } catch (e) {} }
+          throw storageCancelledError();
+        }
+        lastErr = err;
+      }
     }
 
+    if (!initRequestIsCurrent()) throw storageCancelledError();
     if (!adapter) {
       // Modo memória: tenta pelo menos ressuscitar o espelho da sessão anterior.
       emitError(lastErr || new Error("Nenhum mecanismo de armazenamento disponível"));
       const mirror = readMirror();
-      snapshot = mirror ? migrate(mirror.data) : defaultData();
+      installSnapshot(mirror ? migrate(mirror.data) : defaultData());
       lastPersisted = null;
       ready = true;
       return snapshot;
     }
 
+    const targetAdapter = adapter;
     try {
-      let raw = await adapter.readAll();
+      return await runScopedMutation(nextScope, targetAdapter, initGeneration, async () => {
+        let raw = await targetAdapter.readAll();
+        assertStoreScope(nextScope, targetAdapter, initGeneration);
 
-      if (isEmpty(raw)) {
-        const legacy = readLegacyBlob() || (readMirror() || {}).data;
-        if (legacy) {
-          // ---- Migração automática localStorage → IndexedDB (uma única vez) ----
-          const migrated = migrate(legacy);
-          migrated.lastPersistAt = Date.now();
-          await adapter.replaceAll(migrated);
-          try { localStorage.setItem(LEGACY_KEY + "_backup", JSON.stringify(legacy)); } catch (e) {}
-          try { localStorage.removeItem(LEGACY_KEY); } catch (e) {}
-          snapshot = migrated;
-          lastPersisted = shallowSnapshot(migrated);
+        if (isEmpty(raw)) {
+          const legacy = readLegacyBlob() || (readMirror() || {}).data;
+          if (legacy) {
+            // ---- Migração automática localStorage → IndexedDB (uma única vez) ----
+            const migrated = migrate(legacy);
+            migrated.lastPersistAt = Date.now();
+            await targetAdapter.replaceAll(migrated);
+            assertStoreScope(nextScope, targetAdapter, initGeneration);
+            try { localStorage.setItem(LEGACY_KEY + "_backup", JSON.stringify(legacy)); } catch (e) {}
+            try { localStorage.removeItem(LEGACY_KEY); } catch (e) {}
+            installSnapshot(migrated);
+            lastPersisted = shallowSnapshot(migrated);
+            writeMirror(snapshot, true);
+            ready = true; healthy = true;
+            return snapshot;
+          }
+          const fresh = migrate(defaultData());
+          fresh.lastPersistAt = Date.now();
+          await targetAdapter.replaceAll(fresh);
+          assertStoreScope(nextScope, targetAdapter, initGeneration);
+          installSnapshot(fresh);
+          lastPersisted = shallowSnapshot(fresh);
           writeMirror(snapshot, true);
           ready = true; healthy = true;
           return snapshot;
         }
-        const fresh = defaultData();
-        fresh.lastPersistAt = Date.now();
-        await adapter.replaceAll(fresh);
-        snapshot = fresh;
-        lastPersisted = shallowSnapshot(fresh);
+
+        let assembled = assembleSnapshot(raw);
+
+        // ---- Recuperação de escrita perdida ----
+        const mirror = readMirror();
+        const persistedAt = Number(assembled.lastPersistAt) || 0;
+        if (mirror && mirror.savedAt > persistedAt + 500) {
+          const recovered = migrate(mirror.data);
+          // Só aceita o espelho se ele não for um retrocesso (mais dados ou iguais).
+          if (recovered.transactions.length >= assembled.transactions.length) {
+            assembled = recovered;
+            assembled.lastPersistAt = Date.now();
+            await targetAdapter.replaceAll(assembled);
+            assertStoreScope(nextScope, targetAdapter, initGeneration);
+          }
+        }
+
+        installSnapshot(assembled);
+        lastPersisted = shallowSnapshot(snapshot);
+
+        // Se a normalização alterou algo (migração de versão), grava de volta.
+
+        const cs = computeChangeSet(assembleSnapshotRawCopy(raw), snapshot);
+        if (cs) {
+          cs.settings.lastPersistAt = Date.now();
+          snapshot.lastPersistAt = cs.settings.lastPersistAt;
+          await targetAdapter.writeChanges(cs);
+          assertStoreScope(nextScope, targetAdapter, initGeneration);
+          lastPersisted = shallowSnapshot(snapshot);
+        }
         writeMirror(snapshot, true);
+
         ready = true; healthy = true;
         return snapshot;
-      }
-
-      let assembled = assembleSnapshot(raw);
-
-      // ---- Recuperação de escrita perdida ----
-      const mirror = readMirror();
-      const persistedAt = Number(assembled.lastPersistAt) || 0;
-      if (mirror && mirror.savedAt > persistedAt + 500) {
-        const recovered = migrate(mirror.data);
-        // Só aceita o espelho se ele não for um retrocesso (mais dados ou iguais).
-        if (recovered.transactions.length >= assembled.transactions.length) {
-          assembled = recovered;
-          assembled.lastPersistAt = Date.now();
-          await adapter.replaceAll(assembled);
-        }
-      }
-
-      snapshot = assembled;
-      lastPersisted = shallowSnapshot(snapshot);
-
-      // Se a normalização alterou algo (migração de versão), grava de volta.
-
-      const cs = computeChangeSet(assembleSnapshotRawCopy(raw), snapshot);
-      if (cs) {
-        cs.settings.lastPersistAt = Date.now();
-        snapshot.lastPersistAt = cs.settings.lastPersistAt;
-        await adapter.writeChanges(cs);
-        lastPersisted = shallowSnapshot(snapshot);
-      }
-      writeMirror(snapshot, true);
-
-      ready = true; healthy = true;
-      return snapshot;
+      });
     } catch (err) {
+      if (!storeContextIsCurrent(nextScope, targetAdapter, initGeneration)) throw storageCancelledError();
       emitError(err);
       const mirror = readMirror();
-      snapshot = mirror ? migrate(mirror.data) : defaultData();
+      installSnapshot(mirror ? migrate(mirror.data) : defaultData());
       lastPersisted = null;
       ready = true;
       return snapshot;
@@ -3387,28 +3652,84 @@ const FinanceStore = (() => {
     return run;
   }
 
-  async function commitCurrentSnapshot() {
-    if (!adapter) return false;
-    const target = shallowSnapshot(snapshot);
-    const cs = computeChangeSet(lastPersisted, target);
-    if (!cs) return true;
-    const ops = outboxEnabled ? stampChangeSet(lastPersisted, target, cs) : [];
-    const stamp = Date.now();
-    cs.settings.lastPersistAt = stamp;
-    target.lastPersistAt = stamp;
-    snapshot.lastPersistAt = stamp;
-    snapshot.graveyard = target.graveyard;
-    await adapter.writeChanges(cs, { outboxAdds: ops });
-    lastPersisted = target;
-    markHealthy();
-    announceWrite();
-    return true;
+  // A fila acima coordena esta aba. O Web Lock estende a mesma exclusão às
+  // outras abas do mesmo escopo, inclusive ao fallback que grava um documento
+  // inteiro no localStorage. Navegadores sem a API continuam com a fila local.
+  function withStorageScopeLock(targetScope, job) {
+    const locks = typeof navigator !== "undefined" && navigator.locks;
+    if (!locks || typeof locks.request !== "function") return job();
+    return locks.request(`cofre-storage-${targetScope}`, { mode: "exclusive" }, job);
+  }
+
+  function storageChangedError() {
+    const error = new Error("O armazenamento mudou em outra aba durante a operação.");
+    error.code = "storage_changed";
+    return error;
+  }
+
+  function storageChangedDuringOperation(error) {
+    return !!(error && error.code === "storage_changed");
+  }
+
+  async function runScopedMutation(targetScope, targetAdapter, targetGeneration, job) {
+    return withStorageScopeLock(targetScope, async () => {
+      assertStoreScope(targetScope, targetAdapter, targetGeneration);
+      const result = await job();
+      assertStoreScope(targetScope, targetAdapter, targetGeneration);
+      return result;
+    });
+  }
+
+  function enqueueScopedWrite(targetScope, targetAdapter, targetGeneration, job) {
+    return enqueueWrite(() => runScopedMutation(targetScope, targetAdapter, targetGeneration, job));
+  }
+
+  async function assertPhysicalSnapshot(targetScope, targetAdapter, targetGeneration, expected) {
+    const raw = await targetAdapter.readAll();
+    assertStoreScope(targetScope, targetAdapter, targetGeneration);
+    const physical = assembleSnapshot(raw);
+    const forward = computeChangeSet(expected, physical);
+    const backward = computeChangeSet(physical, expected);
+    if (forward || backward) {
+      throw storageChangedError();
+    }
+    return physical;
+  }
+
+  async function commitCurrentSnapshot(context) {
+    const targetScope = context ? context.scope : scope;
+    const targetAdapter = context ? context.adapter : adapter;
+    const targetGeneration = context ? context.generation : storageGeneration;
+    if (!targetAdapter) return false;
+    assertStoreScope(targetScope, targetAdapter, targetGeneration);
+    return runScopedMutation(targetScope, targetAdapter, targetGeneration, async () => {
+      const target = shallowSnapshot(snapshot);
+      const cs = computeChangeSet(lastPersisted, target);
+      if (!cs) return true;
+      const ops = outboxEnabled ? stampChangeSet(lastPersisted, target, cs) : [];
+      const stamp = Date.now();
+      cs.settings.lastPersistAt = stamp;
+      target.lastPersistAt = stamp;
+      snapshot.lastPersistAt = stamp;
+      snapshot.graveyard = target.graveyard;
+      await targetAdapter.writeChanges(cs, { outboxAdds: ops });
+      lastPersisted = target;
+      markHealthy();
+      announceWrite();
+      return true;
+    });
   }
 
   function persist(data) {
-    snapshot = data;
+    // Durante `init/switchScope` o nome do escopo novo já mudou, mas o banco
+    // ainda não foi carregado. Aceitar uma ação da tela antiga aqui escreveria
+    // o mirror de uma conta dentro da outra. A ação é recusada e a tela será
+    // atualizada quando a troca terminar.
+    if (!ready) return Promise.resolve(false);
+    installSnapshot(data);
     writeMirror(snapshot, false);          // proteção imediata, síncrona
     if (!adapter) return Promise.resolve(false);
+    const context = { scope, adapter, generation: storageGeneration };
 
     clearTimeout(pendingTimer);
     return new Promise((resolve) => {
@@ -3419,9 +3740,10 @@ const FinanceStore = (() => {
         enqueueWrite(async () => {
           const settle = (v) => resolvers.forEach((r) => r(v));
           try {
-            await commitCurrentSnapshot();
+            await commitCurrentSnapshot(context);
             settle(true);
           } catch (err) {
+            if (storageOperationCancelled(err)) { settle(false); return; }
             emitError(err);
             writeMirror(snapshot, true);   // falhou no banco? garante o espelho
             settle(false);
@@ -3434,17 +3756,22 @@ const FinanceStore = (() => {
   // Força a gravação imediata (usado antes de fechar/ocultar a aba).
 
   async function flush() {
+    const context = { scope, adapter, generation: storageGeneration };
     clearTimeout(pendingTimer);
     clearTimeout(mirrorTimer);
     writeMirror(snapshot, true);           // síncrono: sempre acontece
     const resolvers = pendingResolvers;
     pendingResolvers = [];
-    if (!adapter) { resolvers.forEach((r) => r(false)); return false; }
+    if (!context.adapter) { resolvers.forEach((r) => r(false)); return false; }
     try {
-      const ok = await enqueueWrite(commitCurrentSnapshot);
+      const ok = await enqueueWrite(() => commitCurrentSnapshot(context));
       resolvers.forEach((r) => r(true));
       return ok;
     } catch (err) {
+      if (storageOperationCancelled(err)) {
+        resolvers.forEach((r) => r(false));
+        return false;
+      }
       emitError(err);
       resolvers.forEach((r) => r(false));
       return false;
@@ -3452,28 +3779,93 @@ const FinanceStore = (() => {
   }
 
   async function replaceAll(data) {
-    await flush();
+    if (!ready) return false;
+    const targetScope = scope;
+    const targetAdapter = adapter;
+    const targetGeneration = storageGeneration;
+    const replacementMustSync = targetScope !== GUEST_SCOPE;
+    if (!targetAdapter) return false;
+    const flushed = await flush();
+    if (!flushed || !storeContextIsCurrent(targetScope, targetAdapter, targetGeneration)) return false;
     const normalized = migrate(data);
-    // Guarda o estado anterior para permitir desfazer um restore acidental.
-    try { localStorage.setItem(undoKey(), JSON.stringify({ savedAt: Date.now(), data: snapshot })); } catch (e) {}
     const anterior = snapshot;
     normalized.lastPersistAt = Date.now();
-    snapshot = normalized;
+    installSnapshot(normalized);
+    const replacementVersion = snapshotVersion;
     // A TROCA DA BASE INTEIRA TAMBÉM PRECISA VIAJAR.
     //
     // Este caminho não passa pelo diff de `persist`, então restaurar um backup,
     // desfazer uma restauração ou adotar os dados de visitante mudava só este
     // aparelho. Nos outros, nada acontecia; e como o servidor continuava com a
     // base velha, a descida seguinte podia até desfazer o que foi restaurado.
-    const semente = outboxEnabled ? stampReplacement(anterior) : { ops: [] };
-    writeMirror(snapshot, true);
-    if (!adapter) return false;
+    // Outra aba pode ter confirmado registros e operações antes de receber o
+    // aviso pelo BroadcastChannel. A base física e a fila são relidas dentro do
+    // mesmo bloqueio usado pelos commits locais; só então as lápides nascem.
+    // A restauração recarimba a base inteira, portanto substitui com segurança
+    // todas as operações antigas que ainda estavam na fila.
+    let replacementSnapshot = normalized;
+    let replacementPersisted = shallowSnapshot(normalized);
+    writeMirror(normalized, true);
     try {
-      await enqueueWrite(() => adapter.replaceAll(snapshot, { outboxAdds: semente.ops }));
-      lastPersisted = shallowSnapshot(snapshot);
+      await enqueueScopedWrite(targetScope, targetAdapter, targetGeneration, async () => {
+        const physicalRaw = await targetAdapter.readAll();
+        assertStoreScope(targetScope, targetAdapter, targetGeneration);
+        const queued = await targetAdapter.outboxRead(0);
+        assertStoreScope(targetScope, targetAdapter, targetGeneration);
+
+        const physical = assembleSnapshot(physicalRaw);
+        observeSnapshotClock(physical);
+        queued.forEach((entry) => SyncClock.observe(entry && entry.rev));
+
+        const queuedRecords = {};
+        SYNC_ENTITY_FIELDS.forEach((field) => { queuedRecords[field] = []; });
+        queued.forEach((entry) => {
+          if (!entry || entry.op !== "put" || SYNC_ENTITY_FIELDS.indexOf(entry.entity) === -1) return;
+          queuedRecords[entry.entity].push({ id: entry.entityId });
+        });
+
+        const replacement = replacementMustSync
+          ? stampReplacement([anterior, physical, queuedRecords], normalized)
+          : { ops: [], data: normalized };
+        replacementSnapshot = replacement.data;
+        replacementPersisted = shallowSnapshot(replacementSnapshot);
+
+        // Guarda o estado realmente confirmado antes do restore, não o
+        // instantâneo possivelmente atrasado desta aba.
+        try {
+          localStorage.setItem(scopedName(LS_UNDO_KEY, targetScope), JSON.stringify({ savedAt: Date.now(), data: physical }));
+        } catch (_error) { /* desfazer fica indisponível se a cota estiver cheia */ }
+
+        await targetAdapter.replaceAll(replacementSnapshot, replacementMustSync ? {
+          outboxDrops: queued.map((entry) => entry.seq),
+          outboxAdds: replacement.ops,
+          metaDeletes: [META_LINK_JOURNAL, META_SEED_JOURNAL],
+        } : undefined);
+        assertStoreScope(targetScope, targetAdapter, targetGeneration);
+      });
+      assertStoreScope(targetScope, targetAdapter, targetGeneration);
+
+      const concurrentSnapshot = snapshot;
+      const localChanges = snapshotVersion !== replacementVersion
+        ? computeChangeSet(normalized, concurrentSnapshot)
+        : null;
+      lastPersisted = replacementPersisted;
+      let finalSnapshot = overlayChangeSet(replacementSnapshot, localChanges);
+      finalSnapshot = restampConcurrentDeletes(normalized, concurrentSnapshot, finalSnapshot);
+      installSnapshot(finalSnapshot);
+      if (localChanges) {
+        const rebased = await flush();
+        if (!rebased) return false;
+        assertStoreScope(targetScope, targetAdapter, targetGeneration);
+      }
+      writeMirror(snapshot, true);
       markHealthy();
+      announceWrite();
       return true;
-    } catch (err) { emitError(err); return false; }
+    } catch (err) {
+      if (!storageOperationCancelled(err)) emitError(err);
+      return false;
+    }
   }
 
   function readUndoSnapshot() {
@@ -3486,55 +3878,87 @@ const FinanceStore = (() => {
   }
 
   async function clear() {
-    const fresh = defaultData();
-    try { localStorage.setItem(undoKey(), JSON.stringify({ savedAt: Date.now(), data: snapshot })); } catch (e) {}
+    if (!ready) return false;
+    const targetScope = scope;
+    const targetAdapter = adapter;
+    const targetGeneration = storageGeneration;
+    const fresh = migrate(defaultData());
+    try { localStorage.setItem(scopedName(LS_UNDO_KEY, targetScope), JSON.stringify({ savedAt: Date.now(), data: snapshot })); } catch (e) {}
     fresh.lastPersistAt = Date.now();
-    snapshot = fresh;
+    installSnapshot(fresh);
     writeMirror(snapshot, true);
-    if (!adapter) return false;
-    try { await adapter.clearAll(); await adapter.replaceAll(fresh); lastPersisted = shallowSnapshot(fresh); return true; }
-    catch (err) { emitError(err); return false; }
+    if (!targetAdapter) return false;
+    try {
+      await enqueueScopedWrite(targetScope, targetAdapter, targetGeneration, async () => {
+        await targetAdapter.clearAll();
+        assertStoreScope(targetScope, targetAdapter, targetGeneration);
+        await targetAdapter.replaceAll(fresh);
+      });
+      assertStoreScope(targetScope, targetAdapter, targetGeneration);
+      lastPersisted = shallowSnapshot(fresh);
+      markHealthy();
+      announceWrite();
+      return true;
+    } catch (err) {
+      if (!storageOperationCancelled(err)) emitError(err);
+      return false;
+    }
   }
 
   // Exclusão definitiva pedida pelo usuário. Ao contrário de clear(), não cria
   // um snapshot de desfazer e remove os espelhos que poderiam ressuscitar dados.
   async function purge() {
+    if (!ready) return false;
+    const targetScope = scope;
+    const targetAdapter = adapter;
+    const targetGeneration = storageGeneration;
     clearTimeout(pendingTimer);
     clearTimeout(mirrorTimer);
     pendingResolvers.splice(0).forEach((resolve) => resolve(false));
-    const fresh = defaultData();
+    const fresh = migrate(defaultData());
     fresh.lastPersistAt = Date.now();
     // Só as chaves DESTE escopo. Apagar os dados da conta não pode levar junto
     // o que pertence a quem usa o aparelho sem conta.
     const keys = [
-      scopedName(LS_FALLBACK_KEY, scope),
-      scopedName("financas_db_outbox", scope),
-      scopedName("financas_db_meta", scope),
-      scopedName("financas_db_recovery", scope),
-      scopedName("financas_db_clock", scope),
-      mirrorKey(),
-      undoKey(),
-      scope === GUEST_SCOPE ? "cofre_sync_cursor" : `cofre_sync_cursor__${scope}`,
-      `cofre_sync_seeded__${scope}`,
-      ...(scope === GUEST_SCOPE ? [LEGACY_KEY, LEGACY_KEY + "_backup", "financas_theme"] : []),
+      scopedName(LS_FALLBACK_KEY, targetScope),
+      scopedName("financas_db_outbox", targetScope),
+      scopedName("financas_db_meta", targetScope),
+      scopedName("financas_db_recovery", targetScope),
+      scopedName("financas_db_clock", targetScope),
+      scopedName(LS_MIRROR_KEY, targetScope),
+      scopedName(LS_UNDO_KEY, targetScope),
+      targetScope === GUEST_SCOPE ? "cofre_sync_cursor" : `cofre_sync_cursor__${targetScope}`,
+      `cofre_sync_seeded__${targetScope}`,
+      ...(targetScope === GUEST_SCOPE ? [LEGACY_KEY, LEGACY_KEY + "_backup", "financas_theme"] : []),
     ];
-    if (!adapter) {
-      snapshot = fresh;
-      lastPersisted = null;
+    if (!targetAdapter) {
+      if (storeContextIsCurrent(targetScope, targetAdapter, targetGeneration)) {
+        installSnapshot(fresh);
+        lastPersisted = null;
+      }
       keys.forEach((key) => { try { localStorage.removeItem(key); } catch (_error) {} });
+      announceWrite();
       return true;
     }
     try {
-      await adapter.clearAll();
-      await adapter.outboxClear();
-      await adapter.localMetaClear();
-      await adapter.replaceAll(fresh);
-      snapshot = fresh;
+      await enqueueScopedWrite(targetScope, targetAdapter, targetGeneration, async () => {
+        await targetAdapter.clearAll();
+        assertStoreScope(targetScope, targetAdapter, targetGeneration);
+        await targetAdapter.outboxClear();
+        assertStoreScope(targetScope, targetAdapter, targetGeneration);
+        await targetAdapter.localMetaClear();
+        assertStoreScope(targetScope, targetAdapter, targetGeneration);
+        await targetAdapter.replaceAll(fresh);
+      });
+      assertStoreScope(targetScope, targetAdapter, targetGeneration);
+      installSnapshot(fresh);
       lastPersisted = shallowSnapshot(fresh);
       healthy = true;
       keys.forEach((key) => { try { localStorage.removeItem(key); } catch (_error) {} });
+      announceWrite();
       return true;
     } catch (err) {
+      if (storageOperationCancelled(err)) return false;
       if (typeof reportSafeError === "function") reportSafeError("storage", err, "storage_delete");
       emitError(err);
       return false;
@@ -3684,8 +4108,10 @@ const FinanceStore = (() => {
     const candidates = [new IndexedDBAdapter(wanted), new LocalStorageAdapter(wanted)];
     for (const candidate of candidates) {
       try {
-        await candidate.init();
-        const raw = await candidate.readAll();
+        const raw = await withStorageScopeLock(wanted, async () => {
+          await candidate.init();
+          return candidate.readAll();
+        });
         const data = isEmpty(raw) ? null : migrate(assembleSnapshot(raw));
         if (data) return { ok: true, data };
       } catch (e) {
@@ -3762,32 +4188,41 @@ const FinanceStore = (() => {
   // tentativa seguinte apenas termina aquele mesmo lote.
   async function adoptScope(source, options) {
     const opts = options || {};
+    const storageAttempt = Math.max(0, Number(opts._storageAttempt) || 0);
     const from = normalizeStorageScope(source);
-    if (from === scope) return { ok: false, reason: "same_scope" };
-    if (scope === GUEST_SCOPE) return { ok: false, reason: "not_authenticated" };
+    const expectedScope = scope;
+    const targetAdapter = adapter;
+    const targetGeneration = storageGeneration;
+    if (from === expectedScope) return { ok: false, reason: "same_scope" };
+    if (expectedScope === GUEST_SCOPE) return { ok: false, reason: "not_authenticated" };
     if (!adapter) return { ok: false, reason: "no_storage" };
+    assertStoreScope(expectedScope, targetAdapter, targetGeneration);
 
     const read = await readScope(from);
+    assertStoreScope(expectedScope, targetAdapter, targetGeneration);
     if (!read.ok) return { ok: false, reason: "unreadable" };
     if (!read.data) return { ok: false, reason: "empty" };
     const incoming = read.data;
     const digest = await contentDigest(incoming);
+    assertStoreScope(expectedScope, targetAdapter, targetGeneration);
 
     // Conteúdo já vinculado não é vinculado de novo. Sem esta parada, uma
     // segunda passagem refazia a mesclagem e a trilha de auditoria dos mesmos
     // lançamentos era reconstruída, gerando um lote de operações que não
     // representava alteração nenhuma.
-    const reciboAtual = await localMetaGet(META_LINK_RECEIPT);
+    const reciboAtual = await localMetaGet(META_LINK_RECEIPT, expectedScope);
+    assertStoreScope(expectedScope, targetAdapter, targetGeneration);
     if (reciboAtual && reciboAtual.status === "linked" && digest
-      && reciboAtual.accountScope === scope && reciboAtual.sourceDigest === digest) {
+      && reciboAtual.accountScope === expectedScope && reciboAtual.sourceDigest === digest) {
       return {
         ok: true, changed: false, alreadyLinked: true, linkId: reciboAtual.linkId || null,
         digest, stats: reciboAtual.stats || null, queued: 0,
       };
     }
 
-    const anterior = await localMetaGet(META_LINK_JOURNAL);
-    if (anterior && anterior.accountScope === scope && anterior.sourceDigest === digest) {
+    const anterior = await localMetaGet(META_LINK_JOURNAL, expectedScope);
+    assertStoreScope(expectedScope, targetAdapter, targetGeneration);
+    if (anterior && anterior.accountScope === expectedScope && anterior.sourceDigest === digest) {
       // Retomada: as operações já estão na fila, com as marcas do diário. Nada
       // é recarimbado, e nenhuma versão nova é criada para reivindicar o
       // conflito que interrompeu a tentativa anterior.
@@ -3798,56 +4233,100 @@ const FinanceStore = (() => {
       };
     }
 
-    await flush();
-    const fusao = mergeBackupInto(snapshot, incoming);
+    const flushed = await flush();
+    if (!flushed) throw storageCancelledError();
+    assertStoreScope(expectedScope, targetAdapter, targetGeneration);
+    const baseSnapshot = snapshot;
+    const baseVersion = snapshotVersion;
+    const fusao = mergeBackupInto(baseSnapshot, incoming);
     const target = migrate(fusao.data);
-    const changeSet = computeChangeSet(snapshot, target);
+    const changeSet = computeChangeSet(baseSnapshot, target);
     const linkId = syncEntryKey({}).replace(/^op_/, "link_");
-
-    if (!changeSet) {
-      // O conteúdo do visitante já está inteiro na conta. Isso é conclusão, não
-      // falha: o recibo evita que a pergunta volte na próxima entrada.
-      await localMetaPut(META_LINK_RECEIPT, {
-        version: 1, status: "linked", accountScope: scope, accountUserId: String(opts.userId || ""),
-        sourceScope: from, sourceDigest: digest, linkId,
-        remoteBaseRevision: opts.remoteRevision == null ? null : String(opts.remoteRevision),
-        serverRevision: null, decidedAt: new Date().toISOString(), stats: fusao.stats,
-      });
-      return { ok: true, changed: false, linkId, digest, stats: fusao.stats, queued: 0 };
-    }
-
-    const ops = stampChangeSet(snapshot, target, changeSet);
-    const entries = ops.map((op, index) => ({
-      ...op, linkId, entryKey: `${linkId}_${String(index).padStart(6, "0")}`,
-    }));
-    const diario = {
-      version: 1, linkId, status: "queued",
-      accountScope: scope, accountUserId: String(opts.userId || ""),
-      sourceScope: from, sourceDigest: digest,
-      remoteBaseRevision: opts.remoteRevision == null ? null : String(opts.remoteRevision),
-      stats: fusao.stats, queued: entries.length, createdAt: new Date().toISOString(),
-    };
-    // A revisão esperada só acompanha o vínculo AUTOMÁTICO. Ela é o que faz o
-    // servidor recusar a adoção se a conta tiver recebido qualquer operação
-    // entre a leitura e a confirmação.
-    if (opts.expectedRemoteRevision != null) diario.expectedRemoteRevision = String(opts.expectedRemoteRevision);
-
-    const stamp = Date.now();
-    changeSet.settings.lastPersistAt = stamp;
-    target.lastPersistAt = stamp;
+    let committed;
     try {
-      await enqueueWrite(() => adapter.writeChanges(changeSet, {
-        outboxAdds: entries,
-        metaPuts: { [META_LINK_JOURNAL]: diario },
-      }));
+      committed = await enqueueScopedWrite(expectedScope, targetAdapter, targetGeneration, async () => {
+        await assertPhysicalSnapshot(expectedScope, targetAdapter, targetGeneration, baseSnapshot);
+
+        // Outra aba pode ter concluído exatamente este vínculo enquanto esta
+        // aguardava o bloqueio. Revalidar o diário dentro da região exclusiva
+        // impede dois lotes com revisões diferentes para a mesma decisão.
+        const receipt = await targetAdapter.localMetaGet(META_LINK_RECEIPT);
+        if (receipt && receipt.status === "linked" && digest
+          && receipt.accountScope === expectedScope && receipt.sourceDigest === digest) {
+          return { existing: {
+            ok: true, changed: false, alreadyLinked: true, linkId: receipt.linkId || null,
+            digest, stats: receipt.stats || null, queued: 0,
+          } };
+        }
+        const journal = await targetAdapter.localMetaGet(META_LINK_JOURNAL);
+        if (journal && journal.accountScope === expectedScope && journal.sourceDigest === digest) {
+          return { existing: {
+            ok: true, resumed: true, changed: false, linkId: journal.linkId, digest,
+            stats: journal.stats || null, queued: Number(journal.queued) || 0,
+            blocked: journal.status === "blocked",
+          } };
+        }
+
+        if (!changeSet) {
+          // O conteúdo do visitante já está inteiro na conta. Isso é conclusão,
+          // e o recibo nasce sob o mesmo bloqueio usado pelas demais mutações.
+          await targetAdapter.localMetaPut(META_LINK_RECEIPT, {
+            version: 1, status: "linked", accountScope: expectedScope, accountUserId: String(opts.userId || ""),
+            sourceScope: from, sourceDigest: digest, linkId,
+            remoteBaseRevision: opts.remoteRevision == null ? null : String(opts.remoteRevision),
+            serverRevision: null, decidedAt: new Date().toISOString(), stats: fusao.stats,
+          });
+          return { existing: { ok: true, changed: false, linkId, digest, stats: fusao.stats, queued: 0 } };
+        }
+
+        const ops = stampChangeSet(baseSnapshot, target, changeSet);
+        const entries = ops.map((op, index) => ({
+          ...op, linkId, entryKey: `${linkId}_${String(index).padStart(6, "0")}`,
+        }));
+        const diario = {
+          version: 1, linkId, status: "queued",
+          accountScope: expectedScope, accountUserId: String(opts.userId || ""),
+          sourceScope: from, sourceDigest: digest,
+          remoteBaseRevision: opts.remoteRevision == null ? null : String(opts.remoteRevision),
+          stats: fusao.stats, queued: entries.length, createdAt: new Date().toISOString(),
+        };
+        // A revisão esperada só acompanha o vínculo AUTOMÁTICO. Ela faz o
+        // servidor recusar a adoção se a conta avançar antes da confirmação.
+        if (opts.expectedRemoteRevision != null) diario.expectedRemoteRevision = String(opts.expectedRemoteRevision);
+        const stamp = Date.now();
+        changeSet.settings.lastPersistAt = stamp;
+        target.lastPersistAt = stamp;
+        await targetAdapter.writeChanges(changeSet, {
+          outboxAdds: entries,
+          metaPuts: { [META_LINK_JOURNAL]: diario },
+        });
+        return { entries };
+      });
+      assertStoreScope(expectedScope, targetAdapter, targetGeneration);
     } catch (err) {
       // Dados, fila e diário falham juntos: a conta continua exatamente como
       // estava, e o visitante também.
+      if (err && err.code === "sync_cancelled") throw err;
+      if (storageChangedDuringOperation(err) && storageAttempt < 3) {
+        await reload({ scope: expectedScope, adapter: targetAdapter, generation: targetGeneration });
+        return adoptScope(source, { ...opts, _storageAttempt: storageAttempt + 1 });
+      }
       emitError(err);
       return { ok: false, reason: "write_failed", digest, error: err };
     }
-    snapshot = target;
-    lastPersisted = shallowSnapshot(target);
+    if (committed.existing) return committed.existing;
+    const entries = committed.entries;
+    if (snapshotVersion !== baseVersion) {
+      const localChanges = computeChangeSet(baseSnapshot, snapshot);
+      lastPersisted = shallowSnapshot(target);
+      installSnapshot(overlayChangeSet(target, localChanges));
+      const rebased = await flush();
+      if (!rebased) throw storageCancelledError();
+      assertStoreScope(expectedScope, targetAdapter, targetGeneration);
+    } else {
+      installSnapshot(target);
+      lastPersisted = shallowSnapshot(target);
+    }
     writeMirror(snapshot, true);
     markHealthy();
     announceWrite();
@@ -3874,25 +4353,30 @@ const FinanceStore = (() => {
   // A conta avançou entre a leitura e a confirmação. O diário e a fila ficam
   // como estão; o motor apenas para de reenviar aquele lote até a pessoa
   // decidir de novo.
-  async function blockGuestLink(remoteRevision) {
-    const diario = await localMetaGet(META_LINK_JOURNAL);
+  async function blockGuestLink(remoteRevision, expectedScope) {
+    const diario = await localMetaGet(META_LINK_JOURNAL, expectedScope);
     if (!diario || diario.status === "blocked") return false;
     await localMetaPut(META_LINK_JOURNAL, {
       ...diario, status: "blocked",
       blockedAt: new Date().toISOString(),
       observedRemoteRevision: remoteRevision == null ? null : String(remoteRevision),
-    });
+    }, expectedScope);
     return true;
   }
 
   // Confirmação explícita depois do bloqueio: o lote volta a subir, agora sem
   // declarar revisão esperada, porque a pessoa já sabe que a conta mudou.
   async function releaseGuestLink() {
-    const diario = await localMetaGet(META_LINK_JOURNAL);
+    const expectedScope = scope;
+    const targetAdapter = adapter;
+    assertStoreScope(expectedScope, targetAdapter);
+    const diario = await localMetaGet(META_LINK_JOURNAL, expectedScope);
+    assertStoreScope(expectedScope, targetAdapter);
     if (!diario) return false;
     const proximo = { ...diario, status: "queued", releasedAt: new Date().toISOString() };
     delete proximo.expectedRemoteRevision;
-    await localMetaPut(META_LINK_JOURNAL, proximo);
+    await localMetaPut(META_LINK_JOURNAL, proximo, expectedScope);
+    assertStoreScope(expectedScope, targetAdapter);
     return true;
   }
 
@@ -3922,11 +4406,18 @@ const FinanceStore = (() => {
     if (bus) { try { bus.close(); } catch (e) {} }
     bus = openBus();
     if (!bus) return;
+    const attachedBus = bus;
+    const attachedScope = scope;
+    const attachedGeneration = storageGeneration;
     bus.onmessage = (event) => {
       const message = event && event.data;
       if (!message || message.type !== "written" || message.tab === tabId) return;
+      if (bus !== attachedBus || scope !== attachedScope || storageGeneration !== attachedGeneration) return;
+      const reloadContext = { scope: attachedScope, adapter, generation: attachedGeneration };
       // Reler é assíncrono; até terminar, esta aba não pode gravar por cima.
-      reload().then((data) => {
+      reload(reloadContext).then((data) => {
+        if (!storeContextIsCurrent(reloadContext.scope, reloadContext.adapter, reloadContext.generation)
+          || bus !== attachedBus) return;
         tabListeners.forEach((fn) => { try { fn(data); } catch (e) { /* ouvinte quebrado */ } });
       }).catch(() => {});
     };
@@ -3934,77 +4425,171 @@ const FinanceStore = (() => {
 
   // Relê o banco e substitui o snapshot em memória. Usado quando outra aba
   // gravou e quando o motor de sincronização quer descartar estado suspeito.
-  async function reload() {
-    if (!adapter) return snapshot;
+  async function reload(context) {
+    const targetScope = context ? context.scope : scope;
+    const targetAdapter = context ? context.adapter : adapter;
+    const targetGeneration = context ? context.generation : storageGeneration;
+    if (!targetAdapter) return snapshot;
     try {
-      const raw = await adapter.readAll();
-      const assembled = assembleSnapshot(raw);
-      snapshot = assembled;
-      lastPersisted = shallowSnapshot(assembled);
+      // Primeiro confirma qualquer edição que já esteja no debounce ou na fila.
+      // Depois, se outra edição chegar enquanto `readAll` estiver em voo, a
+      // versão muda e a leitura antiga é descartada. Assim um aviso de outra aba
+      // nunca apaga o que a pessoa acabou de digitar nesta aba.
+      for (let attempt = 0; attempt < 3; attempt++) {
+        assertStoreScope(targetScope, targetAdapter, targetGeneration);
+        const flushed = await flush();
+        if (!flushed) throw storageCancelledError();
+        assertStoreScope(targetScope, targetAdapter, targetGeneration);
+        const versionAtRead = snapshotVersion;
+        const raw = await runScopedMutation(targetScope, targetAdapter, targetGeneration,
+          () => targetAdapter.readAll());
+        assertStoreScope(targetScope, targetAdapter, targetGeneration);
+        if (snapshotVersion !== versionAtRead) continue;
+        const assembled = assembleSnapshot(raw);
+        assertStoreScope(targetScope, targetAdapter, targetGeneration);
+        observeSnapshotClock(assembled);
+        installSnapshot(assembled);
+        lastPersisted = shallowSnapshot(assembled);
+        return snapshot;
+      }
       return snapshot;
-    } catch (err) { emitError(err); return snapshot; }
+    } catch (err) {
+      if (storageOperationCancelled(err)) throw err;
+      emitError(err);
+      return snapshot;
+    }
   }
 
   // ---- Fila persistente exposta ao motor de sincronização ----
-  async function outboxAppend(entries) {
+  async function outboxAppend(entries, expectedScope) {
     const list = Array.isArray(entries) ? entries : [entries];
     if (!adapter) throw new Error("Armazenamento local indisponível para a fila");
     if (!list.length) return true;
+    const targetScope = expectedScope || scope;
+    const targetAdapter = adapter;
+    const targetGeneration = storageGeneration;
+    assertStoreScope(targetScope, targetAdapter, targetGeneration);
     try {
-      const result = await enqueueWrite(() => adapter.outboxAppend(list));
+      const result = await enqueueScopedWrite(targetScope, targetAdapter, targetGeneration, () => {
+        return targetAdapter.outboxAppend(list);
+      });
+      assertStoreScope(targetScope, targetAdapter, targetGeneration);
       markHealthy();
       return result;
-    } catch (err) { emitError(err); throw err; }
+    } catch (err) {
+      if (!storageOperationCancelled(err)) emitError(err);
+      throw err;
+    }
   }
-  async function outboxRead(limit) {
+  async function outboxRead(limit, expectedScope) {
     if (!adapter) throw new Error("Armazenamento local indisponível para a fila");
+    const targetScope = expectedScope || scope;
+    const targetAdapter = adapter;
+    const targetGeneration = storageGeneration;
+    assertStoreScope(targetScope, targetAdapter, targetGeneration);
     try {
       await writeQueue;
-      const result = await adapter.outboxRead(limit);
+      assertStoreScope(targetScope, targetAdapter, targetGeneration);
+      const result = await runScopedMutation(targetScope, targetAdapter, targetGeneration,
+        () => targetAdapter.outboxRead(limit));
+      assertStoreScope(targetScope, targetAdapter, targetGeneration);
       markHealthy();
       return result;
-    } catch (err) { emitError(err); throw err; }
+    } catch (err) {
+      if (!storageOperationCancelled(err)) emitError(err);
+      throw err;
+    }
   }
-  async function outboxDrop(seqs) {
+  async function outboxDrop(seqs, expectedScope) {
     if (!adapter) throw new Error("Armazenamento local indisponível para a fila");
     if (!seqs.length) return true;
+    const targetScope = expectedScope || scope;
+    const targetAdapter = adapter;
+    const targetGeneration = storageGeneration;
+    assertStoreScope(targetScope, targetAdapter, targetGeneration);
     try {
-      const result = await enqueueWrite(() => adapter.outboxDrop(seqs));
+      const result = await enqueueScopedWrite(targetScope, targetAdapter, targetGeneration, () => {
+        return targetAdapter.outboxDrop(seqs);
+      });
+      assertStoreScope(targetScope, targetAdapter, targetGeneration);
       markHealthy();
       return result;
-    } catch (err) { emitError(err); throw err; }
+    } catch (err) {
+      if (!storageOperationCancelled(err)) emitError(err);
+      throw err;
+    }
   }
-  async function outboxClear() {
+  async function outboxClear(expectedScope) {
     if (!adapter) throw new Error("Armazenamento local indisponível para a fila");
+    const targetScope = expectedScope || scope;
+    const targetAdapter = adapter;
+    const targetGeneration = storageGeneration;
+    assertStoreScope(targetScope, targetAdapter, targetGeneration);
     try {
-      const result = await enqueueWrite(() => adapter.outboxClear());
+      const result = await enqueueScopedWrite(targetScope, targetAdapter, targetGeneration, () => {
+        return targetAdapter.outboxClear();
+      });
+      assertStoreScope(targetScope, targetAdapter, targetGeneration);
       markHealthy();
       return result;
-    } catch (err) { emitError(err); throw err; }
+    } catch (err) {
+      if (!storageOperationCancelled(err)) emitError(err);
+      throw err;
+    }
   }
 
-  async function localMetaGet(key) {
+  async function localMetaGet(key, expectedScope) {
     if (!adapter) throw new Error("Armazenamento local indisponível para metadados");
+    const targetScope = expectedScope || scope;
+    const targetAdapter = adapter;
+    const targetGeneration = storageGeneration;
+    assertStoreScope(targetScope, targetAdapter, targetGeneration);
     await writeQueue;
-    return adapter.localMetaGet(String(key));
+    assertStoreScope(targetScope, targetAdapter, targetGeneration);
+    const result = await runScopedMutation(targetScope, targetAdapter, targetGeneration,
+      () => targetAdapter.localMetaGet(String(key)));
+    assertStoreScope(targetScope, targetAdapter, targetGeneration);
+    return result;
   }
 
-  async function localMetaPut(key, value) {
+  async function localMetaPut(key, value, expectedScope) {
     if (!adapter) throw new Error("Armazenamento local indisponível para metadados");
-    return enqueueWrite(() => adapter.localMetaPut(String(key), value));
+    const targetScope = expectedScope || scope;
+    const targetAdapter = adapter;
+    const targetGeneration = storageGeneration;
+    assertStoreScope(targetScope, targetAdapter, targetGeneration);
+    return enqueueScopedWrite(targetScope, targetAdapter, targetGeneration, () => {
+      return targetAdapter.localMetaPut(String(key), value);
+    }).then((result) => {
+      assertStoreScope(targetScope, targetAdapter, targetGeneration);
+      return result;
+    });
   }
 
-  async function localMetaDelete(key) {
+  async function localMetaDelete(key, expectedScope) {
     if (!adapter) throw new Error("Armazenamento local indisponível para metadados");
-    return enqueueWrite(() => adapter.localMetaDelete(String(key)));
+    const targetScope = expectedScope || scope;
+    const targetAdapter = adapter;
+    const targetGeneration = storageGeneration;
+    assertStoreScope(targetScope, targetAdapter, targetGeneration);
+    return enqueueScopedWrite(targetScope, targetAdapter, targetGeneration, () => {
+      return targetAdapter.localMetaDelete(String(key));
+    }).then((result) => {
+      assertStoreScope(targetScope, targetAdapter, targetGeneration);
+      return result;
+    });
   }
 
-  async function acknowledgeOutbox(seqs, serverAck) {
+  async function acknowledgeOutbox(seqs, serverAck, expectedScope) {
     if (!adapter) throw new Error("Armazenamento local indisponível para confirmar a fila");
+    const targetScope = expectedScope || scope;
+    const targetAdapter = adapter;
+    const targetGeneration = storageGeneration;
+    assertStoreScope(targetScope, targetAdapter, targetGeneration);
     const drop = new Set((seqs || []).map((seq) => Number(seq)));
     if (!drop.size) return { dropped: 0, linkIds: [], seedIds: [] };
-    return enqueueWrite(async () => {
-      const queued = await adapter.outboxRead(0);
+    return enqueueScopedWrite(targetScope, targetAdapter, targetGeneration, async () => {
+      const queued = await targetAdapter.outboxRead(0);
       const removed = queued.filter((entry) => drop.has(Number(entry.seq)));
       if (removed.length !== drop.size) throw new Error("A fila mudou antes da confirmação do servidor");
       const remaining = queued.filter((entry) => !drop.has(Number(entry.seq)));
@@ -4015,7 +4600,7 @@ const FinanceStore = (() => {
       const metaPuts = {};
       const metaDeletes = [];
       for (const linkId of linkIds) {
-        const journal = await adapter.localMetaGet(META_LINK_JOURNAL);
+        const journal = await targetAdapter.localMetaGet(META_LINK_JOURNAL);
         if (!journal || journal.linkId !== linkId) continue;
         metaPuts[META_LINK_RECEIPT] = {
           version: 1, status: "linked", accountUserId: journal.accountUserId,
@@ -4033,7 +4618,9 @@ const FinanceStore = (() => {
         };
         metaDeletes.push(META_SEED_JOURNAL);
       }
-      await adapter.writeChanges(null, { outboxDrops: Array.from(drop), metaPuts, metaDeletes });
+      assertStoreScope(targetScope, targetAdapter, targetGeneration);
+      await targetAdapter.writeChanges(null, { outboxDrops: Array.from(drop), metaPuts, metaDeletes });
+      assertStoreScope(targetScope, targetAdapter, targetGeneration);
       markHealthy();
       return { dropped: removed.length, linkIds, seedIds };
     });
@@ -4059,6 +4646,7 @@ const FinanceStore = (() => {
     readUndoSnapshot,
     queryTransactionsByMonth,
     scope: () => scope,
+    generation: () => storageGeneration,
     switchScope: (target, preferredAdapter) => init(preferredAdapter || null, { scope: target }),
     peekScope,
     adoptScope,
@@ -4096,6 +4684,17 @@ const FinanceStore = (() => {
     // Marca nova do relógio lógico deste aparelho. Usada por operações que não
     // nascem de um registro, como o "apagar tudo" da conta.
     mintRev: () => { const rev = SyncClock.tick(); saveClockState(); return rev; },
+    // O reset é carimbado pelo servidor acima de toda HLC já conhecida. O
+    // aparelho solicitante precisa absorver essa marca antes de voltar a criar
+    // registros, senão uma criação imediata poderia perder para a lápide.
+    observeRemoteRev: (value) => {
+      const rev = normalizeSyncRev(value);
+      if (!rev) return false;
+      loadClockState();
+      const observed = SyncClock.observe(rev);
+      if (observed) saveClockState();
+      return observed;
+    },
     isReady: () => ready,
     isHealthy: () => healthy,
     hasMirror: () => mirrorEnabled,
@@ -4130,7 +4729,31 @@ function isStorageAvailable() { return FinanceStore.adapterName() !== "memory"; 
 // Garante que nada em rajada se perca ao fechar/minimizar o app (PWA no celular).
 // `pagehide` e `freeze` cobrem o iOS, onde `beforeunload` não é confiável.
 if (typeof document !== "undefined") {
-  const flushNow = () => { try { FinanceStore.flush(); } catch (e) {} };
+  let lifecycleFlush = null;
+  const flushNow = () => {
+    const flushScope = FinanceStore.scope();
+    const flushGeneration = typeof FinanceStore.generation === "function" ? FinanceStore.generation() : 0;
+    if (lifecycleFlush && lifecycleFlush.scope === flushScope && lifecycleFlush.generation === flushGeneration) {
+      return lifecycleFlush.promise;
+    }
+    try {
+      const attempt = typeof CloudSync !== "undefined" && typeof CloudSync.flushOnHide === "function"
+        ? CloudSync.flushOnHide()
+        : FinanceStore.flush();
+      const entry = { scope: flushScope, generation: flushGeneration, promise: null };
+      entry.promise = Promise.resolve(attempt)
+        .catch((error) => {
+          if (typeof reportSafeError === "function") reportSafeError("sync", error, "lifecycle_flush");
+          return false;
+        })
+        .finally(() => { if (lifecycleFlush === entry) lifecycleFlush = null; });
+      lifecycleFlush = entry;
+      return entry.promise;
+    } catch (error) {
+      if (typeof reportSafeError === "function") reportSafeError("sync", error, "lifecycle_flush_start");
+      return Promise.resolve(false);
+    }
+  };
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") flushNow();
   });

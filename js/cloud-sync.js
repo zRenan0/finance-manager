@@ -44,13 +44,13 @@
 // fazendo o trabalho pelas duas.
 "use strict";
 
-const CLOUD_SYNC_DEBOUNCE_MS = 4000;      // rajada de digitação vira um envio só
+const CLOUD_SYNC_DEBOUNCE_MS = 750;       // rajada curta, com envio iniciado em até 1 s
 const CLOUD_SYNC_RETRY_MS = 30000;        // nova tentativa após falha de rede
 const CLOUD_SYNC_BATCH = 400;             // operações por requisição (servidor aceita 500)
 const CLOUD_SYNC_PAGE = 500;              // operações por página na descida
 const CLOUD_SYNC_MAX_PAGES = 200;         // trava de segurança contra cursor que não anda
 const CLOUD_SYNC_MAX_BATCHES = 200;       // trava equivalente na subida
-const CLOUD_SYNC_POLL_MS = 60000;         // volta periódica enquanto o app está à vista
+const CLOUD_SYNC_POLL_MS = 15000;         // volta periódica enquanto o app está à vista
 
 // Chaves antigas, no localStorage. Continuam sendo LIDAS uma única vez, para
 // importar o progresso de quem já usava o app; a partir daí o cursor e o recibo
@@ -66,8 +66,24 @@ const CloudSync = (() => {
   let pollTimer = null;
   let cicloMexeu = false;          // esta volta enviou ou aplicou alguma coisa
   let running = false;
+  let activeRunPromise = null;
+  let rerunPromise = null;
+  let rerunGeneration = -1;
+  let rerunRequest = null;
+  let syncGeneration = 0;
+  let enablePromise = null;
+  let enableKey = "";
+  let sessionRefreshAccountId = "";
+  let resetPromise = null;
+  let resetting = false;
   let scope = "guest";
-  let hooks = { applyRemote: null };
+  let hooks = {
+    applyRemote: null,
+    onAuthInvalid: null,
+    onAccountScopeChanged: null,
+    onSessionRefreshRequired: null,
+    getExpectedAccountId: null,
+  };
   const listeners = [];
 
   // Segura a subida e a semeadura até a decisão de vínculo. Sem isto, entrar
@@ -95,8 +111,8 @@ const CloudSync = (() => {
 
   // `silencioso` existe por causa da volta periódica: `onStatus` redesenha o
   // aplicativo inteiro, e uma volta que não encontrou nada não pode reconstruir
-  // a tela do usuário de minuto em minuto. O estado é atualizado do mesmo
-  // jeito; só o aviso é poupado.
+  // a tela do usuário a cada consulta de 15 segundos. O estado é atualizado do
+  // mesmo jeito; só o aviso é poupado.
   function setState(patch, silencioso) {
     state = { ...state, ...patch };
     if (silencioso) return;
@@ -112,6 +128,56 @@ const CloudSync = (() => {
     const error = new Error(message);
     error.code = code;
     return error;
+  }
+
+  function cancelledError() {
+    return syncError("O ciclo pertencia a outro escopo.", "sync_cancelled");
+  }
+
+  function expectedAccountId() {
+    if (typeof hooks.getExpectedAccountId !== "function") return "";
+    try { return String(hooks.getExpectedAccountId() || "").trim().toLowerCase(); }
+    catch (_) { return ""; }
+  }
+
+  function contextIsCurrent(context, requireEnabled) {
+    if (!context
+      || context.generation !== syncGeneration
+      || context.scope !== scope
+      || context.scope !== FinanceStore.scope()
+      || context.expectedAccountId !== expectedAccountId()) return false;
+    // O contexto de um ciclo ou de uma ação manual sempre captura o adaptador.
+    // O contexto de `performEnable` ainda está preparando o candidato e, por
+    // isso, só pode ser invalidado pela geração, escopo ou identidade.
+    if (Object.prototype.hasOwnProperty.call(context, "adapter") && context.adapter !== adapter) return false;
+    if (requireEnabled && !state.enabled) return false;
+    return true;
+  }
+
+  function assertCurrentCycle(context) {
+    if (!contextIsCurrent(context, true)) throw cancelledError();
+  }
+
+  function nextGeneration() {
+    syncGeneration += 1;
+    // Promessas antigas continuam resolvendo para seus chamadores, mas deixam
+    // de ser a promessa compartilhada da geração nova.
+    rerunRequest = null;
+    rerunPromise = null;
+    rerunGeneration = -1;
+    return syncGeneration;
+  }
+
+  function captureCurrentContext() {
+    if (!state.enabled || !adapter) return null;
+    const context = {
+      generation: syncGeneration,
+      scope,
+      adapter,
+      expectedAccountId: expectedAccountId(),
+    };
+    assertCurrentCycle(context);
+    return context;
   }
 
   // ---------------------------------------------------------------------------
@@ -130,24 +196,29 @@ const CloudSync = (() => {
     } catch (e) { return "0"; }
   }
 
-  async function readCursor() {
+  async function readCursor(context) {
+    if (context) assertCurrentCycle(context);
     if (cursorScope === scope && cursorCache !== null) return cursorCache;
-    const stored = await FinanceStore.localMetaGet(META_CURSOR);
+    const stored = await FinanceStore.localMetaGet(META_CURSOR, context && context.scope);
+    if (context) assertCurrentCycle(context);
     let value = /^\d{1,18}$/.test(String(stored == null ? "" : stored)) ? String(stored) : "";
     if (!value) {
       // Importação única do cursor antigo. Quem já sincronizava não volta a
       // baixar o log inteiro só porque o lugar de guardar mudou.
       value = legacyCursor();
-      await FinanceStore.localMetaPut(META_CURSOR, value);
+      await FinanceStore.localMetaPut(META_CURSOR, value, context && context.scope);
+      if (context) assertCurrentCycle(context);
     }
     cursorScope = scope;
     cursorCache = value;
     return value;
   }
 
-  async function writeCursor(value) {
+  async function writeCursor(value, context) {
     if (!/^\d{1,18}$/.test(String(value || ""))) return;
-    await FinanceStore.localMetaPut(META_CURSOR, String(value));
+    if (context) assertCurrentCycle(context);
+    await FinanceStore.localMetaPut(META_CURSOR, String(value), context && context.scope);
+    if (context) assertCurrentCycle(context);
     cursorScope = scope;
     cursorCache = String(value);
   }
@@ -179,13 +250,15 @@ const CloudSync = (() => {
     return (data.categories || []).some((c) => c && c.custom === true);
   }
 
-  async function precisaSemear(cursor) {
-    const recibo = await FinanceStore.localMetaGet(META_SEED_RECEIPT);
+  async function precisaSemear(cursor, context) {
+    const recibo = await FinanceStore.localMetaGet(META_SEED_RECEIPT, context && context.scope);
+    if (context) assertCurrentCycle(context);
     // Sem recibo confirmado, ou com um diário interrompido pendurado, semear é
     // o certo: reapresentar registros com a marca que eles já têm é inofensivo,
     // porque o servidor guarda a versão de marca maior.
     if (!recibo || recibo.status !== "confirmed") return true;
-    const diario = await FinanceStore.localMetaGet(META_SEED_JOURNAL);
+    const diario = await FinanceStore.localMetaGet(META_SEED_JOURNAL, context && context.scope);
+    if (context) assertCurrentCycle(context);
     if (diario) return true;
     // Rede de segurança: cursor zerado depois de uma descida completa significa
     // servidor sem NENHUMA operação. Se este aparelho tem base e o servidor não
@@ -225,12 +298,14 @@ const CloudSync = (() => {
   // Ciclo
   // ---------------------------------------------------------------------------
 
-  async function applyIncoming(ops) {
+  async function applyIncoming(ops, context) {
     if (!ops || !ops.length) return false;
+    assertCurrentCycle(context);
     // `applyRemoteOps` agora GRAVA antes de devolver. É esta promessa que o
     // cursor espera: enquanto ela não resolve, o aparelho não pode declarar que
     // já leu aquele trecho do log.
-    const result = await FinanceStore.applyRemoteOps(ops);
+    const result = await FinanceStore.applyRemoteOps(ops, context.scope);
+    assertCurrentCycle(context);
     if (!result.changed) return false;
     cicloMexeu = true;
     // `applyRemote` redesenha e reavalia conquistas e avisos, como se o próprio
@@ -240,12 +315,15 @@ const CloudSync = (() => {
   }
 
   // ---- Subida: esvazia a fila em lotes ----
-  async function upload(from) {
+  async function upload(from, context) {
     let cursor = from;
     let guard = 0;
     for (;;) {
-      const queued = await FinanceStore.outboxRead(0);
-      const diarioVinculo = await FinanceStore.localMetaGet(META_LINK_JOURNAL);
+      assertCurrentCycle(context);
+      const queued = await FinanceStore.outboxRead(0, context.scope);
+      assertCurrentCycle(context);
+      const diarioVinculo = await FinanceStore.localMetaGet(META_LINK_JOURNAL, context.scope);
+      assertCurrentCycle(context);
       // Vínculo bloqueado por mudança remota espera decisão explícita. As
       // entradas continuam na fila; elas só não são REENVIADAS às cegas.
       const bloqueado = diarioVinculo && diarioVinculo.status === "blocked" ? String(diarioVinculo.linkId) : "";
@@ -259,12 +337,15 @@ const CloudSync = (() => {
       const compact = compactOutbox(enviaveis);
       const batch = compact.slice(0, CLOUD_SYNC_BATCH);
       if (batch.length) cicloMexeu = true;
-      const result = await adapter.push(batch.map(toWireOp), cursor, pushOptions(batch, diarioVinculo));
+      const result = await context.adapter.push(batch.map(toWireOp), cursor, pushOptions(batch, diarioVinculo));
+      // O servidor valida a conta antes de devolver operações. Mesmo assim, a
+      // aba pode ter trocado de escopo enquanto a resposta viajava.
+      assertCurrentCycle(context);
 
       // A resposta é APLICADA antes de a fila ser confirmada. Se a gravação da
       // resposta falhar, a fila continua inteira e o lote volta na próxima
       // volta; o `mutationId` garante que reenviar não duplica nada.
-      await applyIncoming(result.ops);
+      await applyIncoming(result.ops, context);
 
       // Saem também as versões ANTERIORES do mesmo registro, que a compactação
       // substituiu: a marca já enviada é maior que a delas.
@@ -277,11 +358,13 @@ const CloudSync = (() => {
         .map((entry) => entry.seq);
       // Confirmar é gravar: a remoção da fila e a promoção do recibo de vínculo
       // ou de semeadura acontecem na mesma transação.
-      await FinanceStore.acknowledgeOutbox(seqs, { revision: result.revision });
+      assertCurrentCycle(context);
+      await FinanceStore.acknowledgeOutbox(seqs, { revision: result.revision }, context.scope);
+      assertCurrentCycle(context);
 
       // O cursor só avança depois de tudo acima ter chegado ao disco.
       cursor = result.cursor;
-      await writeCursor(cursor);
+      await writeCursor(cursor, context);
       if (batch.length >= compact.length && !result.hasMore) break;
     }
     return cursor;
@@ -300,14 +383,17 @@ const CloudSync = (() => {
   }
 
   // ---- Descida: páginas até alcançar o servidor ----
-  async function download(from) {
+  async function download(from, context) {
     let cursor = from;
     for (let page = 0; page < CLOUD_SYNC_MAX_PAGES; page++) {
-      const result = await adapter.pull(cursor, CLOUD_SYNC_PAGE);
-      await applyIncoming(result.ops);
+      assertCurrentCycle(context);
+      const result = await context.adapter.pull(cursor, CLOUD_SYNC_PAGE);
+      // Nenhum payload toca o armazenamento antes desta conferência.
+      assertCurrentCycle(context);
+      await applyIncoming(result.ops, context);
       const advanced = String(result.cursor) !== String(cursor);
       cursor = result.cursor;
-      await writeCursor(cursor);
+      await writeCursor(cursor, context);
       if (!result.hasMore) return cursor;
       // Servidor dizendo "tem mais" sem mover o cursor é laço infinito
       // disfarçado de sucesso. Parar em silêncio deixaria o aparelho com meia
@@ -317,68 +403,124 @@ const CloudSync = (() => {
     throw syncError("A leitura da conta excedeu o limite de páginas.", "page_limit");
   }
 
-  async function cycle() {
+  async function cycle(context) {
     // 1. Gravação local em curso termina ANTES de qualquer decisão. Uma
     //    alteração ainda no debounce não pode ficar de fora do primeiro envio,
     //    nem ser sobrescrita pela primeira descida.
     const gravou = await FinanceStore.flush();
     if (gravou === false) throw syncError("O aparelho não conseguiu salvar antes de sincronizar.", "local_write_failed");
+    assertCurrentCycle(context);
 
-    let cursor = await readCursor();
+    let cursor = await readCursor(context);
 
     // 2. Descida primeiro. O vínculo e a semeadura precisam saber o que a conta
     //    JÁ TEM antes de este aparelho empurrar qualquer coisa.
-    cursor = await download(cursor);
+    cursor = await download(cursor, context);
+    assertCurrentCycle(context);
     if (observedRevision === null) {
-      observedRevision = String(adapter.revision == null ? cursor : adapter.revision);
+      observedRevision = String(context.adapter.revision == null ? cursor : context.adapter.revision);
       setState({ remoteRevision: observedRevision }, true);
     }
 
     // 3. Enquanto a decisão de vínculo não sai, nada sobe e nada é semeado.
     if (bootstrapHeld) return;
 
-    if (await precisaSemear(cursor)) await FinanceStore.seedOutbox();
+    if (await precisaSemear(cursor, context)) {
+      assertCurrentCycle(context);
+      await FinanceStore.seedOutbox(context.scope);
+      assertCurrentCycle(context);
+    }
 
     // 4. Subida, com aplicação da resposta e confirmação da fila por dentro.
-    cursor = await upload(cursor);
+    cursor = await upload(cursor, context);
 
     // 5. Descida final: fecha a volta com o que outros aparelhos escreveram
     //    enquanto este enviava.
-    await download(cursor);
+    await download(cursor, context);
   }
 
   // Um ciclo por vez, e uma ABA por vez. `ifAvailable` faz a aba desistir na
   // hora em vez de enfileirar: a outra aba já está enviando a mesma fila.
-  async function withLock(fn) {
+  async function withLock(context, fn, waitForLock) {
     const locks = typeof navigator !== "undefined" && navigator.locks;
     if (!locks || typeof locks.request !== "function") return fn();
     let ran = false;
-    await locks.request(`cofre-sync-${scope}`, { ifAvailable: true }, async (lock) => {
+    const options = waitForLock ? {} : { ifAvailable: true };
+    await locks.request(`cofre-sync-${context.scope}`, options, async (lock) => {
       if (!lock) return;
+      assertCurrentCycle(context);
       ran = true;
       await fn();
     });
     return ran;
   }
 
-  async function runSync(quieto) {
-    if (!adapter || running || !hooks.applyRemote) return false;
-    if (offline()) { setState({ phase: "offline", pending: true }); return false; }
+  function queueRerun(quieto) {
+    const requestedGeneration = syncGeneration;
+    if (!rerunRequest || rerunRequest.generation !== requestedGeneration) {
+      rerunRequest = { generation: requestedGeneration, quieto: !!quieto };
+    } else {
+      // Se ao menos um chamador pediu uma volta visível, ela não pode ser
+      // rebaixada para silenciosa por outro gatilho.
+      rerunRequest.quieto = rerunRequest.quieto && !!quieto;
+    }
+    if (rerunPromise && rerunGeneration === requestedGeneration) return rerunPromise;
+    const current = activeRunPromise || Promise.resolve(false);
+    let promise;
+    promise = Promise.resolve(current).catch(() => false).then(() => {
+      const request = rerunRequest;
+      if (!request || request.generation !== requestedGeneration
+        || !state.enabled || requestedGeneration !== syncGeneration) return false;
+      rerunRequest = null;
+      return runSync(request.quieto);
+    }).finally(() => {
+      if (rerunPromise === promise) {
+        rerunPromise = null;
+        rerunGeneration = -1;
+      }
+    });
+    rerunPromise = promise;
+    rerunGeneration = requestedGeneration;
+    return promise;
+  }
 
+  function runSync(quieto) {
+    if (!adapter || !hooks.applyRemote) return Promise.resolve(false);
+    if (resetting) return resetPromise ? resetPromise.then(() => false, () => false) : Promise.resolve(false);
+    if (running) return queueRerun(quieto);
+    if (offline()) { setState({ phase: "offline", pending: true }); return Promise.resolve(false); }
+
+    const context = captureCurrentContext();
     running = true;
     cicloMexeu = false;
     const eraSincronizado = state.phase === "synced";
     if (!quieto) setState({ phase: "syncing", error: null, errorCode: null });
+    const raw = performRun(context, quieto, eraSincronizado);
+    const tracked = raw.finally(() => {
+      if (activeRunPromise === tracked) {
+        activeRunPromise = null;
+        running = false;
+      }
+    });
+    activeRunPromise = tracked;
+    return tracked;
+  }
+
+  async function performRun(context, quieto, eraSincronizado) {
     try {
-      const ran = await withLock(cycle);
+      assertCurrentCycle(context);
+      const ran = await withLock(context, () => cycle(context));
+      assertCurrentCycle(context);
       if (ran === false) { setState({ phase: "idle", pending: true }); return false; }
       // A LEITURA FINAL DA FILA É A PROVA. Se ela falhar, o `catch` assume: o
       // aplicativo não tem como afirmar que não sobrou nada por enviar.
-      const queued = await FinanceStore.outboxRead(0);
+      const queued = await FinanceStore.outboxRead(0, context.scope);
+      assertCurrentCycle(context);
       const pendente = queued.length > 0;
       // Volta periódica que não achou nada e não mudou nada visível não avisa
       // ninguém: para o usuário, a tela continua exatamente como estava.
       const semNovidade = !!quieto && !cicloMexeu && eraSincronizado && !pendente;
+      if (sessionRefreshAccountId === context.expectedAccountId) sessionRefreshAccountId = "";
       setState({
         phase: pendente ? "idle" : "synced", lastSyncAt: new Date().toISOString(),
         pending: pendente, queued: queued.length, error: null, errorCode: null,
@@ -386,20 +528,83 @@ const CloudSync = (() => {
       }, semNovidade);
       return !pendente;
     } catch (error) {
-      return handleFailure(error);
-    } finally {
-      running = false;
+      return await handleFailure(error, context);
     }
   }
 
-  function handleFailure(error) {
+  async function handleFailure(error, context) {
     const code = (error && error.code) || "server_error";
-    if (code === "session_expired" || code === "device_revoked") {
+    if (code === "sync_cancelled") return false;
+    // Uma resposta do motor antigo não pode desligar, alterar mensagens nem
+    // chamar os hooks da conta que entrou depois dela.
+    if (!contextIsCurrent(context, Object.prototype.hasOwnProperty.call(context || {}, "adapter"))) return false;
+    if (code === "session_refresh_required") {
+      const accountId = context.expectedAccountId;
+      if (sessionRefreshAccountId === accountId) {
+        disable();
+        setState({
+          phase: "error", pending: true, errorCode: code,
+          error: "Não foi possível renovar a sessão para sincronizar. Tente novamente.",
+        });
+        return false;
+      }
+      sessionRefreshAccountId = accountId;
+      disable();
+      setState({ phase: "idle", pending: true, error: null, errorCode: code });
+      // A consulta de sessão usa o lock de cookies. Ela começa fora da promessa
+      // do ciclo antigo, e a própria camada de conta religa o motor somente se a
+      // identidade confirmada continuar sendo esta.
+      if (typeof hooks.onSessionRefreshRequired === "function") {
+        Promise.resolve().then(() => hooks.onSessionRefreshRequired({
+          code,
+          message: error && error.message || "",
+          expectedAccountId: accountId,
+        })).catch((hookError) => {
+          if (typeof reportSafeError === "function") reportSafeError("sync", hookError, "sync_session_refresh_hook");
+        });
+      }
+      return false;
+    }
+    if (code === "account_scope_changed") {
+      disable();
+      setState({
+        phase: "disabled", pending: true, error: null,
+        errorCode: code,
+      });
+      // A consulta de sessão pode ligar um motor novo. Ela precisa começar fora
+      // da promessa deste ciclo para não esperar por si mesma.
+      if (typeof hooks.onAccountScopeChanged === "function") {
+        Promise.resolve().then(() => hooks.onAccountScopeChanged({
+          code,
+          message: error && error.message || "",
+          expectedAccountId: context && context.expectedAccountId || expectedAccountId(),
+        })).catch((hookError) => {
+          if (typeof reportSafeError === "function") reportSafeError("sync", hookError, "sync_account_scope_hook");
+        });
+      }
+      return false;
+    }
+    if (code === "invalid_account_scope") {
+      disable();
+      setState({
+        phase: "error", pending: true,
+        error: "Não foi possível confirmar a identidade da conta para sincronizar.",
+        errorCode: code,
+      });
+      return false;
+    }
+    if (code === "session_expired" || code === "device_revoked" || code === "device_unknown") {
       // Sessão morta ou aparelho revogado: parar é o certo. Insistir só produz
       // uma fila de 401 e um aviso repetido na tela. A fila local fica intacta;
       // ao entrar de novo, ela sobe.
       disable();
       setState({ phase: "error", error: "A sessão terminou. Entre novamente para voltar a sincronizar.", errorCode: code });
+      if (typeof hooks.onAuthInvalid === "function") {
+        try { await hooks.onAuthInvalid({ code, message: error && error.message || "" }); }
+        catch (hookError) {
+          if (typeof reportSafeError === "function") reportSafeError("sync", hookError, "sync_auth_invalid_hook");
+        }
+      }
       return false;
     }
     if (code === "protocol_upgrade_required") {
@@ -412,7 +617,9 @@ const CloudSync = (() => {
       // A conta recebeu algo entre a leitura e a confirmação do vínculo. Nada é
       // descartado: o diário e a fila continuam, e a decisão volta para o
       // usuário como confirmação de mesclagem.
-      FinanceStore.blockGuestLink(error && error.revision).catch(() => {});
+      FinanceStore.blockGuestLink(error && error.revision, context.scope).catch((journalError) => {
+        if (typeof reportSafeError === "function") reportSafeError("storage", journalError, "guest_link_block");
+      });
       setState({
         phase: "idle", pending: true,
         error: "A conta mudou em outro aparelho. Confirme como juntar os dados.",
@@ -431,7 +638,7 @@ const CloudSync = (() => {
     }
     if (code === "network_error" || code === "timeout" || code === "upstream_unavailable") {
       setState({ phase: "offline", pending: true, error: null, errorCode: code });
-      scheduleRetry();
+      scheduleRetry(context);
       return false;
     }
     if (typeof reportSafeError === "function") reportSafeError("sync", error, "sync_cycle");
@@ -441,13 +648,21 @@ const CloudSync = (() => {
       error: "Não foi possível sincronizar agora. O aparelho continua com todos os dados.",
       errorCode: code,
     });
-    scheduleRetry();
+    scheduleRetry(context);
     return false;
   }
 
-  function scheduleRetry() {
+  function scheduleRetry(context) {
     clearTimeout(retryTimer);
-    retryTimer = setTimeout(() => { if (state.enabled) runSync(); }, CLOUD_SYNC_RETRY_MS);
+    const retryAccountId = String(context && context.expectedAccountId || expectedAccountId());
+    const retryScope = String(context && context.scope || FinanceStore.scope());
+    if (!retryAccountId || retryScope === "guest") return;
+    retryTimer = setTimeout(() => {
+      retryTimer = null;
+      if (expectedAccountId() !== retryAccountId || FinanceStore.scope() !== retryScope) return;
+      if (state.enabled) runSync();
+      else enable();
+    }, CLOUD_SYNC_RETRY_MS);
   }
 
   // ---------------------------------------------------------------------------
@@ -460,8 +675,8 @@ const CloudSync = (() => {
   // já estava "sincronizada" - não tinha nada para mandar - e ninguém ia
   // buscar o que havia chegado. Só recarregar a página resolvia.
   //
-  // Uma volta por minuto, e só com o app à vista, cobre isso sem gastar
-  // bateria em segundo plano nem somar requisição com a aba escondida.
+  // Uma consulta a cada 15 segundos, e só com o app à vista, cobre isso sem
+  // gastar bateria em segundo plano nem somar requisição com a aba escondida.
   function appVisivel() {
     return typeof document === "undefined" || document.visibilityState !== "hidden";
   }
@@ -496,11 +711,22 @@ const CloudSync = (() => {
     return runSync();
   }
 
+  // O navegador pode interromper esta promessa assim que a aba some. Ainda
+  // assim iniciamos a gravação e o envio imediatamente; se ele for cortado, a
+  // fila persistente continua inteira para o próximo pageshow, foco ou online.
+  async function flushOnHide() {
+    clearTimeout(pendingTimer);
+    const gravou = await FinanceStore.flush();
+    if (gravou === false || !state.enabled) return false;
+    return runSync(true);
+  }
+
   // O botão "tentar de novo" da tela de conta. Quando o motor está ligado, é um
   // ciclo. Quando ele PAROU por erro (sessão morta, migração faltando), é uma
   // nova tentativa de ligar; era exatamente aí que a tela não oferecia botão
   // nenhum e a única saída conhecida era recarregar a página.
   function retry() {
+    if (sessionRefreshAccountId === expectedAccountId()) sessionRefreshAccountId = "";
     if (state.enabled) return syncNow();
     return enable();
   }
@@ -510,25 +736,134 @@ const CloudSync = (() => {
   // ---------------------------------------------------------------------------
   // Precisa virar lápide no servidor, e não sumiço: sumiço faz o próximo
   // aparelho a sincronizar devolver a base inteira de volta.
-  async function resetRemote() {
-    if (!state.enabled || !adapter) return false;
-    const rev = FinanceStore.mintRev();
-    const result = await adapter.resetRemote(rev);
-    await FinanceStore.outboxClear();
-    await writeCursor(String(result.revision || "0"));
-    return true;
+  function resetRemote() {
+    if (resetPromise) return resetPromise;
+    let captured;
+    try { captured = captureCurrentContext(); }
+    catch (error) {
+      if (state.phase === "syncing") {
+        setState({ phase: state.enabled ? "idle" : "disabled", pending: !!state.enabled });
+      }
+      return Promise.resolve({
+        ok: false, remoteDeleted: false, localPrepared: false,
+        reason: (error && error.code) || "sync_cancelled", resetRev: null,
+      });
+    }
+    if (!captured) {
+      if (state.phase === "syncing") {
+        setState({ phase: state.enabled ? "idle" : "disabled", pending: !!state.enabled });
+      }
+      return Promise.resolve({ ok: false, remoteDeleted: false, localPrepared: false, reason: "disabled", resetRev: null });
+    }
+    const previousRun = activeRunPromise;
+    const generation = nextGeneration();
+    const context = { ...captured, generation };
+    resetting = true;
+    clearTimeout(pendingTimer);
+    clearTimeout(retryTimer);
+    setState({ phase: "syncing", error: null, errorCode: null });
+
+    let promise;
+    promise = performReset(context, previousRun).finally(() => {
+      if (resetPromise === promise) {
+        // Todo caminho normal escolhe um estado antes de chegar aqui. Este
+        // último anteparo cobre cancelamentos lançados pelo adaptador sem
+        // deixar a conta aparentando sincronizar para sempre.
+        if (contextIsCurrent(context, true) && state.phase === "syncing") {
+          setState({ phase: "idle", pending: true, error: null, errorCode: null });
+        }
+        resetPromise = null;
+        resetting = false;
+      }
+    });
+    resetPromise = promise;
+    return promise;
+  }
+
+  async function performReset(context, previousRun) {
+    let remoteDeleted = false;
+    let resetRev = null;
+    try {
+      // A geração já mudou, então a resposta do ciclo anterior não pode mais
+      // tocar na base. Aguardá-lo garante também que uma escrita local que já
+      // tinha começado termine antes da operação destrutiva.
+      if (previousRun) await previousRun.catch(() => false);
+      assertCurrentCycle(context);
+      const ran = await withLock(context, async () => {
+        assertCurrentCycle(context);
+        const flushed = await FinanceStore.flush();
+        if (flushed === false) throw syncError("O aparelho não conseguiu salvar antes de apagar.", "local_write_failed");
+        assertCurrentCycle(context);
+        const rev = FinanceStore.mintRev();
+        const result = await context.adapter.resetRemote(rev);
+        resetRev = result.resetRev;
+        // O adaptador só resolve depois da confirmação do servidor. Marcar
+        // antes de conferir de novo o contexto preserva essa verdade mesmo se
+        // a sessão mudar exatamente enquanto a resposta volta.
+        remoteDeleted = true;
+        assertCurrentCycle(context);
+        if (FinanceStore.observeRemoteRev(result.resetRev) !== true) {
+          throw syncError("O aparelho não conseguiu registrar a versão da exclusão remota.", "reset_rev_observe_failed");
+        }
+        try { await FinanceStore.outboxClear(context.scope); }
+        catch (error) {
+          const failure = syncError("A fila local não pôde ser limpa depois da exclusão remota.", "outbox_clear_failed");
+          failure.cause = error;
+          throw failure;
+        }
+        assertCurrentCycle(context);
+        try { await writeCursor(String(result.revision || "0"), context); }
+        catch (error) {
+          const failure = syncError("O cursor local não pôde ser atualizado depois da exclusão remota.", "cursor_write_failed");
+          failure.cause = error;
+          throw failure;
+        }
+        return true;
+      }, true);
+      assertCurrentCycle(context);
+      if (ran !== true) throw syncError("Não foi possível reservar este aparelho para apagar os dados.", "lock_unavailable");
+      setState({
+        phase: "synced", lastSyncAt: new Date().toISOString(), pending: false,
+        queued: 0, error: null, errorCode: null,
+      });
+      return { ok: true, remoteDeleted: true, localPrepared: true, reason: null, resetRev };
+    } catch (error) {
+      const reason = (error && error.code) || "server_error";
+      if (remoteDeleted) {
+        if (contextIsCurrent(context, true)) {
+          if (typeof reportSafeError === "function") {
+            reportSafeError("storage", error && error.cause || error, reason);
+          }
+          setState({
+            phase: "error", pending: true, errorCode: reason,
+            error: "Os dados foram apagados da conta, mas o aparelho não concluiu a limpeza local.",
+          });
+        }
+        return { ok: false, remoteDeleted: true, localPrepared: false, reason, resetRev };
+      }
+      await handleFailure(error, context);
+      return { ok: false, remoteDeleted: false, localPrepared: false, reason, resetRev: null };
+    }
   }
 
   async function createCheckpoint(label) {
-    if (!state.enabled || !adapter) return null;
-    try { return await adapter.createCheckpoint(label); }
-    catch (error) { handleFailure(error); return null; }
+    const context = captureCurrentContext();
+    if (!context) return null;
+    try {
+      const checkpoint = await context.adapter.createCheckpoint(label);
+      assertCurrentCycle(context);
+      return checkpoint;
+    } catch (error) { await handleFailure(error, context); return null; }
   }
 
   async function listCheckpoints() {
-    if (!state.enabled || !adapter) return [];
-    try { return await adapter.listCheckpoints(); }
-    catch (error) { return []; }
+    const context = captureCurrentContext();
+    if (!context) return [];
+    try {
+      const checkpoints = await context.adapter.listCheckpoints();
+      assertCurrentCycle(context);
+      return checkpoints;
+    } catch (error) { await handleFailure(error, context); return []; }
   }
 
   // ---------------------------------------------------------------------------
@@ -540,40 +875,67 @@ const CloudSync = (() => {
   // restauração propaga para os outros aparelhos como qualquer outra alteração,
   // em vez de ser desfeita por eles na volta seguinte.
   async function restoreCheckpoint(checkpointId) {
-    if (!state.enabled || !adapter) return { ok: false, reason: "disabled" };
+    const context = captureCurrentContext();
+    if (!context) return { ok: false, reason: "disabled" };
 
-    // Rede de segurança: quem restaura por engano precisa de caminho de volta.
-    await createCheckpoint("Antes de restaurar");
+    try {
+      // Rede de segurança: quem restaura por engano precisa de caminho de volta.
+      const safetyCheckpoint = await context.adapter.createCheckpoint("Antes de restaurar");
+      assertCurrentCycle(context);
+      if (!safetyCheckpoint || !safetyCheckpoint.id) {
+        throw syncError("Não foi possível criar a versão de segurança antes da restauração.", "checkpoint_failed");
+      }
 
-    const ops = [];
-    let after = "";
-    for (let page = 0; page < CLOUD_SYNC_MAX_PAGES; page++) {
-      const result = await adapter.readCheckpoint(checkpointId, after);
-      result.ops.forEach((row) => {
-        if (row.op !== "put" || !row.payload) return;
-        ops.push({ entity: row.entity, entityId: row.entityId, op: "put", rev: FinanceStore.mintRev(), payload: row.payload });
-      });
-      if (!result.hasMore || result.after === after) break;
-      after = result.after;
-    }
-
-    const naVersao = new Set(ops.map((op) => `${op.entity} ${op.entityId}`));
-    const atual = FinanceStore.snapshot();
-    FinanceStore.syncEntityFields().forEach((field) => {
-      (atual[field] || []).forEach((rec) => {
-        if (!naVersao.has(`${field} ${rec.id}`)) {
-          ops.push({ entity: field, entityId: rec.id, op: "delete", rev: FinanceStore.mintRev() });
+      const ops = [];
+      let after = "";
+      let checkpointComplete = false;
+      for (let page = 0; page < CLOUD_SYNC_MAX_PAGES; page++) {
+        const result = await context.adapter.readCheckpoint(checkpointId, after);
+        assertCurrentCycle(context);
+        result.ops.forEach((row) => {
+          if (row.op !== "put" || !row.payload) return;
+          ops.push({ entity: row.entity, entityId: row.entityId, op: "put", rev: FinanceStore.mintRev(), payload: row.payload });
+        });
+        if (!result.hasMore) {
+          checkpointComplete = true;
+          break;
         }
-      });
-    });
+        const nextAfter = String(result.after || "");
+        if (!nextAfter || nextAfter === after) {
+          throw syncError("A versão parou de avançar durante a leitura. Nada foi restaurado.", "cursor_stalled");
+        }
+        after = nextAfter;
+      }
+      if (!checkpointComplete) {
+        throw syncError("A versão excedeu o limite seguro de páginas. Nada foi restaurado.", "page_limit");
+      }
 
-    const aplicado = await FinanceStore.applyRemoteOps(ops);
-    if (aplicado.changed) hooks.applyRemote(aplicado.data);
-    // As operações da restauração precisam SUBIR: `applyRemoteOps` não
-    // enfileira nada, porque normalmente o que ele aplica veio de fora.
-    await FinanceStore.outboxAppend(ops.map((op) => ({ ...op, queuedAt: Date.now() })));
-    await syncNow();
-    return { ok: true, applied: ops.length };
+      assertCurrentCycle(context);
+      const naVersao = new Set(ops.map((op) => `${op.entity} ${op.entityId}`));
+      const atual = FinanceStore.snapshot();
+      FinanceStore.syncEntityFields().forEach((field) => {
+        (atual[field] || []).forEach((rec) => {
+          if (!naVersao.has(`${field} ${rec.id}`)) {
+            ops.push({ entity: field, entityId: rec.id, op: "delete", rev: FinanceStore.mintRev() });
+          }
+        });
+      });
+
+      assertCurrentCycle(context);
+      const queued = ops.map((op) => ({ ...op, queuedAt: Date.now() }));
+      // A base restaurada e as operações que a propagam são uma única gravação
+      // local. Se a sessão parar neste await, nunca sobra uma restauração sem
+      // fila, nem uma fila sem a respectiva restauração.
+      const aplicado = await FinanceStore.applyRemoteOps(ops, context.scope, { outboxAdds: queued });
+      assertCurrentCycle(context);
+      if (aplicado.changed) hooks.applyRemote(aplicado.data);
+      await syncNow();
+      assertCurrentCycle(context);
+      return { ok: true, applied: ops.length };
+    } catch (error) {
+      await handleFailure(error, context);
+      return { ok: false, reason: (error && error.code) || "failed" };
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -610,39 +972,69 @@ const CloudSync = (() => {
   // Ligar e desligar
   // ---------------------------------------------------------------------------
 
-  async function enable() {
+  function enable() {
     if (state.enabled) return runSync();
-    if (!hooks.applyRemote) return false;
-    scope = FinanceStore.scope();
+    if (!hooks.applyRemote) return Promise.resolve(false);
+    const nextScope = FinanceStore.scope();
+    const accountId = expectedAccountId();
+    if (sessionRefreshAccountId && sessionRefreshAccountId !== accountId) sessionRefreshAccountId = "";
+    const key = `${nextScope} ${accountId}`;
+    if (enablePromise && enableKey === key) return enablePromise;
+
+    // Entrar no escopo da conta já autoriza a marcação local. A saúde remota
+    // pode falhar; isso não pode transformar edições feitas nesse intervalo em
+    // mudanças sem relógio e sem fila.
+    FinanceStore.setOutboxEnabled(nextScope !== "guest" && !!accountId);
+    const generation = nextGeneration();
+    scope = nextScope;
+    adapter = null;
     cursorCache = null;
     cursorScope = null;
+    const promise = performEnable({ generation, scope: nextScope, expectedAccountId: accountId });
+    enablePromise = promise;
+    enableKey = key;
+    return promise.finally(() => {
+      if (enablePromise === promise) {
+        enablePromise = null;
+        enableKey = "";
+      }
+    });
+  }
+
+  async function performEnable(context) {
+    let candidate = null;
     try {
-      adapter = new CloudAdapter({
+      candidate = new CloudAdapter({
         enabled: true,
         baseUrl: "/api/sync",
         authMode: "cookie",              // a sessão vive em cookie HttpOnly
         deviceId: accountDeviceId(),
+        deviceLabel: typeof accountDeviceLabel === "function" ? accountDeviceLabel() : "Este navegador",
+        deviceType: typeof accountCurrentDeviceType === "function" ? accountCurrentDeviceType() : "unknown",
+        accountId: context.expectedAccountId,
         allowDestructive: true,          // usado só por resetRemote(), que grava lápides
       });
-      await adapter.init();
+      await candidate.init();
     } catch (error) {
-      adapter = null;
+      if (context.generation !== syncGeneration
+        || context.scope !== FinanceStore.scope()
+        || context.expectedAccountId !== expectedAccountId()) return false;
       const code = (error && error.code) || "unavailable";
-      // Site publicado sem o backend configurado não é erro do usuário; é só
-      // um recurso que não existe naquela instalação.
-      //
-      // Nos DEMAIS casos a mensagem do servidor é guardada. Ela era descartada
-      // (`error: null`), e por isso a tela dizia "Sincronização com falha" e
-      // parava por aí: quem estava vendo não tinha como saber se era a sessão,
-      // a rede ou uma migração que faltou rodar no banco.
-      setState({
-        enabled: false,
-        phase: code === "not_configured" ? "disabled" : "error",
-        errorCode: code,
-        error: code === "not_configured" ? null : ((error && error.message) || "Não foi possível ligar a sincronização."),
-      });
+      if (code === "account_scope_changed" || code === "invalid_account_scope"
+        || code === "session_expired" || code === "device_revoked" || code === "device_unknown"
+        || code === "protocol_upgrade_required" || code === "schema_missing"
+        || code === "not_configured" || code === "origin_denied") {
+        await handleFailure(error, context);
+        return false;
+      }
+      setState({ enabled: false });
+      await handleFailure(error, context);
       return false;
     }
+    if (context.generation !== syncGeneration
+      || context.scope !== FinanceStore.scope()
+      || context.expectedAccountId !== expectedAccountId()) return false;
+    adapter = candidate;
     FinanceStore.setOutboxEnabled(true);
     setState({ enabled: true, phase: "idle", error: null, errorCode: null });
     startPolling();
@@ -652,9 +1044,12 @@ const CloudSync = (() => {
   }
 
   function disable() {
+    nextGeneration();
     clearTimeout(pendingTimer);
     clearTimeout(retryTimer);
     stopPolling();
+    enablePromise = null;
+    enableKey = "";
     adapter = null;
     bootstrapHeld = false;
     observedRevision = null;
@@ -662,32 +1057,24 @@ const CloudSync = (() => {
     cursorScope = null;
     // A fila NÃO é apagada: ela é o que ainda não chegou ao servidor. Apagar
     // aqui perderia lançamentos feitos offline logo antes de sair.
-    FinanceStore.setOutboxEnabled(false);
+    // O motor pode parar por rede, atualização ou configuração incompleta sem
+    // a conta deixar de ser o escopo atual. Continuamos enfileirando nesse banco;
+    // a troca efetiva para visitante reinicializa a flag no FinanceStore.
     setState({
       enabled: false, phase: "disabled", pending: false, error: null, errorCode: null,
       remoteRevision: null, bootstrapHeld: false,
     });
+    return activeRunPromise ? activeRunPromise.catch(() => false) : Promise.resolve(true);
   }
 
   function configure(options) {
     const o = options || {};
     if (typeof o.applyRemote === "function") hooks.applyRemote = o.applyRemote;
+    if (typeof o.onAuthInvalid === "function") hooks.onAuthInvalid = o.onAuthInvalid;
+    if (typeof o.onAccountScopeChanged === "function") hooks.onAccountScopeChanged = o.onAccountScopeChanged;
+    if (typeof o.onSessionRefreshRequired === "function") hooks.onSessionRefreshRequired = o.onSessionRefreshRequired;
+    if (typeof o.getExpectedAccountId === "function") hooks.getExpectedAccountId = o.getExpectedAccountId;
     if (typeof o.onStatus === "function") listeners.push(o.onStatus);
-  }
-
-  // Voltar a ter rede e voltar para o aplicativo são os dois momentos em que o
-  // usuário mais espera ver os dados em dia.
-  if (typeof window !== "undefined") {
-    window.addEventListener("online", () => { if (state.enabled) syncNow(); });
-    if (typeof document !== "undefined") {
-      // Voltar ao app busca o que chegou, TENDO OU NÃO fila para mandar. A
-      // condição antiga (`state.pending`) só deixava passar quem tinha algo a
-      // enviar, que é exatamente o aparelho que NÃO precisava do gatilho: quem
-      // ficou parado é quem está desatualizado.
-      document.addEventListener("visibilitychange", () => {
-        if (state.enabled && document.visibilityState === "visible") syncNow();
-      });
-    }
   }
 
   return {
@@ -696,6 +1083,7 @@ const CloudSync = (() => {
     disable,
     schedule,
     syncNow,
+    flushOnHide,
     retry,
     resetRemote,
     createCheckpoint,

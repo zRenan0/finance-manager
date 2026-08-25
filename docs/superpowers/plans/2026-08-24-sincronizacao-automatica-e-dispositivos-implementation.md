@@ -101,7 +101,11 @@ Passos:
 10. distinguir códigos terminais do Auth de timeout, transporte e HTTP 5xx;
 11. validar `X-Account-Id` antes de dados em sync, análise e ações autenticadas
     de conta, com 400 para formato inválido e 403 para identidade divergente;
-12. liberar `X-Account-Id` no preflight CORS da análise.
+12. impedir refresh em rotas com escopo e devolver
+    `401 session_refresh_required` sem cookies ou acesso ao banco;
+13. manter `/account/session` como único ponto de renovação e usar `sub` não
+    verificado somente para rejeição antecipada, nunca para autorização;
+14. liberar `X-Account-Id` no preflight CORS da análise.
 
 ## Tarefa 4. Corrigir estado de sessão e recuperação automática
 
@@ -129,7 +133,9 @@ Passos:
     `session_expired`;
 12. voltar a interface ao escopo visitante sem apagar o banco da conta.
 13. enviar `X-Account-Id` em sincronização, análise e ações autenticadas de
-    conta, tratando `account_scope_changed` sem aplicar resposta antiga.
+    conta, tratando `account_scope_changed` sem aplicar resposta antiga;
+14. ao receber `session_refresh_required`, consultar `/account/session`,
+    confirmar a mesma identidade e repetir a operação uma única vez.
 
 ## Tarefa 5. Refazer o extrato de acessos
 

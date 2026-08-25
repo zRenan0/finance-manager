@@ -131,16 +131,33 @@ function onClick(e) {
       // que o botão não funciona. Então a pergunta muda: apagar na conta
       // inteira (lápides que viajam para os outros aparelhos) ou apagar aqui e
       // desconectar.
-      const naNuvem = typeof CloudSync !== "undefined" && CloudSync.isEnabled();
+      // O motor pode estar temporariamente parado por falta de rede. Ainda
+      // assim este banco pertence a uma conta e não pode ser tratado como uma
+      // base apenas local, pois a sessão pode baixar tudo quando se recuperar.
+      const naNuvem = FinanceStore.scope() !== GUEST_SCOPE;
+      const expectedScope = FinanceStore.scope();
+      const expectedGeneration = FinanceStore.generation();
 
-      const apagarLocal = async (mensagem) => {
-        const ok = await FinanceStore.purge();
+      const apagarLocal = async (mensagem, mensagemFalha, resetRev) => {
+        let ok = false;
+        let purgeError = null;
+        try { ok = await FinanceStore.purge(); }
+        catch (error) { purgeError = error; }
         if (!ok) {
-          if (typeof reportSafeError === "function") reportSafeError("storage", null, "storage_delete");
-          notify("Não foi possível apagar todos os dados", "danger");
+          if (typeof reportSafeError === "function") reportSafeError("storage", purgeError, "storage_delete");
+          notify(mensagemFalha || "Não foi possível apagar todos os dados", "danger");
           return false;
         }
-        clearSafeErrors();
+        // `purge()` remove também o relógio persistido deste escopo. Depois de
+        // um reset remoto, gravamos de novo somente a HLC dominante devolvida
+        // pelo servidor, para uma criação após recarregar não perder para as
+        // lápides que acabaram de ser geradas.
+        const clockPrepared = !resetRev || (typeof FinanceStore.observeRemoteRev === "function"
+          && FinanceStore.observeRemoteRev(resetRev) === true);
+        if (clockPrepared) clearSafeErrors();
+        else if (typeof reportSafeError === "function") {
+          reportSafeError("storage", null, "reset_rev_observe_failed");
+        }
         state.data = FinanceStore.snapshot();
         state.onboarding = freshOnboarding();
         state.onboarding.open = true;
@@ -163,23 +180,62 @@ function onClick(e) {
         alternateLabel: naNuvem ? "Apagar só aqui e desconectar" : null,
         alternateIcon: "eyeOff",
         onConfirm: async () => {
+          let resetResult = null;
           if (naNuvem) {
+            if (FinanceStore.scope() !== expectedScope || FinanceStore.generation() !== expectedGeneration) {
+              notify("A conta mudou antes da exclusão. Nenhuma cópia foi apagada.", "danger");
+              return;
+            }
             // A ordem importa: primeiro as lápides sobem, depois o aparelho
             // esvazia. Ao contrário, o esvaziamento local não teria mais o que
             // marcar como apagado.
-            try { await CloudSync.resetRemote(); }
+            try {
+              resetResult = await CloudSync.resetRemote();
+              if (!resetResult || typeof resetResult !== "object"
+                || typeof resetResult.ok !== "boolean"
+                || typeof resetResult.remoteDeleted !== "boolean"
+                || typeof resetResult.localPrepared !== "boolean"
+                || !Object.prototype.hasOwnProperty.call(resetResult, "reason")) {
+                const invalid = new Error("A sincronização devolveu um resultado inválido para a exclusão.");
+                invalid.code = "invalid_reset_result";
+                throw invalid;
+              }
+              if (!resetResult.remoteDeleted) {
+                const unconfirmed = new Error("A exclusão remota não foi confirmada.");
+                unconfirmed.code = resetResult.reason || "sync_reset";
+                throw unconfirmed;
+              }
+            }
             catch (error) {
               if (typeof reportSafeError === "function") reportSafeError("sync", error, "sync_reset");
-              notify("Não foi possível apagar os dados na conta. Nada foi apagado.", "danger");
+              notify("Não foi possível confirmar a exclusão na conta. A cópia deste aparelho não foi apagada.", "danger");
+              return;
+            }
+            if (FinanceStore.scope() !== expectedScope || FinanceStore.generation() !== expectedGeneration) {
+              notify("Os dados foram apagados da conta anterior no servidor. A conta aberta agora não foi alterada.");
               return;
             }
           }
-          await apagarLocal(naNuvem ? "Dados apagados na conta e neste aparelho" : "Dados apagados deste aparelho");
+          let mensagem = naNuvem ? "Dados apagados na conta e neste aparelho" : "Dados apagados deste aparelho";
+          if (resetResult && !resetResult.localPrepared) {
+            if (resetResult.reason === "cursor_write_failed") {
+              mensagem = "Dados apagados na conta e neste aparelho. O ponto local de sincronização não pôde ser atualizado, mas a limpeza final foi concluída.";
+            } else if (resetResult.reason === "outbox_clear_failed") {
+              mensagem = "Dados apagados na conta e neste aparelho. A fila local não pôde ser limpa primeiro, mas a limpeza final foi concluída.";
+            } else {
+              mensagem = "Dados apagados na conta e neste aparelho. A preparação local falhou, mas a limpeza final foi concluída.";
+            }
+          }
+          await apagarLocal(
+            mensagem,
+            naNuvem
+              ? "Os dados foram apagados da conta, mas o navegador não permitiu apagar a cópia deste aparelho. Limpe os dados deste site no navegador."
+              : null,
+            resetResult && resetResult.resetRev,
+          );
         },
         onAlternate: async () => {
-          // Desconectar ANTES de apagar; senão o ciclo seguinte rebaixa tudo.
-          CloudSync.disable();
-          await apagarLocal("Dados apagados deste aparelho. A conta foi desconectada aqui.");
+          await accountForgetThisDevice();
         },
       });
       break;
@@ -224,11 +280,11 @@ function onClick(e) {
     case "account-link-review": accountReviewGuestLink(); break;
     case "account-logout": accountLogout(); break;
     case "account-revoke":
-      requestConfirmation({ title: "Revogar acesso deste dispositivo?", message: "A sessão desse dispositivo deixará de acessar sua conta.", confirmLabel: "Revogar acesso", tone: "danger", onConfirm: () => accountRevoke(id) });
+      requestConfirmation({ title: "Revogar acesso deste dispositivo?", message: "Este dispositivo não poderá mais acessar nem sincronizar sua conta. Uma cópia já salva nele não será apagada à distância.", confirmLabel: "Revogar acesso", tone: "danger", onConfirm: () => accountRevoke(id) });
       break;
     case "account-delete-request":
       if (state.account.form.deleteText !== "APAGAR CONTA" || state.account.form.deletePassword.length < 10) { state.account.error = "Informe sua senha atual e digite APAGAR CONTA."; render(); break; }
-      requestConfirmation({ title: "Apagar sua conta online?", message: "A conta e os dados guardados no servidor serão apagados. Os dados locais deste aparelho serão preservados.", confirmLabel: "Apagar conta online", tone: "danger", requiredText: "APAGAR CONTA", onConfirm: accountDelete });
+      requestConfirmation({ title: "Apagar conta e dados?", message: "A conta e os dados guardados no servidor e neste aparelho serão apagados. Isso não pode ser desfeito. Cópias já salvas em outros aparelhos não serão apagadas à distância.", confirmLabel: "Apagar conta e dados", tone: "danger", requiredText: "APAGAR CONTA", onConfirm: accountDelete });
       break;
     case "analytics-view": state.analyticsView = value === "reports" ? "reports" : "movements"; state.analyticsLimit = 30; render(); break;
     case "accounts-view": state.accountsUi.view = value === "sources" ? "sources" : "accounts"; render(); break;

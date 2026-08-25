@@ -100,6 +100,10 @@ async function main() {
   check("origem diferente é recusada", foreign.statusCode === 403, foreign.statusCode);
   check("requisição sem Origin é recusada", missing.statusCode === 403, missing.statusCode);
   check("resposta permitida não usa curinga", same.headers["Access-Control-Allow-Origin"] === "https://financas.example", same.headers["Access-Control-Allow-Origin"]);
+  check("preflight permite identificar conta e dispositivo",
+    ["X-Account-Id", "X-Device-Id", "X-Device-Label", "X-Device-Type"]
+      .every((header) => same.headers["Access-Control-Allow-Headers"].includes(header)),
+    same.headers["Access-Control-Allow-Headers"]);
   if (oldAllowed == null) delete process.env.ALLOWED_ORIGIN;
   else process.env.ALLOWED_ORIGIN = oldAllowed;
   delete require.cache[functionPath];
@@ -132,7 +136,8 @@ async function main() {
     httpMethod: "POST",
     headers: {
       origin: "https://financas.example", host: "financas.example", "x-forwarded-proto": "https",
-      "x-device-id": "dispositivo-de-teste-0001", ...(extra || {}),
+      "x-device-id": "dispositivo-de-teste-0001",
+      "x-account-id": "00000000-0000-4000-8000-000000000001", ...(extra || {}),
     },
     body: JSON.stringify({ rendaMensal: 5000, categorias: [{ nome: "Mercado", gasto: 800 }] }),
   });

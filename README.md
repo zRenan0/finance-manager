@@ -10,13 +10,13 @@ referências e tamanhos de texto. Uma chave de nota fiscal em qualquer endereço
 não basta para provocar uma consulta: o leitor aceita somente HTTPS em domínio
 governamental identificado como SEFAZ ou Fazenda.
 
-O `CloudAdapter` continua desligado e não está conectado a servidor. Seu contrato
-agora exige sessão, dispositivo, revisão, idempotência e tratamento explícito de
-conflito. As regras que um backend futuro precisa cumprir estão em
-`docs/SYNC_PROTOCOL.md`.
+O `CloudAdapter` entra em operação quando uma conta é conectada. O IndexedDB
+continua sendo a fonte da tela, enquanto uma fila persistente envia alterações e
+busca o que mudou nos outros aparelhos. Sessão, aparelho, revisão, idempotência e
+conflitos seguem o contrato descrito em `docs/SYNC_PROTOCOL.md`.
 
 O projeto possui repositório Git local, versão semântica, changelog, integração
-contínua e comandos para gerar a entrada modular e verificar os 24 arquivos de teste:
+contínua e comandos para gerar a entrada modular e executar a suíte de testes:
 
 ```bash
 npm run build
@@ -25,7 +25,7 @@ npm run verify:release
 ```
 
 O processo de homologação, publicação e retorno está em `docs/RELEASE.md`. O schema
-de dados está na versão 20 e o cache offline na versão 39.
+de dados está na versão 22 e o cache offline na versão 55.
 
 ## Módulo 15 — revisão das referências financeiras
 
@@ -1397,7 +1397,7 @@ UI (app.js)  →  FinanceStore (façade + cache em memória + fila de escrita)
                      │
         ┌────────────┼──────────────┐
    IndexedDB    localStorage      Cloud
-   (principal)   (fallback)    (pronto p/ o futuro)
+   (principal)   (fallback)    (conta conectada)
 ```
 
 **1. Storage (`js/storage.js`) — padrão Adapter sobre IndexedDB**
@@ -1416,15 +1416,21 @@ UI (app.js)  →  FinanceStore (façade + cache em memória + fila de escrita)
 - `flush()` é disparado em `visibilitychange`/`pagehide`, então nada se perde ao
   minimizar o app no celular.
 
-**Trocar para nuvem no futuro:** `CloudAdapter` já está implementado no mesmo
-arquivo, seguindo o mesmo contrato de 5 métodos. Basta ter um backend REST com as
-rotas `/health`, `/snapshot` (GET/PUT/DELETE) e `/changes` (POST) e chamar, no boot:
+**Sincronização entre aparelhos:** ao entrar numa conta, o aplicativo escolhe um
+banco local separado para ela e liga o `CloudAdapter` em modo cookie. Cada
+gravação entra primeiro no IndexedDB e numa fila persistente; o envio começa em
+até um segundo. Login, recarga, volta da rede, retorno à aba e consulta periódica
+com a tela visível buscam alterações sem exigir que a pessoa abra a tela de
+sincronização. Uma falha preserva a fila e só então mostra a ação de tentar
+novamente. A consulta da sessão limita cabeçalhos e corpo a 12 segundos, libera
+pedidos pendurados e tenta recuperar sem transformar falta de rede em logout.
 
-```js
-FinanceStore.use(new CloudAdapter({ baseUrl: "/api", token: seuToken }));
-```
-
-Nenhuma linha de UI precisa mudar.
+Cada chamada remota também leva a identidade esperada em `X-Account-Id`. O
+backend confere esse valor contra a sessão antes de tocar em dispositivo, dados
+financeiros ou análise. Trocar de conta em outra aba cancela o ciclo antigo,
+abre o banco local correto e preserva as filas separadas. A renovação de sessão
+passa somente por `/api/account/session` e as chamadas que escrevem cookies são
+serializadas entre abas.
 
 **2. Importação offline (`js/import.js`)**
 

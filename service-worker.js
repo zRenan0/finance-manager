@@ -23,7 +23,9 @@
 // controller pode identificar o pacote novo antes de pedir a recarga da aba.
 // v54: a primeira tomada de controle deixou de recarregar o onboarding. O
 // pacote do aplicativo mudou e precisa substituir o app.generated.js em cache.
-const VERSION = "v54";
+// v55: conta, sincronização automática e extrato de acessos mudaram. A promoção
+// garante que instalações existentes recebam o cliente e os estilos juntos.
+const VERSION = "v55";
 const BUILD_ID = VERSION;
 const CACHE_NAME = "financas-cache-" + VERSION;
 // A PÁGINA COMERCIAL TEM CACHE PRÓPRIO.

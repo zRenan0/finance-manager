@@ -810,7 +810,10 @@ const ICONS = {
   gift: '<rect x="4" y="9.5" width="16" height="10.5" rx="1.3"/><rect x="4" y="9.5" width="16" height="3.6"/><line x1="12" y1="9.5" x2="12" y2="20"/><path d="M12 9.5c-1.6 0-3-1.1-3-2.6C9 5.7 9.9 4.7 11 4.7c1.3 0 1.9 2 1 4.8"/><path d="M12 9.5c1.6 0 3-1.1 3-2.6 0-1.2-.9-2.2-2-2.2-1.3 0-1.9 2-1 4.8"/>',
   book: '<path d="M4 5.3A1.8 1.8 0 0 1 5.8 3.5H11v17H5.8A1.8 1.8 0 0 0 4 22.3V5.3Z"/><path d="M20 5.3a1.8 1.8 0 0 0-1.8-1.8H13v17h5.2a1.8 1.8 0 0 1 1.8 1.8V5.3Z"/>',
   coffee: '<path d="M5 9h11v6a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4V9Z"/><path d="M16 10.3h1.6a2.4 2.4 0 0 1 0 4.7H16"/><path d="M8 6.3c0-1 .8-1.1.8-2M11.5 6.3c0-1 .8-1.1.8-2"/>',
+  monitor: '<rect x="3" y="4" width="18" height="13" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>',
   phone: '<rect x="7.2" y="2.5" width="9.6" height="19" rx="2"/><line x1="10.8" y1="18.3" x2="13.2" y2="18.3"/>',
+  tablet: '<rect x="4.5" y="2.5" width="15" height="19" rx="2"/><circle cx="12" cy="18.4" r="0.7" fill="currentColor" stroke="none"/>',
+  globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.3 2.5 3.5 5.5 3.5 9S14.3 18.5 12 21M12 3C9.7 5.5 8.5 8.5 8.5 12s1.2 6.5 3.5 9"/>',
   creditCard: '<rect x="2.3" y="5.5" width="19.4" height="13" rx="2"/><line x1="2.3" y1="9.7" x2="21.7" y2="9.7"/><line x1="5.3" y1="15" x2="9.5" y2="15"/>',
   gasPump: '<path d="M4.5 21V6.3a2 2 0 0 1 2-2h4.5a2 2 0 0 1 2 2V21"/><line x1="3" y1="21" x2="13.5" y2="21"/><path d="M13 8.3h2.3l2.4 2.4V17a1.5 1.5 0 0 1-3 0v-2.7h-1.7"/><line x1="6.3" y1="9.3" x2="10.7" y2="9.3"/>',
   dumbbell: '<rect x="9" y="10" width="6" height="4" rx="1"/><rect x="3.3" y="8" width="3" height="8" rx="1"/><rect x="17.7" y="8" width="3" height="8" rx="1"/><line x1="6.3" y1="12" x2="9" y2="12"/><line x1="15" y1="12" x2="17.7" y2="12"/>',
@@ -1667,6 +1670,19 @@ function rememberStorageScope(scope) {
 // que a comparação de texto simples (a < b) já seja a comparação correta.
 const HLC_PATTERN = /^\d{15}\.\d{6}\.[A-Za-z0-9][A-Za-z0-9:_-]{0,79}$/;
 const HLC_MAX_DRIFT_MS = 24 * 60 * 60 * 1000;   // 24h: além disso o relógio remoto é ignorado
+const SYNC_WRITER_TOKEN = (() => {
+  let token = "";
+  try {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      token = crypto.randomUUID().replace(/[^A-Za-z0-9]/g, "");
+    }
+  } catch (_error) { /* usa a alternativa local abaixo */ }
+  if (!token) {
+    token = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
+      .replace(/[^A-Za-z0-9]/g, "");
+  }
+  return (token || "localwriter").padEnd(12, "0").slice(0, 12);
+})();
 
 const SyncClock = (() => {
   let lastMillis = 0;
@@ -1766,6 +1782,25 @@ function syncDeviceId() {
     if (/^[A-Za-z0-9][A-Za-z0-9:_-]{7,79}$/.test(value || "")) return value;
   } catch (e) { /* armazenamento bloqueado */ }
   return "device-local";
+}
+
+// Duas abas compartilham o id persistente do aparelho, mas cada uma mantém o
+// contador HLC em memória. Sem um desempate por aba, duas escritas no mesmo
+// milissegundo podem receber exatamente a mesma revisão e representar conteúdos
+// diferentes. O sufixo continua dentro do componente opaco aceito pelo servidor.
+// O prefixo persistente continua identificando o dono para reenvio de lápides.
+function syncWriterId() {
+  const suffix = `:tab_${SYNC_WRITER_TOKEN}`;
+  return `${syncDeviceId().slice(0, 80 - suffix.length)}${suffix}`;
+}
+
+function isLocalSyncWriter(value) {
+  const writer = String(value || "");
+  const stable = syncDeviceId();
+  if (writer === stable) return true; // revisões criadas antes do sufixo por aba
+  const marker = ":tab_";
+  const baseLength = 80 - marker.length - SYNC_WRITER_TOKEN.length;
+  return writer.startsWith(`${stable.slice(0, baseLength)}${marker}`);
 }
 const SCHEMA_VERSION = 22;  // v22; privacidade, consentimentos e controles do usuário
 const LEGAL_REVIEW_DATE = "2026-08-18";
@@ -3686,9 +3721,9 @@ class IndexedDBAdapter extends StorageAdapter {
   }
 
   // ---- Fila persistente de sincronização ----
-  // Gravada na MESMA transação nunca: a fila é escrita depois do dado local,
-  // porque perder uma entrada da fila custa uma reenvio; perder o dado custa o
-  // lançamento do usuário.
+  // Quando a alteração nasce junto de uma operação que precisa subir, dado e
+  // fila entram na mesma transação por `writeChanges`. O método separado existe
+  // apenas para operações que não alteram a base financeira.
   async outboxAppend(entries) {
     if (!entries.length) return true;
     return this.writeChanges(null, { outboxAdds: entries });
@@ -3990,7 +4025,10 @@ async function cloudErrorBody(res) {
     // a conta avançou enquanto este aparelho preparava o vínculo.
     const revision = /^\d{1,18}$/.test(String(dados.revision == null ? "" : dados.revision)) ? String(dados.revision) : null;
     return { code, message, revision };
-  } catch (e) { return {}; }
+  } catch (e) {
+    if (e && e.name === "AbortError") throw e;
+    return {};
+  }
 }
 
 class CloudSyncError extends Error {
@@ -4016,11 +4054,14 @@ class CloudAdapter extends StorageAdapter {
     baseUrl = "/api/sync",
     token = null,
     deviceId = null,
+    deviceLabel = "Este navegador",
+    deviceType = "unknown",
+    accountId = "",
     fetchImpl = null,
     timeoutMs = 12000,
     allowCrossOrigin = false,
-      allowDestructive = false,
-      authMode = "bearer",
+    allowDestructive = false,
+    authMode = "bearer",
   } = {}) {
     super();
     if (!enabled) throw new CloudSyncError("A sincronização em nuvem está desativada.", "disabled");
@@ -4045,6 +4086,14 @@ class CloudAdapter extends StorageAdapter {
     this.authMode = authMode === "cookie" ? "cookie" : "bearer";
     this.token = this.authMode === "cookie" ? "" : token.trim();
     this.deviceId = normalizeRecordId(deviceId, "device");
+    const cleanLabel = String(deviceLabel || "")
+      .replace(/[\x00-\x1F\x7F]/g, " ").replace(/\s+/g, " ").trim().slice(0, 50);
+    this.deviceLabel = cleanLabel || "Este navegador";
+    this.deviceType = ["desktop", "phone", "tablet", "unknown"].includes(deviceType) ? deviceType : "unknown";
+    this.accountId = String(accountId || "").trim().toLowerCase();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(this.accountId)) {
+      throw new CloudSyncError("A sincronização não recebeu a identidade válida da conta.", "invalid_account_scope");
+    }
     this.fetch = fetchImpl || ((...a) => fetch(...a));
     this.timeoutMs = clamp(Number(timeoutMs) || 12000, 1000, 30000);
     this.allowDestructive = allowDestructive === true;
@@ -4060,6 +4109,9 @@ class CloudAdapter extends StorageAdapter {
       "Content-Type": "application/json",
       "Accept": "application/json",
       "X-Device-Id": this.deviceId,
+      "X-Device-Label": this.deviceLabel,
+      "X-Device-Type": this.deviceType,
+      "X-Account-Id": this.accountId,
       "X-Sync-Protocol": String(CLOUD_SYNC_PROTOCOL),
       ...(extra || {}),
     };
@@ -4083,13 +4135,13 @@ class CloudAdapter extends StorageAdapter {
         referrerPolicy: "no-referrer",
       });
     } catch (error) {
+      clearTimeout(timer);
       if (error && error.name === "AbortError") throw new CloudSyncError("O servidor de sincronização não respondeu a tempo.", "timeout");
       throw new CloudSyncError("Não foi possível acessar o servidor de sincronização.", "network_error");
-    } finally {
-      clearTimeout(timer);
     }
 
-    if (!res.ok) {
+    try {
+      if (!res.ok) {
       // A RAZÃO DA FALHA VEM NO CORPO, E ERA JOGADA FORA.
       //
       // O servidor deste app responde erro com `{ code, message }` escrito para
@@ -4097,43 +4149,60 @@ class CloudAdapter extends StorageAdapter {
       // tabelas no banco", "origem recusada" e "email não confirmado" viravam a
       // mesma frase sem conteúdo, e a tela mostrava "Sincronização com falha"
       // sem nunca dizer a falha.
-      const detalhe = await cloudErrorBody(res);
+        const detalhe = await cloudErrorBody(res);
+      // A identidade é conferida antes de o backend devolver qualquer operação.
+      // Preserve o código para a camada de sessão trocar de escopo sem tratar a
+      // conta nova como logout nem aplicar um payload da conta errada.
+        if (detalhe.code === "account_scope_changed" || detalhe.code === "invalid_account_scope"
+          || detalhe.code === "session_refresh_required") {
+          throw new CloudSyncError(detalhe.message || "A conta desta sessão mudou.", detalhe.code, res.status);
+        }
       // `remote_changed` é o único 409 que NÃO é conflito de documento: ele diz
       // que a conta remota avançou entre a leitura e a confirmação do vínculo.
       // Tratá-lo como conflito faria o motor descartar a fila do vínculo.
-      if (res.status === 409) {
-        if (detalhe.code === "remote_changed") {
-          const erro = new CloudSyncError(detalhe.message || "A conta mudou durante a operação.", "remote_changed", res.status);
-          erro.revision = detalhe.revision != null ? String(detalhe.revision) : null;
-          throw erro;
+        if (res.status === 409) {
+          if (detalhe.code === "remote_changed") {
+            const erro = new CloudSyncError(detalhe.message || "A conta mudou durante a operação.", "remote_changed", res.status);
+            erro.revision = detalhe.revision != null ? String(detalhe.revision) : null;
+            throw erro;
+          }
+          throw new CloudSyncConflictError(res.headers && res.headers.get ? res.headers.get("x-sync-revision") : null);
         }
-        throw new CloudSyncConflictError(res.headers && res.headers.get ? res.headers.get("x-sync-revision") : null);
-      }
-      if (res.status === 401 || res.status === 403) {
+        if (res.status === 401 || res.status === 403) {
         // O código continua sendo um dos DOIS que o motor sabe tratar (parar em
         // vez de insistir); só a frase passa a ser a de verdade.
-        const codigo = detalhe.code === "device_revoked" ? "device_revoked" : "session_expired";
-        throw new CloudSyncError(detalhe.message || "A sessão de sincronização expirou.", codigo, res.status);
+          const codigo = detalhe.code === "device_revoked" || detalhe.code === "device_unknown"
+            ? detalhe.code
+            : "session_expired";
+          throw new CloudSyncError(detalhe.message || "A sessão de sincronização expirou.", codigo, res.status);
+        }
+        throw new CloudSyncError(detalhe.message || `O servidor de sincronização recusou a operação (${res.status}).`, detalhe.code || "server_error", res.status);
       }
-      throw new CloudSyncError(detalhe.message || `O servidor de sincronização recusou a operação (${res.status}).`, detalhe.code || "server_error", res.status);
-    }
-    if (res.status === 204) return null;
+      if (res.status === 204) return null;
 
-    const contentType = String(res.headers && res.headers.get ? res.headers.get("content-type") : "").toLowerCase();
-    const contentLength = Number(res.headers && res.headers.get ? res.headers.get("content-length") : 0);
-    if (!contentType.includes("application/json")) throw new CloudSyncError("Resposta de sincronização em formato inválido.", "invalid_content_type");
-    if (Number.isFinite(contentLength) && contentLength > CLOUD_MAX_RESPONSE_BYTES) {
-      throw new CloudSyncError("A resposta de sincronização excede o limite permitido.", "response_too_large");
+      const contentType = String(res.headers && res.headers.get ? res.headers.get("content-type") : "").toLowerCase();
+      const contentLength = Number(res.headers && res.headers.get ? res.headers.get("content-length") : 0);
+      if (!contentType.includes("application/json")) throw new CloudSyncError("Resposta de sincronização em formato inválido.", "invalid_content_type");
+      if (Number.isFinite(contentLength) && contentLength > CLOUD_MAX_RESPONSE_BYTES) {
+        throw new CloudSyncError("A resposta de sincronização excede o limite permitido.", "response_too_large");
+      }
+      const text = await res.text();
+      if (text.length > CLOUD_MAX_RESPONSE_BYTES) throw new CloudSyncError("A resposta de sincronização excede o limite permitido.", "response_too_large");
+      let payload;
+      try { payload = JSON.parse(text); }
+      catch (e) { throw new CloudSyncError("Resposta de sincronização inválida.", "invalid_json"); }
+      if (!payload || payload.protocol !== CLOUD_SYNC_PROTOCOL) {
+        throw new CloudSyncError("Versão incompatível do protocolo de sincronização.", "protocol_mismatch");
+      }
+      return payload;
+    } catch (error) {
+      if (error && error.name === "AbortError") {
+        throw new CloudSyncError("O servidor de sincronização não respondeu a tempo.", "timeout");
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
     }
-    const text = await res.text();
-    if (text.length > CLOUD_MAX_RESPONSE_BYTES) throw new CloudSyncError("A resposta de sincronização excede o limite permitido.", "response_too_large");
-    let payload;
-    try { payload = JSON.parse(text); }
-    catch (e) { throw new CloudSyncError("Resposta de sincronização inválida.", "invalid_json"); }
-    if (!payload || payload.protocol !== CLOUD_SYNC_PROTOCOL) {
-      throw new CloudSyncError("Versão incompatível do protocolo de sincronização.", "protocol_mismatch");
-    }
-    return payload;
   }
 
   async init() {
@@ -4212,8 +4281,19 @@ class CloudAdapter extends StorageAdapter {
       headers: { "Idempotency-Key": mutationId },
       body: { protocol: CLOUD_SYNC_PROTOCOL, mutationId, rev },
     });
-    this.revision = result && typeof result.revision === "string" ? result.revision : this.revision;
-    return { revision: this.revision, applied: Number(result && result.applied) || 0 };
+    if (!result || (result.status !== "applied" && result.status !== "replayed")) {
+      const code = result && result.status === "idempotency_mismatch" ? "idempotency_mismatch" : "invalid_commit";
+      throw new CloudSyncError("O servidor não confirmou a exclusão remota.", code);
+    }
+    if (!/^\d{1,18}$/.test(String(result.revision || "")) || !isSyncRev(result.resetRev)) {
+      throw new CloudSyncError("O servidor devolveu uma confirmação inválida para a exclusão.", "invalid_commit");
+    }
+    this.revision = String(result.revision);
+    return {
+      revision: this.revision,
+      resetRev: result.resetRev,
+      applied: Number(result.applied) || 0,
+    };
   }
 
   async createCheckpoint(label) {
@@ -4231,9 +4311,9 @@ class CloudAdapter extends StorageAdapter {
     return (result && Array.isArray(result.checkpoints)) ? result.checkpoints : [];
   }
 
-  // Conteúdo de uma versão, paginado por id de registro. Paginado porque uma
-  // versão tem o tamanho da base, e é justamente o corpo único gigante que o
-  // protocolo 2 existe para evitar.
+  // Conteúdo de uma versão, paginado por cursor opaco da chave completa.
+  // Paginado porque uma versão tem o tamanho da base, e é justamente o corpo
+  // único gigante que o protocolo 2 existe para evitar.
   async readCheckpoint(checkpointId, after) {
     this._requireReady(false);
     const query = `?id=${encodeURIComponent(String(checkpointId || ""))}&limit=500${after ? `&after=${encodeURIComponent(after)}` : ""}`;
@@ -4258,7 +4338,9 @@ class CloudAdapter extends StorageAdapter {
 const FinanceStore = (() => {
   let adapter = null;
   let scope = GUEST_SCOPE;         // conta dona dos dados carregados agora
+  let storageGeneration = 0;
   let snapshot = defaultData();
+  let snapshotVersion = 0;        // invalida leituras iniciadas antes de uma mutação
   let lastPersisted = null;        // cópia usada como base do diff
   let ready = false;
   let healthy = true;
@@ -4277,6 +4359,35 @@ const FinanceStore = (() => {
   let outboxEnabled = false;       // só enfileira quando há conta ligada
   const errorListeners = [];
   const recoveryListeners = [];
+
+  function storeContextIsCurrent(expectedScope, expectedAdapter, expectedGeneration) {
+    return scope === expectedScope
+      && adapter === expectedAdapter
+      && (expectedGeneration == null || storageGeneration === expectedGeneration);
+  }
+
+  function storageCancelledError() {
+    const error = new Error("O armazenamento mudou de escopo durante a sincronização.");
+    error.code = "sync_cancelled";
+    return error;
+  }
+
+  function installSnapshot(next) {
+    snapshot = next;
+    snapshotVersion += 1;
+    return snapshot;
+  }
+
+  function assertStoreScope(expectedScope, expectedAdapter, expectedGeneration) {
+    if (!expectedScope) return;
+    if (!storeContextIsCurrent(expectedScope, expectedAdapter || adapter, expectedGeneration)) {
+      throw storageCancelledError();
+    }
+  }
+
+  function storageOperationCancelled(error) {
+    return !!(error && error.code === "sync_cancelled");
+  }
 
   // Impressão digital por REFERÊNCIA: se o objeto não foi substituído, ele não
   // mudou (o app usa atualização imutável). Só serializamos quando a referência
@@ -4332,6 +4443,18 @@ const FinanceStore = (() => {
     } catch (e) { settingRevs = {}; }
   }
 
+  function observeSnapshotClock(data) {
+    loadClockState();
+    SYNC_ENTITY_FIELDS.forEach((field) => {
+      ((data && data[field]) || []).forEach((record) => SyncClock.observe(record && record.syncRev));
+    });
+    const graveyard = normalizeGraveyard(data && data.graveyard);
+    SYNC_ENTITY_FIELDS.forEach((field) => {
+      Object.values(graveyard[field] || {}).forEach((entry) => SyncClock.observe(entry && entry.rev));
+    });
+    saveClockState();
+  }
+
   function saveClockState() {
     try { localStorage.setItem(clockKey(), JSON.stringify({ clock: SyncClock.state(), settings: settingRevs })); }
     catch (e) { /* cota cheia: o relógio ainda funciona nesta sessão */ }
@@ -4383,8 +4506,8 @@ const FinanceStore = (() => {
         // dele, e a edição não podia ser descartada.
         const key = `${field} ${rec.id}`;
         const echo = remoteApplied.get(key);
+        if (echo !== undefined) remoteApplied.delete(key);
         if (echo !== undefined && echo === fingerprintOf(rec)) {
-          remoteApplied.delete(key);
           SyncClock.observe(rec.syncRev);
           return;
         }
@@ -4408,7 +4531,7 @@ const FinanceStore = (() => {
         // aponta para outro aparelho. Sem esta checagem, cada exclusão remota
         // gerava um eco que o outro lado reenviava de volta.
         const parsed = SyncClock.parse(rev);
-        if (parsed && parsed.device !== SyncClock.device()) return;
+        if (parsed && !isLocalSyncWriter(parsed.device)) return;
         ops.push({ entity: field, entityId: id, op: "delete", rev });
       });
     }
@@ -4417,10 +4540,10 @@ const FinanceStore = (() => {
       // Mesmo eco, do lado das configurações: se o valor gravado é exatamente o
       // que acabou de chegar do servidor, ele não é uma alteração deste
       // aparelho e não deve ser reivindicado como tal.
-      if (Object.prototype.hasOwnProperty.call(remoteSettingEcho, key)
-        && remoteSettingEcho[key] === JSON.stringify(changeSet.settings[key])) {
+      if (Object.prototype.hasOwnProperty.call(remoteSettingEcho, key)) {
+        const isEcho = remoteSettingEcho[key] === JSON.stringify(changeSet.settings[key]);
         delete remoteSettingEcho[key];
-        return;
+        if (isEcho) return;
       }
       const rev = SyncClock.tick();
       settingRevs[key] = rev;
@@ -4464,16 +4587,31 @@ const FinanceStore = (() => {
     return expanded;
   }
 
-  async function applyRemoteOps(ops) {
+  async function applyRemoteOps(ops, expectedScope, options) {
+    if (!ready) throw storageCancelledError();
     const rawList = Array.isArray(ops) ? ops : [];
-    if (!rawList.length) return { changed: false, data: snapshot, applied: 0 };
+    const outboxAdds = Array.isArray(options && options.outboxAdds) ? options.outboxAdds : [];
+    const storageAttempt = Math.max(0, Number(options && options._storageAttempt) || 0);
+    if (!rawList.length && !outboxAdds.length) return { changed: false, data: snapshot, applied: 0 };
+    const targetScope = expectedScope || scope;
+    const targetAdapter = adapter;
+    const targetGeneration = storageGeneration;
+    assertStoreScope(targetScope, targetAdapter, targetGeneration);
     const flushed = await flush();
     if (!flushed || !adapter) throw new Error("Não foi possível preparar o armazenamento para a descida");
+    assertStoreScope(targetScope, targetAdapter, targetGeneration);
+    const baseSnapshot = snapshot;
+    const baseVersion = snapshotVersion;
     const list = expandLegacyListOps(rawList);
+    const retryAfterStorageChange = async (error) => {
+      if (!storageChangedDuringOperation(error) || storageAttempt >= 3) throw error;
+      await reload({ scope: targetScope, adapter: targetAdapter, generation: targetGeneration });
+      return applyRemoteOps(rawList, targetScope, { ...(options || {}), _storageAttempt: storageAttempt + 1 });
+    };
 
     const maps = {};
-    SYNC_ENTITY_FIELDS.forEach((f) => { maps[f] = indexById(snapshot[f] || []); });
-    let graveyard = normalizeGraveyard(snapshot.graveyard);
+    SYNC_ENTITY_FIELDS.forEach((f) => { maps[f] = indexById(baseSnapshot[f] || []); });
+    let graveyard = normalizeGraveyard(baseSnapshot.graveyard);
     const settings = {};
     const nextSettingRevs = { ...settingRevs };
     const nextSettingEcho = { ...remoteSettingEcho };
@@ -4524,31 +4662,79 @@ const FinanceStore = (() => {
     });
 
     if (!changed) {
+      try {
+        await enqueueScopedWrite(targetScope, targetAdapter, targetGeneration, async () => {
+          await assertPhysicalSnapshot(targetScope, targetAdapter, targetGeneration, baseSnapshot);
+          if (outboxAdds.length) await targetAdapter.writeChanges(null, { outboxAdds });
+        });
+      } catch (error) {
+        return retryAfterStorageChange(error);
+      }
+      assertStoreScope(targetScope, targetAdapter, targetGeneration);
       observedRevs.forEach((rev) => SyncClock.observe(rev));
       saveClockState();
+      if (outboxAdds.length) markHealthy();
       return { changed: false, data: snapshot, applied: 0 };
     }
 
     const assembled = {
-      ...snapshot,
+      ...baseSnapshot,
       ...settings,
       graveyard,
     };
     SYNC_ENTITY_FIELDS.forEach((field) => { assembled[field] = Array.from(maps[field].values()); });
     const next = migrate(assembled);
-    const changeSet = computeChangeSet(snapshot, next);
+    const changeSet = computeChangeSet(baseSnapshot, next);
     // Operação remota que a normalização anula (um carimbo que `migrate`
     // reescreve para o mesmo valor) não gera gravação. Isso não é falha: o
     // conteúdo já está aqui. O que ela não pode fazer é avançar o cursor sem
     // registrar a revisão observada, e por isso a marca continua sendo salva.
     if (changeSet) {
-      if (!adapter) throw new Error("Armazenamento local indisponível para a descida");
+      assertStoreScope(targetScope, targetAdapter, targetGeneration);
       const stamp = Date.now();
       changeSet.settings.lastPersistAt = stamp;
       next.lastPersistAt = stamp;
-      await enqueueWrite(() => adapter.writeChanges(changeSet));
     }
-    snapshot = next;
+    try {
+      await enqueueScopedWrite(targetScope, targetAdapter, targetGeneration, async () => {
+        await assertPhysicalSnapshot(targetScope, targetAdapter, targetGeneration, baseSnapshot);
+        if (changeSet || outboxAdds.length) {
+          await targetAdapter.writeChanges(changeSet, outboxAdds.length ? { outboxAdds } : undefined);
+        }
+      });
+      assertStoreScope(targetScope, targetAdapter, targetGeneration);
+    } catch (error) {
+      return retryAfterStorageChange(error);
+    }
+    if (snapshotVersion !== baseVersion) {
+      // Uma edição local pode acontecer enquanto a transação remota aguarda o
+      // IndexedDB. O banco já contém `next`; reaplicamos somente a diferença
+      // feita depois de `baseSnapshot`, sobre esse estado remoto, e a gravamos
+      // com uma revisão posterior. Nenhum dos dois lados desaparece.
+      const concurrentSnapshot = snapshot;
+      const localChanges = computeChangeSet(baseSnapshot, concurrentSnapshot);
+      settingRevs = nextSettingRevs;
+      remoteSettingEcho = nextSettingEcho;
+      Object.keys((localChanges && localChanges.settings) || {}).forEach((key) => {
+        delete remoteSettingEcho[key];
+      });
+      observedRevs.forEach((rev) => SyncClock.observe(rev));
+      let rebasedSnapshot = overlayChangeSet(next, localChanges);
+      // A lápide pode ter nascido antes de observarmos a revisão remota que
+      // estava em voo. Recarimbá-la agora garante que uma exclusão feita depois
+      // da edição remota vença também no servidor e nos outros aparelhos.
+      rebasedSnapshot = restampConcurrentDeletes(baseSnapshot, concurrentSnapshot, rebasedSnapshot);
+      saveClockState();
+      lastPersisted = shallowSnapshot(next);
+      installSnapshot(rebasedSnapshot);
+      const rebased = await flush();
+      if (!rebased) throw storageCancelledError();
+      assertStoreScope(targetScope, targetAdapter, targetGeneration);
+      markHealthy();
+      announceWrite();
+      return { changed: true, data: snapshot, applied };
+    }
+    installSnapshot(next);
     lastPersisted = shallowSnapshot(next);
     settingRevs = nextSettingRevs;
     remoteSettingEcho = nextSettingEcho;
@@ -4611,7 +4797,8 @@ const FinanceStore = (() => {
     return igualAoPadrao(limpo, modelo);
   }
 
-  function collectSyncOps(restamp) {
+  function collectSyncOps(restamp, sourceData) {
+    const source = sourceData || snapshot;
     const ops = [];
     const stamped = { puts: {}, deletes: {}, settings: {} };
     const stampedSettings = new Set();
@@ -4623,7 +4810,7 @@ const FinanceStore = (() => {
       modelos[field] = padrao ? indexById(padrao[field] || []) : new Map();
     });
     GRAVEYARD_COLLECTIONS.forEach((field) => {
-      (snapshot[field] || []).forEach((rec) => {
+      (source[field] || []).forEach((rec) => {
         if (!rec || !rec.id) return;
         let rev = restamp ? "" : normalizeSyncRev(rec.syncRev);
         if (!rev) {
@@ -4637,27 +4824,27 @@ const FinanceStore = (() => {
         ops.push({ entity: field, entityId: rec.id, op: "put", rev, payload: rec });
       });
     });
-    stampedSettings.forEach((field) => { stamped.settings[field] = snapshot[field]; });
+    stampedSettings.forEach((field) => { stamped.settings[field] = source[field]; });
     SETTING_KEYS.forEach((key) => {
       if (SYNC_SKIP_SETTINGS.has(key)) return;
-      if (snapshot[key] === undefined) return;
+      if (source[key] === undefined) return;
       let rev = restamp ? "" : normalizeSyncRev(settingRevs[key]);
       if (!rev) {
-        if (padrao && igualAoPadrao(snapshot[key], padrao[key])) return;
+        if (padrao && igualAoPadrao(source[key], padrao[key])) return;
         rev = SyncClock.tick();
         settingRevs[key] = rev;
       }
-      ops.push({ entity: "settings", entityId: key, op: "put", rev, payload: snapshot[key] });
+      ops.push({ entity: "settings", entityId: key, op: "put", rev, payload: source[key] });
     });
     // Exclusões feitas AQUI enquanto não havia para onde mandar. As de outro
     // aparelho ficam de fora pelo mesmo motivo de `stampChangeSet`: reenviar a
     // exclusão alheia seria reivindicá-la como nossa.
-    const grave = normalizeGraveyard(snapshot.graveyard);
+    const grave = normalizeGraveyard(source.graveyard);
     GRAVEYARD_COLLECTIONS.forEach((field) => {
       Object.keys(grave[field] || {}).forEach((id) => {
         const rev = normalizeSyncRev((grave[field][id] || {}).rev);
         const parsed = rev ? SyncClock.parse(rev) : null;
-        if (!parsed || parsed.device !== SyncClock.device()) return;
+        if (!parsed || !isLocalSyncWriter(parsed.device)) return;
         ops.push({ entity: field, entityId: id, op: "delete", rev });
       });
     });
@@ -4667,36 +4854,68 @@ const FinanceStore = (() => {
 
   // Marcas, fila e diário de semeadura confirmam juntos. O recibo definitivo
   // nasce somente quando o servidor reconhecer o lote e a fila ficar vazia.
-  async function seedOutbox() {
+  async function seedOutbox(expectedScope, storageAttempt) {
     if (!outboxEnabled || !adapter) return { seedId: null, queued: 0, empty: true };
+    const attempt = Math.max(0, Number(storageAttempt) || 0);
+    const targetScope = expectedScope || scope;
+    const targetAdapter = adapter;
+    const targetGeneration = storageGeneration;
+    assertStoreScope(targetScope, targetAdapter, targetGeneration);
     const flushed = await flush();
     if (!flushed) throw new Error("Não foi possível concluir os dados antes da semeadura");
-    const { ops, stamped } = collectSyncOps(false);
-    if (!ops.length) return { seedId: null, queued: 0, empty: true };
-    const seedId = syncEntryKey({}).replace(/^op_/, "seed_");
-    const entries = ops.map((op, index) => ({
-      ...op, seedId, entryKey: `${seedId}_${String(index).padStart(6, "0")}`,
-    }));
-    await adapter.writeChanges(stamped, {
-      outboxAdds: entries,
-      metaPuts: { [META_SEED_JOURNAL]: { version: 1, seedId, status: "queued", queued: entries.length, createdAt: new Date().toISOString() } },
-    });
-    lastPersisted = shallowSnapshot(snapshot);
+    assertStoreScope(targetScope, targetAdapter, targetGeneration);
+    const seedBase = shallowSnapshot(snapshot);
+    const seedVersion = snapshotVersion;
+    let outcome;
+    try {
+      outcome = await enqueueScopedWrite(targetScope, targetAdapter, targetGeneration, async () => {
+        await assertPhysicalSnapshot(targetScope, targetAdapter, targetGeneration, seedBase);
+        const { ops, stamped } = collectSyncOps(false, seedBase);
+        if (!ops.length) return { seedId: null, queued: 0, empty: true, persisted: null };
+        const seededSnapshot = shallowSnapshot(seedBase);
+        const seedId = syncEntryKey({}).replace(/^op_/, "seed_");
+        const entries = ops.map((op, index) => ({
+          ...op, seedId, entryKey: `${seedId}_${String(index).padStart(6, "0")}`,
+        }));
+        await targetAdapter.writeChanges(stamped, {
+          outboxAdds: entries,
+          metaPuts: { [META_SEED_JOURNAL]: { version: 1, seedId, status: "queued", queued: entries.length, createdAt: new Date().toISOString() } },
+        });
+        return { seedId, queued: entries.length, empty: false, persisted: seededSnapshot };
+      });
+    } catch (error) {
+      if (!storageChangedDuringOperation(error) || attempt >= 3) throw error;
+      await reload({ scope: targetScope, adapter: targetAdapter, generation: targetGeneration });
+      return seedOutbox(targetScope, attempt + 1);
+    }
+    assertStoreScope(targetScope, targetAdapter, targetGeneration);
+    if (outcome.persisted) lastPersisted = outcome.persisted;
+    if (snapshotVersion !== seedVersion) {
+      const rebased = await flush();
+      if (!rebased) throw storageCancelledError();
+      assertStoreScope(targetScope, targetAdapter, targetGeneration);
+    }
     markHealthy();
-    return { seedId, queued: entries.length, empty: false };
+    return { seedId: outcome.seedId, queued: outcome.queued, empty: outcome.empty };
   }
 
   // Troca da base inteira: o que sumiu precisa de lápide, senão volta do outro
   // aparelho na primeira descida. A marca é nova porque restaurar é um ato de
   // agora, não a repetição do passado.
-  function stampReplacement(previous) {
+  function stampReplacement(previousSources, replacement) {
+    const prepared = shallowSnapshot(replacement || snapshot);
+    const sources = Array.isArray(previousSources) ? previousSources : [previousSources];
     GRAVEYARD_COLLECTIONS.forEach((field) => {
-      const vivos = indexById(snapshot[field] || []);
-      const ids = (((previous && previous[field]) || []).map((rec) => (rec && rec.id) || ""))
-        .filter((id) => id && !vivos.has(id));
-      if (ids.length) snapshot.graveyard = withTombstones(snapshot.graveyard, field, ids);
+      const vivos = indexById(prepared[field] || []);
+      const ids = new Set();
+      sources.forEach((previous) => {
+        ((previous && previous[field]) || []).forEach((rec) => {
+          if (rec && rec.id && !vivos.has(rec.id)) ids.add(rec.id);
+        });
+      });
+      if (ids.size) prepared.graveyard = withTombstones(prepared.graveyard, field, Array.from(ids));
     });
-    return collectSyncOps(true);
+    return { ...collectSyncOps(true, prepared), data: prepared };
   }
 
   function computeChangeSet(prev, next) {
@@ -4728,6 +4947,32 @@ const FinanceStore = (() => {
     });
 
     return dirty ? changeSet : null;
+  }
+
+  function overlayChangeSet(base, changeSet) {
+    if (!changeSet) return base;
+    const next = shallowSnapshot(base);
+    const pairs = [[STORE_TX, "transactions"], [STORE_CAT, "categories"], [STORE_GOALS, "goals"], [STORE_ASSETS, "assets"]];
+    pairs.forEach(([storeName, field]) => {
+      const records = indexById(next[field] || []);
+      ((changeSet.deletes || {})[storeName] || []).forEach((id) => records.delete(id));
+      ((changeSet.puts || {})[storeName] || []).forEach((record) => records.set(record.id, record));
+      next[field] = Array.from(records.values());
+    });
+    Object.entries(changeSet.settings || {}).forEach(([key, value]) => { next[key] = value; });
+    return next;
+  }
+
+  function restampConcurrentDeletes(base, local, rebased) {
+    let graveyard = rebased.graveyard;
+    SYNC_ENTITY_FIELDS.forEach((field) => {
+      const before = indexById((base && base[field]) || []);
+      const after = indexById((local && local[field]) || []);
+      const deleted = [];
+      before.forEach((_record, id) => { if (!after.has(id)) deleted.push(id); });
+      if (deleted.length) graveyard = withTombstones(graveyard, field, deleted);
+    });
+    return graveyard === rebased.graveyard ? rebased : { ...rebased, graveyard };
   }
 
   // Cópia rasa por coleção: preserva as referências dos registros (essenciais
@@ -4821,10 +5066,13 @@ const FinanceStore = (() => {
     // Trocar de escopo é o passo que impede o vazamento entre contas: fecha o
     // banco anterior, zera a memória e recomeça do zero no banco novo.
     const nextScope = normalizeStorageScope(opts.scope == null ? scope : opts.scope);
+    storageGeneration += 1;
+    const initGeneration = storageGeneration;
+    const initRequestIsCurrent = () => storageGeneration === initGeneration && scope === nextScope;
     if (adapter && typeof adapter.close === "function") { try { adapter.close(); } catch (e) {} }
     scope = nextScope;
     adapter = null;
-    snapshot = defaultData();
+    installSnapshot(defaultData());
     lastPersisted = null;
     ready = false;
     healthy = true;
@@ -4839,7 +5087,7 @@ const FinanceStore = (() => {
     remoteSettingEcho = {};
     remoteApplied.clear();
     SyncClock.reset();
-    SyncClock.setDevice(syncDeviceId());
+    SyncClock.setDevice(syncWriterId());
     loadClockState();
     attachBus();
     // Promessas penduradas de um escopo que não existe mais precisam de
@@ -4852,86 +5100,106 @@ const FinanceStore = (() => {
 
     for (const cand of candidates) {
       try {
-        await cand.init();
+        await withStorageScopeLock(nextScope, () => cand.init());
+        if (!initRequestIsCurrent()) {
+          if (adapter !== cand && typeof cand.close === "function") { try { cand.close(); } catch (e) {} }
+          throw storageCancelledError();
+        }
         adapter = cand;
         lastErr = null;
         break;
-      } catch (err) { lastErr = err; }
+      } catch (err) {
+        if (!initRequestIsCurrent()) {
+          if (adapter !== cand && typeof cand.close === "function") { try { cand.close(); } catch (e) {} }
+          throw storageCancelledError();
+        }
+        lastErr = err;
+      }
     }
 
+    if (!initRequestIsCurrent()) throw storageCancelledError();
     if (!adapter) {
       // Modo memória: tenta pelo menos ressuscitar o espelho da sessão anterior.
       emitError(lastErr || new Error("Nenhum mecanismo de armazenamento disponível"));
       const mirror = readMirror();
-      snapshot = mirror ? migrate(mirror.data) : defaultData();
+      installSnapshot(mirror ? migrate(mirror.data) : defaultData());
       lastPersisted = null;
       ready = true;
       return snapshot;
     }
 
+    const targetAdapter = adapter;
     try {
-      let raw = await adapter.readAll();
+      return await runScopedMutation(nextScope, targetAdapter, initGeneration, async () => {
+        let raw = await targetAdapter.readAll();
+        assertStoreScope(nextScope, targetAdapter, initGeneration);
 
-      if (isEmpty(raw)) {
-        const legacy = readLegacyBlob() || (readMirror() || {}).data;
-        if (legacy) {
-          // ---- Migração automática localStorage → IndexedDB (uma única vez) ----
-          const migrated = migrate(legacy);
-          migrated.lastPersistAt = Date.now();
-          await adapter.replaceAll(migrated);
-          try { localStorage.setItem(LEGACY_KEY + "_backup", JSON.stringify(legacy)); } catch (e) {}
-          try { localStorage.removeItem(LEGACY_KEY); } catch (e) {}
-          snapshot = migrated;
-          lastPersisted = shallowSnapshot(migrated);
+        if (isEmpty(raw)) {
+          const legacy = readLegacyBlob() || (readMirror() || {}).data;
+          if (legacy) {
+            // ---- Migração automática localStorage → IndexedDB (uma única vez) ----
+            const migrated = migrate(legacy);
+            migrated.lastPersistAt = Date.now();
+            await targetAdapter.replaceAll(migrated);
+            assertStoreScope(nextScope, targetAdapter, initGeneration);
+            try { localStorage.setItem(LEGACY_KEY + "_backup", JSON.stringify(legacy)); } catch (e) {}
+            try { localStorage.removeItem(LEGACY_KEY); } catch (e) {}
+            installSnapshot(migrated);
+            lastPersisted = shallowSnapshot(migrated);
+            writeMirror(snapshot, true);
+            ready = true; healthy = true;
+            return snapshot;
+          }
+          const fresh = migrate(defaultData());
+          fresh.lastPersistAt = Date.now();
+          await targetAdapter.replaceAll(fresh);
+          assertStoreScope(nextScope, targetAdapter, initGeneration);
+          installSnapshot(fresh);
+          lastPersisted = shallowSnapshot(fresh);
           writeMirror(snapshot, true);
           ready = true; healthy = true;
           return snapshot;
         }
-        const fresh = defaultData();
-        fresh.lastPersistAt = Date.now();
-        await adapter.replaceAll(fresh);
-        snapshot = fresh;
-        lastPersisted = shallowSnapshot(fresh);
+
+        let assembled = assembleSnapshot(raw);
+
+        // ---- Recuperação de escrita perdida ----
+        const mirror = readMirror();
+        const persistedAt = Number(assembled.lastPersistAt) || 0;
+        if (mirror && mirror.savedAt > persistedAt + 500) {
+          const recovered = migrate(mirror.data);
+          // Só aceita o espelho se ele não for um retrocesso (mais dados ou iguais).
+          if (recovered.transactions.length >= assembled.transactions.length) {
+            assembled = recovered;
+            assembled.lastPersistAt = Date.now();
+            await targetAdapter.replaceAll(assembled);
+            assertStoreScope(nextScope, targetAdapter, initGeneration);
+          }
+        }
+
+        installSnapshot(assembled);
+        lastPersisted = shallowSnapshot(snapshot);
+
+        // Se a normalização alterou algo (migração de versão), grava de volta.
+
+        const cs = computeChangeSet(assembleSnapshotRawCopy(raw), snapshot);
+        if (cs) {
+          cs.settings.lastPersistAt = Date.now();
+          snapshot.lastPersistAt = cs.settings.lastPersistAt;
+          await targetAdapter.writeChanges(cs);
+          assertStoreScope(nextScope, targetAdapter, initGeneration);
+          lastPersisted = shallowSnapshot(snapshot);
+        }
         writeMirror(snapshot, true);
+
         ready = true; healthy = true;
         return snapshot;
-      }
-
-      let assembled = assembleSnapshot(raw);
-
-      // ---- Recuperação de escrita perdida ----
-      const mirror = readMirror();
-      const persistedAt = Number(assembled.lastPersistAt) || 0;
-      if (mirror && mirror.savedAt > persistedAt + 500) {
-        const recovered = migrate(mirror.data);
-        // Só aceita o espelho se ele não for um retrocesso (mais dados ou iguais).
-        if (recovered.transactions.length >= assembled.transactions.length) {
-          assembled = recovered;
-          assembled.lastPersistAt = Date.now();
-          await adapter.replaceAll(assembled);
-        }
-      }
-
-      snapshot = assembled;
-      lastPersisted = shallowSnapshot(snapshot);
-
-      // Se a normalização alterou algo (migração de versão), grava de volta.
-
-      const cs = computeChangeSet(assembleSnapshotRawCopy(raw), snapshot);
-      if (cs) {
-        cs.settings.lastPersistAt = Date.now();
-        snapshot.lastPersistAt = cs.settings.lastPersistAt;
-        await adapter.writeChanges(cs);
-        lastPersisted = shallowSnapshot(snapshot);
-      }
-      writeMirror(snapshot, true);
-
-      ready = true; healthy = true;
-      return snapshot;
+      });
     } catch (err) {
+      if (!storeContextIsCurrent(nextScope, targetAdapter, initGeneration)) throw storageCancelledError();
       emitError(err);
       const mirror = readMirror();
-      snapshot = mirror ? migrate(mirror.data) : defaultData();
+      installSnapshot(mirror ? migrate(mirror.data) : defaultData());
       lastPersisted = null;
       ready = true;
       return snapshot;
@@ -4953,28 +5221,84 @@ const FinanceStore = (() => {
     return run;
   }
 
-  async function commitCurrentSnapshot() {
-    if (!adapter) return false;
-    const target = shallowSnapshot(snapshot);
-    const cs = computeChangeSet(lastPersisted, target);
-    if (!cs) return true;
-    const ops = outboxEnabled ? stampChangeSet(lastPersisted, target, cs) : [];
-    const stamp = Date.now();
-    cs.settings.lastPersistAt = stamp;
-    target.lastPersistAt = stamp;
-    snapshot.lastPersistAt = stamp;
-    snapshot.graveyard = target.graveyard;
-    await adapter.writeChanges(cs, { outboxAdds: ops });
-    lastPersisted = target;
-    markHealthy();
-    announceWrite();
-    return true;
+  // A fila acima coordena esta aba. O Web Lock estende a mesma exclusão às
+  // outras abas do mesmo escopo, inclusive ao fallback que grava um documento
+  // inteiro no localStorage. Navegadores sem a API continuam com a fila local.
+  function withStorageScopeLock(targetScope, job) {
+    const locks = typeof navigator !== "undefined" && navigator.locks;
+    if (!locks || typeof locks.request !== "function") return job();
+    return locks.request(`cofre-storage-${targetScope}`, { mode: "exclusive" }, job);
+  }
+
+  function storageChangedError() {
+    const error = new Error("O armazenamento mudou em outra aba durante a operação.");
+    error.code = "storage_changed";
+    return error;
+  }
+
+  function storageChangedDuringOperation(error) {
+    return !!(error && error.code === "storage_changed");
+  }
+
+  async function runScopedMutation(targetScope, targetAdapter, targetGeneration, job) {
+    return withStorageScopeLock(targetScope, async () => {
+      assertStoreScope(targetScope, targetAdapter, targetGeneration);
+      const result = await job();
+      assertStoreScope(targetScope, targetAdapter, targetGeneration);
+      return result;
+    });
+  }
+
+  function enqueueScopedWrite(targetScope, targetAdapter, targetGeneration, job) {
+    return enqueueWrite(() => runScopedMutation(targetScope, targetAdapter, targetGeneration, job));
+  }
+
+  async function assertPhysicalSnapshot(targetScope, targetAdapter, targetGeneration, expected) {
+    const raw = await targetAdapter.readAll();
+    assertStoreScope(targetScope, targetAdapter, targetGeneration);
+    const physical = assembleSnapshot(raw);
+    const forward = computeChangeSet(expected, physical);
+    const backward = computeChangeSet(physical, expected);
+    if (forward || backward) {
+      throw storageChangedError();
+    }
+    return physical;
+  }
+
+  async function commitCurrentSnapshot(context) {
+    const targetScope = context ? context.scope : scope;
+    const targetAdapter = context ? context.adapter : adapter;
+    const targetGeneration = context ? context.generation : storageGeneration;
+    if (!targetAdapter) return false;
+    assertStoreScope(targetScope, targetAdapter, targetGeneration);
+    return runScopedMutation(targetScope, targetAdapter, targetGeneration, async () => {
+      const target = shallowSnapshot(snapshot);
+      const cs = computeChangeSet(lastPersisted, target);
+      if (!cs) return true;
+      const ops = outboxEnabled ? stampChangeSet(lastPersisted, target, cs) : [];
+      const stamp = Date.now();
+      cs.settings.lastPersistAt = stamp;
+      target.lastPersistAt = stamp;
+      snapshot.lastPersistAt = stamp;
+      snapshot.graveyard = target.graveyard;
+      await targetAdapter.writeChanges(cs, { outboxAdds: ops });
+      lastPersisted = target;
+      markHealthy();
+      announceWrite();
+      return true;
+    });
   }
 
   function persist(data) {
-    snapshot = data;
+    // Durante `init/switchScope` o nome do escopo novo já mudou, mas o banco
+    // ainda não foi carregado. Aceitar uma ação da tela antiga aqui escreveria
+    // o mirror de uma conta dentro da outra. A ação é recusada e a tela será
+    // atualizada quando a troca terminar.
+    if (!ready) return Promise.resolve(false);
+    installSnapshot(data);
     writeMirror(snapshot, false);          // proteção imediata, síncrona
     if (!adapter) return Promise.resolve(false);
+    const context = { scope, adapter, generation: storageGeneration };
 
     clearTimeout(pendingTimer);
     return new Promise((resolve) => {
@@ -4985,9 +5309,10 @@ const FinanceStore = (() => {
         enqueueWrite(async () => {
           const settle = (v) => resolvers.forEach((r) => r(v));
           try {
-            await commitCurrentSnapshot();
+            await commitCurrentSnapshot(context);
             settle(true);
           } catch (err) {
+            if (storageOperationCancelled(err)) { settle(false); return; }
             emitError(err);
             writeMirror(snapshot, true);   // falhou no banco? garante o espelho
             settle(false);
@@ -5000,17 +5325,22 @@ const FinanceStore = (() => {
   // Força a gravação imediata (usado antes de fechar/ocultar a aba).
 
   async function flush() {
+    const context = { scope, adapter, generation: storageGeneration };
     clearTimeout(pendingTimer);
     clearTimeout(mirrorTimer);
     writeMirror(snapshot, true);           // síncrono: sempre acontece
     const resolvers = pendingResolvers;
     pendingResolvers = [];
-    if (!adapter) { resolvers.forEach((r) => r(false)); return false; }
+    if (!context.adapter) { resolvers.forEach((r) => r(false)); return false; }
     try {
-      const ok = await enqueueWrite(commitCurrentSnapshot);
+      const ok = await enqueueWrite(() => commitCurrentSnapshot(context));
       resolvers.forEach((r) => r(true));
       return ok;
     } catch (err) {
+      if (storageOperationCancelled(err)) {
+        resolvers.forEach((r) => r(false));
+        return false;
+      }
       emitError(err);
       resolvers.forEach((r) => r(false));
       return false;
@@ -5018,28 +5348,93 @@ const FinanceStore = (() => {
   }
 
   async function replaceAll(data) {
-    await flush();
+    if (!ready) return false;
+    const targetScope = scope;
+    const targetAdapter = adapter;
+    const targetGeneration = storageGeneration;
+    const replacementMustSync = targetScope !== GUEST_SCOPE;
+    if (!targetAdapter) return false;
+    const flushed = await flush();
+    if (!flushed || !storeContextIsCurrent(targetScope, targetAdapter, targetGeneration)) return false;
     const normalized = migrate(data);
-    // Guarda o estado anterior para permitir desfazer um restore acidental.
-    try { localStorage.setItem(undoKey(), JSON.stringify({ savedAt: Date.now(), data: snapshot })); } catch (e) {}
     const anterior = snapshot;
     normalized.lastPersistAt = Date.now();
-    snapshot = normalized;
+    installSnapshot(normalized);
+    const replacementVersion = snapshotVersion;
     // A TROCA DA BASE INTEIRA TAMBÉM PRECISA VIAJAR.
     //
     // Este caminho não passa pelo diff de `persist`, então restaurar um backup,
     // desfazer uma restauração ou adotar os dados de visitante mudava só este
     // aparelho. Nos outros, nada acontecia; e como o servidor continuava com a
     // base velha, a descida seguinte podia até desfazer o que foi restaurado.
-    const semente = outboxEnabled ? stampReplacement(anterior) : { ops: [] };
-    writeMirror(snapshot, true);
-    if (!adapter) return false;
+    // Outra aba pode ter confirmado registros e operações antes de receber o
+    // aviso pelo BroadcastChannel. A base física e a fila são relidas dentro do
+    // mesmo bloqueio usado pelos commits locais; só então as lápides nascem.
+    // A restauração recarimba a base inteira, portanto substitui com segurança
+    // todas as operações antigas que ainda estavam na fila.
+    let replacementSnapshot = normalized;
+    let replacementPersisted = shallowSnapshot(normalized);
+    writeMirror(normalized, true);
     try {
-      await enqueueWrite(() => adapter.replaceAll(snapshot, { outboxAdds: semente.ops }));
-      lastPersisted = shallowSnapshot(snapshot);
+      await enqueueScopedWrite(targetScope, targetAdapter, targetGeneration, async () => {
+        const physicalRaw = await targetAdapter.readAll();
+        assertStoreScope(targetScope, targetAdapter, targetGeneration);
+        const queued = await targetAdapter.outboxRead(0);
+        assertStoreScope(targetScope, targetAdapter, targetGeneration);
+
+        const physical = assembleSnapshot(physicalRaw);
+        observeSnapshotClock(physical);
+        queued.forEach((entry) => SyncClock.observe(entry && entry.rev));
+
+        const queuedRecords = {};
+        SYNC_ENTITY_FIELDS.forEach((field) => { queuedRecords[field] = []; });
+        queued.forEach((entry) => {
+          if (!entry || entry.op !== "put" || SYNC_ENTITY_FIELDS.indexOf(entry.entity) === -1) return;
+          queuedRecords[entry.entity].push({ id: entry.entityId });
+        });
+
+        const replacement = replacementMustSync
+          ? stampReplacement([anterior, physical, queuedRecords], normalized)
+          : { ops: [], data: normalized };
+        replacementSnapshot = replacement.data;
+        replacementPersisted = shallowSnapshot(replacementSnapshot);
+
+        // Guarda o estado realmente confirmado antes do restore, não o
+        // instantâneo possivelmente atrasado desta aba.
+        try {
+          localStorage.setItem(scopedName(LS_UNDO_KEY, targetScope), JSON.stringify({ savedAt: Date.now(), data: physical }));
+        } catch (_error) { /* desfazer fica indisponível se a cota estiver cheia */ }
+
+        await targetAdapter.replaceAll(replacementSnapshot, replacementMustSync ? {
+          outboxDrops: queued.map((entry) => entry.seq),
+          outboxAdds: replacement.ops,
+          metaDeletes: [META_LINK_JOURNAL, META_SEED_JOURNAL],
+        } : undefined);
+        assertStoreScope(targetScope, targetAdapter, targetGeneration);
+      });
+      assertStoreScope(targetScope, targetAdapter, targetGeneration);
+
+      const concurrentSnapshot = snapshot;
+      const localChanges = snapshotVersion !== replacementVersion
+        ? computeChangeSet(normalized, concurrentSnapshot)
+        : null;
+      lastPersisted = replacementPersisted;
+      let finalSnapshot = overlayChangeSet(replacementSnapshot, localChanges);
+      finalSnapshot = restampConcurrentDeletes(normalized, concurrentSnapshot, finalSnapshot);
+      installSnapshot(finalSnapshot);
+      if (localChanges) {
+        const rebased = await flush();
+        if (!rebased) return false;
+        assertStoreScope(targetScope, targetAdapter, targetGeneration);
+      }
+      writeMirror(snapshot, true);
       markHealthy();
+      announceWrite();
       return true;
-    } catch (err) { emitError(err); return false; }
+    } catch (err) {
+      if (!storageOperationCancelled(err)) emitError(err);
+      return false;
+    }
   }
 
   function readUndoSnapshot() {
@@ -5052,55 +5447,87 @@ const FinanceStore = (() => {
   }
 
   async function clear() {
-    const fresh = defaultData();
-    try { localStorage.setItem(undoKey(), JSON.stringify({ savedAt: Date.now(), data: snapshot })); } catch (e) {}
+    if (!ready) return false;
+    const targetScope = scope;
+    const targetAdapter = adapter;
+    const targetGeneration = storageGeneration;
+    const fresh = migrate(defaultData());
+    try { localStorage.setItem(scopedName(LS_UNDO_KEY, targetScope), JSON.stringify({ savedAt: Date.now(), data: snapshot })); } catch (e) {}
     fresh.lastPersistAt = Date.now();
-    snapshot = fresh;
+    installSnapshot(fresh);
     writeMirror(snapshot, true);
-    if (!adapter) return false;
-    try { await adapter.clearAll(); await adapter.replaceAll(fresh); lastPersisted = shallowSnapshot(fresh); return true; }
-    catch (err) { emitError(err); return false; }
+    if (!targetAdapter) return false;
+    try {
+      await enqueueScopedWrite(targetScope, targetAdapter, targetGeneration, async () => {
+        await targetAdapter.clearAll();
+        assertStoreScope(targetScope, targetAdapter, targetGeneration);
+        await targetAdapter.replaceAll(fresh);
+      });
+      assertStoreScope(targetScope, targetAdapter, targetGeneration);
+      lastPersisted = shallowSnapshot(fresh);
+      markHealthy();
+      announceWrite();
+      return true;
+    } catch (err) {
+      if (!storageOperationCancelled(err)) emitError(err);
+      return false;
+    }
   }
 
   // Exclusão definitiva pedida pelo usuário. Ao contrário de clear(), não cria
   // um snapshot de desfazer e remove os espelhos que poderiam ressuscitar dados.
   async function purge() {
+    if (!ready) return false;
+    const targetScope = scope;
+    const targetAdapter = adapter;
+    const targetGeneration = storageGeneration;
     clearTimeout(pendingTimer);
     clearTimeout(mirrorTimer);
     pendingResolvers.splice(0).forEach((resolve) => resolve(false));
-    const fresh = defaultData();
+    const fresh = migrate(defaultData());
     fresh.lastPersistAt = Date.now();
     // Só as chaves DESTE escopo. Apagar os dados da conta não pode levar junto
     // o que pertence a quem usa o aparelho sem conta.
     const keys = [
-      scopedName(LS_FALLBACK_KEY, scope),
-      scopedName("financas_db_outbox", scope),
-      scopedName("financas_db_meta", scope),
-      scopedName("financas_db_recovery", scope),
-      scopedName("financas_db_clock", scope),
-      mirrorKey(),
-      undoKey(),
-      scope === GUEST_SCOPE ? "cofre_sync_cursor" : `cofre_sync_cursor__${scope}`,
-      `cofre_sync_seeded__${scope}`,
-      ...(scope === GUEST_SCOPE ? [LEGACY_KEY, LEGACY_KEY + "_backup", "financas_theme"] : []),
+      scopedName(LS_FALLBACK_KEY, targetScope),
+      scopedName("financas_db_outbox", targetScope),
+      scopedName("financas_db_meta", targetScope),
+      scopedName("financas_db_recovery", targetScope),
+      scopedName("financas_db_clock", targetScope),
+      scopedName(LS_MIRROR_KEY, targetScope),
+      scopedName(LS_UNDO_KEY, targetScope),
+      targetScope === GUEST_SCOPE ? "cofre_sync_cursor" : `cofre_sync_cursor__${targetScope}`,
+      `cofre_sync_seeded__${targetScope}`,
+      ...(targetScope === GUEST_SCOPE ? [LEGACY_KEY, LEGACY_KEY + "_backup", "financas_theme"] : []),
     ];
-    if (!adapter) {
-      snapshot = fresh;
-      lastPersisted = null;
+    if (!targetAdapter) {
+      if (storeContextIsCurrent(targetScope, targetAdapter, targetGeneration)) {
+        installSnapshot(fresh);
+        lastPersisted = null;
+      }
       keys.forEach((key) => { try { localStorage.removeItem(key); } catch (_error) {} });
+      announceWrite();
       return true;
     }
     try {
-      await adapter.clearAll();
-      await adapter.outboxClear();
-      await adapter.localMetaClear();
-      await adapter.replaceAll(fresh);
-      snapshot = fresh;
+      await enqueueScopedWrite(targetScope, targetAdapter, targetGeneration, async () => {
+        await targetAdapter.clearAll();
+        assertStoreScope(targetScope, targetAdapter, targetGeneration);
+        await targetAdapter.outboxClear();
+        assertStoreScope(targetScope, targetAdapter, targetGeneration);
+        await targetAdapter.localMetaClear();
+        assertStoreScope(targetScope, targetAdapter, targetGeneration);
+        await targetAdapter.replaceAll(fresh);
+      });
+      assertStoreScope(targetScope, targetAdapter, targetGeneration);
+      installSnapshot(fresh);
       lastPersisted = shallowSnapshot(fresh);
       healthy = true;
       keys.forEach((key) => { try { localStorage.removeItem(key); } catch (_error) {} });
+      announceWrite();
       return true;
     } catch (err) {
+      if (storageOperationCancelled(err)) return false;
       if (typeof reportSafeError === "function") reportSafeError("storage", err, "storage_delete");
       emitError(err);
       return false;
@@ -5250,8 +5677,10 @@ const FinanceStore = (() => {
     const candidates = [new IndexedDBAdapter(wanted), new LocalStorageAdapter(wanted)];
     for (const candidate of candidates) {
       try {
-        await candidate.init();
-        const raw = await candidate.readAll();
+        const raw = await withStorageScopeLock(wanted, async () => {
+          await candidate.init();
+          return candidate.readAll();
+        });
         const data = isEmpty(raw) ? null : migrate(assembleSnapshot(raw));
         if (data) return { ok: true, data };
       } catch (e) {
@@ -5328,32 +5757,41 @@ const FinanceStore = (() => {
   // tentativa seguinte apenas termina aquele mesmo lote.
   async function adoptScope(source, options) {
     const opts = options || {};
+    const storageAttempt = Math.max(0, Number(opts._storageAttempt) || 0);
     const from = normalizeStorageScope(source);
-    if (from === scope) return { ok: false, reason: "same_scope" };
-    if (scope === GUEST_SCOPE) return { ok: false, reason: "not_authenticated" };
+    const expectedScope = scope;
+    const targetAdapter = adapter;
+    const targetGeneration = storageGeneration;
+    if (from === expectedScope) return { ok: false, reason: "same_scope" };
+    if (expectedScope === GUEST_SCOPE) return { ok: false, reason: "not_authenticated" };
     if (!adapter) return { ok: false, reason: "no_storage" };
+    assertStoreScope(expectedScope, targetAdapter, targetGeneration);
 
     const read = await readScope(from);
+    assertStoreScope(expectedScope, targetAdapter, targetGeneration);
     if (!read.ok) return { ok: false, reason: "unreadable" };
     if (!read.data) return { ok: false, reason: "empty" };
     const incoming = read.data;
     const digest = await contentDigest(incoming);
+    assertStoreScope(expectedScope, targetAdapter, targetGeneration);
 
     // Conteúdo já vinculado não é vinculado de novo. Sem esta parada, uma
     // segunda passagem refazia a mesclagem e a trilha de auditoria dos mesmos
     // lançamentos era reconstruída, gerando um lote de operações que não
     // representava alteração nenhuma.
-    const reciboAtual = await localMetaGet(META_LINK_RECEIPT);
+    const reciboAtual = await localMetaGet(META_LINK_RECEIPT, expectedScope);
+    assertStoreScope(expectedScope, targetAdapter, targetGeneration);
     if (reciboAtual && reciboAtual.status === "linked" && digest
-      && reciboAtual.accountScope === scope && reciboAtual.sourceDigest === digest) {
+      && reciboAtual.accountScope === expectedScope && reciboAtual.sourceDigest === digest) {
       return {
         ok: true, changed: false, alreadyLinked: true, linkId: reciboAtual.linkId || null,
         digest, stats: reciboAtual.stats || null, queued: 0,
       };
     }
 
-    const anterior = await localMetaGet(META_LINK_JOURNAL);
-    if (anterior && anterior.accountScope === scope && anterior.sourceDigest === digest) {
+    const anterior = await localMetaGet(META_LINK_JOURNAL, expectedScope);
+    assertStoreScope(expectedScope, targetAdapter, targetGeneration);
+    if (anterior && anterior.accountScope === expectedScope && anterior.sourceDigest === digest) {
       // Retomada: as operações já estão na fila, com as marcas do diário. Nada
       // é recarimbado, e nenhuma versão nova é criada para reivindicar o
       // conflito que interrompeu a tentativa anterior.
@@ -5364,56 +5802,100 @@ const FinanceStore = (() => {
       };
     }
 
-    await flush();
-    const fusao = mergeBackupInto(snapshot, incoming);
+    const flushed = await flush();
+    if (!flushed) throw storageCancelledError();
+    assertStoreScope(expectedScope, targetAdapter, targetGeneration);
+    const baseSnapshot = snapshot;
+    const baseVersion = snapshotVersion;
+    const fusao = mergeBackupInto(baseSnapshot, incoming);
     const target = migrate(fusao.data);
-    const changeSet = computeChangeSet(snapshot, target);
+    const changeSet = computeChangeSet(baseSnapshot, target);
     const linkId = syncEntryKey({}).replace(/^op_/, "link_");
-
-    if (!changeSet) {
-      // O conteúdo do visitante já está inteiro na conta. Isso é conclusão, não
-      // falha: o recibo evita que a pergunta volte na próxima entrada.
-      await localMetaPut(META_LINK_RECEIPT, {
-        version: 1, status: "linked", accountScope: scope, accountUserId: String(opts.userId || ""),
-        sourceScope: from, sourceDigest: digest, linkId,
-        remoteBaseRevision: opts.remoteRevision == null ? null : String(opts.remoteRevision),
-        serverRevision: null, decidedAt: new Date().toISOString(), stats: fusao.stats,
-      });
-      return { ok: true, changed: false, linkId, digest, stats: fusao.stats, queued: 0 };
-    }
-
-    const ops = stampChangeSet(snapshot, target, changeSet);
-    const entries = ops.map((op, index) => ({
-      ...op, linkId, entryKey: `${linkId}_${String(index).padStart(6, "0")}`,
-    }));
-    const diario = {
-      version: 1, linkId, status: "queued",
-      accountScope: scope, accountUserId: String(opts.userId || ""),
-      sourceScope: from, sourceDigest: digest,
-      remoteBaseRevision: opts.remoteRevision == null ? null : String(opts.remoteRevision),
-      stats: fusao.stats, queued: entries.length, createdAt: new Date().toISOString(),
-    };
-    // A revisão esperada só acompanha o vínculo AUTOMÁTICO. Ela é o que faz o
-    // servidor recusar a adoção se a conta tiver recebido qualquer operação
-    // entre a leitura e a confirmação.
-    if (opts.expectedRemoteRevision != null) diario.expectedRemoteRevision = String(opts.expectedRemoteRevision);
-
-    const stamp = Date.now();
-    changeSet.settings.lastPersistAt = stamp;
-    target.lastPersistAt = stamp;
+    let committed;
     try {
-      await enqueueWrite(() => adapter.writeChanges(changeSet, {
-        outboxAdds: entries,
-        metaPuts: { [META_LINK_JOURNAL]: diario },
-      }));
+      committed = await enqueueScopedWrite(expectedScope, targetAdapter, targetGeneration, async () => {
+        await assertPhysicalSnapshot(expectedScope, targetAdapter, targetGeneration, baseSnapshot);
+
+        // Outra aba pode ter concluído exatamente este vínculo enquanto esta
+        // aguardava o bloqueio. Revalidar o diário dentro da região exclusiva
+        // impede dois lotes com revisões diferentes para a mesma decisão.
+        const receipt = await targetAdapter.localMetaGet(META_LINK_RECEIPT);
+        if (receipt && receipt.status === "linked" && digest
+          && receipt.accountScope === expectedScope && receipt.sourceDigest === digest) {
+          return { existing: {
+            ok: true, changed: false, alreadyLinked: true, linkId: receipt.linkId || null,
+            digest, stats: receipt.stats || null, queued: 0,
+          } };
+        }
+        const journal = await targetAdapter.localMetaGet(META_LINK_JOURNAL);
+        if (journal && journal.accountScope === expectedScope && journal.sourceDigest === digest) {
+          return { existing: {
+            ok: true, resumed: true, changed: false, linkId: journal.linkId, digest,
+            stats: journal.stats || null, queued: Number(journal.queued) || 0,
+            blocked: journal.status === "blocked",
+          } };
+        }
+
+        if (!changeSet) {
+          // O conteúdo do visitante já está inteiro na conta. Isso é conclusão,
+          // e o recibo nasce sob o mesmo bloqueio usado pelas demais mutações.
+          await targetAdapter.localMetaPut(META_LINK_RECEIPT, {
+            version: 1, status: "linked", accountScope: expectedScope, accountUserId: String(opts.userId || ""),
+            sourceScope: from, sourceDigest: digest, linkId,
+            remoteBaseRevision: opts.remoteRevision == null ? null : String(opts.remoteRevision),
+            serverRevision: null, decidedAt: new Date().toISOString(), stats: fusao.stats,
+          });
+          return { existing: { ok: true, changed: false, linkId, digest, stats: fusao.stats, queued: 0 } };
+        }
+
+        const ops = stampChangeSet(baseSnapshot, target, changeSet);
+        const entries = ops.map((op, index) => ({
+          ...op, linkId, entryKey: `${linkId}_${String(index).padStart(6, "0")}`,
+        }));
+        const diario = {
+          version: 1, linkId, status: "queued",
+          accountScope: expectedScope, accountUserId: String(opts.userId || ""),
+          sourceScope: from, sourceDigest: digest,
+          remoteBaseRevision: opts.remoteRevision == null ? null : String(opts.remoteRevision),
+          stats: fusao.stats, queued: entries.length, createdAt: new Date().toISOString(),
+        };
+        // A revisão esperada só acompanha o vínculo AUTOMÁTICO. Ela faz o
+        // servidor recusar a adoção se a conta avançar antes da confirmação.
+        if (opts.expectedRemoteRevision != null) diario.expectedRemoteRevision = String(opts.expectedRemoteRevision);
+        const stamp = Date.now();
+        changeSet.settings.lastPersistAt = stamp;
+        target.lastPersistAt = stamp;
+        await targetAdapter.writeChanges(changeSet, {
+          outboxAdds: entries,
+          metaPuts: { [META_LINK_JOURNAL]: diario },
+        });
+        return { entries };
+      });
+      assertStoreScope(expectedScope, targetAdapter, targetGeneration);
     } catch (err) {
       // Dados, fila e diário falham juntos: a conta continua exatamente como
       // estava, e o visitante também.
+      if (err && err.code === "sync_cancelled") throw err;
+      if (storageChangedDuringOperation(err) && storageAttempt < 3) {
+        await reload({ scope: expectedScope, adapter: targetAdapter, generation: targetGeneration });
+        return adoptScope(source, { ...opts, _storageAttempt: storageAttempt + 1 });
+      }
       emitError(err);
       return { ok: false, reason: "write_failed", digest, error: err };
     }
-    snapshot = target;
-    lastPersisted = shallowSnapshot(target);
+    if (committed.existing) return committed.existing;
+    const entries = committed.entries;
+    if (snapshotVersion !== baseVersion) {
+      const localChanges = computeChangeSet(baseSnapshot, snapshot);
+      lastPersisted = shallowSnapshot(target);
+      installSnapshot(overlayChangeSet(target, localChanges));
+      const rebased = await flush();
+      if (!rebased) throw storageCancelledError();
+      assertStoreScope(expectedScope, targetAdapter, targetGeneration);
+    } else {
+      installSnapshot(target);
+      lastPersisted = shallowSnapshot(target);
+    }
     writeMirror(snapshot, true);
     markHealthy();
     announceWrite();
@@ -5440,25 +5922,30 @@ const FinanceStore = (() => {
   // A conta avançou entre a leitura e a confirmação. O diário e a fila ficam
   // como estão; o motor apenas para de reenviar aquele lote até a pessoa
   // decidir de novo.
-  async function blockGuestLink(remoteRevision) {
-    const diario = await localMetaGet(META_LINK_JOURNAL);
+  async function blockGuestLink(remoteRevision, expectedScope) {
+    const diario = await localMetaGet(META_LINK_JOURNAL, expectedScope);
     if (!diario || diario.status === "blocked") return false;
     await localMetaPut(META_LINK_JOURNAL, {
       ...diario, status: "blocked",
       blockedAt: new Date().toISOString(),
       observedRemoteRevision: remoteRevision == null ? null : String(remoteRevision),
-    });
+    }, expectedScope);
     return true;
   }
 
   // Confirmação explícita depois do bloqueio: o lote volta a subir, agora sem
   // declarar revisão esperada, porque a pessoa já sabe que a conta mudou.
   async function releaseGuestLink() {
-    const diario = await localMetaGet(META_LINK_JOURNAL);
+    const expectedScope = scope;
+    const targetAdapter = adapter;
+    assertStoreScope(expectedScope, targetAdapter);
+    const diario = await localMetaGet(META_LINK_JOURNAL, expectedScope);
+    assertStoreScope(expectedScope, targetAdapter);
     if (!diario) return false;
     const proximo = { ...diario, status: "queued", releasedAt: new Date().toISOString() };
     delete proximo.expectedRemoteRevision;
-    await localMetaPut(META_LINK_JOURNAL, proximo);
+    await localMetaPut(META_LINK_JOURNAL, proximo, expectedScope);
+    assertStoreScope(expectedScope, targetAdapter);
     return true;
   }
 
@@ -5488,11 +5975,18 @@ const FinanceStore = (() => {
     if (bus) { try { bus.close(); } catch (e) {} }
     bus = openBus();
     if (!bus) return;
+    const attachedBus = bus;
+    const attachedScope = scope;
+    const attachedGeneration = storageGeneration;
     bus.onmessage = (event) => {
       const message = event && event.data;
       if (!message || message.type !== "written" || message.tab === tabId) return;
+      if (bus !== attachedBus || scope !== attachedScope || storageGeneration !== attachedGeneration) return;
+      const reloadContext = { scope: attachedScope, adapter, generation: attachedGeneration };
       // Reler é assíncrono; até terminar, esta aba não pode gravar por cima.
-      reload().then((data) => {
+      reload(reloadContext).then((data) => {
+        if (!storeContextIsCurrent(reloadContext.scope, reloadContext.adapter, reloadContext.generation)
+          || bus !== attachedBus) return;
         tabListeners.forEach((fn) => { try { fn(data); } catch (e) { /* ouvinte quebrado */ } });
       }).catch(() => {});
     };
@@ -5500,77 +5994,171 @@ const FinanceStore = (() => {
 
   // Relê o banco e substitui o snapshot em memória. Usado quando outra aba
   // gravou e quando o motor de sincronização quer descartar estado suspeito.
-  async function reload() {
-    if (!adapter) return snapshot;
+  async function reload(context) {
+    const targetScope = context ? context.scope : scope;
+    const targetAdapter = context ? context.adapter : adapter;
+    const targetGeneration = context ? context.generation : storageGeneration;
+    if (!targetAdapter) return snapshot;
     try {
-      const raw = await adapter.readAll();
-      const assembled = assembleSnapshot(raw);
-      snapshot = assembled;
-      lastPersisted = shallowSnapshot(assembled);
+      // Primeiro confirma qualquer edição que já esteja no debounce ou na fila.
+      // Depois, se outra edição chegar enquanto `readAll` estiver em voo, a
+      // versão muda e a leitura antiga é descartada. Assim um aviso de outra aba
+      // nunca apaga o que a pessoa acabou de digitar nesta aba.
+      for (let attempt = 0; attempt < 3; attempt++) {
+        assertStoreScope(targetScope, targetAdapter, targetGeneration);
+        const flushed = await flush();
+        if (!flushed) throw storageCancelledError();
+        assertStoreScope(targetScope, targetAdapter, targetGeneration);
+        const versionAtRead = snapshotVersion;
+        const raw = await runScopedMutation(targetScope, targetAdapter, targetGeneration,
+          () => targetAdapter.readAll());
+        assertStoreScope(targetScope, targetAdapter, targetGeneration);
+        if (snapshotVersion !== versionAtRead) continue;
+        const assembled = assembleSnapshot(raw);
+        assertStoreScope(targetScope, targetAdapter, targetGeneration);
+        observeSnapshotClock(assembled);
+        installSnapshot(assembled);
+        lastPersisted = shallowSnapshot(assembled);
+        return snapshot;
+      }
       return snapshot;
-    } catch (err) { emitError(err); return snapshot; }
+    } catch (err) {
+      if (storageOperationCancelled(err)) throw err;
+      emitError(err);
+      return snapshot;
+    }
   }
 
   // ---- Fila persistente exposta ao motor de sincronização ----
-  async function outboxAppend(entries) {
+  async function outboxAppend(entries, expectedScope) {
     const list = Array.isArray(entries) ? entries : [entries];
     if (!adapter) throw new Error("Armazenamento local indisponível para a fila");
     if (!list.length) return true;
+    const targetScope = expectedScope || scope;
+    const targetAdapter = adapter;
+    const targetGeneration = storageGeneration;
+    assertStoreScope(targetScope, targetAdapter, targetGeneration);
     try {
-      const result = await enqueueWrite(() => adapter.outboxAppend(list));
+      const result = await enqueueScopedWrite(targetScope, targetAdapter, targetGeneration, () => {
+        return targetAdapter.outboxAppend(list);
+      });
+      assertStoreScope(targetScope, targetAdapter, targetGeneration);
       markHealthy();
       return result;
-    } catch (err) { emitError(err); throw err; }
+    } catch (err) {
+      if (!storageOperationCancelled(err)) emitError(err);
+      throw err;
+    }
   }
-  async function outboxRead(limit) {
+  async function outboxRead(limit, expectedScope) {
     if (!adapter) throw new Error("Armazenamento local indisponível para a fila");
+    const targetScope = expectedScope || scope;
+    const targetAdapter = adapter;
+    const targetGeneration = storageGeneration;
+    assertStoreScope(targetScope, targetAdapter, targetGeneration);
     try {
       await writeQueue;
-      const result = await adapter.outboxRead(limit);
+      assertStoreScope(targetScope, targetAdapter, targetGeneration);
+      const result = await runScopedMutation(targetScope, targetAdapter, targetGeneration,
+        () => targetAdapter.outboxRead(limit));
+      assertStoreScope(targetScope, targetAdapter, targetGeneration);
       markHealthy();
       return result;
-    } catch (err) { emitError(err); throw err; }
+    } catch (err) {
+      if (!storageOperationCancelled(err)) emitError(err);
+      throw err;
+    }
   }
-  async function outboxDrop(seqs) {
+  async function outboxDrop(seqs, expectedScope) {
     if (!adapter) throw new Error("Armazenamento local indisponível para a fila");
     if (!seqs.length) return true;
+    const targetScope = expectedScope || scope;
+    const targetAdapter = adapter;
+    const targetGeneration = storageGeneration;
+    assertStoreScope(targetScope, targetAdapter, targetGeneration);
     try {
-      const result = await enqueueWrite(() => adapter.outboxDrop(seqs));
+      const result = await enqueueScopedWrite(targetScope, targetAdapter, targetGeneration, () => {
+        return targetAdapter.outboxDrop(seqs);
+      });
+      assertStoreScope(targetScope, targetAdapter, targetGeneration);
       markHealthy();
       return result;
-    } catch (err) { emitError(err); throw err; }
+    } catch (err) {
+      if (!storageOperationCancelled(err)) emitError(err);
+      throw err;
+    }
   }
-  async function outboxClear() {
+  async function outboxClear(expectedScope) {
     if (!adapter) throw new Error("Armazenamento local indisponível para a fila");
+    const targetScope = expectedScope || scope;
+    const targetAdapter = adapter;
+    const targetGeneration = storageGeneration;
+    assertStoreScope(targetScope, targetAdapter, targetGeneration);
     try {
-      const result = await enqueueWrite(() => adapter.outboxClear());
+      const result = await enqueueScopedWrite(targetScope, targetAdapter, targetGeneration, () => {
+        return targetAdapter.outboxClear();
+      });
+      assertStoreScope(targetScope, targetAdapter, targetGeneration);
       markHealthy();
       return result;
-    } catch (err) { emitError(err); throw err; }
+    } catch (err) {
+      if (!storageOperationCancelled(err)) emitError(err);
+      throw err;
+    }
   }
 
-  async function localMetaGet(key) {
+  async function localMetaGet(key, expectedScope) {
     if (!adapter) throw new Error("Armazenamento local indisponível para metadados");
+    const targetScope = expectedScope || scope;
+    const targetAdapter = adapter;
+    const targetGeneration = storageGeneration;
+    assertStoreScope(targetScope, targetAdapter, targetGeneration);
     await writeQueue;
-    return adapter.localMetaGet(String(key));
+    assertStoreScope(targetScope, targetAdapter, targetGeneration);
+    const result = await runScopedMutation(targetScope, targetAdapter, targetGeneration,
+      () => targetAdapter.localMetaGet(String(key)));
+    assertStoreScope(targetScope, targetAdapter, targetGeneration);
+    return result;
   }
 
-  async function localMetaPut(key, value) {
+  async function localMetaPut(key, value, expectedScope) {
     if (!adapter) throw new Error("Armazenamento local indisponível para metadados");
-    return enqueueWrite(() => adapter.localMetaPut(String(key), value));
+    const targetScope = expectedScope || scope;
+    const targetAdapter = adapter;
+    const targetGeneration = storageGeneration;
+    assertStoreScope(targetScope, targetAdapter, targetGeneration);
+    return enqueueScopedWrite(targetScope, targetAdapter, targetGeneration, () => {
+      return targetAdapter.localMetaPut(String(key), value);
+    }).then((result) => {
+      assertStoreScope(targetScope, targetAdapter, targetGeneration);
+      return result;
+    });
   }
 
-  async function localMetaDelete(key) {
+  async function localMetaDelete(key, expectedScope) {
     if (!adapter) throw new Error("Armazenamento local indisponível para metadados");
-    return enqueueWrite(() => adapter.localMetaDelete(String(key)));
+    const targetScope = expectedScope || scope;
+    const targetAdapter = adapter;
+    const targetGeneration = storageGeneration;
+    assertStoreScope(targetScope, targetAdapter, targetGeneration);
+    return enqueueScopedWrite(targetScope, targetAdapter, targetGeneration, () => {
+      return targetAdapter.localMetaDelete(String(key));
+    }).then((result) => {
+      assertStoreScope(targetScope, targetAdapter, targetGeneration);
+      return result;
+    });
   }
 
-  async function acknowledgeOutbox(seqs, serverAck) {
+  async function acknowledgeOutbox(seqs, serverAck, expectedScope) {
     if (!adapter) throw new Error("Armazenamento local indisponível para confirmar a fila");
+    const targetScope = expectedScope || scope;
+    const targetAdapter = adapter;
+    const targetGeneration = storageGeneration;
+    assertStoreScope(targetScope, targetAdapter, targetGeneration);
     const drop = new Set((seqs || []).map((seq) => Number(seq)));
     if (!drop.size) return { dropped: 0, linkIds: [], seedIds: [] };
-    return enqueueWrite(async () => {
-      const queued = await adapter.outboxRead(0);
+    return enqueueScopedWrite(targetScope, targetAdapter, targetGeneration, async () => {
+      const queued = await targetAdapter.outboxRead(0);
       const removed = queued.filter((entry) => drop.has(Number(entry.seq)));
       if (removed.length !== drop.size) throw new Error("A fila mudou antes da confirmação do servidor");
       const remaining = queued.filter((entry) => !drop.has(Number(entry.seq)));
@@ -5581,7 +6169,7 @@ const FinanceStore = (() => {
       const metaPuts = {};
       const metaDeletes = [];
       for (const linkId of linkIds) {
-        const journal = await adapter.localMetaGet(META_LINK_JOURNAL);
+        const journal = await targetAdapter.localMetaGet(META_LINK_JOURNAL);
         if (!journal || journal.linkId !== linkId) continue;
         metaPuts[META_LINK_RECEIPT] = {
           version: 1, status: "linked", accountUserId: journal.accountUserId,
@@ -5599,7 +6187,9 @@ const FinanceStore = (() => {
         };
         metaDeletes.push(META_SEED_JOURNAL);
       }
-      await adapter.writeChanges(null, { outboxDrops: Array.from(drop), metaPuts, metaDeletes });
+      assertStoreScope(targetScope, targetAdapter, targetGeneration);
+      await targetAdapter.writeChanges(null, { outboxDrops: Array.from(drop), metaPuts, metaDeletes });
+      assertStoreScope(targetScope, targetAdapter, targetGeneration);
       markHealthy();
       return { dropped: removed.length, linkIds, seedIds };
     });
@@ -5625,6 +6215,7 @@ const FinanceStore = (() => {
     readUndoSnapshot,
     queryTransactionsByMonth,
     scope: () => scope,
+    generation: () => storageGeneration,
     switchScope: (target, preferredAdapter) => init(preferredAdapter || null, { scope: target }),
     peekScope,
     adoptScope,
@@ -5662,6 +6253,17 @@ const FinanceStore = (() => {
     // Marca nova do relógio lógico deste aparelho. Usada por operações que não
     // nascem de um registro, como o "apagar tudo" da conta.
     mintRev: () => { const rev = SyncClock.tick(); saveClockState(); return rev; },
+    // O reset é carimbado pelo servidor acima de toda HLC já conhecida. O
+    // aparelho solicitante precisa absorver essa marca antes de voltar a criar
+    // registros, senão uma criação imediata poderia perder para a lápide.
+    observeRemoteRev: (value) => {
+      const rev = normalizeSyncRev(value);
+      if (!rev) return false;
+      loadClockState();
+      const observed = SyncClock.observe(rev);
+      if (observed) saveClockState();
+      return observed;
+    },
     isReady: () => ready,
     isHealthy: () => healthy,
     hasMirror: () => mirrorEnabled,
@@ -5696,7 +6298,31 @@ function isStorageAvailable() { return FinanceStore.adapterName() !== "memory"; 
 // Garante que nada em rajada se perca ao fechar/minimizar o app (PWA no celular).
 // `pagehide` e `freeze` cobrem o iOS, onde `beforeunload` não é confiável.
 if (typeof document !== "undefined") {
-  const flushNow = () => { try { FinanceStore.flush(); } catch (e) {} };
+  let lifecycleFlush = null;
+  const flushNow = () => {
+    const flushScope = FinanceStore.scope();
+    const flushGeneration = typeof FinanceStore.generation === "function" ? FinanceStore.generation() : 0;
+    if (lifecycleFlush && lifecycleFlush.scope === flushScope && lifecycleFlush.generation === flushGeneration) {
+      return lifecycleFlush.promise;
+    }
+    try {
+      const attempt = typeof CloudSync !== "undefined" && typeof CloudSync.flushOnHide === "function"
+        ? CloudSync.flushOnHide()
+        : FinanceStore.flush();
+      const entry = { scope: flushScope, generation: flushGeneration, promise: null };
+      entry.promise = Promise.resolve(attempt)
+        .catch((error) => {
+          if (typeof reportSafeError === "function") reportSafeError("sync", error, "lifecycle_flush");
+          return false;
+        })
+        .finally(() => { if (lifecycleFlush === entry) lifecycleFlush = null; });
+      lifecycleFlush = entry;
+      return entry.promise;
+    } catch (error) {
+      if (typeof reportSafeError === "function") reportSafeError("sync", error, "lifecycle_flush_start");
+      return Promise.resolve(false);
+    }
+  };
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") flushNow();
   });
@@ -6638,25 +7264,83 @@ function buildBudgetsCsv(data, monthKey) {
 
 const ACCOUNT_ENDPOINT = "/api/account";
 const ACCOUNT_DEVICE_KEY = "cofre_device_id";
+const ACCOUNT_REQUEST_TIMEOUT_MS = 12000;
+const ACCOUNT_RECOVERY_DEDUP_MS = 750;
+const ACCOUNT_RECOVERY_RETRY_MS = 30000;
+const ACCOUNT_SCOPED_ACTIONS = new Set(["password", "devices", "revoke-device", "delete", "logout"]);
+const ACCOUNT_COOKIE_ACTIONS = new Set(["session", "login", "register", "recover", "resend", "verify", "exchange", "logout", "revoke-device", "delete"]);
+
+// Alguns modos privados permitem ler o localStorage, mas recusam a gravação.
+// Sem uma cópia em memória, cada chamada criava outro id e o mesmo navegador
+// aparecia como vários aparelhos durante a mesma visita.
+let __accountDeviceIdMemory = "";
+
+function newAccountDeviceId() {
+  return typeof crypto !== "undefined" && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `device_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
+}
 
 function accountDeviceId() {
+  if (/^[A-Za-z0-9][A-Za-z0-9:_-]{7,79}$/.test(__accountDeviceIdMemory)) return __accountDeviceIdMemory;
   try {
     let value = localStorage.getItem(ACCOUNT_DEVICE_KEY);
-    if (/^[A-Za-z0-9][A-Za-z0-9:_-]{7,79}$/.test(value || "")) return value;
-    value = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `device_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
-    localStorage.setItem(ACCOUNT_DEVICE_KEY, value);
+    if (/^[A-Za-z0-9][A-Za-z0-9:_-]{7,79}$/.test(value || "")) {
+      __accountDeviceIdMemory = value;
+      return value;
+    }
+    value = newAccountDeviceId();
+    __accountDeviceIdMemory = value;
+    try { localStorage.setItem(ACCOUNT_DEVICE_KEY, value); } catch (_) { /* vale nesta visita */ }
     return value;
-  } catch (_) { return `device_${Date.now()}_memory`; }
+  } catch (_) {
+    __accountDeviceIdMemory = newAccountDeviceId();
+    return __accountDeviceIdMemory;
+  }
 }
 
 function accountDeviceLabel() {
-  const platform = typeof navigator !== "undefined" ? String(navigator.userAgentData && navigator.userAgentData.platform || navigator.platform || "") : "";
-  return platform ? `Navegador em ${platform}`.slice(0, 50) : "Este navegador";
+  if (typeof navigator === "undefined") return "Este navegador";
+  const ua = String(navigator.userAgent || "");
+  const rawPlatform = String(navigator.userAgentData && navigator.userAgentData.platform || navigator.platform || "");
+  const browser = /Edg\//.test(ua) ? "Edge"
+    : /OPR\//.test(ua) ? "Opera"
+      : /Firefox\//.test(ua) ? "Firefox"
+        : /CriOS\//.test(ua) ? "Chrome"
+          : /Chrome\//.test(ua) ? "Chrome"
+            : /FxiOS\//.test(ua) ? "Firefox"
+              : /Safari\//.test(ua) ? "Safari"
+                : "Navegador";
+  const platform = /Win/i.test(rawPlatform) ? "Windows"
+    : /Android/i.test(ua) ? "Android"
+      : /iPhone|iPod/i.test(ua) ? "iPhone"
+        : /iPad/i.test(ua) || (rawPlatform === "MacIntel" && Number(navigator.maxTouchPoints) > 1) ? "iPad"
+          : /Mac/i.test(rawPlatform) ? "macOS"
+            : /CrOS/i.test(`${ua} ${rawPlatform}`) ? "ChromeOS"
+              : /Linux/i.test(rawPlatform) ? "Linux"
+                : rawPlatform.replace(/[\x00-\x1F\x7F]/g, " ").trim().slice(0, 24);
+  return (platform ? `${browser} no ${platform}` : browser).slice(0, 50);
+}
+
+function accountCurrentDeviceType() {
+  if (typeof navigator === "undefined") return "unknown";
+  const ua = String(navigator.userAgent || "");
+  const platform = String(navigator.platform || "");
+  if (/iPad|Tablet|PlayBook|Silk/i.test(ua) || (platform === "MacIntel" && Number(navigator.maxTouchPoints) > 1)) return "tablet";
+  if ((navigator.userAgentData && navigator.userAgentData.mobile === true) || /Mobi|iPhone|iPod|Android.*Mobile/i.test(ua)) return "phone";
+  if (/Android/i.test(ua)) return "tablet";
+  if (/Windows|Macintosh|Linux|X11/i.test(`${ua} ${platform}`)) return "desktop";
+  return "unknown";
+}
+
+function accountExpectedUserId() {
+  try { return String(state && state.account && state.account.userId || "").trim().toLowerCase(); }
+  catch (_) { return ""; }
 }
 
 function freshAccountState() {
   return {
-    loading: true, configured: null, authenticated: false, email: "", userId: "", mode: "login", busy: false, error: "", message: "",
+    loading: true, configured: null, authenticated: false, knownAccount: false, sessionStatus: "unknown", email: "", userId: "", mode: "login", busy: false, error: "", message: "",
     // Email cadastrado que ainda espera confirmação. Enquanto ele existe, a
     // tela mostra o cartão de "confirmação pendente" com o botão de reenvio;
     // antes disto, quem não recebia o email não tinha para onde ir.
@@ -6683,22 +7367,36 @@ function freshAccountState() {
 // conta remota já tem, e isso só existe depois da primeira descida; misturar as
 // duas coisas aqui era o que fazia o aplicativo perguntar (ou deixar de
 // perguntar) antes de ter a informação.
+let __accountScopeQueue = Promise.resolve();
+
 async function applyAccountScope(userId) {
   const desired = storageScopeFor(userId);
-  if (desired === FinanceStore.scope()) return false;
+  const task = async () => {
+    if (desired === FinanceStore.scope()) {
+      FinanceStore.setOutboxEnabled(desired !== GUEST_SCOPE);
+      return false;
+    }
 
-  // O que estava na fila pertence ao escopo que está saindo; grave antes.
-  try { await FinanceStore.flush(); } catch (_) {}
-  if (typeof CloudSync !== "undefined") CloudSync.disable();
+    // Invalidar primeiro impede que uma resposta remota já em voo toque no
+    // banco que será aberto a seguir. A fila antiga é gravada logo depois.
+    if (typeof CloudSync !== "undefined") CloudSync.disable();
+    try { await FinanceStore.flush(); } catch (_) {}
 
-  state.data = await switchStorageScope(desired);
-  state.storageOk = isStorageAvailable();
-  // Tudo que a tela guardava era daquele escopo: seleção, formulário aberto,
-  // rascunho de importação, pré-visualização de backup. Nada disso vale para a
-  // conta que entrou agora.
-  resetScopedUiState(desired);
-  render();
-  return true;
+    state.data = await switchStorageScope(desired);
+    // O /health pode falhar, mas toda edição deste escopo já precisa nascer com
+    // marca e fila para subir na recuperação automática.
+    FinanceStore.setOutboxEnabled(desired !== GUEST_SCOPE);
+    state.storageOk = isStorageAvailable();
+    // Tudo que a tela guardava era daquele escopo: seleção, formulário aberto,
+    // rascunho de importação, pré-visualização de backup. Nada disso vale para a
+    // conta que entrou agora.
+    resetScopedUiState(desired);
+    render();
+    return true;
+  };
+  const run = __accountScopeQueue.then(task, task);
+  __accountScopeQueue = run.catch(() => {});
+  return run;
 }
 
 // Estado de tela derivado dos dados. Sem esta limpeza, um id selecionado na
@@ -6798,6 +7496,7 @@ async function finishAccountBootstrapAndGate() {
 // a conta tiver recebido qualquer operação nesse intervalo.
 async function runGuestLink(token, escopo, visitante, opts) {
   const valido = () => token === __guestLinkToken && FinanceStore.scope() === escopo;
+  if (!valido()) return;
   let resultado;
   try { resultado = await FinanceStore.adoptScope("guest", opts); }
   catch (error) { resultado = { ok: false, reason: "write_failed", error }; }
@@ -6953,12 +7652,15 @@ async function accountLinkGuest() {
   if (!state.account.authenticated) return;
   const escopo = FinanceStore.scope();
   const token = ++__guestLinkToken;
+  const userId = state.account.userId;
+  const remoteRevision = state.account.guestLink.remoteRevision;
+  const valido = () => token === __guestLinkToken && FinanceStore.scope() === escopo;
   setGuestLink({ phase: "linking", busy: true, error: "", errorCode: "" });
 
   let visitante = null;
   try { visitante = await FinanceStore.peekScope("guest"); }
   catch (_) { visitante = null; }
-  if (token !== __guestLinkToken || FinanceStore.scope() !== escopo) return;
+  if (!valido()) return;
   if (!visitante || !visitante.exists) {
     setGuestLink({ phase: "idle", busy: false, summary: null });
     return;
@@ -6966,9 +7668,10 @@ async function accountLinkGuest() {
   setGuestLink({ summary: visitante, digest: visitante.digest || "", busy: false });
 
   try { await FinanceStore.releaseGuestLink(); } catch (_) { /* sem diário */ }
+  if (!valido()) return;
   await runGuestLink(token, escopo, visitante, {
-    userId: state.account.userId,
-    remoteRevision: state.account.guestLink.remoteRevision,
+    userId,
+    remoteRevision,
   });
 }
 
@@ -6976,6 +7679,9 @@ async function accountLinkGuest() {
 // Fechar a tela NÃO passa por aqui, e é isso que impede o marcador silencioso
 // que existia antes.
 async function accountDismissGuestLink() {
+  const escopo = FinanceStore.scope();
+  const token = ++__guestLinkToken;
+  const valido = () => token === __guestLinkToken && FinanceStore.scope() === escopo;
   const digest = state.account.guestLink && state.account.guestLink.digest;
   if (!digest) {
     // Sem impressão (navegador sem WebCrypto) nada é gravado: preferimos
@@ -6985,6 +7691,7 @@ async function accountDismissGuestLink() {
   }
   try { await FinanceStore.dismissGuestLink(digest, "guest"); }
   catch (_) { /* a pergunta volta na próxima entrada */ }
+  if (!valido()) return;
   setGuestLink({ phase: "dismissed", error: "", errorCode: "" });
   notify("Os dados deste aparelho continuam separados da conta");
 }
@@ -7012,54 +7719,160 @@ async function accountReviewGuestLink() {
 }
 
 const AccountAPI = (() => {
-  async function request(path, options) {
+  let cookieQueue = Promise.resolve();
+
+  function withCookieLock(task) {
+    const locks = typeof navigator !== "undefined" && navigator.locks;
+    if (locks && typeof locks.request === "function") {
+      return locks.request("cofre-account-cookie", () => task());
+    }
+    const run = cookieQueue.then(task, task);
+    cookieQueue = run.catch(() => {});
+    return run;
+  }
+
+  async function singleRequest(path, options) {
     const o = options || {};
     if (typeof location !== "undefined" && location.protocol === "file:") {
       if (path === "session") return { ok: true, configured: false, authenticated: false };
       throw new Error("O serviço de conta exige o site publicado.");
     }
-    let response;
+    const externalSignal = o.signal;
+    const controller = typeof AbortController === "function" ? new AbortController() : null;
+    let abortKind = "";
+    let timeoutId = null;
+    let onExternalAbort = null;
+    const abortRequest = (kind) => {
+      if (!controller || controller.signal.aborted) return;
+      abortKind = kind;
+      controller.abort();
+    };
+    const requestFailure = (cause) => {
+      if (cause && cause.name === "AbortError") {
+        const timedOut = abortKind === "timeout";
+        const aborted = new Error(timedOut
+          ? "O serviço de conta não respondeu a tempo."
+          : "A verificação anterior da conta foi cancelada.");
+        aborted.code = timedOut ? "timeout" : "request_aborted";
+        return aborted;
+      }
+      const error = new Error("Não foi possível acessar o serviço de conta.");
+      error.code = "network_error";
+      return error;
+    };
+    if (controller) {
+      onExternalAbort = () => abortRequest("external");
+      if (externalSignal && externalSignal.aborted) onExternalAbort();
+      else if (externalSignal && typeof externalSignal.addEventListener === "function") {
+        externalSignal.addEventListener("abort", onExternalAbort, { once: true });
+      }
+      timeoutId = setTimeout(() => abortRequest("timeout"), ACCOUNT_REQUEST_TIMEOUT_MS);
+    }
+
     try {
-      response = await fetch(`${ACCOUNT_ENDPOINT}/${path}`, {
-        method: o.method || "GET", credentials: "include", cache: "no-store",
-        headers: { "Accept": "application/json", "Content-Type": "application/json", "X-Device-Id": accountDeviceId(), "X-Device-Label": accountDeviceLabel() },
-        body: o.body === undefined ? undefined : JSON.stringify(o.body),
-      });
-    } catch (_) { throw new Error("Não foi possível acessar o serviço de conta."); }
-    // AUSÊNCIA DE BACKEND NÃO É ERRO DO USUÁRIO.
-    //
-    // Publicação estática, o servidor de desenvolvimento (`npm start`) e portais
-    // de Wi-Fi respondem `/api/*` com o HTML do próprio aplicativo e status 200.
-    // O `404` já era tratado; o `200 text/html` não era, caía no erro genérico e
-    // a tela de conta abria com alerta vermelho antes de o usuário digitar
-    // qualquer coisa. Resposta sem JSON significa que não há serviço de conta
-    // aqui, que é o "modo local", estado que a tela já sabe apresentar.
-    const tipoConteudo = String(response.headers.get("content-type") || "");
-    const respostaEhJson = tipoConteudo.indexOf("json") !== -1;
-    if (path === "session" && (response.status === 404 || !respostaEhJson)) {
-      return { ok: true, configured: false, authenticated: false };
+      let response;
+      try {
+        response = await fetch(`${ACCOUNT_ENDPOINT}/${path}`, {
+          method: o.method || "GET", credentials: "include", cache: "no-store",
+          headers: {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "X-Device-Id": accountDeviceId(),
+            "X-Device-Label": accountDeviceLabel(),
+            "X-Device-Type": accountCurrentDeviceType(),
+            ...(ACCOUNT_SCOPED_ACTIONS.has(path) ? { "X-Account-Id": o.expectedAccountId } : {}),
+          },
+          body: o.body === undefined ? undefined : JSON.stringify(o.body),
+          signal: controller ? controller.signal : externalSignal,
+        });
+      } catch (cause) {
+        throw requestFailure(cause);
+      }
+
+      // AUSÊNCIA DE BACKEND NÃO É ERRO DO USUÁRIO.
+      //
+      // Publicação estática, o servidor de desenvolvimento (`npm start`) e portais
+      // de Wi-Fi respondem `/api/*` com o HTML do próprio aplicativo e status 200.
+      // O `404` já era tratado; o `200 text/html` não era, caía no erro genérico e
+      // a tela de conta abria com alerta vermelho antes de o usuário digitar
+      // qualquer coisa. Resposta sem JSON significa que não há serviço de conta
+      // aqui, que é o "modo local", estado que a tela já sabe apresentar.
+      const tipoConteudo = String(response.headers.get("content-type") || "");
+      const respostaEhJson = tipoConteudo.indexOf("json") !== -1;
+      if (path === "session" && (response.status === 404 || !respostaEhJson)) {
+        return { ok: true, configured: false, authenticated: false };
+      }
+      if (!respostaEhJson) {
+        const semServico = new Error("O serviço de conta não está disponível nesta publicação.");
+        semServico.code = "account_unavailable";
+        throw semServico;
+      }
+      let payload = null;
+      try { payload = await response.json(); }
+      catch (cause) {
+        // Abortar o fetch depois dos cabeçalhos também interrompe a leitura do
+        // corpo. Esse cancelamento precisa conservar a causa; JSON inválido
+        // continua seguindo o tratamento de resposta malformada já existente.
+        if (cause && cause.name === "AbortError") throw requestFailure(cause);
+      }
+      if (!response.ok || !payload || payload.ok === false) {
+        const error = new Error(payload && payload.message || "Não foi possível concluir a operação.");
+        error.code = payload && payload.code || "request_failed";
+        throw error;
+      }
+      return payload;
+    } finally {
+      if (timeoutId !== null) clearTimeout(timeoutId);
+      if (externalSignal && onExternalAbort && typeof externalSignal.removeEventListener === "function") {
+        externalSignal.removeEventListener("abort", onExternalAbort);
+      }
     }
-    if (!respostaEhJson) {
-      const semServico = new Error("O serviço de conta não está disponível nesta publicação.");
-      semServico.code = "account_unavailable";
-      throw semServico;
-    }
-    const payload = await response.json().catch(() => null);
-    if (!response.ok || !payload || payload.ok === false) {
-      const error = new Error(payload && payload.message || "Não foi possível concluir a operação.");
-      error.code = payload && payload.code || "request_failed";
+  }
+
+  async function request(path, options) {
+    const scoped = ACCOUNT_SCOPED_ACTIONS.has(path);
+    const original = options || {};
+    const o = {
+      ...original,
+      expectedAccountId: scoped
+        ? String(original.expectedAccountId || accountExpectedUserId()).trim().toLowerCase()
+        : "",
+    };
+    let result;
+    try {
+      // O lock termina junto desta única ida HTTP. Recuperar a sessão aqui
+      // dentro tentaria adquirir o mesmo lock e prenderia a fila para sempre.
+      result = ACCOUNT_COOKIE_ACTIONS.has(path)
+        ? await withCookieLock(() => singleRequest(path, o))
+        : await singleRequest(path, o);
+    } catch (error) {
+      if (scoped && error && error.code === "session_refresh_required"
+        && o.retrySession !== false && !o.sessionRetried) {
+        // A ação nasceu para esta identidade. Se login/logout mudou a conta
+        // enquanto a resposta viajava, ela não pode ser repetida na conta nova.
+        if (!o.expectedAccountId || accountExpectedUserId() !== o.expectedAccountId) {
+          const changed = new Error("A conta desta sessão mudou durante a operação.");
+          changed.code = "account_scope_changed";
+          throw changed;
+        }
+        const refreshed = await refreshAccountSession();
+        if (refreshed && refreshed.status === "active" && accountExpectedUserId() === o.expectedAccountId) {
+          return request(path, { ...o, sessionRetried: true });
+        }
+      }
       throw error;
     }
-    return payload;
+    return result;
   }
   return {
-    session: () => request("session"), register: (body) => request("register", { method: "POST", body }),
+    session: (options) => request("session", options), register: (body) => request("register", { method: "POST", body }),
     login: (body) => request("login", { method: "POST", body }), recover: (body) => request("recover", { method: "POST", body }),
     resend: (email) => request("resend", { method: "POST", body: { email } }),
     exchange: (code) => request("exchange", { method: "POST", body: { code } }),
     verify: (tokenHash, type) => request("verify", { method: "POST", body: { tokenHash, type } }),
     logout: () => request("logout", { method: "POST", body: {} }),
-    password: (password) => request("password", { method: "POST", body: { password } }), devices: () => request("devices"),
+    password: (password) => request("password", { method: "POST", body: { password } }),
+    devices: (options) => request("devices", options),
     revokeDevice: (deviceId) => request("revoke-device", { method: "POST", body: { deviceId } }),
     deleteAccount: (password, confirmation) => request("delete", { method: "POST", body: { password, confirmation } }),
   };
@@ -7071,77 +7884,331 @@ function accountSetBusy(busy, error) {
   render();
 }
 
-async function refreshAccountSession() {
-  // "O servidor respondeu" é diferente de "o servidor disse que não há sessão".
-  // Só a segunda pode trocar o escopo de dados; a primeira, num aparelho sem
-  // rede, faria a conta parecer vazia.
-  let sessionKnown = false;
-  try {
-    const result = await AccountAPI.session();
-    sessionKnown = true;
-    state.account.configured = result.configured !== false;
-    state.account.authenticated = !!result.authenticated;
-    state.account.email = result.email || "";
-    state.account.userId = result.userId || "";
-    state.account.loading = false;
-    // O servidor devolve a sessão pendente em vez de simplesmente negar: é
-    // assim que a tela sabe oferecer o reenvio para o endereço certo.
-    if (result.pendingConfirmation) state.account.pendingEmail = result.email || state.account.pendingEmail;
-    else if (state.account.authenticated) state.account.pendingEmail = "";
-    if (state.account.authenticated) {
-      try {
-        const devices = await AccountAPI.devices();
-        state.account.devices = devices.devices || [];
-      } catch (error) {
-        state.account.devices = [];
-        if (error.code === "device_revoked" || error.code === "session_expired") {
-          state.account.authenticated = false;
-          state.account.email = "";
-          state.account.error = error.message;
-        }
-      }
-    } else state.account.devices = [];
-  } catch (error) {
-    state.account.loading = false;
-    state.account.configured = true;
-    state.account.authenticated = false;
-    // Esta consulta é automática: roda ao abrir o aplicativo, sem ninguém pedir.
-    // Falha aqui não descreve nada que o usuário tenha feito, e um alerta
-    // vermelho na abertura da tela só destrói a confiança em quem ia se
-    // cadastrar. O formulário continua disponível; se a tentativa real de
-    // entrar falhar, aí sim o erro aparece, com a causa certa e na hora certa.
-    state.account.error = "";
-  }
+let __accountSessionRefreshPromise = null;
+let __accountSessionRefreshEpoch = -1;
+let __accountSessionAbortController = null;
+let __accountAuthEpoch = 0;
+let __accountInvalidationPromise = null;
+let __accountScopeChangePromise = null;
+let __accountReadyScope = "";
+let __accountRecoveryPromise = null;
+let __accountRecoveryLastAt = 0;
+let __accountRecoveryListenersStarted = false;
+let __accountRecoveryTimer = null;
+let __accountDisconnecting = false;
 
-  // O banco carregado precisa ser o da sessão ANTES de qualquer sincronização;
-  // ligar o sync antes da troca enviaria os dados de uma conta para a outra.
-  if (sessionKnown) {
-    try { await applyAccountScope(state.account.authenticated ? state.account.userId : ""); }
+function accountRefreshIsCurrent(epoch) {
+  return epoch === __accountAuthEpoch;
+}
+
+function invalidateAccountRefresh() {
+  __accountAuthEpoch += 1;
+  if (__accountSessionAbortController) {
+    try { __accountSessionAbortController.abort(); } catch (_) {}
+  }
+  __accountSessionRefreshPromise = null;
+  __accountSessionRefreshEpoch = -1;
+  __accountSessionAbortController = null;
+  return __accountAuthEpoch;
+}
+
+function clearAccountRecoveryRetry() {
+  if (__accountRecoveryTimer !== null) {
+    clearTimeout(__accountRecoveryTimer);
+    __accountRecoveryTimer = null;
+  }
+}
+
+function scheduleAccountRecoveryRetry() {
+  clearAccountRecoveryRetry();
+  const epoch = __accountAuthEpoch;
+  const rememberedScope = FinanceStore.scope();
+  if (rememberedScope === GUEST_SCOPE && !state.account.knownAccount) return;
+  __accountRecoveryTimer = setTimeout(() => {
+    __accountRecoveryTimer = null;
+    if (!accountRefreshIsCurrent(epoch) || FinanceStore.scope() !== rememberedScope) return;
+    recoverAccountSession("retry").catch((error) => {
+      if (typeof reportSafeError === "function") reportSafeError("sync", error, "account_recover_retry");
+    });
+  }, ACCOUNT_RECOVERY_RETRY_MS);
+}
+
+function invalidAccountSessionCode(error) {
+  const code = String(error && error.code || "");
+  return code === "device_revoked" || code === "device_unknown" || code === "session_expired";
+}
+
+function changedAccountScopeCode(error) {
+  return String(error && error.code || "") === "account_scope_changed";
+}
+
+// Revogação e expiração trocam apenas o ESCOPO carregado. O banco da conta e
+// sua fila ficam no aparelho para um login posterior continuar de onde parou.
+async function invalidateAccountSession(details) {
+  if (__accountInvalidationPromise) return __accountInvalidationPromise;
+  const info = details || {};
+  invalidateAccountRefresh();
+  clearAccountRecoveryRetry();
+  __accountInvalidationPromise = (async () => {
+    ++__guestLinkToken;
+    __accountReadyScope = "";
+    // Uma gravação local que já estava confirmada pela interface precisa chegar
+    // à fila da conta antes que o motor pare de enfileirar.
+    try { await FinanceStore.flush(); }
     catch (error) {
-      if (typeof reportSafeError === "function") reportSafeError("storage", error, "scope_switch");
-      notify("Não foi possível abrir os dados desta conta neste aparelho", "danger");
-      render();
-      return;
+      if (typeof reportSafeError === "function") reportSafeError("storage", error, "session_invalid_flush");
     }
+    if (typeof CloudSync !== "undefined") CloudSync.disable();
+    state.account.authenticated = false;
+    state.account.knownAccount = false;
+    state.account.sessionStatus = "guest";
+    state.account.loading = false;
+    state.account.email = "";
+    state.account.userId = "";
+    state.account.devices = [];
+    state.account.busy = false;
+    state.account.error = info.message || "A sessão terminou. Entre novamente para voltar a sincronizar.";
+    try {
+      await applyAccountScope("");
+    } catch (error) {
+      if (typeof reportSafeError === "function") reportSafeError("storage", error, "invalid_session_scope");
+      notify("A sessão terminou, mas não foi possível abrir os dados locais deste aparelho", "danger");
+    }
+    if (typeof refreshOnboardingGate === "function") refreshOnboardingGate({ release: true });
+    render();
+    return { status: "guest", invalidated: true };
+  })();
+  try { return await __accountInvalidationPromise; }
+  finally { __accountInvalidationPromise = null; }
+}
+
+// Consultas concorrentes de pageshow, foco e online compartilham a mesma
+// promessa. Isso impede duas trocas de escopo e duas primeiras descidas.
+async function refreshAccountSession() {
+  const epoch = __accountAuthEpoch;
+  if (__accountSessionRefreshPromise && __accountSessionRefreshEpoch === epoch) return __accountSessionRefreshPromise;
+  const controller = typeof AbortController === "function" ? new AbortController() : null;
+  const promise = performAccountSessionRefresh(epoch, controller && controller.signal);
+  __accountSessionRefreshPromise = promise;
+  __accountSessionRefreshEpoch = epoch;
+  __accountSessionAbortController = controller;
+  return promise.finally(() => {
+    if (__accountSessionRefreshPromise === promise) {
+      __accountSessionRefreshPromise = null;
+      __accountSessionRefreshEpoch = -1;
+      __accountSessionAbortController = null;
+    }
+  });
+}
+
+async function performAccountSessionRefresh(epoch, signal) {
+  // "O servidor respondeu" é diferente de "o servidor disse que não há sessão".
+  // Falha de transporte mantém autenticação, escopo e fila como estavam.
+  let result;
+  try {
+    result = await AccountAPI.session({ signal });
+  } catch (error) {
+    if (!accountRefreshIsCurrent(epoch) || error.code === "request_aborted") return { status: "stale" };
+    if (invalidAccountSessionCode(error)) return invalidateAccountSession(error);
+    const rememberedAccount = FinanceStore.scope() !== GUEST_SCOPE;
+    state.account.knownAccount = state.account.knownAccount || rememberedAccount;
+    // No cold reload não temos email nem id em memória. Manter o estado de
+    // verificação evita renderizar o formulário guest como se houvesse logout;
+    // dashboard e banco local continuam disponíveis enquanto a rede se recupera.
+    state.account.loading = rememberedAccount && !state.account.authenticated;
+    if (state.account.configured === null) state.account.configured = true;
+    state.account.sessionStatus = "unknown";
+    // Esta consulta é automática. O estado de sincronização já apresenta a
+    // falta de rede sem transformar a abertura do app num erro de formulário.
+    state.account.error = "";
+    render();
+    scheduleAccountRecoveryRetry();
+    return { status: "unknown", error };
   }
 
-  // A sincronização segue a sessão: liga quando há conta confirmada e para
-  // assim que ela deixa de existir. `enable()` já faz a primeira volta completa
-  // (puxa o remoto, funde e devolve), então é aqui que um aparelho novo recebe
-  // o histórico. Não é aguardado para não segurar a pintura da tela de conta.
-  // A sincronização segue a sessão. Ela não é mais ligada "solta": a entrada
-  // numa conta passa pela sequência de vínculo, que desce primeiro, decide, e só
-  // então libera a fila e a semeadura. Não é aguardada para não segurar a
-  // pintura da tela de conta.
-  if (typeof CloudSync !== "undefined") {
-    if (state.account.authenticated) bootstrapAccountLink().catch(() => {});
-    else CloudSync.disable();
+  if (!accountRefreshIsCurrent(epoch)) return { status: "stale" };
+
+  state.account.loading = false;
+  state.account.configured = result.configured !== false;
+
+  // Uma publicação sem serviço de conta não confirmou logout nenhum. Se este
+  // navegador já estava num escopo autenticado, ele continua disponível localmente.
+  if (result.configured === false) {
+    const rememberedAccount = FinanceStore.scope() !== GUEST_SCOPE;
+    state.account.knownAccount = state.account.knownAccount || rememberedAccount;
+    state.account.sessionStatus = rememberedAccount ? "unknown" : "guest";
+    if (!rememberedAccount) state.account.authenticated = false;
+    if (!rememberedAccount && typeof refreshOnboardingGate === "function") refreshOnboardingGate({ release: true });
+    render();
+    return { status: state.account.sessionStatus, configured: false };
   }
-  // Sem sessão não há descida para esperar. O portão precisa abrir aqui, senão
-  // uma consulta de sessão que falhou por falta de rede deixaria o assistente
-  // fechado para sempre num aparelho que nunca foi configurado.
-  if (!state.account.authenticated && typeof refreshOnboardingGate === "function") refreshOnboardingGate({ release: true });
+
+  if (!result.authenticated) {
+    clearAccountRecoveryRetry();
+    ++__guestLinkToken;
+    __accountReadyScope = "";
+    state.account.authenticated = false;
+    state.account.knownAccount = false;
+    state.account.sessionStatus = "guest";
+    state.account.email = result.email || "";
+    state.account.userId = "";
+    state.account.devices = [];
+    if (result.pendingConfirmation) state.account.pendingEmail = result.email || state.account.pendingEmail;
+    try {
+      await applyAccountScope("");
+    } catch (error) {
+      if (typeof reportSafeError === "function") reportSafeError("storage", error, "scope_switch");
+      notify("Não foi possível abrir os dados deste aparelho", "danger");
+      render();
+      return { status: "guest", error };
+    }
+    if (!accountRefreshIsCurrent(epoch)) return { status: "stale" };
+    if (typeof CloudSync !== "undefined") CloudSync.disable();
+    if (typeof refreshOnboardingGate === "function") refreshOnboardingGate({ release: true });
+    render();
+    return { status: "guest" };
+  }
+
+  // Uma resposta autenticada sem identidade não é autorização para escolher um
+  // banco. Preservamos o escopo atual e tentamos de novo no próximo gatilho.
+  if (!result.userId) {
+    state.account.sessionStatus = "unknown";
+    render();
+    scheduleAccountRecoveryRetry();
+    return { status: "unknown", error: new Error("A sessão não informou a identidade da conta.") };
+  }
+
+  const previousUserId = String(state.account.userId || "");
+  state.account.authenticated = true;
+  state.account.knownAccount = true;
+  state.account.sessionStatus = "active";
+  state.account.email = result.email || state.account.email || "";
+  state.account.userId = result.userId;
+  state.account.pendingEmail = "";
+  if (previousUserId && previousUserId !== String(result.userId)) state.account.devices = [];
+  clearAccountRecoveryRetry();
+
+  let mudouEscopo = false;
+  try {
+    mudouEscopo = await applyAccountScope(result.userId);
+  } catch (error) {
+    if (typeof reportSafeError === "function") reportSafeError("storage", error, "scope_switch");
+    notify("Não foi possível abrir os dados desta conta neste aparelho", "danger");
+    render();
+    return { status: "active", error };
+  }
+  if (!accountRefreshIsCurrent(epoch)) return { status: "stale" };
+
+  // Uma falha ao atualizar a lista não inventa uma lista vazia. Revogação ou
+  // expiração, por outro lado, são confirmações de que o acesso acabou.
+  try {
+    const devices = await AccountAPI.devices({ retrySession: false });
+    if (!accountRefreshIsCurrent(epoch)) return { status: "stale" };
+    state.account.devices = Array.isArray(devices.devices) ? devices.devices : [];
+  } catch (error) {
+    if (!accountRefreshIsCurrent(epoch)) return { status: "stale" };
+    if (changedAccountScopeCode(error)) return handleAccountScopeChanged(error);
+    if (invalidAccountSessionCode(error)) return invalidateAccountSession(error);
+  }
+
+  if (typeof CloudSync !== "undefined" && state.account.authenticated) {
+    const currentScope = FinanceStore.scope();
+    const precisaPreparar = mudouEscopo || __accountReadyScope !== currentScope || !CloudSync.isEnabled();
+    if (precisaPreparar) await bootstrapAccountLink();
+    else await CloudSync.syncNow();
+    if (!accountRefreshIsCurrent(epoch)) return { status: "stale" };
+    if (state.account.authenticated && CloudSync.isEnabled()) __accountReadyScope = currentScope;
+  } else if (typeof refreshOnboardingGate === "function") {
+    refreshOnboardingGate({ release: true });
+  }
   render();
+  return { status: state.account.sessionStatus };
+}
+
+function handleAccountScopeChanged(details) {
+  if (__accountScopeChangePromise) return __accountScopeChangePromise;
+  invalidateAccountRefresh();
+  clearAccountRecoveryRetry();
+  ++__guestLinkToken;
+  __accountReadyScope = "";
+  if (typeof CloudSync !== "undefined") CloudSync.disable();
+  state.account.authenticated = false;
+  state.account.knownAccount = FinanceStore.scope() !== GUEST_SCOPE;
+  state.account.sessionStatus = "unknown";
+  state.account.loading = state.account.knownAccount;
+  state.account.devices = [];
+  state.account.busy = false;
+  state.account.error = "";
+  render();
+
+  const promise = refreshAccountSession();
+  __accountScopeChangePromise = promise;
+  return promise.finally(() => {
+    if (__accountScopeChangePromise === promise) __accountScopeChangePromise = null;
+  });
+}
+
+async function handleSessionRefreshRequired(details) {
+  const expected = String(details && details.expectedAccountId || "").trim().toLowerCase();
+  // Uma resposta que chegou depois de outro login não ganha o direito de
+  // consultar ou religar nada para a identidade nova.
+  if (!expected || accountExpectedUserId() !== expected) return { status: "stale" };
+  const result = await refreshAccountSession();
+  if (!result || result.status !== "active" || accountExpectedUserId() !== expected) {
+    return { status: result && result.status || "stale" };
+  }
+  // A consulta pode ter sido compartilhada com uma recuperação que decidiu
+  // sincronizar enquanto o motor ainda estava ligado. Se esse ciclo recebeu o
+  // pedido de refresh e desligou o motor antes de a consulta terminar, a
+  // resposta `active` sozinha não o religa. Reavaliamos depois da promessa e
+  // preparamos novamente somente para a mesma identidade confirmada.
+  if (typeof CloudSync !== "undefined" && !CloudSync.isEnabled()) {
+    const expectedScope = FinanceStore.scope();
+    await bootstrapAccountLink();
+    if (accountExpectedUserId() !== expected || FinanceStore.scope() !== expectedScope) return { status: "stale" };
+    if (state.account.authenticated && CloudSync.isEnabled()) __accountReadyScope = expectedScope;
+  }
+  return result;
+}
+
+function recoverAccountSession(reason) {
+  // Foco, pageshow e online podem disparar enquanto o usuário está saindo ou
+  // apagando a cópia local. Uma consulta concorrente nesse intervalo poderia
+  // revalidar o cookie e baixar novamente o que acabou de ser removido.
+  if (__accountDisconnecting) return Promise.resolve(false);
+  if (__accountRecoveryPromise) return __accountRecoveryPromise;
+  const now = Date.now();
+  if (reason !== "online" && now - __accountRecoveryLastAt < ACCOUNT_RECOVERY_DEDUP_MS) return Promise.resolve(false);
+  __accountRecoveryLastAt = now;
+  const promise = (async () => {
+    if (state.account.sessionStatus === "active"
+      && typeof CloudSync !== "undefined" && CloudSync.isEnabled()) {
+      return CloudSync.syncNow();
+    }
+    return refreshAccountSession();
+  })();
+  __accountRecoveryPromise = promise;
+  return promise.finally(() => {
+    if (__accountRecoveryPromise === promise) __accountRecoveryPromise = null;
+  });
+}
+
+function startAccountRecoveryListeners() {
+  if (__accountRecoveryListenersStarted || typeof window === "undefined") return;
+  __accountRecoveryListenersStarted = true;
+  const recover = (reason) => {
+    recoverAccountSession(reason).catch((error) => {
+      if (typeof reportSafeError === "function") reportSafeError("sync", error, `account_recover_${reason}`);
+    });
+  };
+  window.addEventListener("online", () => recover("online"));
+  window.addEventListener("pageshow", () => recover("pageshow"));
+  window.addEventListener("focus", () => recover("focus"));
+  if (typeof document !== "undefined") {
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") recover("visible");
+    });
+  }
 }
 
 // ------------------------------------------------------------------------------
@@ -7178,7 +8245,14 @@ function authLinkErrorMessage(codigo) {
   return "O link não trouxe um código válido.";
 }
 
+let __accountBootstrapPromise = null;
+
 async function bootstrapAccount() {
+  if (!__accountBootstrapPromise) __accountBootstrapPromise = performAccountBootstrap();
+  return __accountBootstrapPromise;
+}
+
+async function performAccountBootstrap() {
   const params = new URLSearchParams(location.search || "");
   const code = params.get("code");
   const tokenHash = params.get("token_hash");
@@ -7193,10 +8267,13 @@ async function bootstrapAccount() {
   // modelo de email seja trocado enquanto ainda ha link antigo circulando.
   if (tokenHash) {
     consumiu = true;
+    invalidateAccountRefresh();
     try {
       const result = await AccountAPI.verify(tokenHash, params.get("type") || (recuperacao ? "recovery" : "signup"));
       state.account.authenticated = true;
+      state.account.sessionStatus = "active";
       state.account.email = result.email || "";
+      state.account.userId = result.userId || "";
       state.account.pendingEmail = "";
       state.account.mode = result.purpose === "recovery" ? "password" : "login";
       state.account.message = result.purpose === "recovery"
@@ -7205,10 +8282,13 @@ async function bootstrapAccount() {
     } catch (error) { state.account.error = error.message; }
   } else if (code) {
     consumiu = true;
+    invalidateAccountRefresh();
     try {
       const result = await AccountAPI.exchange(code);
       state.account.authenticated = true;
+      state.account.sessionStatus = "active";
       state.account.email = result.email || "";
+      state.account.userId = result.userId || "";
       state.account.pendingEmail = "";
       state.account.mode = result.purpose === "recovery" ? "password" : "login";
       state.account.message = result.purpose === "recovery" ? "Defina uma nova senha para concluir a recuperação." : "Email confirmado. Sua conta está pronta.";
@@ -7246,7 +8326,20 @@ async function bootstrapAccount() {
     const hash = erroNoHash ? "" : (location.hash || "");
     history.replaceState(history.state, "", `${location.pathname}${query ? `?${query}` : ""}${hash}`);
   }
-  await refreshAccountSession();
+  const refreshed = await refreshAccountSession();
+  // O login por link já confirmou a sessão e definiu o cookie. Se a consulta
+  // seguinte encontrou uma queda de rede, essa queda não desfaz a confirmação:
+  // abrimos o escopo e iniciamos a descida usando o resultado explícito.
+  if (refreshed && refreshed.status === "unknown" && state.account.authenticated && state.account.userId) {
+    state.account.sessionStatus = "active";
+    const mudouEscopo = await applyAccountScope(state.account.userId);
+    if (typeof CloudSync !== "undefined") {
+      const currentScope = FinanceStore.scope();
+      if (mudouEscopo || __accountReadyScope !== currentScope || !CloudSync.isEnabled()) await bootstrapAccountLink();
+      else await CloudSync.syncNow();
+      if (state.account.authenticated && CloudSync.isEnabled()) __accountReadyScope = currentScope;
+    }
+  }
 }
 
 async function accountSubmit(kind) {
@@ -7259,6 +8352,7 @@ async function accountSubmit(kind) {
     if (kind !== "recover" && form.password.length < 10) errors["account-password"] = "Use pelo menos 10 caracteres.";
   }
   if (Object.keys(errors).length) { showFormErrors(errors, "Revise os dados da conta."); return; }
+  if (kind === "login" || kind === "register") invalidateAccountRefresh();
   accountSetBusy(true, "");
   try {
     let result;
@@ -7283,13 +8377,33 @@ async function accountSubmit(kind) {
       // diz as duas saídas, sem revelar qual delas é a sua.
       state.account.pendingEmail = result.email || form.email;
       state.account.message = "Se este email ainda não tinha conta, o link de confirmação foi enviado. Se já tinha, entre com sua senha.";
-    } else { state.account.authenticated = !!result.authenticated; state.account.email = result.email || form.email; state.account.pendingEmail = ""; state.account.message = kind === "register" ? "Conta criada." : "Acesso confirmado."; }
+    } else {
+      const previousUserId = String(state.account.userId || "");
+      state.account.authenticated = !!result.authenticated;
+      if (state.account.authenticated) state.account.sessionStatus = "active";
+      state.account.email = result.email || form.email;
+      state.account.userId = result.userId || state.account.userId || "";
+      if (previousUserId && previousUserId !== String(state.account.userId || "")) state.account.devices = [];
+      state.account.pendingEmail = "";
+      state.account.message = kind === "register" ? "Conta criada." : "Acesso confirmado.";
+    }
     state.account.busy = false;
-    await refreshAccountSession();
+    const refreshed = await refreshAccountSession();
+    if (refreshed && refreshed.status === "unknown" && state.account.authenticated && state.account.userId) {
+      state.account.sessionStatus = "active";
+      const mudouEscopo = await applyAccountScope(state.account.userId);
+      if (typeof CloudSync !== "undefined") {
+        const currentScope = FinanceStore.scope();
+        if (mudouEscopo || __accountReadyScope !== currentScope || !CloudSync.isEnabled()) await bootstrapAccountLink();
+        else await CloudSync.syncNow();
+        if (state.account.authenticated && CloudSync.isEnabled()) __accountReadyScope = currentScope;
+      }
+    }
   } catch (error) {
     // Também no erro: senha errada continua sendo senha, e a tentativa seguinte
     // é digitada do zero.
     form.password = "";
+    if (changedAccountScopeCode(error)) { await handleAccountScopeChanged(error); return; }
     // Entrar com email não confirmado deixa de ser recusa muda: a tela passa a
     // mostrar o cartão de confirmação pendente, com o reenvio à mão.
     if (error.code === "email_not_confirmed") state.account.pendingEmail = form.email;
@@ -7310,50 +8424,187 @@ async function accountResend() {
 }
 
 async function accountLogout() {
-  accountSetBusy(true, "");
-  // Última chance de enviar o que ainda estava na fila: depois do logout o
-  // cookie some e o envio passa a ser recusado. Falhar aqui não impede a saída,
-  // porque os dados continuam inteiros neste aparelho.
-  if (typeof CloudSync !== "undefined") {
-    try { await CloudSync.syncNow(); } catch (error) { /* sai mesmo assim */ }
-    CloudSync.disable();
-  }
+  if (__accountDisconnecting) return false;
+  __accountDisconnecting = true;
   try {
-    await AccountAPI.logout();
+    invalidateAccountRefresh();
+    clearAccountRecoveryRetry();
+    accountSetBusy(true, "");
+    // Última chance de enviar o que ainda estava na fila: depois do logout o
+    // cookie some e o envio passa a ser recusado. Falhar aqui não impede a saída,
+    // porque os dados continuam inteiros neste aparelho.
+    if (typeof CloudSync !== "undefined") {
+      try { await CloudSync.syncNow(); } catch (error) { /* sai mesmo assim */ }
+      CloudSync.disable();
+    }
+    try {
+      await AccountAPI.logout();
+      // Se o banco visitante não abrir, sair ainda precisa esconder o snapshot
+      // da conta. A base permanece guardada no escopo próprio para um login
+      // futuro, mas não continua exposta na tela sem sessão.
+      state.data = defaultData();
+      state.account = freshAccountState();
+      state.account.loading = false;
+      state.account.configured = true;
+      state.account.sessionStatus = "guest";
+      // Sair descarrega o banco da conta e volta para o de visitante. Sem isto,
+      // o snapshot da conta continuaria em memória e na tela, e a próxima conta
+      // a entrar neste aparelho o veria.
+      await applyAccountScope("");
+      render();
+      return true;
+    } catch (error) {
+      if (changedAccountScopeCode(error)) { await handleAccountScopeChanged(error); return false; }
+      accountSetBusy(false, error.message);
+      return false;
+    }
+  } finally {
+    __accountDisconnecting = false;
+  }
+}
+
+// A alternativa da tela de Privacidade tem uma ordem mais rígida que o logout
+// comum: primeiro o servidor precisa confirmar que o cookie acabou; somente
+// depois é seguro destruir a base local. Se a rede falhar, nada local é
+// apagado, pois uma sessão ainda válida baixaria a conta inteira outra vez.
+async function accountForgetThisDevice() {
+  if (__accountDisconnecting) return false;
+  __accountDisconnecting = true;
+  try {
+    invalidateAccountRefresh();
+    clearAccountRecoveryRetry();
+    ++__guestLinkToken;
+    __accountReadyScope = "";
+    accountSetBusy(true, "");
+    if (typeof CloudSync !== "undefined") CloudSync.disable();
+
+    try {
+      await AccountAPI.logout();
+    } catch (error) {
+      if (changedAccountScopeCode(error)) {
+        await handleAccountScopeChanged(error);
+        return false;
+      }
+      accountSetBusy(false, error.message);
+      return false;
+    }
+
+    // Uma recuperação de sessão feita pelo próprio pedido de logout pode ter
+    // religado o motor antes da repetição HTTP. Invalidamos de novo antes da
+    // exclusão local.
+    if (typeof CloudSync !== "undefined") CloudSync.disable();
+    let localPurged = false;
+    try { localPurged = (await FinanceStore.purge()) === true; }
+    catch (_) { localPurged = false; }
+
+    // Mesmo se abrir o escopo visitante falhar logo abaixo, a interface não
+    // pode continuar apontando para o snapshot financeiro da conta que acabou
+    // de perder a sessão. Se o navegador recusou o purge, ocultamos a cópia que
+    // ainda pode existir no IndexedDB e explicamos a limpeza manual.
+    state.data = localPurged ? FinanceStore.snapshot() : defaultData();
+
     state.account = freshAccountState();
     state.account.loading = false;
     state.account.configured = true;
-    // Sair descarrega o banco da conta e volta para o de visitante. Sem isto,
-    // o snapshot da conta continuaria em memória e na tela, e a próxima conta
-    // a entrar neste aparelho o veria.
-    await applyAccountScope("");
+    state.account.sessionStatus = "guest";
+    let guestOpened = false;
+    try {
+      await applyAccountScope("");
+      guestOpened = true;
+    } catch (error) {
+      if (typeof reportSafeError === "function") reportSafeError("storage", error, "privacy_disconnect_scope");
+    }
+    if (typeof refreshOnboardingGate === "function") refreshOnboardingGate({ release: true });
+    if (localPurged && typeof clearSafeErrors === "function") clearSafeErrors();
     render();
-  } catch (error) { accountSetBusy(false, error.message); }
+
+    if (!guestOpened && localPurged) {
+      notify("A conta foi desconectada e a cópia local foi apagada, mas não foi possível abrir os dados de visitante deste aparelho.", "danger");
+      return false;
+    }
+    if (!guestOpened) {
+      notify("A conta foi desconectada, mas não foi possível apagar a cópia local nem abrir os dados de visitante. Limpe os dados deste site no navegador.", "danger");
+      return false;
+    }
+    if (!localPurged) {
+      notify("A conta foi desconectada, mas o navegador não permitiu apagar a cópia local. Limpe os dados deste site no navegador.", "danger");
+      return false;
+    }
+    notify("Dados apagados deste aparelho. A conta foi desconectada aqui.");
+    return true;
+  } finally {
+    __accountDisconnecting = false;
+  }
 }
 
 async function accountRevoke(deviceId) {
+  const expectedAccount = accountExpectedUserId();
+  const accountState = state.account;
   accountSetBusy(true, "");
-  try { const result = await AccountAPI.revokeDevice(deviceId); if (result.currentRevoked) { await accountLogout(); return; } await refreshAccountSession(); notify("Acesso do dispositivo revogado"); }
-  catch (error) { accountSetBusy(false, error.message); }
+  try {
+    const result = await AccountAPI.revokeDevice(deviceId);
+    if (result.currentRevoked) { await accountLogout(); return; }
+    // A resposta já confirmou a alteração. A linha sai sem esperar outra ida à
+    // rede; a consulta seguinte apenas reconcilia atividade dos demais aparelhos.
+    state.account.devices = (state.account.devices || []).filter((device) => String(device.id) !== String(deviceId));
+    await refreshAccountSession();
+    // Um refresh de foco pode ter começado antes do PATCH e reapresentado a
+    // lista antiga. A confirmação da revogação manda mais que essa resposta.
+    // Se outra conta entrou no intervalo, não tocamos no estado dela.
+    if (state.account !== accountState || accountExpectedUserId() !== expectedAccount) return;
+    state.account.devices = (state.account.devices || []).filter((device) => String(device.id) !== String(deviceId));
+    state.account.busy = false;
+    render();
+    notify("Acesso do dispositivo revogado");
+  } catch (error) {
+    if (changedAccountScopeCode(error)) { await handleAccountScopeChanged(error); return; }
+    accountSetBusy(false, error.message);
+  } finally {
+    // Falha inesperada durante o refresh não pode deixar toda a seção travada.
+    if (state.account === accountState && state.account.busy) {
+      state.account.busy = false;
+      render();
+    }
+  }
 }
 
 async function accountDelete() {
-  accountSetBusy(true, "");
-  // Parar antes de apagar: um ciclo em andamento recriaria o snapshot no
-  // servidor logo depois da exclusão.
-  if (typeof CloudSync !== "undefined") CloudSync.disable();
+  if (__accountDisconnecting) return false;
+  __accountDisconnecting = true;
   try {
-    await AccountAPI.deleteAccount(state.account.form.deletePassword, state.account.form.deleteText);
-    // Apagar a conta apaga também a cópia local dela. Deixar o banco da conta
-    // excluída neste navegador manteria vivo exatamente o dado que o usuário
-    // pediu para destruir, e num aparelho compartilhado isso é um vazamento.
-    // `purge()` já apaga o `localMeta` do escopo, e com ele o recibo e o diário
-    // de vínculo daquela conta. Nada sobra apontando para dados que não existem.
-    try { await FinanceStore.purge(); } catch (_) {}
-    state.account = freshAccountState(); state.account.loading = false; state.account.configured = true;
-    await applyAccountScope("");
-    render(); notify("Conta apagada no servidor e neste aparelho.");
-  } catch (error) { accountSetBusy(false, error.message); }
+    invalidateAccountRefresh();
+    clearAccountRecoveryRetry();
+    accountSetBusy(true, "");
+    // Parar antes de apagar: um ciclo em andamento recriaria o snapshot no
+    // servidor logo depois da exclusão.
+    if (typeof CloudSync !== "undefined") CloudSync.disable();
+    try {
+      await AccountAPI.deleteAccount(state.account.form.deletePassword, state.account.form.deleteText);
+      // Apagar a conta apaga também a cópia local dela. Deixar o banco da conta
+      // excluída neste navegador manteria vivo exatamente o dado que o usuário
+      // pediu para destruir, e num aparelho compartilhado isso é um vazamento.
+      // `purge()` já apaga o `localMeta` do escopo, e com ele o recibo e o diário
+      // de vínculo daquela conta. Nada sobra apontando para dados que não existem.
+      let localPurged = false;
+      try { localPurged = (await FinanceStore.purge()) === true; } catch (_) { localPurged = false; }
+      // A exclusão do servidor já foi confirmada. Mesmo que o navegador falhe
+      // ao apagar o IndexedDB ou abrir o escopo visitante, a tela não pode
+      // conservar o snapshot financeiro da conta removida.
+      state.data = localPurged ? FinanceStore.snapshot() : defaultData();
+      state.account = freshAccountState(); state.account.loading = false; state.account.configured = true; state.account.sessionStatus = "guest";
+      await applyAccountScope("");
+      render();
+      if (localPurged) notify("Conta apagada no servidor e neste aparelho.");
+      else notify("A conta foi apagada no servidor, mas o navegador não permitiu apagar a cópia local. Limpe os dados deste site no navegador.", "danger");
+      return true;
+    } catch (error) {
+      if (changedAccountScopeCode(error)) { await handleAccountScopeChanged(error); return false; }
+      accountSetBusy(false, error.message);
+      return false;
+    }
+  } finally {
+    __accountDisconnecting = false;
+  }
 }
 
 // source: js/cloud-sync.js
@@ -7403,13 +8654,13 @@ async function accountDelete() {
 // fazendo o trabalho pelas duas.
 "use strict";
 
-const CLOUD_SYNC_DEBOUNCE_MS = 4000;      // rajada de digitação vira um envio só
+const CLOUD_SYNC_DEBOUNCE_MS = 750;       // rajada curta, com envio iniciado em até 1 s
 const CLOUD_SYNC_RETRY_MS = 30000;        // nova tentativa após falha de rede
 const CLOUD_SYNC_BATCH = 400;             // operações por requisição (servidor aceita 500)
 const CLOUD_SYNC_PAGE = 500;              // operações por página na descida
 const CLOUD_SYNC_MAX_PAGES = 200;         // trava de segurança contra cursor que não anda
 const CLOUD_SYNC_MAX_BATCHES = 200;       // trava equivalente na subida
-const CLOUD_SYNC_POLL_MS = 60000;         // volta periódica enquanto o app está à vista
+const CLOUD_SYNC_POLL_MS = 15000;         // volta periódica enquanto o app está à vista
 
 // Chaves antigas, no localStorage. Continuam sendo LIDAS uma única vez, para
 // importar o progresso de quem já usava o app; a partir daí o cursor e o recibo
@@ -7425,8 +8676,24 @@ const CloudSync = (() => {
   let pollTimer = null;
   let cicloMexeu = false;          // esta volta enviou ou aplicou alguma coisa
   let running = false;
+  let activeRunPromise = null;
+  let rerunPromise = null;
+  let rerunGeneration = -1;
+  let rerunRequest = null;
+  let syncGeneration = 0;
+  let enablePromise = null;
+  let enableKey = "";
+  let sessionRefreshAccountId = "";
+  let resetPromise = null;
+  let resetting = false;
   let scope = "guest";
-  let hooks = { applyRemote: null };
+  let hooks = {
+    applyRemote: null,
+    onAuthInvalid: null,
+    onAccountScopeChanged: null,
+    onSessionRefreshRequired: null,
+    getExpectedAccountId: null,
+  };
   const listeners = [];
 
   // Segura a subida e a semeadura até a decisão de vínculo. Sem isto, entrar
@@ -7454,8 +8721,8 @@ const CloudSync = (() => {
 
   // `silencioso` existe por causa da volta periódica: `onStatus` redesenha o
   // aplicativo inteiro, e uma volta que não encontrou nada não pode reconstruir
-  // a tela do usuário de minuto em minuto. O estado é atualizado do mesmo
-  // jeito; só o aviso é poupado.
+  // a tela do usuário a cada consulta de 15 segundos. O estado é atualizado do
+  // mesmo jeito; só o aviso é poupado.
   function setState(patch, silencioso) {
     state = { ...state, ...patch };
     if (silencioso) return;
@@ -7471,6 +8738,56 @@ const CloudSync = (() => {
     const error = new Error(message);
     error.code = code;
     return error;
+  }
+
+  function cancelledError() {
+    return syncError("O ciclo pertencia a outro escopo.", "sync_cancelled");
+  }
+
+  function expectedAccountId() {
+    if (typeof hooks.getExpectedAccountId !== "function") return "";
+    try { return String(hooks.getExpectedAccountId() || "").trim().toLowerCase(); }
+    catch (_) { return ""; }
+  }
+
+  function contextIsCurrent(context, requireEnabled) {
+    if (!context
+      || context.generation !== syncGeneration
+      || context.scope !== scope
+      || context.scope !== FinanceStore.scope()
+      || context.expectedAccountId !== expectedAccountId()) return false;
+    // O contexto de um ciclo ou de uma ação manual sempre captura o adaptador.
+    // O contexto de `performEnable` ainda está preparando o candidato e, por
+    // isso, só pode ser invalidado pela geração, escopo ou identidade.
+    if (Object.prototype.hasOwnProperty.call(context, "adapter") && context.adapter !== adapter) return false;
+    if (requireEnabled && !state.enabled) return false;
+    return true;
+  }
+
+  function assertCurrentCycle(context) {
+    if (!contextIsCurrent(context, true)) throw cancelledError();
+  }
+
+  function nextGeneration() {
+    syncGeneration += 1;
+    // Promessas antigas continuam resolvendo para seus chamadores, mas deixam
+    // de ser a promessa compartilhada da geração nova.
+    rerunRequest = null;
+    rerunPromise = null;
+    rerunGeneration = -1;
+    return syncGeneration;
+  }
+
+  function captureCurrentContext() {
+    if (!state.enabled || !adapter) return null;
+    const context = {
+      generation: syncGeneration,
+      scope,
+      adapter,
+      expectedAccountId: expectedAccountId(),
+    };
+    assertCurrentCycle(context);
+    return context;
   }
 
   // ---------------------------------------------------------------------------
@@ -7489,24 +8806,29 @@ const CloudSync = (() => {
     } catch (e) { return "0"; }
   }
 
-  async function readCursor() {
+  async function readCursor(context) {
+    if (context) assertCurrentCycle(context);
     if (cursorScope === scope && cursorCache !== null) return cursorCache;
-    const stored = await FinanceStore.localMetaGet(META_CURSOR);
+    const stored = await FinanceStore.localMetaGet(META_CURSOR, context && context.scope);
+    if (context) assertCurrentCycle(context);
     let value = /^\d{1,18}$/.test(String(stored == null ? "" : stored)) ? String(stored) : "";
     if (!value) {
       // Importação única do cursor antigo. Quem já sincronizava não volta a
       // baixar o log inteiro só porque o lugar de guardar mudou.
       value = legacyCursor();
-      await FinanceStore.localMetaPut(META_CURSOR, value);
+      await FinanceStore.localMetaPut(META_CURSOR, value, context && context.scope);
+      if (context) assertCurrentCycle(context);
     }
     cursorScope = scope;
     cursorCache = value;
     return value;
   }
 
-  async function writeCursor(value) {
+  async function writeCursor(value, context) {
     if (!/^\d{1,18}$/.test(String(value || ""))) return;
-    await FinanceStore.localMetaPut(META_CURSOR, String(value));
+    if (context) assertCurrentCycle(context);
+    await FinanceStore.localMetaPut(META_CURSOR, String(value), context && context.scope);
+    if (context) assertCurrentCycle(context);
     cursorScope = scope;
     cursorCache = String(value);
   }
@@ -7538,13 +8860,15 @@ const CloudSync = (() => {
     return (data.categories || []).some((c) => c && c.custom === true);
   }
 
-  async function precisaSemear(cursor) {
-    const recibo = await FinanceStore.localMetaGet(META_SEED_RECEIPT);
+  async function precisaSemear(cursor, context) {
+    const recibo = await FinanceStore.localMetaGet(META_SEED_RECEIPT, context && context.scope);
+    if (context) assertCurrentCycle(context);
     // Sem recibo confirmado, ou com um diário interrompido pendurado, semear é
     // o certo: reapresentar registros com a marca que eles já têm é inofensivo,
     // porque o servidor guarda a versão de marca maior.
     if (!recibo || recibo.status !== "confirmed") return true;
-    const diario = await FinanceStore.localMetaGet(META_SEED_JOURNAL);
+    const diario = await FinanceStore.localMetaGet(META_SEED_JOURNAL, context && context.scope);
+    if (context) assertCurrentCycle(context);
     if (diario) return true;
     // Rede de segurança: cursor zerado depois de uma descida completa significa
     // servidor sem NENHUMA operação. Se este aparelho tem base e o servidor não
@@ -7584,12 +8908,14 @@ const CloudSync = (() => {
   // Ciclo
   // ---------------------------------------------------------------------------
 
-  async function applyIncoming(ops) {
+  async function applyIncoming(ops, context) {
     if (!ops || !ops.length) return false;
+    assertCurrentCycle(context);
     // `applyRemoteOps` agora GRAVA antes de devolver. É esta promessa que o
     // cursor espera: enquanto ela não resolve, o aparelho não pode declarar que
     // já leu aquele trecho do log.
-    const result = await FinanceStore.applyRemoteOps(ops);
+    const result = await FinanceStore.applyRemoteOps(ops, context.scope);
+    assertCurrentCycle(context);
     if (!result.changed) return false;
     cicloMexeu = true;
     // `applyRemote` redesenha e reavalia conquistas e avisos, como se o próprio
@@ -7599,12 +8925,15 @@ const CloudSync = (() => {
   }
 
   // ---- Subida: esvazia a fila em lotes ----
-  async function upload(from) {
+  async function upload(from, context) {
     let cursor = from;
     let guard = 0;
     for (;;) {
-      const queued = await FinanceStore.outboxRead(0);
-      const diarioVinculo = await FinanceStore.localMetaGet(META_LINK_JOURNAL);
+      assertCurrentCycle(context);
+      const queued = await FinanceStore.outboxRead(0, context.scope);
+      assertCurrentCycle(context);
+      const diarioVinculo = await FinanceStore.localMetaGet(META_LINK_JOURNAL, context.scope);
+      assertCurrentCycle(context);
       // Vínculo bloqueado por mudança remota espera decisão explícita. As
       // entradas continuam na fila; elas só não são REENVIADAS às cegas.
       const bloqueado = diarioVinculo && diarioVinculo.status === "blocked" ? String(diarioVinculo.linkId) : "";
@@ -7618,12 +8947,15 @@ const CloudSync = (() => {
       const compact = compactOutbox(enviaveis);
       const batch = compact.slice(0, CLOUD_SYNC_BATCH);
       if (batch.length) cicloMexeu = true;
-      const result = await adapter.push(batch.map(toWireOp), cursor, pushOptions(batch, diarioVinculo));
+      const result = await context.adapter.push(batch.map(toWireOp), cursor, pushOptions(batch, diarioVinculo));
+      // O servidor valida a conta antes de devolver operações. Mesmo assim, a
+      // aba pode ter trocado de escopo enquanto a resposta viajava.
+      assertCurrentCycle(context);
 
       // A resposta é APLICADA antes de a fila ser confirmada. Se a gravação da
       // resposta falhar, a fila continua inteira e o lote volta na próxima
       // volta; o `mutationId` garante que reenviar não duplica nada.
-      await applyIncoming(result.ops);
+      await applyIncoming(result.ops, context);
 
       // Saem também as versões ANTERIORES do mesmo registro, que a compactação
       // substituiu: a marca já enviada é maior que a delas.
@@ -7636,11 +8968,13 @@ const CloudSync = (() => {
         .map((entry) => entry.seq);
       // Confirmar é gravar: a remoção da fila e a promoção do recibo de vínculo
       // ou de semeadura acontecem na mesma transação.
-      await FinanceStore.acknowledgeOutbox(seqs, { revision: result.revision });
+      assertCurrentCycle(context);
+      await FinanceStore.acknowledgeOutbox(seqs, { revision: result.revision }, context.scope);
+      assertCurrentCycle(context);
 
       // O cursor só avança depois de tudo acima ter chegado ao disco.
       cursor = result.cursor;
-      await writeCursor(cursor);
+      await writeCursor(cursor, context);
       if (batch.length >= compact.length && !result.hasMore) break;
     }
     return cursor;
@@ -7659,14 +8993,17 @@ const CloudSync = (() => {
   }
 
   // ---- Descida: páginas até alcançar o servidor ----
-  async function download(from) {
+  async function download(from, context) {
     let cursor = from;
     for (let page = 0; page < CLOUD_SYNC_MAX_PAGES; page++) {
-      const result = await adapter.pull(cursor, CLOUD_SYNC_PAGE);
-      await applyIncoming(result.ops);
+      assertCurrentCycle(context);
+      const result = await context.adapter.pull(cursor, CLOUD_SYNC_PAGE);
+      // Nenhum payload toca o armazenamento antes desta conferência.
+      assertCurrentCycle(context);
+      await applyIncoming(result.ops, context);
       const advanced = String(result.cursor) !== String(cursor);
       cursor = result.cursor;
-      await writeCursor(cursor);
+      await writeCursor(cursor, context);
       if (!result.hasMore) return cursor;
       // Servidor dizendo "tem mais" sem mover o cursor é laço infinito
       // disfarçado de sucesso. Parar em silêncio deixaria o aparelho com meia
@@ -7676,68 +9013,124 @@ const CloudSync = (() => {
     throw syncError("A leitura da conta excedeu o limite de páginas.", "page_limit");
   }
 
-  async function cycle() {
+  async function cycle(context) {
     // 1. Gravação local em curso termina ANTES de qualquer decisão. Uma
     //    alteração ainda no debounce não pode ficar de fora do primeiro envio,
     //    nem ser sobrescrita pela primeira descida.
     const gravou = await FinanceStore.flush();
     if (gravou === false) throw syncError("O aparelho não conseguiu salvar antes de sincronizar.", "local_write_failed");
+    assertCurrentCycle(context);
 
-    let cursor = await readCursor();
+    let cursor = await readCursor(context);
 
     // 2. Descida primeiro. O vínculo e a semeadura precisam saber o que a conta
     //    JÁ TEM antes de este aparelho empurrar qualquer coisa.
-    cursor = await download(cursor);
+    cursor = await download(cursor, context);
+    assertCurrentCycle(context);
     if (observedRevision === null) {
-      observedRevision = String(adapter.revision == null ? cursor : adapter.revision);
+      observedRevision = String(context.adapter.revision == null ? cursor : context.adapter.revision);
       setState({ remoteRevision: observedRevision }, true);
     }
 
     // 3. Enquanto a decisão de vínculo não sai, nada sobe e nada é semeado.
     if (bootstrapHeld) return;
 
-    if (await precisaSemear(cursor)) await FinanceStore.seedOutbox();
+    if (await precisaSemear(cursor, context)) {
+      assertCurrentCycle(context);
+      await FinanceStore.seedOutbox(context.scope);
+      assertCurrentCycle(context);
+    }
 
     // 4. Subida, com aplicação da resposta e confirmação da fila por dentro.
-    cursor = await upload(cursor);
+    cursor = await upload(cursor, context);
 
     // 5. Descida final: fecha a volta com o que outros aparelhos escreveram
     //    enquanto este enviava.
-    await download(cursor);
+    await download(cursor, context);
   }
 
   // Um ciclo por vez, e uma ABA por vez. `ifAvailable` faz a aba desistir na
   // hora em vez de enfileirar: a outra aba já está enviando a mesma fila.
-  async function withLock(fn) {
+  async function withLock(context, fn, waitForLock) {
     const locks = typeof navigator !== "undefined" && navigator.locks;
     if (!locks || typeof locks.request !== "function") return fn();
     let ran = false;
-    await locks.request(`cofre-sync-${scope}`, { ifAvailable: true }, async (lock) => {
+    const options = waitForLock ? {} : { ifAvailable: true };
+    await locks.request(`cofre-sync-${context.scope}`, options, async (lock) => {
       if (!lock) return;
+      assertCurrentCycle(context);
       ran = true;
       await fn();
     });
     return ran;
   }
 
-  async function runSync(quieto) {
-    if (!adapter || running || !hooks.applyRemote) return false;
-    if (offline()) { setState({ phase: "offline", pending: true }); return false; }
+  function queueRerun(quieto) {
+    const requestedGeneration = syncGeneration;
+    if (!rerunRequest || rerunRequest.generation !== requestedGeneration) {
+      rerunRequest = { generation: requestedGeneration, quieto: !!quieto };
+    } else {
+      // Se ao menos um chamador pediu uma volta visível, ela não pode ser
+      // rebaixada para silenciosa por outro gatilho.
+      rerunRequest.quieto = rerunRequest.quieto && !!quieto;
+    }
+    if (rerunPromise && rerunGeneration === requestedGeneration) return rerunPromise;
+    const current = activeRunPromise || Promise.resolve(false);
+    let promise;
+    promise = Promise.resolve(current).catch(() => false).then(() => {
+      const request = rerunRequest;
+      if (!request || request.generation !== requestedGeneration
+        || !state.enabled || requestedGeneration !== syncGeneration) return false;
+      rerunRequest = null;
+      return runSync(request.quieto);
+    }).finally(() => {
+      if (rerunPromise === promise) {
+        rerunPromise = null;
+        rerunGeneration = -1;
+      }
+    });
+    rerunPromise = promise;
+    rerunGeneration = requestedGeneration;
+    return promise;
+  }
 
+  function runSync(quieto) {
+    if (!adapter || !hooks.applyRemote) return Promise.resolve(false);
+    if (resetting) return resetPromise ? resetPromise.then(() => false, () => false) : Promise.resolve(false);
+    if (running) return queueRerun(quieto);
+    if (offline()) { setState({ phase: "offline", pending: true }); return Promise.resolve(false); }
+
+    const context = captureCurrentContext();
     running = true;
     cicloMexeu = false;
     const eraSincronizado = state.phase === "synced";
     if (!quieto) setState({ phase: "syncing", error: null, errorCode: null });
+    const raw = performRun(context, quieto, eraSincronizado);
+    const tracked = raw.finally(() => {
+      if (activeRunPromise === tracked) {
+        activeRunPromise = null;
+        running = false;
+      }
+    });
+    activeRunPromise = tracked;
+    return tracked;
+  }
+
+  async function performRun(context, quieto, eraSincronizado) {
     try {
-      const ran = await withLock(cycle);
+      assertCurrentCycle(context);
+      const ran = await withLock(context, () => cycle(context));
+      assertCurrentCycle(context);
       if (ran === false) { setState({ phase: "idle", pending: true }); return false; }
       // A LEITURA FINAL DA FILA É A PROVA. Se ela falhar, o `catch` assume: o
       // aplicativo não tem como afirmar que não sobrou nada por enviar.
-      const queued = await FinanceStore.outboxRead(0);
+      const queued = await FinanceStore.outboxRead(0, context.scope);
+      assertCurrentCycle(context);
       const pendente = queued.length > 0;
       // Volta periódica que não achou nada e não mudou nada visível não avisa
       // ninguém: para o usuário, a tela continua exatamente como estava.
       const semNovidade = !!quieto && !cicloMexeu && eraSincronizado && !pendente;
+      if (sessionRefreshAccountId === context.expectedAccountId) sessionRefreshAccountId = "";
       setState({
         phase: pendente ? "idle" : "synced", lastSyncAt: new Date().toISOString(),
         pending: pendente, queued: queued.length, error: null, errorCode: null,
@@ -7745,20 +9138,83 @@ const CloudSync = (() => {
       }, semNovidade);
       return !pendente;
     } catch (error) {
-      return handleFailure(error);
-    } finally {
-      running = false;
+      return await handleFailure(error, context);
     }
   }
 
-  function handleFailure(error) {
+  async function handleFailure(error, context) {
     const code = (error && error.code) || "server_error";
-    if (code === "session_expired" || code === "device_revoked") {
+    if (code === "sync_cancelled") return false;
+    // Uma resposta do motor antigo não pode desligar, alterar mensagens nem
+    // chamar os hooks da conta que entrou depois dela.
+    if (!contextIsCurrent(context, Object.prototype.hasOwnProperty.call(context || {}, "adapter"))) return false;
+    if (code === "session_refresh_required") {
+      const accountId = context.expectedAccountId;
+      if (sessionRefreshAccountId === accountId) {
+        disable();
+        setState({
+          phase: "error", pending: true, errorCode: code,
+          error: "Não foi possível renovar a sessão para sincronizar. Tente novamente.",
+        });
+        return false;
+      }
+      sessionRefreshAccountId = accountId;
+      disable();
+      setState({ phase: "idle", pending: true, error: null, errorCode: code });
+      // A consulta de sessão usa o lock de cookies. Ela começa fora da promessa
+      // do ciclo antigo, e a própria camada de conta religa o motor somente se a
+      // identidade confirmada continuar sendo esta.
+      if (typeof hooks.onSessionRefreshRequired === "function") {
+        Promise.resolve().then(() => hooks.onSessionRefreshRequired({
+          code,
+          message: error && error.message || "",
+          expectedAccountId: accountId,
+        })).catch((hookError) => {
+          if (typeof reportSafeError === "function") reportSafeError("sync", hookError, "sync_session_refresh_hook");
+        });
+      }
+      return false;
+    }
+    if (code === "account_scope_changed") {
+      disable();
+      setState({
+        phase: "disabled", pending: true, error: null,
+        errorCode: code,
+      });
+      // A consulta de sessão pode ligar um motor novo. Ela precisa começar fora
+      // da promessa deste ciclo para não esperar por si mesma.
+      if (typeof hooks.onAccountScopeChanged === "function") {
+        Promise.resolve().then(() => hooks.onAccountScopeChanged({
+          code,
+          message: error && error.message || "",
+          expectedAccountId: context && context.expectedAccountId || expectedAccountId(),
+        })).catch((hookError) => {
+          if (typeof reportSafeError === "function") reportSafeError("sync", hookError, "sync_account_scope_hook");
+        });
+      }
+      return false;
+    }
+    if (code === "invalid_account_scope") {
+      disable();
+      setState({
+        phase: "error", pending: true,
+        error: "Não foi possível confirmar a identidade da conta para sincronizar.",
+        errorCode: code,
+      });
+      return false;
+    }
+    if (code === "session_expired" || code === "device_revoked" || code === "device_unknown") {
       // Sessão morta ou aparelho revogado: parar é o certo. Insistir só produz
       // uma fila de 401 e um aviso repetido na tela. A fila local fica intacta;
       // ao entrar de novo, ela sobe.
       disable();
       setState({ phase: "error", error: "A sessão terminou. Entre novamente para voltar a sincronizar.", errorCode: code });
+      if (typeof hooks.onAuthInvalid === "function") {
+        try { await hooks.onAuthInvalid({ code, message: error && error.message || "" }); }
+        catch (hookError) {
+          if (typeof reportSafeError === "function") reportSafeError("sync", hookError, "sync_auth_invalid_hook");
+        }
+      }
       return false;
     }
     if (code === "protocol_upgrade_required") {
@@ -7771,7 +9227,9 @@ const CloudSync = (() => {
       // A conta recebeu algo entre a leitura e a confirmação do vínculo. Nada é
       // descartado: o diário e a fila continuam, e a decisão volta para o
       // usuário como confirmação de mesclagem.
-      FinanceStore.blockGuestLink(error && error.revision).catch(() => {});
+      FinanceStore.blockGuestLink(error && error.revision, context.scope).catch((journalError) => {
+        if (typeof reportSafeError === "function") reportSafeError("storage", journalError, "guest_link_block");
+      });
       setState({
         phase: "idle", pending: true,
         error: "A conta mudou em outro aparelho. Confirme como juntar os dados.",
@@ -7790,7 +9248,7 @@ const CloudSync = (() => {
     }
     if (code === "network_error" || code === "timeout" || code === "upstream_unavailable") {
       setState({ phase: "offline", pending: true, error: null, errorCode: code });
-      scheduleRetry();
+      scheduleRetry(context);
       return false;
     }
     if (typeof reportSafeError === "function") reportSafeError("sync", error, "sync_cycle");
@@ -7800,13 +9258,21 @@ const CloudSync = (() => {
       error: "Não foi possível sincronizar agora. O aparelho continua com todos os dados.",
       errorCode: code,
     });
-    scheduleRetry();
+    scheduleRetry(context);
     return false;
   }
 
-  function scheduleRetry() {
+  function scheduleRetry(context) {
     clearTimeout(retryTimer);
-    retryTimer = setTimeout(() => { if (state.enabled) runSync(); }, CLOUD_SYNC_RETRY_MS);
+    const retryAccountId = String(context && context.expectedAccountId || expectedAccountId());
+    const retryScope = String(context && context.scope || FinanceStore.scope());
+    if (!retryAccountId || retryScope === "guest") return;
+    retryTimer = setTimeout(() => {
+      retryTimer = null;
+      if (expectedAccountId() !== retryAccountId || FinanceStore.scope() !== retryScope) return;
+      if (state.enabled) runSync();
+      else enable();
+    }, CLOUD_SYNC_RETRY_MS);
   }
 
   // ---------------------------------------------------------------------------
@@ -7819,8 +9285,8 @@ const CloudSync = (() => {
   // já estava "sincronizada" - não tinha nada para mandar - e ninguém ia
   // buscar o que havia chegado. Só recarregar a página resolvia.
   //
-  // Uma volta por minuto, e só com o app à vista, cobre isso sem gastar
-  // bateria em segundo plano nem somar requisição com a aba escondida.
+  // Uma consulta a cada 15 segundos, e só com o app à vista, cobre isso sem
+  // gastar bateria em segundo plano nem somar requisição com a aba escondida.
   function appVisivel() {
     return typeof document === "undefined" || document.visibilityState !== "hidden";
   }
@@ -7855,11 +9321,22 @@ const CloudSync = (() => {
     return runSync();
   }
 
+  // O navegador pode interromper esta promessa assim que a aba some. Ainda
+  // assim iniciamos a gravação e o envio imediatamente; se ele for cortado, a
+  // fila persistente continua inteira para o próximo pageshow, foco ou online.
+  async function flushOnHide() {
+    clearTimeout(pendingTimer);
+    const gravou = await FinanceStore.flush();
+    if (gravou === false || !state.enabled) return false;
+    return runSync(true);
+  }
+
   // O botão "tentar de novo" da tela de conta. Quando o motor está ligado, é um
   // ciclo. Quando ele PAROU por erro (sessão morta, migração faltando), é uma
   // nova tentativa de ligar; era exatamente aí que a tela não oferecia botão
   // nenhum e a única saída conhecida era recarregar a página.
   function retry() {
+    if (sessionRefreshAccountId === expectedAccountId()) sessionRefreshAccountId = "";
     if (state.enabled) return syncNow();
     return enable();
   }
@@ -7869,25 +9346,134 @@ const CloudSync = (() => {
   // ---------------------------------------------------------------------------
   // Precisa virar lápide no servidor, e não sumiço: sumiço faz o próximo
   // aparelho a sincronizar devolver a base inteira de volta.
-  async function resetRemote() {
-    if (!state.enabled || !adapter) return false;
-    const rev = FinanceStore.mintRev();
-    const result = await adapter.resetRemote(rev);
-    await FinanceStore.outboxClear();
-    await writeCursor(String(result.revision || "0"));
-    return true;
+  function resetRemote() {
+    if (resetPromise) return resetPromise;
+    let captured;
+    try { captured = captureCurrentContext(); }
+    catch (error) {
+      if (state.phase === "syncing") {
+        setState({ phase: state.enabled ? "idle" : "disabled", pending: !!state.enabled });
+      }
+      return Promise.resolve({
+        ok: false, remoteDeleted: false, localPrepared: false,
+        reason: (error && error.code) || "sync_cancelled", resetRev: null,
+      });
+    }
+    if (!captured) {
+      if (state.phase === "syncing") {
+        setState({ phase: state.enabled ? "idle" : "disabled", pending: !!state.enabled });
+      }
+      return Promise.resolve({ ok: false, remoteDeleted: false, localPrepared: false, reason: "disabled", resetRev: null });
+    }
+    const previousRun = activeRunPromise;
+    const generation = nextGeneration();
+    const context = { ...captured, generation };
+    resetting = true;
+    clearTimeout(pendingTimer);
+    clearTimeout(retryTimer);
+    setState({ phase: "syncing", error: null, errorCode: null });
+
+    let promise;
+    promise = performReset(context, previousRun).finally(() => {
+      if (resetPromise === promise) {
+        // Todo caminho normal escolhe um estado antes de chegar aqui. Este
+        // último anteparo cobre cancelamentos lançados pelo adaptador sem
+        // deixar a conta aparentando sincronizar para sempre.
+        if (contextIsCurrent(context, true) && state.phase === "syncing") {
+          setState({ phase: "idle", pending: true, error: null, errorCode: null });
+        }
+        resetPromise = null;
+        resetting = false;
+      }
+    });
+    resetPromise = promise;
+    return promise;
+  }
+
+  async function performReset(context, previousRun) {
+    let remoteDeleted = false;
+    let resetRev = null;
+    try {
+      // A geração já mudou, então a resposta do ciclo anterior não pode mais
+      // tocar na base. Aguardá-lo garante também que uma escrita local que já
+      // tinha começado termine antes da operação destrutiva.
+      if (previousRun) await previousRun.catch(() => false);
+      assertCurrentCycle(context);
+      const ran = await withLock(context, async () => {
+        assertCurrentCycle(context);
+        const flushed = await FinanceStore.flush();
+        if (flushed === false) throw syncError("O aparelho não conseguiu salvar antes de apagar.", "local_write_failed");
+        assertCurrentCycle(context);
+        const rev = FinanceStore.mintRev();
+        const result = await context.adapter.resetRemote(rev);
+        resetRev = result.resetRev;
+        // O adaptador só resolve depois da confirmação do servidor. Marcar
+        // antes de conferir de novo o contexto preserva essa verdade mesmo se
+        // a sessão mudar exatamente enquanto a resposta volta.
+        remoteDeleted = true;
+        assertCurrentCycle(context);
+        if (FinanceStore.observeRemoteRev(result.resetRev) !== true) {
+          throw syncError("O aparelho não conseguiu registrar a versão da exclusão remota.", "reset_rev_observe_failed");
+        }
+        try { await FinanceStore.outboxClear(context.scope); }
+        catch (error) {
+          const failure = syncError("A fila local não pôde ser limpa depois da exclusão remota.", "outbox_clear_failed");
+          failure.cause = error;
+          throw failure;
+        }
+        assertCurrentCycle(context);
+        try { await writeCursor(String(result.revision || "0"), context); }
+        catch (error) {
+          const failure = syncError("O cursor local não pôde ser atualizado depois da exclusão remota.", "cursor_write_failed");
+          failure.cause = error;
+          throw failure;
+        }
+        return true;
+      }, true);
+      assertCurrentCycle(context);
+      if (ran !== true) throw syncError("Não foi possível reservar este aparelho para apagar os dados.", "lock_unavailable");
+      setState({
+        phase: "synced", lastSyncAt: new Date().toISOString(), pending: false,
+        queued: 0, error: null, errorCode: null,
+      });
+      return { ok: true, remoteDeleted: true, localPrepared: true, reason: null, resetRev };
+    } catch (error) {
+      const reason = (error && error.code) || "server_error";
+      if (remoteDeleted) {
+        if (contextIsCurrent(context, true)) {
+          if (typeof reportSafeError === "function") {
+            reportSafeError("storage", error && error.cause || error, reason);
+          }
+          setState({
+            phase: "error", pending: true, errorCode: reason,
+            error: "Os dados foram apagados da conta, mas o aparelho não concluiu a limpeza local.",
+          });
+        }
+        return { ok: false, remoteDeleted: true, localPrepared: false, reason, resetRev };
+      }
+      await handleFailure(error, context);
+      return { ok: false, remoteDeleted: false, localPrepared: false, reason, resetRev: null };
+    }
   }
 
   async function createCheckpoint(label) {
-    if (!state.enabled || !adapter) return null;
-    try { return await adapter.createCheckpoint(label); }
-    catch (error) { handleFailure(error); return null; }
+    const context = captureCurrentContext();
+    if (!context) return null;
+    try {
+      const checkpoint = await context.adapter.createCheckpoint(label);
+      assertCurrentCycle(context);
+      return checkpoint;
+    } catch (error) { await handleFailure(error, context); return null; }
   }
 
   async function listCheckpoints() {
-    if (!state.enabled || !adapter) return [];
-    try { return await adapter.listCheckpoints(); }
-    catch (error) { return []; }
+    const context = captureCurrentContext();
+    if (!context) return [];
+    try {
+      const checkpoints = await context.adapter.listCheckpoints();
+      assertCurrentCycle(context);
+      return checkpoints;
+    } catch (error) { await handleFailure(error, context); return []; }
   }
 
   // ---------------------------------------------------------------------------
@@ -7899,40 +9485,67 @@ const CloudSync = (() => {
   // restauração propaga para os outros aparelhos como qualquer outra alteração,
   // em vez de ser desfeita por eles na volta seguinte.
   async function restoreCheckpoint(checkpointId) {
-    if (!state.enabled || !adapter) return { ok: false, reason: "disabled" };
+    const context = captureCurrentContext();
+    if (!context) return { ok: false, reason: "disabled" };
 
-    // Rede de segurança: quem restaura por engano precisa de caminho de volta.
-    await createCheckpoint("Antes de restaurar");
+    try {
+      // Rede de segurança: quem restaura por engano precisa de caminho de volta.
+      const safetyCheckpoint = await context.adapter.createCheckpoint("Antes de restaurar");
+      assertCurrentCycle(context);
+      if (!safetyCheckpoint || !safetyCheckpoint.id) {
+        throw syncError("Não foi possível criar a versão de segurança antes da restauração.", "checkpoint_failed");
+      }
 
-    const ops = [];
-    let after = "";
-    for (let page = 0; page < CLOUD_SYNC_MAX_PAGES; page++) {
-      const result = await adapter.readCheckpoint(checkpointId, after);
-      result.ops.forEach((row) => {
-        if (row.op !== "put" || !row.payload) return;
-        ops.push({ entity: row.entity, entityId: row.entityId, op: "put", rev: FinanceStore.mintRev(), payload: row.payload });
-      });
-      if (!result.hasMore || result.after === after) break;
-      after = result.after;
-    }
-
-    const naVersao = new Set(ops.map((op) => `${op.entity} ${op.entityId}`));
-    const atual = FinanceStore.snapshot();
-    FinanceStore.syncEntityFields().forEach((field) => {
-      (atual[field] || []).forEach((rec) => {
-        if (!naVersao.has(`${field} ${rec.id}`)) {
-          ops.push({ entity: field, entityId: rec.id, op: "delete", rev: FinanceStore.mintRev() });
+      const ops = [];
+      let after = "";
+      let checkpointComplete = false;
+      for (let page = 0; page < CLOUD_SYNC_MAX_PAGES; page++) {
+        const result = await context.adapter.readCheckpoint(checkpointId, after);
+        assertCurrentCycle(context);
+        result.ops.forEach((row) => {
+          if (row.op !== "put" || !row.payload) return;
+          ops.push({ entity: row.entity, entityId: row.entityId, op: "put", rev: FinanceStore.mintRev(), payload: row.payload });
+        });
+        if (!result.hasMore) {
+          checkpointComplete = true;
+          break;
         }
-      });
-    });
+        const nextAfter = String(result.after || "");
+        if (!nextAfter || nextAfter === after) {
+          throw syncError("A versão parou de avançar durante a leitura. Nada foi restaurado.", "cursor_stalled");
+        }
+        after = nextAfter;
+      }
+      if (!checkpointComplete) {
+        throw syncError("A versão excedeu o limite seguro de páginas. Nada foi restaurado.", "page_limit");
+      }
 
-    const aplicado = await FinanceStore.applyRemoteOps(ops);
-    if (aplicado.changed) hooks.applyRemote(aplicado.data);
-    // As operações da restauração precisam SUBIR: `applyRemoteOps` não
-    // enfileira nada, porque normalmente o que ele aplica veio de fora.
-    await FinanceStore.outboxAppend(ops.map((op) => ({ ...op, queuedAt: Date.now() })));
-    await syncNow();
-    return { ok: true, applied: ops.length };
+      assertCurrentCycle(context);
+      const naVersao = new Set(ops.map((op) => `${op.entity} ${op.entityId}`));
+      const atual = FinanceStore.snapshot();
+      FinanceStore.syncEntityFields().forEach((field) => {
+        (atual[field] || []).forEach((rec) => {
+          if (!naVersao.has(`${field} ${rec.id}`)) {
+            ops.push({ entity: field, entityId: rec.id, op: "delete", rev: FinanceStore.mintRev() });
+          }
+        });
+      });
+
+      assertCurrentCycle(context);
+      const queued = ops.map((op) => ({ ...op, queuedAt: Date.now() }));
+      // A base restaurada e as operações que a propagam são uma única gravação
+      // local. Se a sessão parar neste await, nunca sobra uma restauração sem
+      // fila, nem uma fila sem a respectiva restauração.
+      const aplicado = await FinanceStore.applyRemoteOps(ops, context.scope, { outboxAdds: queued });
+      assertCurrentCycle(context);
+      if (aplicado.changed) hooks.applyRemote(aplicado.data);
+      await syncNow();
+      assertCurrentCycle(context);
+      return { ok: true, applied: ops.length };
+    } catch (error) {
+      await handleFailure(error, context);
+      return { ok: false, reason: (error && error.code) || "failed" };
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -7969,39 +9582,69 @@ const CloudSync = (() => {
   // Ligar e desligar
   // ---------------------------------------------------------------------------
 
-  async function enable() {
+  function enable() {
     if (state.enabled) return runSync();
-    if (!hooks.applyRemote) return false;
-    scope = FinanceStore.scope();
+    if (!hooks.applyRemote) return Promise.resolve(false);
+    const nextScope = FinanceStore.scope();
+    const accountId = expectedAccountId();
+    if (sessionRefreshAccountId && sessionRefreshAccountId !== accountId) sessionRefreshAccountId = "";
+    const key = `${nextScope} ${accountId}`;
+    if (enablePromise && enableKey === key) return enablePromise;
+
+    // Entrar no escopo da conta já autoriza a marcação local. A saúde remota
+    // pode falhar; isso não pode transformar edições feitas nesse intervalo em
+    // mudanças sem relógio e sem fila.
+    FinanceStore.setOutboxEnabled(nextScope !== "guest" && !!accountId);
+    const generation = nextGeneration();
+    scope = nextScope;
+    adapter = null;
     cursorCache = null;
     cursorScope = null;
+    const promise = performEnable({ generation, scope: nextScope, expectedAccountId: accountId });
+    enablePromise = promise;
+    enableKey = key;
+    return promise.finally(() => {
+      if (enablePromise === promise) {
+        enablePromise = null;
+        enableKey = "";
+      }
+    });
+  }
+
+  async function performEnable(context) {
+    let candidate = null;
     try {
-      adapter = new CloudAdapter({
+      candidate = new CloudAdapter({
         enabled: true,
         baseUrl: "/api/sync",
         authMode: "cookie",              // a sessão vive em cookie HttpOnly
         deviceId: accountDeviceId(),
+        deviceLabel: typeof accountDeviceLabel === "function" ? accountDeviceLabel() : "Este navegador",
+        deviceType: typeof accountCurrentDeviceType === "function" ? accountCurrentDeviceType() : "unknown",
+        accountId: context.expectedAccountId,
         allowDestructive: true,          // usado só por resetRemote(), que grava lápides
       });
-      await adapter.init();
+      await candidate.init();
     } catch (error) {
-      adapter = null;
+      if (context.generation !== syncGeneration
+        || context.scope !== FinanceStore.scope()
+        || context.expectedAccountId !== expectedAccountId()) return false;
       const code = (error && error.code) || "unavailable";
-      // Site publicado sem o backend configurado não é erro do usuário; é só
-      // um recurso que não existe naquela instalação.
-      //
-      // Nos DEMAIS casos a mensagem do servidor é guardada. Ela era descartada
-      // (`error: null`), e por isso a tela dizia "Sincronização com falha" e
-      // parava por aí: quem estava vendo não tinha como saber se era a sessão,
-      // a rede ou uma migração que faltou rodar no banco.
-      setState({
-        enabled: false,
-        phase: code === "not_configured" ? "disabled" : "error",
-        errorCode: code,
-        error: code === "not_configured" ? null : ((error && error.message) || "Não foi possível ligar a sincronização."),
-      });
+      if (code === "account_scope_changed" || code === "invalid_account_scope"
+        || code === "session_expired" || code === "device_revoked" || code === "device_unknown"
+        || code === "protocol_upgrade_required" || code === "schema_missing"
+        || code === "not_configured" || code === "origin_denied") {
+        await handleFailure(error, context);
+        return false;
+      }
+      setState({ enabled: false });
+      await handleFailure(error, context);
       return false;
     }
+    if (context.generation !== syncGeneration
+      || context.scope !== FinanceStore.scope()
+      || context.expectedAccountId !== expectedAccountId()) return false;
+    adapter = candidate;
     FinanceStore.setOutboxEnabled(true);
     setState({ enabled: true, phase: "idle", error: null, errorCode: null });
     startPolling();
@@ -8011,9 +9654,12 @@ const CloudSync = (() => {
   }
 
   function disable() {
+    nextGeneration();
     clearTimeout(pendingTimer);
     clearTimeout(retryTimer);
     stopPolling();
+    enablePromise = null;
+    enableKey = "";
     adapter = null;
     bootstrapHeld = false;
     observedRevision = null;
@@ -8021,32 +9667,24 @@ const CloudSync = (() => {
     cursorScope = null;
     // A fila NÃO é apagada: ela é o que ainda não chegou ao servidor. Apagar
     // aqui perderia lançamentos feitos offline logo antes de sair.
-    FinanceStore.setOutboxEnabled(false);
+    // O motor pode parar por rede, atualização ou configuração incompleta sem
+    // a conta deixar de ser o escopo atual. Continuamos enfileirando nesse banco;
+    // a troca efetiva para visitante reinicializa a flag no FinanceStore.
     setState({
       enabled: false, phase: "disabled", pending: false, error: null, errorCode: null,
       remoteRevision: null, bootstrapHeld: false,
     });
+    return activeRunPromise ? activeRunPromise.catch(() => false) : Promise.resolve(true);
   }
 
   function configure(options) {
     const o = options || {};
     if (typeof o.applyRemote === "function") hooks.applyRemote = o.applyRemote;
+    if (typeof o.onAuthInvalid === "function") hooks.onAuthInvalid = o.onAuthInvalid;
+    if (typeof o.onAccountScopeChanged === "function") hooks.onAccountScopeChanged = o.onAccountScopeChanged;
+    if (typeof o.onSessionRefreshRequired === "function") hooks.onSessionRefreshRequired = o.onSessionRefreshRequired;
+    if (typeof o.getExpectedAccountId === "function") hooks.getExpectedAccountId = o.getExpectedAccountId;
     if (typeof o.onStatus === "function") listeners.push(o.onStatus);
-  }
-
-  // Voltar a ter rede e voltar para o aplicativo são os dois momentos em que o
-  // usuário mais espera ver os dados em dia.
-  if (typeof window !== "undefined") {
-    window.addEventListener("online", () => { if (state.enabled) syncNow(); });
-    if (typeof document !== "undefined") {
-      // Voltar ao app busca o que chegou, TENDO OU NÃO fila para mandar. A
-      // condição antiga (`state.pending`) só deixava passar quem tinha algo a
-      // enviar, que é exatamente o aparelho que NÃO precisava do gatilho: quem
-      // ficou parado é quem está desatualizado.
-      document.addEventListener("visibilitychange", () => {
-        if (state.enabled && document.visibilityState === "visible") syncNow();
-      });
-    }
   }
 
   return {
@@ -8055,6 +9693,7 @@ const CloudSync = (() => {
     disable,
     schedule,
     syncNow,
+    flushOnHide,
     retry,
     resetRemote,
     createCheckpoint,
@@ -14662,7 +16301,7 @@ const ANALYZE_ENDPOINT = "/api/analyze";
 // `Origin` sozinho não segura um `curl`). Isso significa cookie de sessão, que
 // só viaja com `credentials: "include"`, e o mesmo `X-Device-Id` que o resto
 // do app usa; sem ele o servidor não reconhece o aparelho e devolve 403.
-function analyzeHeaders() {
+function analyzeHeaders(expectedAccountId) {
   const headers = { "Content-Type": "application/json" };
   if (typeof accountDeviceId === "function") {
     try {
@@ -14670,7 +16309,43 @@ function analyzeHeaders() {
       if (typeof accountDeviceLabel === "function") headers["X-Device-Label"] = accountDeviceLabel();
     } catch (e) { /* sem localStorage: o servidor recusa e a UI explica */ }
   }
+  if (typeof accountExpectedUserId === "function") {
+    try { headers["X-Account-Id"] = String(expectedAccountId == null ? accountExpectedUserId() : expectedAccountId); }
+    catch (e) { headers["X-Account-Id"] = ""; }
+  }
   return headers;
+}
+
+function handleAnalyzeAccountScope(code, message, expectedAccountId) {
+  if (code !== "account_scope_changed" || typeof handleAccountScopeChanged !== "function") return;
+  if (typeof accountExpectedUserId === "function" && expectedAccountId
+    && accountExpectedUserId() !== expectedAccountId) return;
+  Promise.resolve(handleAccountScopeChanged({ code, message: message || "" })).catch((error) => {
+    if (typeof reportSafeError === "function") reportSafeError("sync", error, "analyze_account_scope");
+  });
+}
+
+async function fetchAnalyzeWithSessionRetry(requestBody, signal, expectedAccountId, retried) {
+  const res = await fetch(ANALYZE_ENDPOINT, {
+    method: "POST",
+    credentials: "include",
+    headers: analyzeHeaders(expectedAccountId),
+    body: JSON.stringify(requestBody),
+    signal,
+  });
+  let body = null;
+  try { body = await res.json(); } catch (e) { body = null; }
+  const code = body && body.code;
+  if (!res.ok && code === "session_refresh_required" && !retried
+    && typeof refreshAccountSession === "function"
+    && typeof accountExpectedUserId === "function"
+    && expectedAccountId && accountExpectedUserId() === expectedAccountId) {
+    const refreshed = await refreshAccountSession();
+    if (refreshed && refreshed.status === "active" && accountExpectedUserId() === expectedAccountId) {
+      return fetchAnalyzeWithSessionRetry(requestBody, signal, expectedAccountId, true);
+    }
+  }
+  return { res, body };
 }
 const ANALYZE_TIMEOUT_MS = 30000;
 
@@ -14837,21 +16512,18 @@ async function requestStructuredAnalysis(data, monthKey, options) {
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ANALYZE_TIMEOUT_MS);
+  const expectedAccountId = typeof accountExpectedUserId === "function" ? accountExpectedUserId() : "";
 
   try {
-    const res = await fetch(ANALYZE_ENDPOINT, {
-      method: "POST",
-      credentials: "include",
-      headers: analyzeHeaders(),
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-    });
-
-    let body = null;
-    try { body = await res.json(); } catch (e) { body = null; }
+    const { res, body } = await fetchAnalyzeWithSessionRetry(payload, controller.signal, expectedAccountId, false);
+    if (expectedAccountId && typeof accountExpectedUserId === "function"
+      && accountExpectedUserId() !== expectedAccountId) {
+      throw new InsightError("account_scope_changed", "A análise pertencia à conta anterior.");
+    }
 
     if (!res.ok) {
       const code = (body && body.code) || "SERVER";
+      handleAnalyzeAccountScope(code, body && body.message, expectedAccountId);
       throw new InsightError(code, messageForCode(code, res.status));
     }
     if (!body) throw new InsightError("BAD_RESPONSE", "A resposta da IA veio em um formato inesperado.");
@@ -14885,6 +16557,9 @@ function messageForCode(code, status) {
     case "DEVICE_REVOKED": return "O acesso deste aparelho foi revogado. Entre na conta novamente.";
     case "DEVICE_INVALID": return "Não foi possível identificar este aparelho. Recarregue a página e tente de novo.";
     case "ACCOUNT_UNAVAILABLE": return "As análises com IA exigem conta, e o serviço de contas não está configurado neste site.";
+    case "account_scope_changed": return "A conta desta sessão mudou. Aguarde a atualização e tente novamente.";
+    case "invalid_account_scope": return "Não foi possível confirmar qual conta deve receber esta análise.";
+    case "session_refresh_required": return "Não foi possível renovar a sessão para concluir a análise. Tente novamente.";
     case "BAD_JSON": return "Houve um problema ao montar os dados da análise.";
     default: return `Não foi possível gerar a análise agora (erro ${status || "desconhecido"}).`;
   }
@@ -14904,23 +16579,22 @@ async function requestNaturalEntryParse(text, categories) {
   }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15000);
+  const expectedAccountId = typeof accountExpectedUserId === "function" ? accountExpectedUserId() : "";
   try {
-    const res = await fetch(ANALYZE_ENDPOINT, {
-      method: "POST",
-      credentials: "include",
-      headers: analyzeHeaders(),
-      body: JSON.stringify({
-        modo: "lancamento",
-        texto: String(text || "").slice(0, 240),
-        hoje: todayIso(),
-        categorias: (categories || []).map((c) => ({ id: c.id, nome: c.name })).slice(0, 40),
-      }),
-      signal: controller.signal,
-    });
-    let body = null;
-    try { body = await res.json(); } catch (e) { body = null; }
+    const requestBody = {
+      modo: "lancamento",
+      texto: String(text || "").slice(0, 240),
+      hoje: todayIso(),
+      categorias: (categories || []).map((c) => ({ id: c.id, nome: c.name })).slice(0, 40),
+    };
+    const { res, body } = await fetchAnalyzeWithSessionRetry(requestBody, controller.signal, expectedAccountId, false);
+    if (expectedAccountId && typeof accountExpectedUserId === "function"
+      && accountExpectedUserId() !== expectedAccountId) {
+      throw new InsightError("account_scope_changed", "A análise pertencia à conta anterior.");
+    }
     if (!res.ok) {
       const code = (body && body.code) || "SERVER";
+      handleAnalyzeAccountScope(code, body && body.message, expectedAccountId);
       throw new InsightError(code, messageForCode(code, res.status));
     }
     if (!body || !body.lancamento) throw new InsightError("BAD_RESPONSE", "Não consegui entender essa frase.");
@@ -26772,6 +28446,74 @@ function accountDeviceDate(value) {
   return Number.isNaN(date.getTime()) ? "data indisponível" : date.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
 }
 
+const ACCOUNT_DEVICE_ICONS = {
+  desktop: "monitor",
+  phone: "phone",
+  tablet: "tablet",
+  unknown: "globe",
+};
+
+function accountDeviceType(device) {
+  const informed = String((device && (device.type || device.deviceType)) || "").toLowerCase();
+  if (ACCOUNT_DEVICE_ICONS[informed]) return informed;
+  const label = String((device && device.label) || "").toLowerCase();
+  if (/ipad|tablet/.test(label)) return "tablet";
+  if (/iphone|android|celular|mobile/.test(label)) return "phone";
+  if (/windows|macos|mac os|linux|chrome os|desktop|notebook/.test(label)) return "desktop";
+  return "unknown";
+}
+
+function accountDeviceLastSeen(value, current) {
+  if (current) return "Ativo agora";
+  const date = new Date(value || "");
+  if (Number.isNaN(date.getTime())) return "Último acesso indisponível";
+  const now = new Date();
+  const day = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const todayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const today = todayDate.getTime();
+  const yesterdayDate = new Date(todayDate);
+  yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+  const time = date.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  if (day === today) return `Hoje, ${time}`;
+  if (day === yesterdayDate.getTime()) return `Ontem, ${time}`;
+  return date.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+}
+
+function accountDevicesCard(account) {
+  const devices = (Array.isArray(account.devices) ? account.devices : [])
+    .filter((device) => !device.revokedAt)
+    .sort((a, b) => Number(!!b.current) - Number(!!a.current) || new Date(b.lastSeenAt || 0) - new Date(a.lastSeenAt || 0));
+  const activeCount = devices.length;
+  const rows = devices.map((device) => {
+    const type = accountDeviceType(device);
+    const current = !!device.current;
+    return `<div class="account-device account-device--${type}${current ? " account-device--current" : ""}">
+      <span class="account-device__rail" aria-hidden="true"></span>
+      <span class="account-device__icon">${svgIcon(ACCOUNT_DEVICE_ICONS[type], 20)}</span>
+      <span class="account-device__body">
+        <span class="account-device__identity"><strong>${escapeHtml(device.label || "Navegador não identificado")}</strong>${current ? `<span class="account-device__badge">Este aparelho</span>` : ""}</span>
+        <small>${escapeHtml(accountDeviceLastSeen(device.lastSeenAt, current))}</small>
+      </span>
+      ${current ? "" : `<button class="btn btn--ghost btn--sm account-device__revoke" data-action="account-revoke" data-id="${escapeHtml(device.id)}" ${account.busy ? "disabled" : ""}>Revogar acesso</button>`}
+    </div>`;
+  }).join("");
+
+  return `<section class="card account-access" aria-labelledby="account-access-title">
+    <div class="account-access__header">
+      <div class="account-access__heading">
+        <p class="eyebrow">Segurança da conta</p>
+        <h2 class="card-title" id="account-access-title">Dispositivos com acesso</h2>
+        <p class="card-subtitle">Confira onde sua conta está aberta e encerre qualquer acesso que você não reconheça.</p>
+      </div>
+      <div class="account-access__tools">
+        <span class="account-access__count">${escapeHtml(activeCount === 1 ? "1 ativo" : `${activeCount} ativos`)}</span>
+        <button class="btn btn--secondary btn--sm account-access__refresh" data-action="account-refresh" ${account.busy ? "disabled" : ""}>${svgIcon("refresh", 15)} Atualizar</button>
+      </div>
+    </div>
+    <div class="account-device-list">${rows || `<p class="account-access__empty">Nenhum dispositivo com acesso.</p>`}</div>
+  </section>`;
+}
+
 // Estado da sincronização em linguagem de usuário. A regra de escrita aqui é
 // não assustar: em toda situação de falha o aparelho continua com tudo, e a
 // frase precisa dizer isso, senão a pessoa acha que perdeu o extrato.
@@ -26796,10 +28538,10 @@ function accountSyncCard() {
   // que nada se perdeu embaixo. Antes, um excluía o outro, e no caso de falha o
   // motivo era exatamente o que sumia.
   const garantia = phase === "error" && sync.error ? view.note : "";
-  // Falha precisa de saída. O botão só existia com o motor LIGADO, e a falha
-  // que mais acontece (ligar e não conseguir) desliga o motor: sobrava
-  // recarregar a página, sem nada na tela dizendo isso.
-  const podeTentar = sync.enabled || phase === "error";
+  // O caminho saudável é automático. A ação manual só aparece quando houve
+  // uma falha e a pessoa precisa de uma saída imediata além da recuperação do
+  // próprio motor.
+  const podeTentar = phase === "error";
   return `<div class="card account-sync">
     <div class="account-sync__head">
       <span class="account-sync__icon account-sync__icon--${escapeHtml(phase)}">${svgIcon(view.icon, 18)}</span>
@@ -26811,7 +28553,7 @@ function accountSyncCard() {
         ${phase === "error" && sync.errorCode ? `<p class="field-hint">Código da falha: ${escapeHtml(sync.errorCode)}</p>` : ""}
       </div>
     </div>
-    ${podeTentar ? `<button class="btn btn--secondary btn--sm" data-action="account-sync-now" ${sync.phase === "syncing" ? "disabled" : ""}>${svgIcon("refresh", 15)} ${sync.enabled ? "Sincronizar agora" : "Tentar de novo"}</button>` : ""}
+    ${podeTentar ? `<button class="btn btn--secondary btn--sm" data-action="account-sync-now">${svgIcon("refresh", 15)} Tentar novamente</button>` : ""}
   </div>`;
 }
 
@@ -26924,14 +28666,20 @@ function accountSignedIn() {
   ${accountSyncCard()}
   ${accountGuestLinkCard()}
   ${a.mode === "password" ? `<div class="card"><p class="card-title">Definir nova senha</p><div class="field"><label class="field__label" for="account-new-password">Nova senha</label><input id="account-new-password" class="input" type="password" data-field="auth-new-password" minlength="10" maxlength="128" value="${escapeHtml(a.form.newPassword)}" autocomplete="new-password" /></div><button class="btn btn--primary" data-action="account-submit" data-value="password" ${a.busy ? "disabled" : ""}>Salvar nova senha</button></div>` : ""}
-  <div class="card"><div class="settings-row-header"><div><p class="card-title">Dispositivos conectados</p><p class="card-subtitle">Revogue qualquer acesso que você não reconheça.</p></div><button class="icon-btn" data-action="account-refresh" aria-label="Atualizar dispositivos">${svgIcon("refresh", 16)}</button></div>
-    <div class="account-device-list">${a.devices.length ? a.devices.map((device) => `<div class="account-device"><span class="account-device__icon">${svgIcon("phone", 18)}</span><span><b>${escapeHtml(device.label || "Dispositivo")}${device.current ? " (este)" : ""}</b><small>Último acesso: ${escapeHtml(accountDeviceDate(device.lastSeenAt))}${device.revokedAt ? " · acesso revogado" : ""}</small></span>${device.revokedAt ? "" : `<button class="btn btn--ghost btn--sm" data-action="account-revoke" data-id="${escapeHtml(device.id)}">Revogar</button>`}</div>`).join("") : `<p class="field-hint">Nenhum dispositivo listado.</p>`}</div>
-  </div>
-  <div class="card account-danger"><p class="card-title">Apagar conta online</p><p class="card-subtitle">Apaga a conta e os dados guardados no servidor. Seus dados locais ficam neste aparelho até você apagá-los em Privacidade.</p>
-    <div class="field"><label class="field__label" for="account-delete-password">Senha atual</label><input id="account-delete-password" class="input" type="password" data-field="auth-delete-password" maxlength="128" value="${escapeHtml(a.form.deletePassword)}" autocomplete="current-password" /></div>
-    <div class="field"><label class="field__label" for="account-delete-text">Digite APAGAR CONTA</label><input id="account-delete-text" class="input" data-field="auth-delete-text" maxlength="20" value="${escapeHtml(a.form.deleteText)}" autocomplete="off" /></div>
-    <button class="btn btn--danger" data-action="account-delete-request" ${a.busy ? "disabled" : ""}>Apagar conta online</button>
-  </div>`;
+  ${accountDevicesCard(a)}
+  <details class="card account-danger">
+    <summary class="account-danger__summary">
+      <span class="account-danger__icon">${svgIcon("trash", 18)}</span>
+      <span class="account-danger__heading"><span class="card-title">Apagar conta e dados</span><span class="card-subtitle">Exclua a conta e os dados guardados no servidor e neste aparelho.</span></span>
+      <span class="account-danger__chevron">${svgIcon("chevronDown", 18)}</span>
+    </summary>
+    <div class="account-danger__body">
+      <p class="card-subtitle">A cópia deste aparelho também será apagada. Outros aparelhos perderão o acesso ao servidor, mas manterão o que já estiver salvo neles.</p>
+      <div class="field"><label class="field__label" for="account-delete-password">Senha atual</label><input id="account-delete-password" class="input" type="password" data-field="auth-delete-password" maxlength="128" value="${escapeHtml(a.form.deletePassword)}" autocomplete="current-password" /></div>
+      <div class="field"><label class="field__label" for="account-delete-text">Digite APAGAR CONTA</label><input id="account-delete-text" class="input" data-field="auth-delete-text" maxlength="20" value="${escapeHtml(a.form.deleteText)}" autocomplete="off" /></div>
+      <button class="btn btn--danger" data-action="account-delete-request" ${a.busy ? "disabled" : ""}>Apagar conta e dados</button>
+    </div>
+  </details>`;
 }
 
 function renderAccountScreen() {
@@ -27338,16 +29086,33 @@ function onClick(e) {
       // que o botão não funciona. Então a pergunta muda: apagar na conta
       // inteira (lápides que viajam para os outros aparelhos) ou apagar aqui e
       // desconectar.
-      const naNuvem = typeof CloudSync !== "undefined" && CloudSync.isEnabled();
+      // O motor pode estar temporariamente parado por falta de rede. Ainda
+      // assim este banco pertence a uma conta e não pode ser tratado como uma
+      // base apenas local, pois a sessão pode baixar tudo quando se recuperar.
+      const naNuvem = FinanceStore.scope() !== GUEST_SCOPE;
+      const expectedScope = FinanceStore.scope();
+      const expectedGeneration = FinanceStore.generation();
 
-      const apagarLocal = async (mensagem) => {
-        const ok = await FinanceStore.purge();
+      const apagarLocal = async (mensagem, mensagemFalha, resetRev) => {
+        let ok = false;
+        let purgeError = null;
+        try { ok = await FinanceStore.purge(); }
+        catch (error) { purgeError = error; }
         if (!ok) {
-          if (typeof reportSafeError === "function") reportSafeError("storage", null, "storage_delete");
-          notify("Não foi possível apagar todos os dados", "danger");
+          if (typeof reportSafeError === "function") reportSafeError("storage", purgeError, "storage_delete");
+          notify(mensagemFalha || "Não foi possível apagar todos os dados", "danger");
           return false;
         }
-        clearSafeErrors();
+        // `purge()` remove também o relógio persistido deste escopo. Depois de
+        // um reset remoto, gravamos de novo somente a HLC dominante devolvida
+        // pelo servidor, para uma criação após recarregar não perder para as
+        // lápides que acabaram de ser geradas.
+        const clockPrepared = !resetRev || (typeof FinanceStore.observeRemoteRev === "function"
+          && FinanceStore.observeRemoteRev(resetRev) === true);
+        if (clockPrepared) clearSafeErrors();
+        else if (typeof reportSafeError === "function") {
+          reportSafeError("storage", null, "reset_rev_observe_failed");
+        }
         state.data = FinanceStore.snapshot();
         state.onboarding = freshOnboarding();
         state.onboarding.open = true;
@@ -27370,23 +29135,62 @@ function onClick(e) {
         alternateLabel: naNuvem ? "Apagar só aqui e desconectar" : null,
         alternateIcon: "eyeOff",
         onConfirm: async () => {
+          let resetResult = null;
           if (naNuvem) {
+            if (FinanceStore.scope() !== expectedScope || FinanceStore.generation() !== expectedGeneration) {
+              notify("A conta mudou antes da exclusão. Nenhuma cópia foi apagada.", "danger");
+              return;
+            }
             // A ordem importa: primeiro as lápides sobem, depois o aparelho
             // esvazia. Ao contrário, o esvaziamento local não teria mais o que
             // marcar como apagado.
-            try { await CloudSync.resetRemote(); }
+            try {
+              resetResult = await CloudSync.resetRemote();
+              if (!resetResult || typeof resetResult !== "object"
+                || typeof resetResult.ok !== "boolean"
+                || typeof resetResult.remoteDeleted !== "boolean"
+                || typeof resetResult.localPrepared !== "boolean"
+                || !Object.prototype.hasOwnProperty.call(resetResult, "reason")) {
+                const invalid = new Error("A sincronização devolveu um resultado inválido para a exclusão.");
+                invalid.code = "invalid_reset_result";
+                throw invalid;
+              }
+              if (!resetResult.remoteDeleted) {
+                const unconfirmed = new Error("A exclusão remota não foi confirmada.");
+                unconfirmed.code = resetResult.reason || "sync_reset";
+                throw unconfirmed;
+              }
+            }
             catch (error) {
               if (typeof reportSafeError === "function") reportSafeError("sync", error, "sync_reset");
-              notify("Não foi possível apagar os dados na conta. Nada foi apagado.", "danger");
+              notify("Não foi possível confirmar a exclusão na conta. A cópia deste aparelho não foi apagada.", "danger");
+              return;
+            }
+            if (FinanceStore.scope() !== expectedScope || FinanceStore.generation() !== expectedGeneration) {
+              notify("Os dados foram apagados da conta anterior no servidor. A conta aberta agora não foi alterada.");
               return;
             }
           }
-          await apagarLocal(naNuvem ? "Dados apagados na conta e neste aparelho" : "Dados apagados deste aparelho");
+          let mensagem = naNuvem ? "Dados apagados na conta e neste aparelho" : "Dados apagados deste aparelho";
+          if (resetResult && !resetResult.localPrepared) {
+            if (resetResult.reason === "cursor_write_failed") {
+              mensagem = "Dados apagados na conta e neste aparelho. O ponto local de sincronização não pôde ser atualizado, mas a limpeza final foi concluída.";
+            } else if (resetResult.reason === "outbox_clear_failed") {
+              mensagem = "Dados apagados na conta e neste aparelho. A fila local não pôde ser limpa primeiro, mas a limpeza final foi concluída.";
+            } else {
+              mensagem = "Dados apagados na conta e neste aparelho. A preparação local falhou, mas a limpeza final foi concluída.";
+            }
+          }
+          await apagarLocal(
+            mensagem,
+            naNuvem
+              ? "Os dados foram apagados da conta, mas o navegador não permitiu apagar a cópia deste aparelho. Limpe os dados deste site no navegador."
+              : null,
+            resetResult && resetResult.resetRev,
+          );
         },
         onAlternate: async () => {
-          // Desconectar ANTES de apagar; senão o ciclo seguinte rebaixa tudo.
-          CloudSync.disable();
-          await apagarLocal("Dados apagados deste aparelho. A conta foi desconectada aqui.");
+          await accountForgetThisDevice();
         },
       });
       break;
@@ -27431,11 +29235,11 @@ function onClick(e) {
     case "account-link-review": accountReviewGuestLink(); break;
     case "account-logout": accountLogout(); break;
     case "account-revoke":
-      requestConfirmation({ title: "Revogar acesso deste dispositivo?", message: "A sessão desse dispositivo deixará de acessar sua conta.", confirmLabel: "Revogar acesso", tone: "danger", onConfirm: () => accountRevoke(id) });
+      requestConfirmation({ title: "Revogar acesso deste dispositivo?", message: "Este dispositivo não poderá mais acessar nem sincronizar sua conta. Uma cópia já salva nele não será apagada à distância.", confirmLabel: "Revogar acesso", tone: "danger", onConfirm: () => accountRevoke(id) });
       break;
     case "account-delete-request":
       if (state.account.form.deleteText !== "APAGAR CONTA" || state.account.form.deletePassword.length < 10) { state.account.error = "Informe sua senha atual e digite APAGAR CONTA."; render(); break; }
-      requestConfirmation({ title: "Apagar sua conta online?", message: "A conta e os dados guardados no servidor serão apagados. Os dados locais deste aparelho serão preservados.", confirmLabel: "Apagar conta online", tone: "danger", requiredText: "APAGAR CONTA", onConfirm: accountDelete });
+      requestConfirmation({ title: "Apagar conta e dados?", message: "A conta e os dados guardados no servidor e neste aparelho serão apagados. Isso não pode ser desfeito. Cópias já salvas em outros aparelhos não serão apagadas à distância.", confirmLabel: "Apagar conta e dados", tone: "danger", requiredText: "APAGAR CONTA", onConfirm: accountDelete });
       break;
     case "analytics-view": state.analyticsView = value === "reports" ? "reports" : "movements"; state.analyticsLimit = 30; render(); break;
     case "accounts-view": state.accountsUi.view = value === "sources" ? "sources" : "accounts"; render(); break;
@@ -28991,7 +30795,7 @@ let state = {
   toastTone: null,
   confirmation: null,
   privacyDeleteText: "",
-  account: typeof freshAccountState === "function" ? freshAccountState() : { loading: true, configured: false, authenticated: false, email: "", mode: "login", busy: false, error: "", message: "", form: { email: "", password: "", newPassword: "", deletePassword: "", deleteText: "" }, devices: [] },
+  account: typeof freshAccountState === "function" ? freshAccountState() : { loading: true, configured: false, authenticated: false, knownAccount: false, sessionStatus: "unknown", email: "", mode: "login", busy: false, error: "", message: "", form: { email: "", password: "", newPassword: "", deletePassword: "", deleteText: "" }, devices: [] },
   calculationDetail: null,
   contextualAssistant: { open: false, responseId: null },
   form: null,
@@ -30556,6 +32360,13 @@ async function init() {
   }
   state.booting = false;
   state.storageOk = isStorageAvailable();
+  // O escopo lembrado é uma conta conhecida, mesmo quando a rede ainda não
+  // confirmou o cookie nesta abertura. Alterações feitas offline precisam virar
+  // fila desde já; uma resposta guest troca o banco e reinicializa esta flag.
+  if (FinanceStore.scope() !== GUEST_SCOPE) {
+    FinanceStore.setOutboxEnabled(true);
+    state.account.knownAccount = true;
+  }
   state.form = freshTxForm();
   // Primeiro uso: a configuração de 4 passos assume a tela. Quem já usava o app
   // nunca cai aqui. `migrate` marca o onboarding como concluído para qualquer
@@ -30608,8 +32419,13 @@ async function init() {
     CloudSync.configure({
       applyRemote: (merged) => setDataFromRemote(merged),
       onStatus: () => scheduleRender(render),
+      onAuthInvalid: (details) => invalidateAccountSession(details),
+      onAccountScopeChanged: (details) => handleAccountScopeChanged(details),
+      onSessionRefreshRequired: (details) => handleSessionRefreshRequired(details),
+      getExpectedAccountId: () => state.account.authenticated ? state.account.userId : "",
     });
   }
+  if (typeof startAccountRecoveryListeners === "function") startAccountRecoveryListeners();
 
   // Outra aba do mesmo navegador gravou: esta aqui releu o banco e agora
   // precisa redesenhar com o que chegou. Sem isto, a aba parada continuaria
@@ -30643,7 +32459,14 @@ async function init() {
   // histórico e desbloquearia dezenas de medalhas de uma vez; um paredão de
   // celebrações que não celebra nada. Registramos o passado sem alarde; a
   // comemoração fica reservada para o que for conquistado daqui em diante.
-  bootstrapAccount();
+  try {
+    await bootstrapAccount();
+  } catch (error) {
+    if (typeof reportSafeError === "function") reportSafeError("sync", error, "account_bootstrap");
+    state.account.loading = !!state.account.knownAccount && !state.account.authenticated;
+    state.account.sessionStatus = "unknown";
+    render();
+  }
   idleTask(() => syncAchievements({ silent: true }));
   // [M8] Mesma decisão para as notificações: o histórico antigo entra já lido.
   idleTask(() => syncNotifications({ silent: !normalizeNotifications(state.data.notifications).initialized }));

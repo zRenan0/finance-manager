@@ -13,7 +13,7 @@ O aplicativo continua sem framework e o resultado publicado permanece estático.
 
 ## Armazenamento e sincronização
 
-O IndexedDB é a fonte da interface, sempre. `js/cloud-sync.js` é um SEGUNDO destino: lê o snapshot remoto, funde dentro do local e devolve o resultado, em segundo plano. Trocar o adapter da interface pelo da nuvem faria toda leitura passar pela rede e o aplicativo deixaria de funcionar offline, que é a característica que o define. Ver `docs/SYNC_PROTOCOL.md`.
+O IndexedDB é a fonte da interface, sempre. `js/cloud-sync.js` é um segundo destino: envia a fila persistente de operações, recebe mudanças posteriores ao cursor e as aplica no banco local em segundo plano. Trocar o adapter da interface pelo da nuvem faria toda leitura passar pela rede e o aplicativo deixaria de funcionar offline, que é a característica que o define. Ver `docs/SYNC_PROTOCOL.md`.
 
 O bootstrap expõe somente a fachada congelada `window.CofreUI`. O domínio inteiro roda dentro do escopo do módulo gerado e não cria funções globais. Funções financeiras não devem depender de DOM nem dessa fachada.
 

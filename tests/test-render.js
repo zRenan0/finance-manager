@@ -38,6 +38,7 @@ const SCREEN_FILES = [
   "js/screens/categories.js",
   "js/screens/settings.js",
   "js/screens/privacy.js",
+  "js/screens/account.js",
   "js/screens/modals.js",
 ];
 // Varreduras de código-fonte precisam ver o app INTEIRO, não só o núcleo.
@@ -92,6 +93,7 @@ vm.createContext(ctx);
   "js/insights.js", "js/assistant.js", "js/contextual-assistant.js", "js/advisor.js", "js/investments.js",
   "js/portfolio.js", "js/simulators.js", "js/qrcode.js",
   "js/achievements.js", "js/wrapped.js", "js/services.js",
+  "js/auth.js", "js/cloud-sync.js",
 ].concat(SCREEN_FILES).concat(["js/actions.js", "js/app.js"]).forEach((f) => vm.runInContext(readSrc(f), ctx, { filename: f }));
 
 // `state` e as funções de app.js são declaradas com let/function em escopo de
@@ -1041,6 +1043,78 @@ console.log("\n[Categorias] Central de categorias: estrutura, grupos e tetos");
     .forEach((a) => check(`ação "${a}" tem case no onClick`, catClickSrc.includes(`case "${a}"`)));
 
   setTab("dashboard");
+}
+
+console.log("\n[Conta] Extrato de acessos e área destrutiva");
+{
+  ctx.__devices = [
+    { id: "device-desktop", label: "Chrome no Windows", type: "desktop", current: true, lastSeenAt: new Date().toISOString() },
+    { id: "device-phone", label: "Safari no iPhone", type: "phone", current: false, lastSeenAt: "2026-08-24T20:55:00Z" },
+    { id: "device-tablet", label: "Safari no iPad", type: "tablet", current: false, lastSeenAt: "2026-08-24T17:16:00Z" },
+    { id: "device-unknown", label: "Navegador desconhecido", type: "unknown", current: false, lastSeenAt: "2026-08-24T16:39:00Z" },
+    { id: "device-revoked", label: "Acesso antigo", type: "phone", current: false, revokedAt: "2026-08-24T21:00:00Z", lastSeenAt: "2026-08-24T15:00:00Z" },
+  ];
+  run(`state.account = freshAccountState();
+    state.account.loading = false;
+    state.account.configured = true;
+    state.account.authenticated = true;
+    state.account.email = "pessoa@example.com";
+    state.account.devices = __devices;
+    Object.assign(CloudSync.status(), { enabled: true, phase: "synced", pending: false, error: null, errorCode: null });`);
+
+  const conta = run("renderAccountScreen()");
+  auditHtml("conta/dispositivos", conta);
+  check("a seção se apresenta como dispositivos com acesso", /Dispositivos com acesso/.test(conta));
+  check("a lista mostra a contagem de acessos ativos", /4 ativos/.test(conta));
+  check("o aparelho atual recebe selo próprio", /Este aparelho/.test(conta));
+  check("o aparelho revogado não aparece como conectado", !/Acesso antigo/.test(conta));
+  check("computador recebe ícone próprio", /account-device--desktop/.test(conta));
+  check("celular recebe ícone próprio", /account-device--phone/.test(conta));
+  check("tablet recebe ícone próprio", /account-device--tablet/.test(conta));
+  check("tipo desconhecido recebe tratamento próprio", /account-device--unknown/.test(conta));
+  check("somente os outros aparelhos podem ser revogados",
+    (conta.match(/data-action="account-revoke"/g) || []).length === 3,
+    String((conta.match(/data-action="account-revoke"/g) || []).length));
+  check("a ação destrutiva diz exatamente o que faz", /Revogar acesso/.test(conta));
+  const accountClickSrc = run("onClick.toString()");
+  check("a confirmação explica o limite da revogação",
+    /não poderá mais acessar nem sincronizar/.test(accountClickSrc)
+      && /cópia já salva nele não será apagada à distância/.test(accountClickSrc));
+  check("a exclusão descreve servidor, aparelho atual e outros aparelhos",
+    /dados guardados no servidor e neste aparelho serão apagados/.test(accountClickSrc)
+      && /outros aparelhos não serão apagadas à distância/.test(accountClickSrc));
+  check("a exclusão distingue servidor confirmado da preparação local",
+    /resetResult\s*=\s*await CloudSync\.resetRemote\(\)/.test(accountClickSrc)
+      && /!resetResult\.remoteDeleted/.test(accountClickSrc)
+      && /!resetResult\.localPrepared/.test(accountClickSrc)
+      && /typeof resetResult\.ok\s*!==\s*"boolean"/.test(accountClickSrc));
+  check("falha local depois da confirmação remota ainda tenta apagar a cópia",
+    /await apagarLocal\(/.test(accountClickSrc)
+      && /Os dados foram apagados da conta, mas o navegador não permitiu apagar a cópia deste aparelho/.test(accountClickSrc));
+  check("a exclusão captura o escopo e a geração antes da confirmação",
+    /expectedScope\s*=\s*FinanceStore\.scope\(\)/.test(accountClickSrc)
+      && /expectedGeneration\s*=\s*FinanceStore\.generation\(\)/.test(accountClickSrc)
+      && /FinanceStore\.scope\(\)\s*!==\s*expectedScope/.test(accountClickSrc)
+      && /FinanceStore\.generation\(\)\s*!==\s*expectedGeneration/.test(accountClickSrc));
+  check("resultado remoto desconhecido não promete que nada foi apagado",
+    /Não foi possível confirmar a exclusão na conta/.test(accountClickSrc)
+      && /A cópia deste aparelho não foi apagada/.test(accountClickSrc)
+      && !/Nada foi apagado/.test(accountClickSrc));
+  check("atualização da lista tem texto visível", /data-action="account-refresh"[^>]*>[\s\S]*Atualizar/.test(conta));
+  check("estado saudável não oferece sincronização manual", !/data-action="account-sync-now"/.test(conta));
+  check("a exclusão da conta começa recolhida", /<details[^>]*account-danger/.test(conta) && /<summary/.test(conta));
+  check("a área destrutiva não promete preservar a cópia que será apagada",
+    /Apagar conta e dados/.test(conta)
+      && /A cópia deste aparelho também será apagada/.test(conta)
+      && !/dados locais ficam neste aparelho/.test(conta));
+
+  run(`Object.assign(CloudSync.status(), { enabled: false, phase: "error", pending: true, error: "Falha simulada", errorCode: "network_error" });`);
+  const contaComFalha = run("renderAccountScreen()");
+  check("falha oferece tentativa imediata", /data-action="account-sync-now"/.test(contaComFalha) && /Tentar novamente/.test(contaComFalha));
+
+  const accountCss = readSrc("css/screens/account.css");
+  check("ações móveis mantêm alvo de toque", /min-height:\s*44px/.test(accountCss));
+  check("o extrato tem linha de atividade própria", /account-device__rail/.test(accountCss));
 }
 
 console.log(`\n${fail === 0 ? "TODOS OS TESTES PASSARAM" : "FALHAS ENCONTRADAS"} — ${pass} ok, ${fail} falha(s)\n`);
