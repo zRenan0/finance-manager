@@ -116,6 +116,41 @@ Web Locks continuam impedindo dois ciclos simultâneos no mesmo navegador. Os
 gatilhos passam por uma função única que ignora duplicatas quando já existe um
 ciclo em andamento.
 
+### 2.1 Identidade do escopo e concorrência
+
+Cada instância do motor recebe o UUID explícito da conta confirmada. Toda
+chamada do `CloudAdapter` envia esse valor no cabeçalho `X-Account-Id`; ele não
+é reconstruído a partir do nome sanitizado do banco local. O servidor compara
+o cabeçalho com a identidade da sessão antes de ler ou gravar operações. Uma
+diferença responde `account_scope_changed`, sem payload financeiro.
+
+`account_scope_changed` não é logout. O cliente invalida o motor antigo,
+consulta a sessão novamente e abre o escopo da identidade agora confirmada.
+Isso cobre a troca de conta em outra aba, pois cookies são compartilhados entre
+abas enquanto os bancos locais não são.
+
+Cada ciclo captura uma geração, o escopo e o adaptador com que nasceu.
+`disable()` e toda troca de escopo avançam a geração. Depois de qualquer espera
+de rede, o ciclo confere a geração antes de aplicar operações, confirmar a fila
+ou avançar o cursor. Um ciclo antigo termina como cancelado e nunca toca no
+banco que entrou depois dele.
+
+Consultas de sessão usam uma geração própria. Login, logout e exclusão invalidam
+qualquer consulta automática anterior, portanto uma resposta iniciada antes da
+ação explícita não pode desfazer seu resultado. A lista de dispositivos só é
+preservada em falha quando a identidade continua sendo a mesma; ao mudar o
+`userId`, ela é limpa antes da nova consulta.
+
+Ao abrir um escopo autenticado, a fila é ligada imediatamente, antes da saúde
+do serviço remoto ser consultada. Falha temporária no `health` não cria uma
+janela em que edições são gravadas sem operação. Sessão `unknown` e ativação do
+motor têm nova tentativa automática limitada à mesma identidade e ao estado
+autenticado que agendou o timer.
+
+Se ocultar a página enquanto já existe um ciclo em andamento, o gatilho marca
+uma nova volta. Quando o ciclo atual termina, a volta pendente usa a mesma
+geração ou é descartada se a conta já mudou.
+
 ### 3. Primeira carga de uma conta
 
 Entrar em uma conta seguirá esta ordem:
@@ -263,6 +298,13 @@ aparelho ficará abaixo do texto quando não houver largura.
 - sucesso da revogação encerra `busy` e remove a linha;
 - `device_revoked` limpa cookies nos endpoints de conta, sync e análise;
 - evento de sessão inválida volta a interface ao modo local sem apagar a cópia.
+- toda chamada de sincronização envia o UUID esperado em `X-Account-Id`;
+- `account_scope_changed` reconsulta a sessão e não aplica o corpo da resposta;
+- ciclo invalidado por troca de escopo não aplica operações, não confirma fila e
+  não avança cursor;
+- resposta de sessão iniciada antes de login ou logout não altera o estado novo;
+- falha no `health` mantém a fila ligada e repete a ativação automaticamente;
+- ocultação durante um ciclo em andamento provoca uma volta posterior.
 
 ### Navegador com dois contextos
 
@@ -298,8 +340,10 @@ esperas reais de 15 ou 20 segundos.
 5. rodar a verificação de deploy e então publicar em produção.
 
 O backend aceitará por uma versão clientes que ainda não enviam tipo ou rótulo,
-preservando o valor existente. A mudança não altera o protocolo financeiro nem
-descarta filas locais.
+preservando o valor existente. O cabeçalho `X-Account-Id` passa a fazer parte do
+contrato de isolamento: o cliente novo o envia em todas as chamadas e entende
+`account_scope_changed`. A mudança não altera a forma das operações financeiras
+nem descarta filas locais.
 
 ## Critérios finais de aceite
 
