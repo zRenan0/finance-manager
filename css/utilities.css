@@ -15,6 +15,22 @@
   .quick-entry-btn { padding: 0 14px; }
   .bottom-nav__item, .bottom-nav__fab-wrap { font-size: 11px; }
   .qr-actions .btn, .nlp-actions .btn { min-width: 100%; }
+
+  /* A DESCRIÇÃO NÃO CABE NA MESMA LINHA DO VALOR AQUI.
+     A fileira do Início é bolha (40px) + descrição + valor + excluir (44px),
+     com três vãos de 10px. Em 320px sobram 66px para a descrição, e nenhum
+     dos outros três pode ceder: o valor precisa de ~76px para "R$ 1.250,00"
+     e o botão de excluir é alvo de toque. Resultado: toda movimentação virava
+     "mercado d…", e a lista inteira ficava ilegível justamente onde ela é o
+     resumo do mês.
+     O valor desce para a segunda linha, alinhado à direita, que é a mesma
+     saída já adotada na central de movimentações (ver css/screens/movements.css).
+     A descrição fica com a largura toda e a fileira ganha ~20px de altura. */
+  .tx-row { flex-wrap: wrap; row-gap: 0; }
+  .tx-row > .tx-amount {
+    order: 1; flex: 1 0 100%;
+    margin-top: -4px; text-align: right; font-weight: 700;
+  }
 }
 
 /* ==================================================================
@@ -37,7 +53,12 @@
   top: calc(10px + env(safe-area-inset-top, 0px));
   transform: translateY(-260%);
   padding: 11px 17px; border-radius: var(--radius-sm);
-  background: var(--brand); color: #fff;
+  /* `--brand-solid` e não `--brand`: no tema escuro a marca clareia para
+     #1FB394, e branco em cima dela dá 2,65:1. O atalho é o PRIMEIRO elemento
+     que a navegação por teclado revela, e quem depende dele em geral depende
+     também do contraste. O token de chapa passa nos dois temas (6,42:1 no
+     claro, 5,26:1 no escuro) sem mudar a cor da marca em nenhum outro lugar. */
+  background: var(--brand-solid); color: #fff;
   font-size: 13px; font-weight: 700; text-decoration: none;
   box-shadow: var(--shadow-md);
   transition: transform var(--dur) var(--ease);
@@ -210,7 +231,7 @@
 .ach-filter-chip:hover { border-color: color-mix(in srgb, var(--brand) 40%, var(--border)); }
 .ach-filter-chip:active { transform: scale(0.96); }
 .ach-filter-chip.active {
-  background: var(--brand); border-color: var(--brand); color: #fff;
+  background: var(--brand-solid); border-color: var(--brand-solid); color: #fff;
   box-shadow: var(--shadow-sm);
 }
 

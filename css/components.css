@@ -180,6 +180,51 @@
   letter-spacing: -0.005em; flex-shrink: 0;
 }
 
+/* ONDE A COR DE SINAL VIRA TEXTO MIÚDO, ELA VIRA TINTA DE TEXTO.
+   ------------------------------------------------------------------
+   Quem escolhe a cor destes elementos é o JS, não esta folha: o modelo manda
+   a gravidade pronta (`color:var(--positive)`, `var(--goal)`, `var(--negative)`)
+   e a folha de estilos dinâmica a aplica. É deliberado; uma regra de estilo
+   não decide se um orçamento estourou. Só que a cor que chega é a de
+   PREENCHIMENTO, boa em barra e ícone, e aqui ela vira letra de 10,5 a 12,5px:
+   `--positive` dá 4,30:1 no branco e `--negative` dá 4,42:1 no próprio fundo
+   suave, ambos abaixo dos 4,5:1 da WCAG AA.
+   A saída não é mexer no JS nem carimbar `!important` por cima dele: basta
+   REDEFINIR O TOKEN NO ELEMENTO. O `var(--positive)` que o JS mandou continua
+   igual, mas resolve no valor declarado aqui, porque propriedade
+   personalizada é resolvida no elemento que a usa. A decisão continua sendo
+   do modelo; só a tinta muda.
+   PARA ESTENDER: entra nesta lista todo alvo que receba cor de sinal do JS e
+   seja texto abaixo de ~18px. Barra, pastilha e número grande ficam de fora,
+   porque lá a cor cheia é a certa. */
+.status-badge,
+.budget-row__value, .budget-row__note, .budget-row__note b,
+.split-bar-row__value, .cat-bar__text, .indicator__status,
+.health-stat b, .adv-count, .sub-item__price span, .plan-row__value,
+.forecast-alert, .settings-destination__stat-label,
+.cat-tag, .account-row__note, .movement-origin, .source-row__status small,
+/* `.plan-item`, e não `.plan-item__tag`: lá o JS não escreve a cor no
+   elemento do texto, escreve `--tone: var(--negative)` no ITEM inteiro, e é
+   no item que esse `var()` é resolvido. Remapear só o filho chegaria tarde
+   demais: `--tone` já teria virado a cor cheia antes de descer. */
+.plan-item {
+  --positive: var(--positive-ink);
+  --negative: var(--negative-ink);
+  --goal: var(--goal-ink);
+}
+/* PARECE UM CICLO E NÃO É, por causa de ONDE cada lado é declarado.
+   No tema escuro o `:root` diz `--positive-ink: var(--positive)` e a regra
+   acima diz `--positive: var(--positive-ink)`. Lido de longe é um laço, mas
+   `var()` dentro de propriedade personalizada é resolvido NO ELEMENTO QUE A
+   DECLARA: no `:root` o `--positive-ink` já vira `#27C79A` e é esse valor
+   literal que desce por herança. Quando a regra acima o usa, não há mais
+   `var()` do outro lado. Conferido no navegador: no tema escuro o selo sai
+   em `#E9736A`, a cor de sinal, e não na cor herdada do texto.
+   O que fecharia ciclo de verdade é declarar os dois NO MESMO elemento, e é
+   por isso que `--brand-dark` fica de fora da lista: no tema claro
+   `--brand-ink` aponta para ele, então o par cairia no mesmo elemento e o
+   navegador descartaria as duas, deixando a cor cair para a herdada. */
+
 /* ==================================================================
    8. NÚMEROS E LEITURA DE DADOS
    ------------------------------------------------------------------
@@ -261,12 +306,20 @@
 .tx-title, .tx-desc { font-size: 14px; font-weight: 600; margin: 0; letter-spacing: -0.012em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tx-meta { font-size: 11.5px; color: var(--ink-faint); margin: 3px 0 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tx-amount { font-size: clamp(13.5px, 3.6vw, 14.5px); font-weight: 650; flex-shrink: 0; margin: 0; white-space: nowrap; }
-.tx-amount--income { color: var(--positive); }
-.tx-amount--expense { color: var(--negative); }
+.tx-amount--income { color: var(--positive-ink); }
+.tx-amount--expense { color: var(--negative-ink); }
 
+/* A BOLHA PRECISA DE FUNDO PRÓPRIO.
+   Quase toda chamada recebe cor da categoria por `data-ui-css`, e por isso a
+   falta de um padrão passou despercebida: onde não há cor de categoria para
+   dar (a linha da central de movimentações, o cabeçalho dos diálogos, a lista
+   de fontes de dados) sobrava um ícone solto no ar, sem a pastilha que ele
+   tem em todo o resto do app. O padrão é a cor da marca; qualquer inline ou
+   modificador continua ganhando dele. */
 .icon-bubble {
   width: 40px; height: 40px; border-radius: 13px;
   display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  background: var(--brand-soft); color: var(--brand);
   box-shadow: var(--sheen);
 }
 .icon-bubble--lg { width: 46px; height: 46px; border-radius: 15px; }
@@ -363,7 +416,7 @@
               color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
 }
 .payment-chip:active { transform: scale(0.96); }
-.payment-chip.active { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-dark); }
+.payment-chip.active { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-ink); }
 .payment-chip--income.active { border-color: var(--positive); background: color-mix(in srgb, var(--positive) 12%, transparent); color: var(--positive); }
 
 .installments-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(56px, 1fr)); gap: 8px; margin: 0 0 4px; }
@@ -375,14 +428,14 @@
               color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
 }
 .installment-chip:active { transform: scale(0.94); }
-.installment-chip.active { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-dark); }
+.installment-chip.active { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-ink); }
 .installment-hint strong { color: var(--ink); font-weight: 700; }
 
 .submit-bar { margin-top: 6px; }
 
 .origin-chip {
   display: inline-flex; align-items: center; gap: 7px;
-  background: var(--brand-soft); color: var(--brand-dark);
+  background: var(--brand-soft); color: var(--brand-ink);
   border: 1px solid color-mix(in srgb, var(--brand) 22%, transparent); border-radius: 999px;
   padding: 7px 13px 7px 10px; font-size: 11.5px; font-weight: 650;
   max-width: 100%; min-width: 0; align-self: flex-start;
@@ -397,7 +450,7 @@
 
 .field__label-tag {
   font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em;
-  color: var(--brand-dark); background: var(--brand-soft);
+  color: var(--brand-ink); background: var(--brand-soft);
   border-radius: 5px; padding: 2px 6px; margin-left: 7px;
 }
 
@@ -412,7 +465,7 @@
   transition: background var(--dur-fast) var(--ease);
 }
 .cat-picker-option:hover { background: var(--paper); }
-.cat-picker-option.active { background: var(--brand-soft); color: var(--brand-dark); }
+.cat-picker-option.active { background: var(--brand-soft); color: var(--brand-ink); }
 .cat-picker-option > span:nth-child(2) { flex: 1; min-width: 0; }
 .cat-picker-option__hint { font-size: 11.5px; color: var(--ink-faint); font-weight: 500; }
 
@@ -779,7 +832,7 @@
   transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
 }
 .checkbox:active { transform: scale(0.9); }
-.checkbox.checked { background: var(--brand); border-color: var(--brand); }
+.checkbox.checked { background: var(--brand-solid); border-color: var(--brand-solid); }
 
 /* ==================================================================
    16. LEITOR DE QR / WRAPPED
@@ -800,7 +853,7 @@
   border-radius: 999px; padding: 5px 11px; font-size: 11px; font-weight: 700;
   background: var(--paper-alt); color: var(--ink-soft);
 }
-.qr-result-badge--pix { background: var(--brand-soft); color: var(--brand-dark); }
+.qr-result-badge--pix { background: var(--brand-soft); color: var(--brand-ink); }
 .qr-result-badge--warn { background: var(--goal-soft); color: var(--goal); }
 .qr-fields { display: flex; flex-direction: column; gap: 14px; }
 .qr-meta {
@@ -879,7 +932,7 @@
   transition: all var(--dur-fast) var(--ease);
 }
 .cat-group-chip:active { transform: scale(0.95); }
-.cat-group-chip.active { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-dark); }
+.cat-group-chip.active { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-ink); }
 .cat-group-chip svg { flex-shrink: 0; }
 
 .card--assistant { border-color: color-mix(in srgb, var(--brand) 24%, var(--border)); }
@@ -921,7 +974,7 @@
   display: inline-flex; align-items: center; gap: 5px;
   transition: all var(--dur-fast) var(--ease);
 }
-.cat-budget-suggest:hover { border-color: var(--brand); color: var(--brand-dark); border-style: solid; background: var(--brand-soft); }
+.cat-budget-suggest:hover { border-color: var(--brand); color: var(--brand-ink); border-style: solid; background: var(--brand-soft); }
 
 .budget-impact {
   border: 1px solid var(--border); border-radius: var(--radius-sm);
@@ -973,7 +1026,7 @@
   cursor: pointer; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   transition: all var(--dur-fast) var(--ease);
 }
-.quick-entry-example:hover { border-color: var(--brand); color: var(--brand-dark); border-style: solid; background: var(--brand-soft); }
+.quick-entry-example:hover { border-color: var(--brand); color: var(--brand-ink); border-style: solid; background: var(--brand-soft); }
 
 .nlp-drafts { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
 .nlp-draft { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 13px 14px; background: var(--paper); }
@@ -998,13 +1051,13 @@
 .nlp-tag--mid { background: var(--goal-soft); color: var(--goal); border-color: transparent; }
 .nlp-tag--low { background: var(--negative-soft); color: var(--negative); border-color: transparent; }
 .nlp-tag--action { cursor: pointer; font-family: inherit; transition: all var(--dur-fast) var(--ease); }
-.nlp-tag--action:hover { border-color: var(--brand); color: var(--brand-dark); }
+.nlp-tag--action:hover { border-color: var(--brand); color: var(--brand-ink); }
 .nlp-cat-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .nlp-actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 14px; }
 .nlp-actions .btn { flex: 1 1 auto; min-width: 140px; }
 .nlp-refine { font-size: 11.5px; color: var(--ink-soft); margin-top: 10px; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
 .nlp-refine button {
-  border: none; background: transparent; color: var(--brand-dark);
+  border: none; background: transparent; color: var(--brand-ink);
   font-weight: 700; font-family: inherit; font-size: 11.5px; cursor: pointer; padding: 0;
   text-decoration: underline; text-underline-offset: 3px;
 }
@@ -1053,7 +1106,7 @@
   background: linear-gradient(150deg, var(--brand-soft), color-mix(in srgb, var(--brand) 4%, var(--card)));
   border-color: color-mix(in srgb, var(--brand) 22%, transparent);
 }
-.invest-stat--total b { color: var(--brand-dark); font-size: clamp(21px, 5.5vw, 25px); }
+.invest-stat--total b { color: var(--brand-ink); font-size: clamp(21px, 5.5vw, 25px); }
 .invest-stat--interest b { color: var(--positive); }
 .invest-chart { width: 100%; height: 210px; display: block; margin-top: 6px; }
 
@@ -1151,7 +1204,7 @@
   .side-nav__item svg { flex-shrink: 0; transition: transform var(--dur) var(--ease); }
   .side-nav__item:hover:not(.active) { background: var(--paper); color: var(--ink); }
   .side-nav__item:hover svg { transform: translateX(1px); }
-  .side-nav__item.active { background: var(--brand-soft); color: var(--brand-dark); }
+  .side-nav__item.active { background: var(--brand-soft); color: var(--brand-ink); }
   .side-nav__item.active::before {
     content: ""; position: absolute; left: -16px; top: 50%; transform: translateY(-50%);
     width: 3px; height: 22px; border-radius: 0 3px 3px 0; background: var(--brand);

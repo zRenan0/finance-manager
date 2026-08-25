@@ -130,7 +130,17 @@
 
 /* ---- Plano de ação ---- */
 .health-sub { font-size: 12.5px; color: var(--ink-soft); line-height: 1.55; margin: -4px 0 0; }
-.plan-list { list-style: none; margin: 16px 0 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+/* DUAS TELAS DIFERENTES CHAMAM A LISTA DE "plan-list".
+   Aqui e o Plano de acao da Saude (`<ol>`, em js/screens/health.js); em
+   css/screens/intelligence.css e o Plano de economia da Central (`<div>`, em
+   js/screens/insights.js). As duas folhas declaravam `.plan-list` solto, e a
+   Central e importada DEPOIS da Saude em css/style.css: o `gap:8px` e o
+   `margin-top:12px` de la venciam aqui, e o Plano de acao passou a sair com o
+   espacamento de outra tela sem que nada nesta folha tivesse mudado.
+   O seletor de elemento separa as duas sem tocar no HTML nem renomear classe
+   que o JS ja usa. Quem mexer numa das duas telas: se a lista deixar de ser
+   `<ol>` aqui (ou `<div>` la), este par volta a colidir. */
+ol.plan-list { list-style: none; margin: 16px 0 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
 .plan-item {
   display: flex; align-items: flex-start; gap: 12px;
   background: var(--card-alt);

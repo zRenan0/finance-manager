@@ -84,6 +84,53 @@
   --goal:          #A9791F;   /* latão */
   --goal-soft:     #F7EFDC;
 
+  /* --- Tintas de sinal para TEXTO MIÚDO ---------------------------------
+     As cores acima foram escolhidas para preenchimentos, ícones e números
+     grandes, onde o tom mais claro é o certo. Em texto de 10 a 12,5px elas
+     não fecham a conta da WCAG AA: `--positive` dá 4,30:1 no branco e 3,71:1
+     no próprio `--positive-soft`; `--goal` dá 3,86:1 e 3,37:1. É o pior caso
+     possível, porque a etiqueta miúda ("Desejos", "Ótimo", "R$ 91,80 / R$
+     375,00") não tem frase em volta de onde deduzir o que estava escrito.
+     Estas variantes escurecem o mínimo necessário para passar de 4,5:1 em
+     TODOS os fundos claros que a interface usa de verdade: branco do cartão,
+     papel da página, `--card-alt`, o próprio `*-soft` e a pastilha de 12% e
+     16% da cor sobre o cartão, que é o fundo dos selos de estado. Mantêm o
+     matiz. No tema escuro o problema se inverte (o fundo é que é escuro),
+     então lá elas voltam a apontar para a cor de sinal, que já passa com
+     folga.
+     REGRA: preenchimento, barra, ícone e número grande usam `--positive`;
+     texto pequeno em cima de superfície clara usa `--positive-ink`. */
+  --positive-ink:  #0C725B;
+  --negative-ink:  #AE3E36;
+  --goal-ink:      #866019;
+  --brand-ink:     var(--brand-dark);
+
+  /* Chapa de marca que CARREGA BRANCO em cima: chip ativo, caixa marcada,
+     atalho de teclado. É token separado de `--brand` porque no tema escuro a
+     marca clareia para #1FB394 e branco em cima dela cai para 2,65:1; a
+     mesma regra de estilo servia os dois temas e só passava em um. Aqui vale
+     6,42:1 no claro e 5,26:1 no escuro. Preenchimento sem texto (bolinha,
+     trilho de progresso, filete do item ativo) continua em `--brand`. */
+  --brand-solid:   var(--brand);
+
+  /* --- Apelidos de superfície ---
+     `--surface`/`--surface-soft` são os nomes que as folhas de tela usam para
+     "o cartão" e "o bloco recuado dentro do cartão". Sem esta definição, todo
+     `background: var(--surface-soft)` era declaração inválida e caía para
+     transparente: os blocos do resumo de movimentações, o ícone da caixa de
+     revisão e o ícone do diálogo de confirmação ficavam sem fundo nenhum. */
+  --surface:       var(--card);
+  --surface-soft:  var(--card-alt);
+
+  /* --- Escala do texto miúdo ---
+     Mesmo caso: `font-size: var(--text-xs)` sem o token definido é declaração
+     inválida, e o tamanho caía para o herdado (16px). Era por isso que a data
+     do dia e a linha "Lançamento manual" saíam maiores que o próprio título
+     da movimentação. Os valores acompanham a escala já usada à mão na folha
+     (`.tx-meta` 11,5px, `.card-subtitle` 12,5px). */
+  --text-xs:       11.5px;
+  --text-sm:       13px;
+
   /* --- Elevação em camadas (nunca uma sombra só) --- */
   --shadow-xs: 0 1px 1px rgba(11,21,18,0.03), 0 1px 2px rgba(11,21,18,0.04);
   --shadow:    0 1px 2px rgba(11,21,18,0.04), 0 2px 6px rgba(11,21,18,0.05);
@@ -191,6 +238,18 @@
   --goal:          #D9AB57;
   --goal-soft:     rgba(217,171,87,0.15);
 
+  /* No escuro a cor de sinal JÁ é a tinta legível: #27C79A dá 6,41:1 sobre o
+     próprio fundo suave e 8,35:1 sobre o cartão. Quem falhava aqui era o
+     `--brand-dark`, usado como cor de texto em ~20 lugares (chip de forma de
+     pagamento ativo, etiqueta de grupo de categoria, item ativo da barra
+     lateral, "Como foi calculado"): #0E7A66 sobre o fundo esmeralda suave do
+     tema escuro dá 2,73:1, ou seja, verde escuro em cima de verde escuro. */
+  --positive-ink:  var(--positive);
+  --negative-ink:  var(--negative);
+  --goal-ink:      var(--goal);
+  --brand-ink:     var(--brand);
+  --brand-solid:   var(--brand-dark);
+
   --shadow-xs: 0 1px 2px rgba(0,0,0,0.4);
   --shadow:    0 1px 2px rgba(0,0,0,0.4), 0 2px 8px rgba(0,0,0,0.3);
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.4), 0 2px 8px rgba(0,0,0,0.3);
@@ -211,6 +270,21 @@
 * { box-sizing: border-box; min-width: 0; }
 html, body { margin: 0; padding: 0; }
 html { -webkit-text-size-adjust: 100%; }
+
+/* O TEMA DO APP MANDA NOS CONTROLES NATIVOS, NÃO O DO SISTEMA.
+   ------------------------------------------------------------------
+   O `<meta name="color-scheme" content="light dark">` do index.html serve
+   para a primeira pintura, antes de qualquer CSS, e ele diz ao navegador
+   "aceito os dois". Sem uma regra em CSS que feche a escolha, quem usa o
+   aparelho no escuro e o app no claro recebia caixa de seleção, lista de
+   `<select>`, seletor de data e barra de rolagem pintadas no ESQUEMA DO
+   SISTEMA: era isso o quadrado preto ao lado de cada movimentação numa tela
+   branca. `color-scheme` na raiz é o único jeito de mandar nesse desenho, e
+   ele precisa seguir o `data-theme`, que é a escolha do usuário DENTRO do
+   app; `js/boot.js` já escreve o atributo no <head>, antes da primeira
+   pintura, então não há troca visível. */
+:root { color-scheme: light; }
+[data-theme="dark"] { color-scheme: dark; }
 body {
   background: var(--paper);
   color: var(--ink);
@@ -299,6 +373,28 @@ a { color: inherit; }
 }
 .screen > h1.page-title { margin: 0 !important; }
 .screen-header > div:first-child { flex: 1 1 200px; min-width: 0; }
+
+/* AS AÇÕES DO CABEÇALHO SÃO DE TODAS AS TELAS, NÃO DE UMA.
+   ------------------------------------------------------------------
+   `.header-actions` é usada no Início (js/screens/dashboard.js) e na Carteira
+   (js/screens/portfolio.js), mas estava declarada DUAS VEZES, em duas folhas
+   de tela: css/screens/investments.css e css/screens/notifications-onboarding.css.
+   Como a segunda é importada depois em css/style.css, o `gap` dela vencia nas
+   duas telas: quem ajustasse o cabeçalho da Carteira via o número mudar e o
+   espaçamento continuar igual, porque a última palavra era de outro arquivo.
+   Regra que vale em mais de uma tela mora na camada compartilhada, e é aqui.
+   A única parte que continua na folha da Carteira é `.header-actions .btn`,
+   porque só lá existem botões de texto nessa fileira. */
+.header-actions {
+  display: flex; align-items: center; flex-wrap: wrap;
+  gap: 10px; justify-content: flex-end;
+}
+@media (max-width: 519px) {
+  /* No celular a fileira desce para a linha de baixo do cabeçalho e passa a
+     ter a largura inteira; alinhada à esquerda ela fica sob o título, e não
+     pendurada na borda direita. */
+  .header-actions { width: 100%; justify-content: flex-start; }
+}
 
 .eyebrow {
   font-size: 11.5px; font-weight: 700; color: var(--ink-faint); margin: 0;

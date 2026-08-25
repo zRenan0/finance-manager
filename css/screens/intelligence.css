@@ -87,7 +87,10 @@
 .adv-detail-row b { font-family: var(--font-num); }
 
 /* ---- Plano de economia ---- */
-.plan-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+/* `div.plan-list` e nao `.plan-list`: a Saude usa o mesmo nome de classe para
+   o Plano de acao dela (`<ol>`, ver css/screens/health.css). Sem o seletor de
+   elemento, esta regra, que e importada depois, mandava tambem la. */
+div.plan-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
 .plan-row {
   display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center; gap: 10px;

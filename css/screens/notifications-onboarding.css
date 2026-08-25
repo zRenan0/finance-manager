@@ -5,9 +5,9 @@
    JS (`NOTIF_TONE_CLASS`), como nos Módulos 2, 5 e 7. Uma regra de estilo
    nunca decide se um aviso é urgente. */
 
-.header-actions {
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-}
+/* `.header-actions` saiu daqui para css/base.css: a classe e do Inicio e da
+   Carteira, e esta folha, importada depois de investments.css, estava dando a
+   ultima palavra sobre o cabecalho de telas que nao sao dela. */
 
 .notif-bell {
   position: relative; width: 40px; height: 40px; flex: 0 0 auto;
@@ -227,7 +227,7 @@
   flex: 0 0 auto; width: 19px; height: 19px; border-radius: 6px;
   border: 1.5px solid var(--border); display: inline-flex; align-items: center; justify-content: center;
 }
-.onb__toggle.active .onb__toggle-box { background: var(--brand); border-color: var(--brand); color: #fff; }
+.onb__toggle.active .onb__toggle-box { background: var(--brand-solid); border-color: var(--brand-solid); color: #fff; }
 
 .onb__presets { display: flex; flex-direction: column; gap: 9px; }
 .onb__preset {

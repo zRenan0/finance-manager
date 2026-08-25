@@ -7,7 +7,9 @@
    regra de estilo nunca decide se um número é bom ou ruim.
    ================================================================== */
 
-.header-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+/* A regra base de `.header-actions` mora em css/base.css: a classe é usada
+   também pelo Início, e declarar aqui fazia duas folhas de tela disputarem o
+   mesmo seletor. Ver o comentário de lá. */
 
 /* ---- Carteira: lista de aplicações ---- */
 .pf-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
@@ -121,7 +123,7 @@
   cursor: pointer; transition: all 160ms ease;
 }
 .sim-chip:hover { border-color: var(--brand); color: var(--ink); }
-.sim-chip.active { background: var(--brand); border-color: var(--brand); color: #fff; }
+.sim-chip.active { background: var(--brand-solid); border-color: var(--brand-solid); color: #fff; }
 .sim-subtitle { margin: 0 0 12px; }
 
 .sim-options { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -178,7 +180,9 @@
 .rates-derived b { font-family: var(--font-num); color: var(--ink); }
 
 @media (max-width: 519px) {
-  .header-actions { width: 100%; justify-content: stretch; }
+  /* `width` e `justify-content` do celular tambem sairam para css/base.css.
+     Aqui fica so o que e desta tela: os botoes de texto da Carteira dividem a
+     fileira em partes iguais. O Inicio nao tem `.btn` neste lugar. */
   .header-actions .btn { flex: 1 1 0; }
   .pf-item__head { grid-template-columns: 10px minmax(0, 1fr) auto; }
   .pf-item__chevron { display: none; }

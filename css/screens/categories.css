@@ -120,7 +120,7 @@
   font-size: 12px; font-weight: 650;
   transition: border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
 }
-.cat-node__add:hover { border-style: solid; border-color: var(--brand); color: var(--brand-dark); background: var(--brand-soft); }
+.cat-node__add:hover { border-style: solid; border-color: var(--brand); color: var(--brand-ink); background: var(--brand-soft); }
 
 .cat-bar { display: flex; align-items: center; gap: 9px; padding: 0 0 8px; }
 .cat-bar .progress { flex: 1; height: 5px; }
@@ -146,14 +146,19 @@
   .cat-node__main { gap: 9px; padding-left: 6px; padding-right: 6px; margin: 0 -6px; }
   .cat-node__name { font-size: 13.5px; }
 }
-.cat-tag--necessidade { background: var(--brand-soft); color: var(--brand-dark); }
-.cat-tag--desejo { background: var(--goal-soft); color: var(--goal); }
-.cat-tag--futuro { background: var(--positive-soft); color: var(--positive); }
+/* A etiqueta do grupo tem 10px (9,5px no celular) e é a menor letra da tela.
+   Com a cor de sinal cheia ela dava 3,37:1 no latão e 3,71:1 no verde, sobre
+   o próprio fundo suave. Aqui vale a tinta de texto, não a de preenchimento;
+   as pastilhas de ícone logo abaixo continuam com a cor cheia, porque lá o
+   que carrega o sentido é a forma, não a leitura. */
+.cat-tag--necessidade { background: var(--brand-soft); color: var(--brand-ink); }
+.cat-tag--desejo { background: var(--goal-soft); color: var(--goal-ink); }
+.cat-tag--futuro { background: var(--positive-soft); color: var(--positive-ink); }
 
 /* ---------- Lente 2: grupos ---------- */
 .cat-group-card__head { display: flex; align-items: center; gap: 12px; }
 .cat-group-card__text { flex: 1; min-width: 0; }
-.cat-group-card__icon--necessidade { background: var(--brand-soft); color: var(--brand-dark); }
+.cat-group-card__icon--necessidade { background: var(--brand-soft); color: var(--brand-ink); }
 .cat-group-card__icon--desejo { background: var(--goal-soft); color: var(--goal); }
 .cat-group-card__icon--futuro { background: var(--positive-soft); color: var(--positive); }
 .cat-group-card__pct {
@@ -226,7 +231,7 @@
               color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
 }
 .cat-parent-option:active { transform: scale(0.96); }
-.cat-parent-option.active { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-dark); }
+.cat-parent-option.active { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-ink); }
 .cat-parent-option__dot { width: 9px; height: 9px; border-radius: 999px; flex-shrink: 0; }
 
 .cat-group-choice { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
@@ -240,7 +245,7 @@
               color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
 }
 .cat-group-choice__option:active { transform: scale(0.96); }
-.cat-group-choice__option.active { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-dark); }
+.cat-group-choice__option.active { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-ink); }
 
 .cat-icon-grid {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(46px, 1fr)); gap: 7px;
@@ -256,7 +261,7 @@
               color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
 }
 .cat-icon-option:active { transform: scale(0.92); }
-.cat-icon-option.active { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-dark); }
+.cat-icon-option.active { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-ink); }
 
 .cat-color-row { display: flex; flex-wrap: wrap; gap: 9px; }
 .cat-color-option {

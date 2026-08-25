@@ -3,7 +3,7 @@
 .hero-label-row .hero-label { margin:0; }
 .calculation-link {
   min-height:44px; display:inline-flex; align-items:center; justify-content:center; gap:6px;
-  color:var(--brand-dark); font-size:12px; font-weight:700; padding:0 10px;
+  color:var(--brand-ink); font-size:12px; font-weight:700; padding:0 10px;
   border-radius:10px; background:var(--brand-soft); border:1px solid color-mix(in srgb,var(--brand) 24%,transparent);
 }
 .card--hero .calculation-link { color:#fff; background:rgba(255,255,255,.12); border-color:rgba(255,255,255,.25); }
@@ -16,7 +16,7 @@
 .calculation-kinds { display:flex; flex-wrap:wrap; gap:7px; margin:4px 0 16px; }
 .calculation-kind { min-height:30px; display:inline-flex; align-items:center; gap:5px; padding:0 9px; border-radius:999px; font-size:11px; font-weight:750; }
 .calculation-kind--realized { color:var(--positive); background:var(--positive-soft); }
-.calculation-kind--forecast { color:var(--brand-dark); background:var(--brand-soft); }
+.calculation-kind--forecast { color:var(--brand-ink); background:var(--brand-soft); }
 .calculation-kind--estimated { color:color-mix(in srgb,var(--goal) 78%,var(--ink)); background:var(--goal-soft); }
 .calculation-summary { margin:0 0 16px; color:var(--ink); line-height:1.6; }
 .calculation-facts { display:grid; gap:0; margin:0; border:1px solid var(--border-soft); border-radius:var(--radius-sm); overflow:hidden; }
@@ -39,7 +39,7 @@
 .assistant-dialog { max-width:600px; }
 .assistant-questions { display:grid; gap:8px; }
 .assistant-question { min-height:48px; display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 13px; text-align:left; border:1px solid var(--border-soft); border-radius:var(--radius-sm); background:var(--card-alt); color:var(--ink); font-size:13px; font-weight:650; }
-.assistant-question.is-selected { border-color:var(--brand); background:var(--brand-soft); color:var(--brand-dark); }
+.assistant-question.is-selected { border-color:var(--brand); background:var(--brand-soft); color:var(--brand-ink); }
 .assistant-answer { margin-top:14px; padding:15px; border-radius:var(--radius-sm); background:linear-gradient(145deg,var(--brand-soft),var(--card-alt)); border:1px solid color-mix(in srgb,var(--brand) 24%,var(--border)); }
 .assistant-answer p:not(.field__label) { margin:6px 0 14px; line-height:1.6; color:var(--ink); }
 .assistant-hint { margin:14px 0 0; color:var(--ink-soft); font-size:12px; line-height:1.55; }

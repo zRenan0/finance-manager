@@ -311,12 +311,36 @@
   border: 0;
 }
 
+/* A LARGURA TAMBEM PRECISA SER DITA, NAO SO O `display`.
+   ------------------------------------------------------------------
+   Mover a grade para um <span> resolveu metade do problema e o cartao voltou
+   quebrado do iPhone assim mesmo: titulo e subtitulo empilhados numa coluna
+   de ~45px, com "Apagar" quebrando no meio da palavra. Uma coluna de ~45px e
+   exatamente a largura de min-content deste texto, e essa medida e a pista.
+   DIAGNOSTICO (nao reproduzido fora do WebKit, ver abaixo): o WebKit envolve
+   o conteudo de um <button> numa CAIXA ANONIMA propria; e por causa dela que
+   `align-items` funciona num botao sem que ninguem declare `display:flex`.
+   Se essa caixa dimensiona o filho pelo conteudo em vez de esticar, o <span>
+   deixa de ocupar a linha inteira e encolhe ate o min-content. Bate com o que
+   o print mostra.
+   AS TRES LINHAS ABAIXO SAO DEFENSIVAS, e de proposito. `width:100%` fecha a
+   questao em fluxo normal; `flex:1 1 auto` fecha se a caixa anonima for flex;
+   e o `min-width` e a rede por baixo das duas: seja qual for o mecanismo, a
+   linha nunca desce de 240px sem nunca passar do container. No Chrome as tres
+   nao mudam um pixel (medido: a linha da 317,7px com e sem elas), entao o
+   custo de manter e zero e o de tirar e o cartao voltar quebrado no aparelho
+   de sempre.
+   PARA QUEM TIVER UM IPHONE A MAO: confirme o cartao aberto e fechado antes
+   de simplificar isto. */
 .account-danger__row {
   display: grid;
   grid-template-columns: 38px minmax(0, 1fr) auto;
   gap: 12px;
   align-items: center;
   min-height: 46px;
+  width: 100%;
+  min-width: min(100%, 240px);
+  flex: 1 1 auto;
 }
 
 .account-danger__summary::-webkit-details-marker {
