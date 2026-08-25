@@ -171,6 +171,8 @@
   font-size: 12.5px; color: var(--negative); line-height: 1.5;
 }
 .forecast-alert svg { flex-shrink: 0; margin-top: 1px; }
+/* Mesmo motivo do `.goal-eta > span`: a frase tem um <b> com a data no meio. */
+.forecast-alert > span { min-width: 0; }
 .forecast-chart-wrap { margin-top: 16px; }
 .forecast-assumptions { margin-top: 18px; border-top: 1px solid var(--border-soft); padding-top: 14px; }
 .forecast-list { margin: 0; padding-left: 18px; }
@@ -263,11 +265,18 @@
 }
 .goal-number__hint { display: block; font-size: 10.5px; color: var(--ink-faint); margin-top: 2px; line-height: 1.35; }
 
+/* CADA PEDACO DE TEXTO SOLTO VIRA UM ITEM FLEX SEPARADO.
+   A frase e "icone + texto", e o texto traz um <b> no meio com a data. Sem o
+   <span> em volta, o navegador cria um item flex para o texto antes do <b>,
+   outro para o <b> e outro para o texto depois: viravam tres colunas lado a
+   lado, e a data quebrava no meio ("25/06/20" numa linha, "27" na seguinte).
+   O `min-width: 0` deixa a coluna unica encolher ate a largura do cartao. */
 .goal-eta {
   display: flex; align-items: flex-start; gap: 7px;
   font-size: 12px; color: var(--ink-soft); margin: 12px 0 0; line-height: 1.5;
 }
 .goal-eta svg { flex-shrink: 0; margin-top: 2px; }
+.goal-eta > span { min-width: 0; }
 .goal-eta.is-late { color: var(--negative); }
 .goal-spark { margin-top: 14px; }
 

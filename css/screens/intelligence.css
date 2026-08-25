@@ -111,14 +111,22 @@
   font-variant-numeric: tabular-nums;
 }
 .sub-hero__monthly { margin: 6px 0 0; font-size: 0.8rem; color: var(--ink-soft); }
-.sub-upcoming { display: flex; flex-wrap: wrap; gap: 6px; }
+.sub-upcoming { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+/* A ETIQUETA NAO PODE EMPURRAR A TELA.
+   Ela junta data, nome da assinatura e valor numa linha so, com nowrap. Um nome
+   comprido ("Assinatura de streaming de musica e video familiar") passava dos
+   400px num aparelho de 375px: a pagina inteira ganhava rolagem lateral e a
+   barra de navegacao de baixo, que mede a largura em porcentagem, ia junto e
+   saia da tela. O teto e a reticencia mantem a linha unica sem alargar nada. */
 .sub-chip {
   display: inline-flex; align-items: center; gap: 6px;
+  max-width: 100%; min-width: 0;
   padding: 5px 10px; border-radius: 999px;
   background: var(--card-alt); border: 1px solid var(--border-soft);
   font-size: 0.72rem; color: var(--ink-soft); white-space: nowrap;
 }
 .sub-chip i { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.sub-chip__txt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .sub-list { display: flex; flex-direction: column; gap: 8px; margin-top: var(--stack); }
 .sub-item {

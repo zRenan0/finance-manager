@@ -850,9 +850,12 @@
    ================================================================== */
 .split-bars { display: flex; flex-direction: column; gap: 16px; }
 .split-bar-row__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; gap: 10px; }
-.split-bar-row__label { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; color: var(--ink); }
+.split-bar-row__label { display: inline-flex; align-items: center; gap: 7px; min-width: 0; font-size: 13px; font-weight: 600; color: var(--ink); }
 .split-bar-row__label svg { flex-shrink: 0; opacity: 0.7; }
-.split-bar-row__pct { font-weight: 700; color: var(--ink-faint); font-size: 11px; }
+/* Em tela de 320px o rotulo do grupo consumia a linha inteira e espremia a
+   porcentagem para 4px: "50%" aparecia cortado ao lado do nome. Ela e curta e
+   nunca deve encolher; quem cede espaco e o nome do grupo. */
+.split-bar-row__pct { flex-shrink: 0; font-weight: 700; color: var(--ink-faint); font-size: 11px; }
 .split-bar-row__value { font-size: 12.5px; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
 
 .split-warning {

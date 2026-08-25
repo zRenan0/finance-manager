@@ -101,8 +101,8 @@ function renderSubsHero(m) {
       <div class="health-stat"><span>Próximos 30 dias</span><b>${fmtBRL(m.upcomingTotal)}</b></div>
     </div>
     ${m.upcoming.length > 0 ? `<div class="sub-upcoming">
-      ${m.upcoming.slice(0, 4).map((s) => `<span class="sub-chip">
-        <i data-ui-css="background:${s.categoryColor}"></i>${fmtDateShort(s.nextDate)} · ${escapeHtml(s.name)} · ${fmtBRL(s.lastAmount)}
+      ${m.upcoming.slice(0, 4).map((s) => `<span class="sub-chip" title="${escapeHtml(s.name)}">
+        <i data-ui-css="background:${s.categoryColor}"></i><span class="sub-chip__txt">${fmtDateShort(s.nextDate)} · ${escapeHtml(s.name)} · ${fmtBRL(s.lastAmount)}</span>
       </span>`).join("")}
     </div>` : ""}
   </div>`;

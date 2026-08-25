@@ -25,7 +25,14 @@
 // pacote do aplicativo mudou e precisa substituir o app.generated.js em cache.
 // v55: conta, sincronização automática e extrato de acessos mudaram. A promoção
 // garante que instalações existentes recebam o cliente e os estilos juntos.
-const VERSION = "v55";
+// v56: o portão da subida deixou de ficar preso, e é o aparelho JÁ INSTALADO
+// que está travado nesse estado. Sem promover a versão, ele continuaria
+// servindo o pacote antigo do cache e nunca voltaria a enviar. Vêm no mesmo
+// balde o painel de apagar conta e os consertos de tela do celular: atalho de
+// pular preso no alto, data da meta quebrada no meio, caixa de marcar
+// deformada, valor solto na lista, ações de avisos sem estilo e a grade do
+// cartão de exclusão que o Safari ignorava.
+const VERSION = "v56";
 const BUILD_ID = VERSION;
 const CACHE_NAME = "financas-cache-" + VERSION;
 // A PÁGINA COMERCIAL TEM CACHE PRÓPRIO.

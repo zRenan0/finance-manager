@@ -290,15 +290,33 @@
   overflow: hidden;
 }
 
+/* O resumo virou <button> quando o painel deixou de ser <details>: o
+   aberto/fechado passou a morar no estado do app, porque render() refaz o DOM
+   inteiro e o painel se fechava sozinho no meio da digitacao da senha.
+   A GRADE MORA NUM <span> DENTRO DO BOTAO, nao no botao. Foi assim que este
+   cartao apareceu quebrado no iPhone: o Safari ignorava o `display` pedido no
+   elemento de controle, a grade nao valia, o titulo e o subtitulo saiam
+   grudados ("Apagar conta e dadosExclua a conta...") e cada icone caia numa
+   linha propria. Num <span> comum nenhum navegador discute a grade. */
 .account-danger__summary {
+  display: block;
+  width: 100%;
+  padding: 14px 18px;
+  cursor: pointer;
+  list-style: none;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+}
+
+.account-danger__row {
   display: grid;
   grid-template-columns: 38px minmax(0, 1fr) auto;
   gap: 12px;
   align-items: center;
-  min-height: 74px;
-  padding: 14px 18px;
-  cursor: pointer;
-  list-style: none;
+  min-height: 46px;
 }
 
 .account-danger__summary::-webkit-details-marker {
@@ -335,7 +353,7 @@
   transition: transform var(--dur) var(--ease);
 }
 
-.account-danger[open] .account-danger__chevron {
+.account-danger--open .account-danger__chevron {
   transform: rotate(180deg);
 }
 
@@ -344,8 +362,38 @@
   border-top: 1px solid var(--border-soft);
 }
 
+/* O corpo continua no DOM quando recolhido (leitores de tela seguem o
+   aria-controls, e o `hidden` tira do foco). `display: none` precisa ser
+   explicito porque a folha define `display` para descendentes de .card. */
+.account-danger__body[hidden] { display: none; }
+
 .account-danger__body > .card-subtitle {
   padding-top: 16px;
+}
+
+/* O aviso mora DENTRO do painel, ao lado do botao. Quando ele era escrito no
+   rodape da tela, quem clicava sem preencher tudo nao via nada acontecer. */
+.account-danger__hint {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--negative-soft);
+  color: var(--negative);
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.account-danger__hint svg {
+  flex: none;
+  margin-top: 1px;
+}
+
+.account-danger__requisito {
+  margin-top: 10px;
 }
 
 .account-message {

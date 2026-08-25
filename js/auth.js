@@ -87,6 +87,9 @@ function freshAccountState() {
     // "VÍNCULO DOS DADOS DESTE APARELHO COM A CONTA" mais abaixo.
     guestLink: freshGuestLink(),
     form: { email: "", password: "", newPassword: "", deletePassword: "", deleteText: "" }, devices: [],
+    // Aviso do bloco de exclusão, desenhado dentro do próprio painel. Separado
+    // de `error` porque aquele mora no rodapé da tela, longe do botão.
+    deleteHint: "",
   };
 }
 
@@ -148,6 +151,7 @@ function resetScopedUiState(escopo) {
   state.categoryPickerFor = null;
   state.confirmation = null;
   state.overlayStack = [];
+  state.accountDangerOpen = false;
   state.importRows = null;
   state.importFilename = null;
   state.importError = null;
@@ -284,18 +288,57 @@ async function concludeGuestLink(token, escopo, visitante) {
 }
 
 // A sequência completa, chamada depois de a sessão e o escopo estarem prontos.
+// O PORTÃO DA SUBIDA NÃO PODE FICAR PRESO. NUNCA.
+//
+// `CloudSync.prepareAccount()` fecha o portão de propósito: ele segura a fila e
+// a semeadura até a decisão de vínculo sair, para o próprio aparelho não
+// preencher a conta e depois concluir que ela já estava em uso.
+//
+// A sequência abaixo desiste em vários pontos (`if (!valido()) return`) quando
+// outra entrada, uma troca de escopo ou uma renovação de sessão acontece no
+// meio: é o certo, porque a decisão pertence à sessão que veio depois. O que
+// estava errado era desistir DEIXANDO O PORTÃO FECHADO. A partir daí o aparelho
+// entrava num estado que não dava sinal nenhum: baixava o que os outros
+// escreviam, aplicava, mostrava "Tudo sincronizado", e não enviava mais NADA -
+// nem naquela sessão, nem no dia seguinte, porque só recarregar a página ou
+// sair da conta reabria o portão. No servidor isso aparece como um aparelho
+// que consulta todo dia e nunca gravou uma operação sequer.
+//
+// Por isso o portão é liberado aqui, no `finally`, e não em cada saída: caminho
+// novo acrescentado depois já nasce coberto. Liberar duas vezes é barato de
+// propósito (ver `finishAccountBootstrap`).
 async function bootstrapAccountLink() {
+  let liberou = false;
+  const marcar = () => { liberou = true; };
+  try {
+    return await executarVinculoDaConta(marcar);
+  } finally {
+    if (!liberou && typeof CloudSync !== "undefined") {
+      try { await finishAccountBootstrapAndGate(); }
+      catch (error) {
+        if (typeof reportSafeError === "function") reportSafeError("sync", error, "bootstrap_gate_release");
+      }
+    }
+  }
+}
+
+async function executarVinculoDaConta(marcarLiberado) {
   // Sem motor de sincronização não há descida para esperar, e o portão do
   // assistente não pode ficar fechado à espera de uma decisão que não vem.
   if (typeof CloudSync === "undefined") {
+    marcarLiberado();
     if (typeof refreshOnboardingGate === "function" && refreshOnboardingGate({ release: true })) render();
     return;
   }
   const escopo = FinanceStore.scope();
-  if (escopo === GUEST_SCOPE) return;
+  // Visitante não tem conta para preparar: o portão sequer chegou a fechar.
+  if (escopo === GUEST_SCOPE) { marcarLiberado(); return; }
   const token = ++__guestLinkToken;
   const userId = state.account.userId;
   const valido = () => token === __guestLinkToken && FinanceStore.scope() === escopo && state.account.authenticated;
+  // Liberar o portão e AVISAR que ele foi liberado, para a rede de segurança
+  // do chamador não repetir o trabalho.
+  const liberar = async () => { marcarLiberado(); await finishAccountBootstrapAndGate(); };
 
   setGuestLink({ phase: "checking", error: "", errorCode: "", busy: true });
 
@@ -312,12 +355,12 @@ async function bootstrapAccountLink() {
 
   if (!visitante || visitante.readable === false) {
     setGuestLink({ phase: "pending", error: guestLinkFailureText("unreadable"), errorCode: "guest_unreadable" });
-    await finishAccountBootstrapAndGate();
+    await liberar();
     return;
   }
   if (!visitante.exists) {
     setGuestLink({ phase: "idle", summary: null, digest: "" });
-    await finishAccountBootstrapAndGate();
+    await liberar();
     return;
   }
   setGuestLink({ summary: visitante, digest: visitante.digest || "" });
@@ -329,11 +372,12 @@ async function bootstrapAccountLink() {
   if (!valido()) return;
   if (diario && diario.status === "blocked") {
     setGuestLink({ phase: "confirm", errorCode: "remote_changed", error: "A conta mudou em outro aparelho. Confirme como juntar os dados." });
-    await finishAccountBootstrapAndGate();
+    await liberar();
     return;
   }
   if (diario) {
     setGuestLink({ phase: "linking", stats: diario.stats || null });
+    marcarLiberado();
     await concludeGuestLink(token, escopo, visitante);
     return;
   }
@@ -346,12 +390,12 @@ async function bootstrapAccountLink() {
   const decidido = recibo && visitante.digest && recibo.sourceDigest === visitante.digest;
   if (decidido && recibo.status === "linked") {
     setGuestLink({ phase: "linked", stats: recibo.stats || null });
-    await finishAccountBootstrapAndGate();
+    await liberar();
     return;
   }
   if (decidido && recibo.status === "dismissed") {
     setGuestLink({ phase: "dismissed" });
-    await finishAccountBootstrapAndGate();
+    await liberar();
     return;
   }
 
@@ -362,13 +406,14 @@ async function bootstrapAccountLink() {
       error: preparo.error || "Sem conexão para conferir a conta. O vínculo espera a rede voltar.",
       errorCode: preparo.errorCode || "offline",
     });
-    await finishAccountBootstrapAndGate();
+    await liberar();
     return;
   }
 
   // Revisão zero: a conta nunca recebeu uma operação. Incorporar é seguro.
   if (String(preparo.revision) === "0") {
     setGuestLink({ phase: "linking" });
+    marcarLiberado();
     await runGuestLink(token, escopo, visitante, {
       userId, remoteRevision: "0", expectedRemoteRevision: "0",
     });
@@ -378,7 +423,7 @@ async function bootstrapAccountLink() {
   // Conta com história: só com confirmação, e sem nenhuma opção que substitua
   // ou apague um dos lados.
   setGuestLink({ phase: "confirm" });
-  await finishAccountBootstrapAndGate();
+  await liberar();
 }
 
 // ---- Ações da tela de conta ----

@@ -193,7 +193,7 @@ function renderForecastCard(forecast, full) {
       ${f.horizons.map((h) => `<button class="horizon-chip ${h.id === active.id ? "active" : ""}" data-action="set-forecast-horizon" data-value="${h.id}">${h.label}</button>`).join("")}
     </div>`;
   const alert = f.negativeDayIso
-    ? `<p class="forecast-alert">${svgIcon("alertTriangle", 14)} No ritmo atual seu saldo fica negativo em <b>${fmtDateFull(f.negativeDayIso)}</b>. O menor ponto é ${fmtBRL(f.lowest.value)} em ${fmtDateShort(f.lowest.iso)}.</p>`
+    ? `<p class="forecast-alert">${svgIcon("alertTriangle", 14)}<span>No ritmo atual seu saldo fica negativo em <b>${fmtDateFull(f.negativeDayIso)}</b>. O menor ponto é ${fmtBRL(f.lowest.value)} em ${fmtDateShort(f.lowest.iso)}.</span></p>`
     : "";
 
   // Versão compacta do Dashboard: faixa horizontal de largura inteira, para não

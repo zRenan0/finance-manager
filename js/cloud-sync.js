@@ -516,7 +516,13 @@ const CloudSync = (() => {
       // aplicativo não tem como afirmar que não sobrou nada por enviar.
       const queued = await FinanceStore.outboxRead(0, context.scope);
       assertCurrentCycle(context);
-      const pendente = queued.length > 0;
+      // O PORTÃO FECHADO NÃO É "TUDO SINCRONIZADO".
+      //
+      // Com `bootstrapHeld`, o ciclo desce e para: não sobe e não semeia. A
+      // fila pode estar vazia só porque a semeadura ainda não rodou, e dizer
+      // "sincronizado" nesse estado era como o aparelho anunciava que tinha
+      // levado para a conta uma base que nunca saiu daqui.
+      const pendente = queued.length > 0 || bootstrapHeld;
       // Volta periódica que não achou nada e não mudou nada visível não avisa
       // ninguém: para o usuário, a tela continua exatamente como estava.
       const semNovidade = !!quieto && !cicloMexeu && eraSincronizado && !pendente;
@@ -692,6 +698,49 @@ const CloudSync = (() => {
 
   function stopPolling() {
     if (pollTimer !== null) { clearInterval(pollTimer); pollTimer = null; }
+  }
+
+  // VOLTAR PARA O APLICATIVO PRECISA BUSCAR NA HORA.
+  //
+  // O intervalo de 15 s só age com a aba à vista, e é o certo: navegador
+  // nenhum mantém `setInterval` andando numa aba escondida, e no celular ele
+  // congela de vez. O problema é a VOLTA. Quem deixou o app aberto no celular,
+  // usou o computador e voltou ficava esperando o primeiro disparo do
+  // intervalo, e nesse meio tempo a tela mostrava números velhos como se
+  // fossem os atuais.
+  //
+  // A camada de conta já tentava cobrir isso pelo `focus`, mas por um caminho
+  // que pode ser engolido: ela dedupla por 750 ms, compartilha promessa com a
+  // recuperação de sessão e exige `sessionStatus === "active"`. O motor não
+  // pode depender disso para uma coisa que é responsabilidade dele. Aqui o
+  // gatilho é direto, e `runSync` sozinho já resolve a corrida: um ciclo em
+  // andamento vira reexecução em vez de segunda volta simultânea.
+  // A visibilidade NÃO é conferida aqui de propósito. `pageshow` restaurado do
+  // cache de retorno chega com a aba ainda marcada como escondida em alguns
+  // navegadores, e `online` vale mesmo com o app em segundo plano: nos dois
+  // casos exigir "visível" cancelaria justamente a volta que precisa acontecer.
+  // O intervalo religado continua conferindo, disparo a disparo.
+  function acordarComAApp() {
+    if (!state.enabled || offline()) return;
+    startPolling();          // rearma o relógio, que pode ter sido congelado
+    runSync(true);
+  }
+
+  function watchVisibility() {
+    if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") acordarComAApp();
+      });
+    }
+    if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+      // `pageshow` cobre a volta pelo cache de retorno (bfcache), em que a
+      // página inteira é restaurada sem passar por `visibilitychange`.
+      window.addEventListener("pageshow", () => acordarComAApp());
+      window.addEventListener("online", () => acordarComAApp());
+      // Foco sem troca de visibilidade acontece o tempo todo no computador:
+      // duas janelas lado a lado, ou a aba do app atrás do navegador inteiro.
+      window.addEventListener("focus", () => acordarComAApp());
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -963,10 +1012,21 @@ const CloudSync = (() => {
 
   // Libera a fila e a semeadura depois da decisão de vínculo, e devolve o
   // resultado real do ciclo que roda em seguida.
+  //
+  // CHAMAR DUAS VEZES PRECISA SER BARATO.
+  //
+  // A camada de conta agora libera o portão também numa rede de segurança, no
+  // `finally` do vínculo, porque deixar `bootstrapHeld` preso era o defeito que
+  // fazia um aparelho BAIXAR para sempre e nunca ENVIAR: a tela dizia
+  // "sincronizado", a fila ficava parada e o outro aparelho nunca via nada
+  // daquele. Quando o portão já estava aberto e um ciclo já está em curso, esse
+  // segundo pedido acompanha o ciclo existente em vez de agendar mais um.
   async function finishAccountBootstrap() {
+    const estavaPreso = bootstrapHeld;
     bootstrapHeld = false;
     setState({ bootstrapHeld: false }, true);
     if (!state.enabled) return enable();
+    if (!estavaPreso && running && activeRunPromise) return activeRunPromise;
     return syncNow();
   }
 
@@ -1069,8 +1129,14 @@ const CloudSync = (() => {
     return activeRunPromise ? activeRunPromise.catch(() => false) : Promise.resolve(true);
   }
 
+  let ouvindoVisibilidade = false;
+
   function configure(options) {
     const o = options || {};
+    // Um registro só, na primeira configuração: `configure` é chamada uma vez
+    // pelo aplicativo, mas os testes a chamam várias, e ouvinte repetido
+    // multiplicaria requisições a cada volta para a aba.
+    if (!ouvindoVisibilidade) { ouvindoVisibilidade = true; watchVisibility(); }
     if (typeof o.applyRemote === "function") hooks.applyRemote = o.applyRemote;
     if (typeof o.onAuthInvalid === "function") hooks.onAuthInvalid = o.onAuthInvalid;
     if (typeof o.onAccountScopeChanged === "function") hooks.onAccountScopeChanged = o.onAccountScopeChanged;

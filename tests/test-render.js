@@ -1102,7 +1102,17 @@ console.log("\n[Conta] Extrato de acessos e área destrutiva");
       && !/Nada foi apagado/.test(accountClickSrc));
   check("atualização da lista tem texto visível", /data-action="account-refresh"[^>]*>[\s\S]*Atualizar/.test(conta));
   check("estado saudável não oferece sincronização manual", !/data-action="account-sync-now"/.test(conta));
-  check("a exclusão da conta começa recolhida", /<details[^>]*account-danger/.test(conta) && /<summary/.test(conta));
+  // O painel começa recolhido, e o recolhido/aberto mora no ESTADO, não num
+  // `<details>` nativo: `render()` refaz o DOM inteiro, e o painel se fechava
+  // sozinho no meio da digitação da senha, o que fazia a exclusão parecer
+  // quebrada. Ver `accountDangerCard` em js/screens/account.js.
+  check("a exclusão da conta começa recolhida",
+    /<section[^>]*account-danger/.test(conta)
+      && /data-action="account-danger-toggle"/.test(conta)
+      && /aria-expanded="false"/.test(conta)
+      && /account-danger__body[^>]*hidden/.test(conta));
+  check("a exclusão da conta não usa <details>, que não sobrevive ao render",
+    !/<details[^>]*account-danger/.test(conta));
   check("a área destrutiva não promete preservar a cópia que será apagada",
     /Apagar conta e dados/.test(conta)
       && /A cópia deste aparelho também será apagada/.test(conta)

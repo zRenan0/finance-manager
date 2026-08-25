@@ -78,9 +78,24 @@
   .sim-transparency,.sources-next { align-items:stretch; flex-direction:column; }
   .sources-status { grid-template-columns:auto minmax(0,1fr); }
   .sources-status > .status-badge { grid-column:1 / -1; justify-self:start; }
-  .sources-summary { grid-template-columns:1fr; }
+  /* Tres cartoes de um numero cada, empilhados na largura inteira, ocupavam
+     240px de altura para dizer tres coisas curtas. Em duas colunas cabem na
+     primeira olhada; o cartao impar sozinho fica com a linha toda para nao
+     sobrar um buraco ao lado dele. */
+  .sources-summary { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .sources-summary .card:last-child:nth-child(odd) { grid-column:1 / -1; }
   .source-row { grid-template-columns:auto minmax(0,1fr); align-items:start; }
-  .source-row__status { grid-column:2; justify-items:start; text-align:left; }
+  /* O estado desce para a linha de baixo por falta de largura. Empilhado, o
+     selo, a contagem e a data viravam tres linhas soltas e recuadas, que nao
+     pareciam pertencer a origem acima. Em linha, viram uma legenda so. */
+  .source-row__status {
+    grid-column:2; display:flex; flex-wrap:wrap; align-items:baseline;
+    gap:4px 9px; text-align:left; margin-top:5px;
+  }
+  .source-row__status > b { font-size:13.5px; }
+  /* Em coluna a data ficava por baixo da contagem e a separacao era visual.
+     Na mesma linha ela precisa de um ponto, senao "1" e a data se colam. */
+  .source-row__status > small::before { content:"· "; }
   .calculation-facts > div { grid-template-columns:1fr; gap:4px; }
   .hero-label-row { align-items:flex-start; }
   /* 44px, não 40px: a regra base já nasce em 44 e era justamente aqui, na

@@ -219,11 +219,10 @@ function renderGoalCard(m) {
     </div>` : ""}
 
     ${!m.done && m.etaIso ? `<p class="goal-eta ${m.etaLate ? "is-late" : ""}">
-      ${svgIcon("clock", 13)} No ritmo ${m.projectionSource === "real" ? "atual" : "planejado"}, conclusão em <b>${fmtDateFull(m.etaIso)}</b>
-      ${m.etaMonths ? ` (${m.etaMonths} ${m.etaMonths === 1 ? "mês" : "meses"})` : ""}${m.etaLate ? "; depois do prazo." : "."}
+      ${svgIcon("clock", 13)}<span>No ritmo ${m.projectionSource === "real" ? "atual" : "planejado"}, conclusão em <b>${fmtDateFull(m.etaIso)}</b>${m.etaMonths ? ` (${m.etaMonths} ${m.etaMonths === 1 ? "mês" : "meses"})` : ""}${m.etaLate ? "; depois do prazo." : "."}</span>
     </p>` : ""}
-    ${!m.done && !m.etaIso ? `<p class="goal-eta">${svgIcon("info", 13)} Sem aportes nem plano definido, não dá para estimar a conclusão.</p>` : ""}
-    ${!m.done && m.gap > 0 ? `<p class="goal-eta is-late">${svgIcon("alertTriangle", 13)} Faltam <b>${fmtBRL(m.gap)}</b> por mês para o prazo fechar.</p>` : ""}
+    ${!m.done && !m.etaIso ? `<p class="goal-eta">${svgIcon("info", 13)}<span>Sem aportes nem plano definido, não dá para estimar a conclusão.</span></p>` : ""}
+    ${!m.done && m.gap > 0 ? `<p class="goal-eta is-late">${svgIcon("alertTriangle", 13)}<span>Faltam <b>${fmtBRL(m.gap)}</b> por mês para o prazo fechar.</span></p>` : ""}
 
     ${m.series.some((s) => s.contributed !== 0) ? `<div class="goal-spark">
       ${renderSparkline(m.series.map((s) => ({ value: s.balance })), ringColor, 300, 46)}

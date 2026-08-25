@@ -92,6 +92,7 @@ function context(options) {
       if (changed) await switchStorageScope(next);
       return changed;
     };
+    __bootstrapReal = bootstrapAccountLink;
     bootstrapAccountLink = async () => { __bootstrapCalls += 1; CloudSync._enabled = true; };
   `);
   return ctx;
@@ -531,6 +532,60 @@ async function waitRecovery(ctx) {
     check("falha local depois da exclusão online esconde a conta", deleted === false
       && ctx.run("state.account.sessionStatus") === "guest" && ctx.run("state.data.secret") === undefined,
       ctx.run("JSON.stringify({ account: state.account, data: state.data })"));
+  }
+
+  // ------------------------------------------------------------------------
+  // O PORTAO DA SUBIDA
+  // ------------------------------------------------------------------------
+  // `CloudSync.prepareAccount()` fecha o portao: enquanto ele estiver fechado o
+  // aparelho BAIXA e nao ENVIA, para o vinculo poder perguntar "esta conta ja
+  // tem alguma coisa?" antes de este aparelho escrever nela.
+  //
+  // A sequencia desiste quando outra entrada assume no meio. O defeito era
+  // desistir com o portao ainda fechado: dali em diante o aparelho aplicava o
+  // que os outros escreviam, mostrava "Tudo sincronizado" e nunca mais enviava
+  // nada, ate a pagina ser recarregada. No servidor isso aparece como um
+  // aparelho que consulta todo dia e nunca gravou uma operacao sequer.
+  console.log("\n8. O portao da subida sobrevive a um vinculo abandonado");
+  {
+    const ctx = context();
+    ctx.run(`
+      state.account.loading = false;
+      state.account.authenticated = true;
+      state.account.sessionStatus = "active";
+      state.account.userId = "known-user";
+      __liberacoes = 0;
+      CloudSync.prepareAccount = async () => {
+        // Outra entrada assume enquanto a descida acontece: o token avanca e a
+        // sequencia em voo deixa de valer.
+        __guestLinkToken += 1;
+        return { ok: true, revision: "7", phase: "idle", error: null, errorCode: null };
+      };
+      CloudSync.finishAccountBootstrap = async () => { __liberacoes += 1; return true; };
+      FinanceStore.peekScope = async () => ({ exists: false, readable: true, digest: "" });
+    `);
+    await ctx.run("__bootstrapReal()");
+    check("vinculo abandonado no meio ainda libera a fila para subir",
+      ctx.run("__liberacoes") === 1, `liberacoes=${ctx.run("__liberacoes")}`);
+  }
+
+  {
+    const ctx = context();
+    ctx.run(`
+      state.account.loading = false;
+      state.account.authenticated = true;
+      state.account.sessionStatus = "active";
+      state.account.userId = "known-user";
+      __liberacoes = 0;
+      CloudSync.prepareAccount = async () => ({ ok: true, revision: "7", phase: "idle", error: null, errorCode: null });
+      CloudSync.finishAccountBootstrap = async () => { __liberacoes += 1; return true; };
+      FinanceStore.peekScope = async () => ({ exists: false, readable: true, digest: "" });
+    `);
+    await ctx.run("__bootstrapReal()");
+    // A rede de seguranca nao pode virar ciclo extra em toda entrada: liberar
+    // duas vezes gastaria uma volta inteira de rede sem nada para enviar.
+    check("o caminho normal libera uma vez so",
+      ctx.run("__liberacoes") === 1, `liberacoes=${ctx.run("__liberacoes")}`);
   }
 
   console.log(`\n${fail === 0 ? "TODOS OS TESTES PASSARAM" : "FALHAS ENCONTRADAS"}: ${ok} ok, ${fail} falha(s)\n`);

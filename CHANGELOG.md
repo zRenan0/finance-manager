@@ -2,6 +2,117 @@
 
 ## Não publicado
 
+### O aparelho que só baixava volta a enviar
+
+- **O portão da subida não fica mais preso.** `CloudSync.prepareAccount()` fecha
+  a fila de propósito enquanto a decisão de vínculo não sai, para o próprio
+  aparelho não preencher a conta e depois concluir que ela já estava em uso. A
+  sequência em `js/auth.js` desiste em cinco pontos quando outra entrada, uma
+  troca de escopo ou uma renovação de sessão assume no meio, e todos os cinco
+  desistiam DEIXANDO O PORTÃO FECHADO. Dali em diante o aparelho aplicava o que
+  os outros escreviam, mostrava "Tudo sincronizado" e não enviava mais nada, nem
+  naquela sessão nem no dia seguinte: só recarregar a página ou sair da conta
+  reabria a fila. No banco de produção isso aparecia como um aparelho ativo
+  havia quatro dias, com sessão válida, e zero operações gravadas. A liberação
+  agora acontece no `finally` de `bootstrapAccountLink`, então caminho novo
+  acrescentado depois já nasce coberto.
+- **Portão fechado deixou de ser "Tudo sincronizado".** Com a fila segurada, o
+  ciclo desce e para; a fila podia estar vazia só porque a semeadura ainda não
+  tinha rodado. O estado agora é "pendente" enquanto o portão estiver fechado.
+- **O motor tem gatilho próprio de volta ao aplicativo.** `visibilitychange`,
+  `pageshow`, `online` e `focus` passam por `CloudSync` diretamente, e não
+  apenas pela camada de conta, que dedupla por 750 ms, compartilha promessa com
+  a recuperação de sessão e exige sessão ativa. Além de sincronizar na hora, a
+  volta rearma o intervalo de 15 s, que o navegador congela em aba escondida.
+- **Regressão travada em `tests/test-auto-sync-session.js`, seção 8.** Um
+  cenário abandona o vínculo no meio da preparação e confirma que a fila foi
+  liberada; o outro confirma que o caminho normal libera uma vez só, para a rede
+  de segurança não virar um ciclo extra em toda entrada.
+
+### "Apagar conta" deixa de parecer quebrada
+
+- **O painel não se fecha mais sozinho.** Ele era um `<details>` nativo, e
+  `render()` refaz o DOM inteiro. Como a tela de conta se redesenha por conta
+  própria (volta periódica da sincronização, atualização da lista de aparelhos,
+  qualquer aviso), o formulário sumia no meio da digitação da senha. O
+  aberto/fechado passou para `state.accountDangerOpen`, como já acontecia com os
+  tópicos de Ajustes. Fechar o painel também limpa a senha digitada.
+- **O aviso nasce ao lado do botão.** Clicar sem preencher tudo escrevia em
+  `state.account.error`, desenhado no rodapé da tela, depois de todos os
+  cartões: para quem estava olhando o botão, nada acontecia. Agora a mensagem
+  aparece dentro do próprio painel e diz o que falta, senha ou frase.
+- **A confirmação explica por que o botão está desligado.** A frase continua
+  exigindo a caixa exata, que é parte da trava de uma ação irreversível, mas o
+  campo passou a trazer uma linha dizendo o que libera o botão. Antes ele ficava
+  cinza em silêncio, e o campo da tela anterior converte para maiúsculas
+  sozinho, o que ensinava que minúsculas serviriam.
+- **`tests/test-render.js`** deixou de exigir `<details>` e passou a exigir o
+  cartão com `aria-expanded` e o corpo recolhido por `hidden`.
+
+### Seis defeitos de tela vistos em prints de iPhone
+
+- **O atalho "Ir para o conteúdo" ficava colado no alto da tela.** Ele é um
+  `.skip-link`: mora acima da borda e desce quando recebe foco. No celular,
+  encostar num link dá foco a ele, e a partir daí TODO render devolvia o foco
+  pelo seletor `[data-action="skip-to-content"]`. A pilha verde se instalava por
+  cima do relógio e do conteúdo e atravessava telas e minutos, sem jeito de
+  fechar. Um controle que só serve de trampolim deixou de ser reencontrado
+  depois do render; onde o navegador sabe distinguir a origem do foco, o toque
+  também não o revela mais; e ele passou a respeitar o recuo da barra de status.
+- **A data de conclusão da meta quebrava no meio do número.** `.goal-eta` é
+  `display: flex`, e cada pedaço de texto solto vira um item separado: o texto
+  antes do `<b>`, o `<b>` com a data e o texto depois viravam três colunas lado
+  a lado. Saía "25/06/20" numa linha e "27" na seguinte, com "(10 meses)." numa
+  terceira coluna. A frase virou um `<span>` único. O mesmo defeito existia no
+  aviso de saldo negativo do calendário, corrigido junto.
+- **A caixa de marcar da lista de movimentações virava um bloco preto.** A regra
+  de alvo de toque esticava `min-height: 44px` em toda `input`, e uma
+  `input[type=checkbox]` de 19px era deformada para 19x44. Caixas e botões de
+  rádio saíram da regra: o alvo de 44px vem do `.movement-check` em volta, que
+  já centraliza o controle.
+- **O valor da movimentação caía solto embaixo da descrição.** No celular ele
+  desce para a segunda linha de propósito, porque a descrição precisa da largura
+  inteira, mas ficava encostado à esquerda e puxado por uma margem negativa: lia
+  como mais uma linha de detalhe. Agora alinha à direita, no fim da mesma coluna
+  da descrição. O marcador da busca também encolheu, porque
+  "Buscar descrição, valor, conta ou origem" era cortado no meio da palavra; o
+  texto inteiro continua no `aria-label` e no `title`.
+- **As ações do topo de Notificações nunca tiveram estilo.** Sem regra, o botão
+  ficava `inline-block` e o `svg { display: block }` da base empurrava o rótulo
+  para a linha de baixo: saía um ícone solto em cima e o texto embaixo. Elas
+  passaram a usar o mesmo desenho de `.hero-action`, já aplicado nos outros
+  cartões escuros.
+- **A tela de origens gastava meia rolagem com três números.** Os cartões de
+  resumo empilhavam na largura inteira, um por linha; agora vêm em duas colunas,
+  e o ímpar sozinho fica com a linha toda. O estado de cada origem (selo,
+  contagem e data) era uma pilha recuada que não parecia pertencer à linha de
+  cima; virou uma legenda em linha só.
+
+### O cartão de apagar conta quebrado no Safari
+
+- **A grade saiu do elemento de controle.** Além de deixar de ser `<details>`, o
+  cabeçalho do cartão passou a montar a grade num `<span>` interno. Era esse o
+  motivo de o cartão aparecer desmontado no iPhone: o Safari ignorava o
+  `display` pedido no elemento de controle, a grade não valia, título e
+  subtítulo saíam grudados ("Apagar conta e dadosExclua a conta...") e cada
+  ícone caía numa linha própria, com o triângulo nativo do `<details>` à mostra.
+
+### Varredura de layout no celular
+
+- **A etiqueta de assinatura empurrava a tela inteira.** `.sub-chip` junta data,
+  nome e valor numa linha com `nowrap` e não tinha teto de largura: um nome
+  comprido passava de 400 px num aparelho de 375 px. A página ganhava rolagem
+  lateral e a barra de navegação de baixo, que mede a largura em porcentagem, ia
+  junto e saía da tela. Agora a etiqueta tem `max-width` e reticências.
+- **A porcentagem da regra de orçamento aparecia cortada.** Em 320 px o nome do
+  grupo consumia a linha e espremia `.split-bar-row__pct` para 4 px, com "50%"
+  cortado ao lado do rótulo. Ela deixou de encolher; quem cede espaço é o nome.
+- **O resto da varredura passou limpo.** As 23 rotas foram medidas em 375 px e
+  em 320 px, com nomes longos, valores de sete dígitos, contas, cartões e
+  transferências, procurando rolagem lateral, texto cortado, alvo de toque
+  pequeno e conteúdo escondido atrás da barra de baixo. Fora os dois itens
+  acima, nada estourou.
+
 ### A conta sincroniza sem depender da tela de sincronização
 
 - **Gravações passam a subir em até um segundo.** A fila continua no IndexedDB

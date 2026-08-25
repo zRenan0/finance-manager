@@ -31,8 +31,11 @@
 /* Atalho para saltar a navegação. Invisível até receber foco pelo
    teclado; a primeira Tab da página revela o botão. */
 .skip-link {
-  position: fixed; top: 10px; left: 10px; z-index: 999;
-  transform: translateY(-160%);
+  position: fixed; left: 10px; z-index: 999;
+  /* Instalado como app, a pagina vai por baixo da barra de status. Sem o
+     recuo, o atalho aparecia por cima do relogio e do sinal. */
+  top: calc(10px + env(safe-area-inset-top, 0px));
+  transform: translateY(-260%);
   padding: 11px 17px; border-radius: var(--radius-sm);
   background: var(--brand); color: #fff;
   font-size: 13px; font-weight: 700; text-decoration: none;
@@ -40,6 +43,11 @@
   transition: transform var(--dur) var(--ease);
 }
 .skip-link:focus, .skip-link:focus-visible { transform: translateY(0); }
+/* TOCAR NAO E NAVEGAR PELO TECLADO.
+   No celular, encostar num link da foco a ele, e o atalho descia e ficava. Onde
+   o navegador sabe distinguir a origem do foco, o toque deixa de revelar; onde
+   nao sabe, a regra acima continua valendo e o atalho segue acessivel. */
+.skip-link:focus:not(:focus-visible) { transform: translateY(-260%); }
 
 /* Região de anúncio para leitores de tela. O toast é decorativo
    (`aria-hidden`); a mensagem real vive aqui, fora do fluxo visual. */
@@ -65,7 +73,12 @@
 /* Alvos de toque: mínimo de 44px em ponteiro grosso, sem alterar o
    desenho em desktop. */
 @media (pointer: coarse) {
-  button:not(.switch), input, select, textarea { min-height: 44px; }
+  /* CAIXA DE MARCAR NAO E CAMPO DE TEXTO.
+     Esticar `min-height` numa `input[type=checkbox]` de 19px a deformava para
+     19x44: no iPhone a caixa da lista de movimentacoes virava um retangulo
+     preto enorme ao lado do icone da categoria. O alvo de toque de 44px vem do
+     `.movement-check` em volta, que ja centraliza a caixa, e nao do controle. */
+  button:not(.switch), input:not([type="checkbox"]):not([type="radio"]), select, textarea { min-height: 44px; }
   button:not(.switch) { min-width: 44px; }
   .switch {
     height: 44px; background: transparent; box-shadow: none;

@@ -126,6 +126,13 @@ let state = {
   // Campo "tipo de movimento" recolhido por padrão: a dedução acerta o caso
   // comum, e só quem precisa corrigir precisa vê-lo.
   natureFieldOpen: false,
+  // Bloco "Apagar conta e dados", em Conta e acesso. Mora aqui pelo mesmo
+  // motivo de `settingsSection`: era um `<details>` nativo, e `render()`
+  // reconstrói o DOM inteiro. Como o cartão de sincronização redesenha a tela
+  // sozinho (a volta periódica, a lista de aparelhos, qualquer aviso), o painel
+  // se fechava enquanto a pessoa digitava a senha, e a exclusão passava a
+  // impressão de estar quebrada.
+  accountDangerOpen: false,
   // ---- novos recursos ----
   importRows: null,        // linhas parseadas de OFX/CSV aguardando revisão
   importFilename: null,
@@ -638,8 +645,20 @@ function attrSelectorValue(v) {
 // `restoreFocus` saía na primeira linha e o foco caía no `<body>`. Quem usa
 // teclado voltava para o topo da página a cada escolha e precisava tabular a
 // tela inteira de novo.
+// O ATALHO DE PULAR SÓ EXISTE ENQUANTO TEM O FOCO, E ISSO O TIRAVA DA TELA.
+//
+// `.skip-link` fica escondido acima da borda e desce quando recebe foco. No
+// celular, tocar num link dá foco a ele; a partir daí TODO render devolvia o
+// foco pelo seletor `[data-action="skip-to-content"]`, e a pilha verde "Ir para
+// o conteúdo" ficava colada no alto da tela, por cima do relógio e do conteúdo,
+// atravessando telas e minutos, sem jeito de fechar. Um controle que só serve
+// de trampolim para o conteúdo não deve ser reencontrado depois do render: se
+// ele ainda tiver o foco de verdade, o navegador o mantém sozinho.
+const FOCO_NAO_RESTAURAVEL = new Set(["skip-to-content"]);
+
 function focusKeyOf(el) {
   if (!el) return null;
+  if (el.dataset && FOCO_NAO_RESTAURAVEL.has(el.dataset.action)) return null;
   if (el.id) return { by: "id", id: el.id };
   const ds = el.dataset || {};
   if (ds.field) {
@@ -1216,6 +1235,14 @@ function onInput(e) {
   const id = e.target.dataset.id;
   switch (field) {
     case "onb-name": state.onboarding.name = val; break;
+    // A CAIXA CONTINUA IMPORTANDO AQUI, DE PROPÓSITO.
+    //
+    // A frase exigida ("APAGAR CONTA", "APAGAR") é a última trava antes de uma
+    // exclusão irreversível, e digitá-la exatamente é parte da trava; converter
+    // sozinho a tornaria mais fraca, e `tests/browser/run-browser.js` fixa esse
+    // comportamento. O que faltava não era tolerância, era EXPLICAÇÃO: o botão
+    // ficava desligado sem uma linha dizendo o que faltava. A linha agora existe
+    // logo abaixo do campo (ver `renderConfirmationModal`).
     case "confirmation-required":
       if (state.confirmation) { state.confirmation.typedText = val; render(); }
       break;
@@ -1266,8 +1293,10 @@ function onInput(e) {
     case "auth-email": state.account.form.email = val.trim().slice(0, 254); break;
     case "auth-password": state.account.form.password = val.slice(0, 128); break;
     case "auth-new-password": state.account.form.newPassword = val.slice(0, 128); break;
-    case "auth-delete-password": state.account.form.deletePassword = val.slice(0, 128); break;
-    case "auth-delete-text": state.account.form.deleteText = val.toUpperCase().slice(0, 20); if (e.target.value !== state.account.form.deleteText) e.target.value = state.account.form.deleteText; break;
+    // O aviso do painel de exclusão some assim que a pessoa volta a digitar:
+    // ele descreve o que faltava, e o que faltava está sendo preenchido agora.
+    case "auth-delete-password": state.account.form.deletePassword = val.slice(0, 128); state.account.deleteHint = ""; break;
+    case "auth-delete-text": state.account.form.deleteText = val.toUpperCase().slice(0, 20); state.account.deleteHint = ""; if (e.target.value !== state.account.form.deleteText) e.target.value = state.account.form.deleteText; break;
     // Busca da tela "Recursos" e laboratório de regras: re-render a cada tecla é
     // aceitável porque as duas telas são listas curtas, e `restoreFocus` devolve
     // foco e caret pelo id do campo.

@@ -1,6 +1,5 @@
 // Arquivo gerado por scripts/build-app-module.js.
 // Edite os arquivos de origem em js/ e execute npm run build.
-
 // source: js/utils.js
 // utils.js; funções auxiliares puras, sem dependência de DOM
 // ------------------------------------------------------------------------------
@@ -7438,6 +7437,9 @@ function freshAccountState() {
     // "VÍNCULO DOS DADOS DESTE APARELHO COM A CONTA" mais abaixo.
     guestLink: freshGuestLink(),
     form: { email: "", password: "", newPassword: "", deletePassword: "", deleteText: "" }, devices: [],
+    // Aviso do bloco de exclusão, desenhado dentro do próprio painel. Separado
+    // de `error` porque aquele mora no rodapé da tela, longe do botão.
+    deleteHint: "",
   };
 }
 
@@ -7499,6 +7501,7 @@ function resetScopedUiState(escopo) {
   state.categoryPickerFor = null;
   state.confirmation = null;
   state.overlayStack = [];
+  state.accountDangerOpen = false;
   state.importRows = null;
   state.importFilename = null;
   state.importError = null;
@@ -7635,18 +7638,57 @@ async function concludeGuestLink(token, escopo, visitante) {
 }
 
 // A sequência completa, chamada depois de a sessão e o escopo estarem prontos.
+// O PORTÃO DA SUBIDA NÃO PODE FICAR PRESO. NUNCA.
+//
+// `CloudSync.prepareAccount()` fecha o portão de propósito: ele segura a fila e
+// a semeadura até a decisão de vínculo sair, para o próprio aparelho não
+// preencher a conta e depois concluir que ela já estava em uso.
+//
+// A sequência abaixo desiste em vários pontos (`if (!valido()) return`) quando
+// outra entrada, uma troca de escopo ou uma renovação de sessão acontece no
+// meio: é o certo, porque a decisão pertence à sessão que veio depois. O que
+// estava errado era desistir DEIXANDO O PORTÃO FECHADO. A partir daí o aparelho
+// entrava num estado que não dava sinal nenhum: baixava o que os outros
+// escreviam, aplicava, mostrava "Tudo sincronizado", e não enviava mais NADA -
+// nem naquela sessão, nem no dia seguinte, porque só recarregar a página ou
+// sair da conta reabria o portão. No servidor isso aparece como um aparelho
+// que consulta todo dia e nunca gravou uma operação sequer.
+//
+// Por isso o portão é liberado aqui, no `finally`, e não em cada saída: caminho
+// novo acrescentado depois já nasce coberto. Liberar duas vezes é barato de
+// propósito (ver `finishAccountBootstrap`).
 async function bootstrapAccountLink() {
+  let liberou = false;
+  const marcar = () => { liberou = true; };
+  try {
+    return await executarVinculoDaConta(marcar);
+  } finally {
+    if (!liberou && typeof CloudSync !== "undefined") {
+      try { await finishAccountBootstrapAndGate(); }
+      catch (error) {
+        if (typeof reportSafeError === "function") reportSafeError("sync", error, "bootstrap_gate_release");
+      }
+    }
+  }
+}
+
+async function executarVinculoDaConta(marcarLiberado) {
   // Sem motor de sincronização não há descida para esperar, e o portão do
   // assistente não pode ficar fechado à espera de uma decisão que não vem.
   if (typeof CloudSync === "undefined") {
+    marcarLiberado();
     if (typeof refreshOnboardingGate === "function" && refreshOnboardingGate({ release: true })) render();
     return;
   }
   const escopo = FinanceStore.scope();
-  if (escopo === GUEST_SCOPE) return;
+  // Visitante não tem conta para preparar: o portão sequer chegou a fechar.
+  if (escopo === GUEST_SCOPE) { marcarLiberado(); return; }
   const token = ++__guestLinkToken;
   const userId = state.account.userId;
   const valido = () => token === __guestLinkToken && FinanceStore.scope() === escopo && state.account.authenticated;
+  // Liberar o portão e AVISAR que ele foi liberado, para a rede de segurança
+  // do chamador não repetir o trabalho.
+  const liberar = async () => { marcarLiberado(); await finishAccountBootstrapAndGate(); };
 
   setGuestLink({ phase: "checking", error: "", errorCode: "", busy: true });
 
@@ -7663,12 +7705,12 @@ async function bootstrapAccountLink() {
 
   if (!visitante || visitante.readable === false) {
     setGuestLink({ phase: "pending", error: guestLinkFailureText("unreadable"), errorCode: "guest_unreadable" });
-    await finishAccountBootstrapAndGate();
+    await liberar();
     return;
   }
   if (!visitante.exists) {
     setGuestLink({ phase: "idle", summary: null, digest: "" });
-    await finishAccountBootstrapAndGate();
+    await liberar();
     return;
   }
   setGuestLink({ summary: visitante, digest: visitante.digest || "" });
@@ -7680,11 +7722,12 @@ async function bootstrapAccountLink() {
   if (!valido()) return;
   if (diario && diario.status === "blocked") {
     setGuestLink({ phase: "confirm", errorCode: "remote_changed", error: "A conta mudou em outro aparelho. Confirme como juntar os dados." });
-    await finishAccountBootstrapAndGate();
+    await liberar();
     return;
   }
   if (diario) {
     setGuestLink({ phase: "linking", stats: diario.stats || null });
+    marcarLiberado();
     await concludeGuestLink(token, escopo, visitante);
     return;
   }
@@ -7697,12 +7740,12 @@ async function bootstrapAccountLink() {
   const decidido = recibo && visitante.digest && recibo.sourceDigest === visitante.digest;
   if (decidido && recibo.status === "linked") {
     setGuestLink({ phase: "linked", stats: recibo.stats || null });
-    await finishAccountBootstrapAndGate();
+    await liberar();
     return;
   }
   if (decidido && recibo.status === "dismissed") {
     setGuestLink({ phase: "dismissed" });
-    await finishAccountBootstrapAndGate();
+    await liberar();
     return;
   }
 
@@ -7713,13 +7756,14 @@ async function bootstrapAccountLink() {
       error: preparo.error || "Sem conexão para conferir a conta. O vínculo espera a rede voltar.",
       errorCode: preparo.errorCode || "offline",
     });
-    await finishAccountBootstrapAndGate();
+    await liberar();
     return;
   }
 
   // Revisão zero: a conta nunca recebeu uma operação. Incorporar é seguro.
   if (String(preparo.revision) === "0") {
     setGuestLink({ phase: "linking" });
+    marcarLiberado();
     await runGuestLink(token, escopo, visitante, {
       userId, remoteRevision: "0", expectedRemoteRevision: "0",
     });
@@ -7729,7 +7773,7 @@ async function bootstrapAccountLink() {
   // Conta com história: só com confirmação, e sem nenhuma opção que substitua
   // ou apague um dos lados.
   setGuestLink({ phase: "confirm" });
-  await finishAccountBootstrapAndGate();
+  await liberar();
 }
 
 // ---- Ações da tela de conta ----
@@ -9215,7 +9259,13 @@ const CloudSync = (() => {
       // aplicativo não tem como afirmar que não sobrou nada por enviar.
       const queued = await FinanceStore.outboxRead(0, context.scope);
       assertCurrentCycle(context);
-      const pendente = queued.length > 0;
+      // O PORTÃO FECHADO NÃO É "TUDO SINCRONIZADO".
+      //
+      // Com `bootstrapHeld`, o ciclo desce e para: não sobe e não semeia. A
+      // fila pode estar vazia só porque a semeadura ainda não rodou, e dizer
+      // "sincronizado" nesse estado era como o aparelho anunciava que tinha
+      // levado para a conta uma base que nunca saiu daqui.
+      const pendente = queued.length > 0 || bootstrapHeld;
       // Volta periódica que não achou nada e não mudou nada visível não avisa
       // ninguém: para o usuário, a tela continua exatamente como estava.
       const semNovidade = !!quieto && !cicloMexeu && eraSincronizado && !pendente;
@@ -9391,6 +9441,49 @@ const CloudSync = (() => {
 
   function stopPolling() {
     if (pollTimer !== null) { clearInterval(pollTimer); pollTimer = null; }
+  }
+
+  // VOLTAR PARA O APLICATIVO PRECISA BUSCAR NA HORA.
+  //
+  // O intervalo de 15 s só age com a aba à vista, e é o certo: navegador
+  // nenhum mantém `setInterval` andando numa aba escondida, e no celular ele
+  // congela de vez. O problema é a VOLTA. Quem deixou o app aberto no celular,
+  // usou o computador e voltou ficava esperando o primeiro disparo do
+  // intervalo, e nesse meio tempo a tela mostrava números velhos como se
+  // fossem os atuais.
+  //
+  // A camada de conta já tentava cobrir isso pelo `focus`, mas por um caminho
+  // que pode ser engolido: ela dedupla por 750 ms, compartilha promessa com a
+  // recuperação de sessão e exige `sessionStatus === "active"`. O motor não
+  // pode depender disso para uma coisa que é responsabilidade dele. Aqui o
+  // gatilho é direto, e `runSync` sozinho já resolve a corrida: um ciclo em
+  // andamento vira reexecução em vez de segunda volta simultânea.
+  // A visibilidade NÃO é conferida aqui de propósito. `pageshow` restaurado do
+  // cache de retorno chega com a aba ainda marcada como escondida em alguns
+  // navegadores, e `online` vale mesmo com o app em segundo plano: nos dois
+  // casos exigir "visível" cancelaria justamente a volta que precisa acontecer.
+  // O intervalo religado continua conferindo, disparo a disparo.
+  function acordarComAApp() {
+    if (!state.enabled || offline()) return;
+    startPolling();          // rearma o relógio, que pode ter sido congelado
+    runSync(true);
+  }
+
+  function watchVisibility() {
+    if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") acordarComAApp();
+      });
+    }
+    if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+      // `pageshow` cobre a volta pelo cache de retorno (bfcache), em que a
+      // página inteira é restaurada sem passar por `visibilitychange`.
+      window.addEventListener("pageshow", () => acordarComAApp());
+      window.addEventListener("online", () => acordarComAApp());
+      // Foco sem troca de visibilidade acontece o tempo todo no computador:
+      // duas janelas lado a lado, ou a aba do app atrás do navegador inteiro.
+      window.addEventListener("focus", () => acordarComAApp());
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -9662,10 +9755,21 @@ const CloudSync = (() => {
 
   // Libera a fila e a semeadura depois da decisão de vínculo, e devolve o
   // resultado real do ciclo que roda em seguida.
+  //
+  // CHAMAR DUAS VEZES PRECISA SER BARATO.
+  //
+  // A camada de conta agora libera o portão também numa rede de segurança, no
+  // `finally` do vínculo, porque deixar `bootstrapHeld` preso era o defeito que
+  // fazia um aparelho BAIXAR para sempre e nunca ENVIAR: a tela dizia
+  // "sincronizado", a fila ficava parada e o outro aparelho nunca via nada
+  // daquele. Quando o portão já estava aberto e um ciclo já está em curso, esse
+  // segundo pedido acompanha o ciclo existente em vez de agendar mais um.
   async function finishAccountBootstrap() {
+    const estavaPreso = bootstrapHeld;
     bootstrapHeld = false;
     setState({ bootstrapHeld: false }, true);
     if (!state.enabled) return enable();
+    if (!estavaPreso && running && activeRunPromise) return activeRunPromise;
     return syncNow();
   }
 
@@ -9768,8 +9872,14 @@ const CloudSync = (() => {
     return activeRunPromise ? activeRunPromise.catch(() => false) : Promise.resolve(true);
   }
 
+  let ouvindoVisibilidade = false;
+
   function configure(options) {
     const o = options || {};
+    // Um registro só, na primeira configuração: `configure` é chamada uma vez
+    // pelo aplicativo, mas os testes a chamam várias, e ouvinte repetido
+    // multiplicaria requisições a cada volta para a aba.
+    if (!ouvindoVisibilidade) { ouvindoVisibilidade = true; watchVisibility(); }
     if (typeof o.applyRemote === "function") hooks.applyRemote = o.applyRemote;
     if (typeof o.onAuthInvalid === "function") hooks.onAuthInvalid = o.onAuthInvalid;
     if (typeof o.onAccountScopeChanged === "function") hooks.onAccountScopeChanged = o.onAccountScopeChanged;
@@ -23122,7 +23232,7 @@ function renderMovementFilters() {
   return `<div class="movement-filters ${state.movementFiltersOpen ? "movement-filters--open" : ""}">
     <div class="search-row movement-search">
       <span class="search-icon">${svgIcon("search", 16)}</span>
-      <input id="analytics-search" class="input input--search" data-field="search" value="${escapeHtml(state.analyticsSearch)}" placeholder="Buscar descrição, valor, conta ou origem" autocomplete="off" />
+      <input id="analytics-search" class="input input--search" data-field="search" value="${escapeHtml(state.analyticsSearch)}" placeholder="Buscar" aria-label="Buscar por descrição, valor, conta ou origem" title="Buscar por descrição, valor, conta ou origem" autocomplete="off" />
       ${state.analyticsSearch ? `<button class="icon-btn" data-action="movement-search-clear" aria-label="Limpar busca">${svgIcon("x", 16)}</button>` : ""}
     </div>
     <button class="btn btn--secondary movement-filter-toggle" data-action="movement-filters-toggle" aria-expanded="${state.movementFiltersOpen}">${svgIcon("filter", 16)} Filtros</button>
@@ -23723,11 +23833,10 @@ function renderGoalCard(m) {
     </div>` : ""}
 
     ${!m.done && m.etaIso ? `<p class="goal-eta ${m.etaLate ? "is-late" : ""}">
-      ${svgIcon("clock", 13)} No ritmo ${m.projectionSource === "real" ? "atual" : "planejado"}, conclusão em <b>${fmtDateFull(m.etaIso)}</b>
-      ${m.etaMonths ? ` (${m.etaMonths} ${m.etaMonths === 1 ? "mês" : "meses"})` : ""}${m.etaLate ? "; depois do prazo." : "."}
+      ${svgIcon("clock", 13)}<span>No ritmo ${m.projectionSource === "real" ? "atual" : "planejado"}, conclusão em <b>${fmtDateFull(m.etaIso)}</b>${m.etaMonths ? ` (${m.etaMonths} ${m.etaMonths === 1 ? "mês" : "meses"})` : ""}${m.etaLate ? "; depois do prazo." : "."}</span>
     </p>` : ""}
-    ${!m.done && !m.etaIso ? `<p class="goal-eta">${svgIcon("info", 13)} Sem aportes nem plano definido, não dá para estimar a conclusão.</p>` : ""}
-    ${!m.done && m.gap > 0 ? `<p class="goal-eta is-late">${svgIcon("alertTriangle", 13)} Faltam <b>${fmtBRL(m.gap)}</b> por mês para o prazo fechar.</p>` : ""}
+    ${!m.done && !m.etaIso ? `<p class="goal-eta">${svgIcon("info", 13)}<span>Sem aportes nem plano definido, não dá para estimar a conclusão.</span></p>` : ""}
+    ${!m.done && m.gap > 0 ? `<p class="goal-eta is-late">${svgIcon("alertTriangle", 13)}<span>Faltam <b>${fmtBRL(m.gap)}</b> por mês para o prazo fechar.</span></p>` : ""}
 
     ${m.series.some((s) => s.contributed !== 0) ? `<div class="goal-spark">
       ${renderSparkline(m.series.map((s) => ({ value: s.balance })), ringColor, 300, 46)}
@@ -23948,7 +24057,7 @@ function renderForecastCard(forecast, full) {
       ${f.horizons.map((h) => `<button class="horizon-chip ${h.id === active.id ? "active" : ""}" data-action="set-forecast-horizon" data-value="${h.id}">${h.label}</button>`).join("")}
     </div>`;
   const alert = f.negativeDayIso
-    ? `<p class="forecast-alert">${svgIcon("alertTriangle", 14)} No ritmo atual seu saldo fica negativo em <b>${fmtDateFull(f.negativeDayIso)}</b>. O menor ponto é ${fmtBRL(f.lowest.value)} em ${fmtDateShort(f.lowest.iso)}.</p>`
+    ? `<p class="forecast-alert">${svgIcon("alertTriangle", 14)}<span>No ritmo atual seu saldo fica negativo em <b>${fmtDateFull(f.negativeDayIso)}</b>. O menor ponto é ${fmtBRL(f.lowest.value)} em ${fmtDateShort(f.lowest.iso)}.</span></p>`
     : "";
 
   // Versão compacta do Dashboard: faixa horizontal de largura inteira, para não
@@ -26413,8 +26522,8 @@ function renderSubsHero(m) {
       <div class="health-stat"><span>Próximos 30 dias</span><b>${fmtBRL(m.upcomingTotal)}</b></div>
     </div>
     ${m.upcoming.length > 0 ? `<div class="sub-upcoming">
-      ${m.upcoming.slice(0, 4).map((s) => `<span class="sub-chip">
-        <i data-ui-css="background:${s.categoryColor}"></i>${fmtDateShort(s.nextDate)} · ${escapeHtml(s.name)} · ${fmtBRL(s.lastAmount)}
+      ${m.upcoming.slice(0, 4).map((s) => `<span class="sub-chip" title="${escapeHtml(s.name)}">
+        <i data-ui-css="background:${s.categoryColor}"></i><span class="sub-chip__txt">${fmtDateShort(s.nextDate)} · ${escapeHtml(s.name)} · ${fmtBRL(s.lastAmount)}</span>
       </span>`).join("")}
     </div>` : ""}
   </div>`;
@@ -28758,19 +28867,36 @@ function accountSignedIn() {
   ${accountGuestLinkCard()}
   ${a.mode === "password" ? `<div class="card"><p class="card-title">Definir nova senha</p><div class="field"><label class="field__label" for="account-new-password">Nova senha</label><input id="account-new-password" class="input" type="password" data-field="auth-new-password" minlength="10" maxlength="128" value="${escapeHtml(a.form.newPassword)}" autocomplete="new-password" /></div><button class="btn btn--primary" data-action="account-submit" data-value="password" ${a.busy ? "disabled" : ""}>Salvar nova senha</button></div>` : ""}
   ${accountDevicesCard(a)}
-  <details class="card account-danger">
-    <summary class="account-danger__summary">
-      <span class="account-danger__icon">${svgIcon("trash", 18)}</span>
-      <span class="account-danger__heading"><span class="card-title">Apagar conta e dados</span><span class="card-subtitle">Exclua a conta e os dados guardados no servidor e neste aparelho.</span></span>
-      <span class="account-danger__chevron">${svgIcon("chevronDown", 18)}</span>
-    </summary>
-    <div class="account-danger__body">
+  ${accountDangerCard(a)}`;
+}
+
+// O ABERTO/FECHADO MORA NO ESTADO, NÃO NO `<details>`.
+//
+// Este bloco era um `<details>` nativo. Como `render()` refaz o DOM inteiro e a
+// própria tela de conta redesenha sozinha (volta periódica da sincronização,
+// atualização da lista de aparelhos, qualquer aviso), o painel se fechava no
+// meio da digitação da senha. Quem tentava apagar a conta via o formulário
+// sumir sem explicação e concluía, com razão, que o botão não funcionava.
+function accountDangerCard(a) {
+  const aberto = !!state.accountDangerOpen;
+  const pronto = a.form.deleteText === "APAGAR CONTA" && a.form.deletePassword.length >= 10;
+  return `<section class="card account-danger${aberto ? " account-danger--open" : ""}">
+    <button type="button" class="account-danger__summary" data-action="account-danger-toggle" aria-expanded="${aberto ? "true" : "false"}" aria-controls="account-danger-body">
+      <span class="account-danger__row">
+        <span class="account-danger__icon">${svgIcon("trash", 18)}</span>
+        <span class="account-danger__heading"><span class="card-title">Apagar conta e dados</span><span class="card-subtitle">Exclua a conta e os dados guardados no servidor e neste aparelho.</span></span>
+        <span class="account-danger__chevron">${svgIcon("chevronDown", 18)}</span>
+      </span>
+    </button>
+    <div class="account-danger__body" id="account-danger-body" ${aberto ? "" : "hidden"}>
       <p class="card-subtitle">A cópia deste aparelho também será apagada. Outros aparelhos perderão o acesso ao servidor, mas manterão o que já estiver salvo neles.</p>
       <div class="field"><label class="field__label" for="account-delete-password">Senha atual</label><input id="account-delete-password" class="input" type="password" data-field="auth-delete-password" maxlength="128" value="${escapeHtml(a.form.deletePassword)}" autocomplete="current-password" /></div>
       <div class="field"><label class="field__label" for="account-delete-text">Digite APAGAR CONTA</label><input id="account-delete-text" class="input" data-field="auth-delete-text" maxlength="20" value="${escapeHtml(a.form.deleteText)}" autocomplete="off" /></div>
+      ${a.deleteHint ? `<p class="account-danger__hint" role="alert">${svgIcon("alertTriangle", 15)} ${escapeHtml(a.deleteHint)}</p>` : ""}
       <button class="btn btn--danger" data-action="account-delete-request" ${a.busy ? "disabled" : ""}>Apagar conta e dados</button>
+      ${pronto ? "" : `<p class="card-subtitle account-danger__requisito">Preencha a senha da conta (10 caracteres ou mais) e digite APAGAR CONTA para liberar a exclusão. A frase seguinte, na confirmação, também precisa vir em maiúsculas.</p>`}
     </div>
-  </details>`;
+  </section>`;
 }
 
 function renderAccountScreen() {
@@ -28844,7 +28970,13 @@ function renderConfirmationModal() {
       <div class="confirmation-dialog__copy">
         <p class="card-title" id="confirmation-title">${escapeHtml(c.title)}</p>
         <p class="card-subtitle" id="confirmation-message">${escapeHtml(c.message)}</p>
-        ${c.requiredText ? `<div class="field" data-ui-css="margin-top:14px"><label class="field__label" for="confirmation-required-input">Digite ${escapeHtml(c.requiredText)} para confirmar</label><input id="confirmation-required-input" class="input" data-field="confirmation-required" value="${escapeHtml(c.typedText || "")}" autocomplete="off" data-validate="text" /></div>` : ""}
+        ${c.requiredText ? `<div class="field" data-ui-css="margin-top:14px">
+          <label class="field__label" for="confirmation-required-input">Digite ${escapeHtml(c.requiredText)} para confirmar</label>
+          <input id="confirmation-required-input" class="input" data-field="confirmation-required" value="${escapeHtml(c.typedText || "")}" autocomplete="off" data-validate="text" aria-describedby="confirmation-required-help" />
+          <p class="field-hint" id="confirmation-required-help">${c.typedText === c.requiredText
+            ? "Confirmação conferida."
+            : `O botão libera quando o campo tiver exatamente ${escapeHtml(c.requiredText)}.`}</p>
+        </div>` : ""}
       </div>
       <div class="confirmation-dialog__actions">
         <button type="button" class="btn btn--ghost" data-action="confirmation-cancel" autofocus>${escapeHtml(c.cancelLabel)}</button>
@@ -29329,8 +29461,29 @@ function onClick(e) {
     case "account-revoke":
       requestConfirmation({ title: "Revogar acesso deste dispositivo?", message: "Este dispositivo não poderá mais acessar nem sincronizar sua conta. Uma cópia já salva nele não será apagada à distância.", confirmLabel: "Revogar acesso", tone: "danger", onConfirm: () => accountRevoke(id) });
       break;
+    case "account-danger-toggle":
+      state.accountDangerOpen = !state.accountDangerOpen;
+      // Fechar o painel esquece o que estava digitado. Senha não fica em
+      // memória depois que a pessoa desiste, e o texto de confirmação volta a
+      // ser exigido por inteiro na próxima vez.
+      if (!state.accountDangerOpen) { state.account.form.deletePassword = ""; state.account.form.deleteText = ""; state.account.deleteHint = ""; }
+      render();
+      break;
     case "account-delete-request":
-      if (state.account.form.deleteText !== "APAGAR CONTA" || state.account.form.deletePassword.length < 10) { state.account.error = "Informe sua senha atual e digite APAGAR CONTA."; render(); break; }
+      // O AVISO PRECISA FICAR DO LADO DO BOTÃO.
+      //
+      // Ele era escrito em `state.account.error`, que a tela desenha lá
+      // embaixo, depois de todos os cartões. Quem clicava no botão sem ter
+      // preenchido tudo não via nada acontecer: a mensagem nascia fora do campo
+      // de visão. Agora ela nasce dentro do próprio painel.
+      if (state.account.form.deleteText !== "APAGAR CONTA" || state.account.form.deletePassword.length < 10) {
+        state.account.deleteHint = state.account.form.deletePassword.length < 10
+          ? "Informe a senha atual da conta. Ela tem 10 caracteres ou mais."
+          : "Digite APAGAR CONTA, exatamente assim, no campo acima.";
+        render();
+        break;
+      }
+      state.account.deleteHint = "";
       requestConfirmation({ title: "Apagar conta e dados?", message: "A conta e os dados guardados no servidor e neste aparelho serão apagados. Isso não pode ser desfeito. Cópias já salvas em outros aparelhos não serão apagadas à distância.", confirmLabel: "Apagar conta e dados", tone: "danger", requiredText: "APAGAR CONTA", onConfirm: accountDelete });
       break;
     case "analytics-view": state.analyticsView = value === "reports" ? "reports" : "movements"; state.analyticsLimit = 30; render(); break;
@@ -30931,6 +31084,13 @@ let state = {
   // Campo "tipo de movimento" recolhido por padrão: a dedução acerta o caso
   // comum, e só quem precisa corrigir precisa vê-lo.
   natureFieldOpen: false,
+  // Bloco "Apagar conta e dados", em Conta e acesso. Mora aqui pelo mesmo
+  // motivo de `settingsSection`: era um `<details>` nativo, e `render()`
+  // reconstrói o DOM inteiro. Como o cartão de sincronização redesenha a tela
+  // sozinho (a volta periódica, a lista de aparelhos, qualquer aviso), o painel
+  // se fechava enquanto a pessoa digitava a senha, e a exclusão passava a
+  // impressão de estar quebrada.
+  accountDangerOpen: false,
   // ---- novos recursos ----
   importRows: null,        // linhas parseadas de OFX/CSV aguardando revisão
   importFilename: null,
@@ -31443,8 +31603,20 @@ function attrSelectorValue(v) {
 // `restoreFocus` saía na primeira linha e o foco caía no `<body>`. Quem usa
 // teclado voltava para o topo da página a cada escolha e precisava tabular a
 // tela inteira de novo.
+// O ATALHO DE PULAR SÓ EXISTE ENQUANTO TEM O FOCO, E ISSO O TIRAVA DA TELA.
+//
+// `.skip-link` fica escondido acima da borda e desce quando recebe foco. No
+// celular, tocar num link dá foco a ele; a partir daí TODO render devolvia o
+// foco pelo seletor `[data-action="skip-to-content"]`, e a pilha verde "Ir para
+// o conteúdo" ficava colada no alto da tela, por cima do relógio e do conteúdo,
+// atravessando telas e minutos, sem jeito de fechar. Um controle que só serve
+// de trampolim para o conteúdo não deve ser reencontrado depois do render: se
+// ele ainda tiver o foco de verdade, o navegador o mantém sozinho.
+const FOCO_NAO_RESTAURAVEL = new Set(["skip-to-content"]);
+
 function focusKeyOf(el) {
   if (!el) return null;
+  if (el.dataset && FOCO_NAO_RESTAURAVEL.has(el.dataset.action)) return null;
   if (el.id) return { by: "id", id: el.id };
   const ds = el.dataset || {};
   if (ds.field) {
@@ -32021,6 +32193,14 @@ function onInput(e) {
   const id = e.target.dataset.id;
   switch (field) {
     case "onb-name": state.onboarding.name = val; break;
+    // A CAIXA CONTINUA IMPORTANDO AQUI, DE PROPÓSITO.
+    //
+    // A frase exigida ("APAGAR CONTA", "APAGAR") é a última trava antes de uma
+    // exclusão irreversível, e digitá-la exatamente é parte da trava; converter
+    // sozinho a tornaria mais fraca, e `tests/browser/run-browser.js` fixa esse
+    // comportamento. O que faltava não era tolerância, era EXPLICAÇÃO: o botão
+    // ficava desligado sem uma linha dizendo o que faltava. A linha agora existe
+    // logo abaixo do campo (ver `renderConfirmationModal`).
     case "confirmation-required":
       if (state.confirmation) { state.confirmation.typedText = val; render(); }
       break;
@@ -32071,8 +32251,10 @@ function onInput(e) {
     case "auth-email": state.account.form.email = val.trim().slice(0, 254); break;
     case "auth-password": state.account.form.password = val.slice(0, 128); break;
     case "auth-new-password": state.account.form.newPassword = val.slice(0, 128); break;
-    case "auth-delete-password": state.account.form.deletePassword = val.slice(0, 128); break;
-    case "auth-delete-text": state.account.form.deleteText = val.toUpperCase().slice(0, 20); if (e.target.value !== state.account.form.deleteText) e.target.value = state.account.form.deleteText; break;
+    // O aviso do painel de exclusão some assim que a pessoa volta a digitar:
+    // ele descreve o que faltava, e o que faltava está sendo preenchido agora.
+    case "auth-delete-password": state.account.form.deletePassword = val.slice(0, 128); state.account.deleteHint = ""; break;
+    case "auth-delete-text": state.account.form.deleteText = val.toUpperCase().slice(0, 20); state.account.deleteHint = ""; if (e.target.value !== state.account.form.deleteText) e.target.value = state.account.form.deleteText; break;
     // Busca da tela "Recursos" e laboratório de regras: re-render a cada tecla é
     // aceitável porque as duas telas são listas curtas, e `restoreFocus` devolve
     // foco e caret pelo id do campo.

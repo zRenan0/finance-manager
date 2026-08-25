@@ -66,7 +66,12 @@
   .review-issue__actions { grid-column:1 / -1; justify-content:stretch; }
   .review-issue__actions .btn, .review-category { flex:1; min-width:0; min-height:44px; }
   .movement-row { grid-template-columns:28px 36px minmax(0, 1fr) 44px; gap:6px; }
-  .movement-row > .tx-amount { grid-column:3; justify-self:start; margin-top:-12px; padding-bottom:6px; }
+  /* O valor desce para a segunda linha porque a descricao precisa da largura
+     inteira no celular. Ele ficava colado a esquerda, embaixo da linha de
+     origem e puxado por uma margem negativa: lia-se como mais uma linha de
+     detalhe, e nao como o valor da movimentacao. Alinhado a direita, no fim da
+     mesma coluna da descricao, volta a ser a leitura de sempre. */
+  .movement-row > .tx-amount { grid-column:3; justify-self:end; margin-top:-6px; padding-bottom:6px; font-weight:700; }
   .movement-row > .icon-btn { grid-column:4; grid-row:1 / span 2; }
   .movement-row__main { grid-column:3; }
   .movement-detail__facts { grid-template-columns:1fr; }

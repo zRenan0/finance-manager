@@ -283,8 +283,29 @@ function onClick(e) {
     case "account-revoke":
       requestConfirmation({ title: "Revogar acesso deste dispositivo?", message: "Este dispositivo não poderá mais acessar nem sincronizar sua conta. Uma cópia já salva nele não será apagada à distância.", confirmLabel: "Revogar acesso", tone: "danger", onConfirm: () => accountRevoke(id) });
       break;
+    case "account-danger-toggle":
+      state.accountDangerOpen = !state.accountDangerOpen;
+      // Fechar o painel esquece o que estava digitado. Senha não fica em
+      // memória depois que a pessoa desiste, e o texto de confirmação volta a
+      // ser exigido por inteiro na próxima vez.
+      if (!state.accountDangerOpen) { state.account.form.deletePassword = ""; state.account.form.deleteText = ""; state.account.deleteHint = ""; }
+      render();
+      break;
     case "account-delete-request":
-      if (state.account.form.deleteText !== "APAGAR CONTA" || state.account.form.deletePassword.length < 10) { state.account.error = "Informe sua senha atual e digite APAGAR CONTA."; render(); break; }
+      // O AVISO PRECISA FICAR DO LADO DO BOTÃO.
+      //
+      // Ele era escrito em `state.account.error`, que a tela desenha lá
+      // embaixo, depois de todos os cartões. Quem clicava no botão sem ter
+      // preenchido tudo não via nada acontecer: a mensagem nascia fora do campo
+      // de visão. Agora ela nasce dentro do próprio painel.
+      if (state.account.form.deleteText !== "APAGAR CONTA" || state.account.form.deletePassword.length < 10) {
+        state.account.deleteHint = state.account.form.deletePassword.length < 10
+          ? "Informe a senha atual da conta. Ela tem 10 caracteres ou mais."
+          : "Digite APAGAR CONTA, exatamente assim, no campo acima.";
+        render();
+        break;
+      }
+      state.account.deleteHint = "";
       requestConfirmation({ title: "Apagar conta e dados?", message: "A conta e os dados guardados no servidor e neste aparelho serão apagados. Isso não pode ser desfeito. Cópias já salvas em outros aparelhos não serão apagadas à distância.", confirmLabel: "Apagar conta e dados", tone: "danger", requiredText: "APAGAR CONTA", onConfirm: accountDelete });
       break;
     case "analytics-view": state.analyticsView = value === "reports" ? "reports" : "movements"; state.analyticsLimit = 30; render(); break;

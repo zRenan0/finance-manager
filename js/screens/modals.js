@@ -57,7 +57,13 @@ function renderConfirmationModal() {
       <div class="confirmation-dialog__copy">
         <p class="card-title" id="confirmation-title">${escapeHtml(c.title)}</p>
         <p class="card-subtitle" id="confirmation-message">${escapeHtml(c.message)}</p>
-        ${c.requiredText ? `<div class="field" data-ui-css="margin-top:14px"><label class="field__label" for="confirmation-required-input">Digite ${escapeHtml(c.requiredText)} para confirmar</label><input id="confirmation-required-input" class="input" data-field="confirmation-required" value="${escapeHtml(c.typedText || "")}" autocomplete="off" data-validate="text" /></div>` : ""}
+        ${c.requiredText ? `<div class="field" data-ui-css="margin-top:14px">
+          <label class="field__label" for="confirmation-required-input">Digite ${escapeHtml(c.requiredText)} para confirmar</label>
+          <input id="confirmation-required-input" class="input" data-field="confirmation-required" value="${escapeHtml(c.typedText || "")}" autocomplete="off" data-validate="text" aria-describedby="confirmation-required-help" />
+          <p class="field-hint" id="confirmation-required-help">${c.typedText === c.requiredText
+            ? "Confirmação conferida."
+            : `O botão libera quando o campo tiver exatamente ${escapeHtml(c.requiredText)}.`}</p>
+        </div>` : ""}
       </div>
       <div class="confirmation-dialog__actions">
         <button type="button" class="btn btn--ghost" data-action="confirmation-cancel" autofocus>${escapeHtml(c.cancelLabel)}</button>

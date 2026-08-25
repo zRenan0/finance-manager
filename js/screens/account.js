@@ -271,19 +271,36 @@ function accountSignedIn() {
   ${accountGuestLinkCard()}
   ${a.mode === "password" ? `<div class="card"><p class="card-title">Definir nova senha</p><div class="field"><label class="field__label" for="account-new-password">Nova senha</label><input id="account-new-password" class="input" type="password" data-field="auth-new-password" minlength="10" maxlength="128" value="${escapeHtml(a.form.newPassword)}" autocomplete="new-password" /></div><button class="btn btn--primary" data-action="account-submit" data-value="password" ${a.busy ? "disabled" : ""}>Salvar nova senha</button></div>` : ""}
   ${accountDevicesCard(a)}
-  <details class="card account-danger">
-    <summary class="account-danger__summary">
-      <span class="account-danger__icon">${svgIcon("trash", 18)}</span>
-      <span class="account-danger__heading"><span class="card-title">Apagar conta e dados</span><span class="card-subtitle">Exclua a conta e os dados guardados no servidor e neste aparelho.</span></span>
-      <span class="account-danger__chevron">${svgIcon("chevronDown", 18)}</span>
-    </summary>
-    <div class="account-danger__body">
+  ${accountDangerCard(a)}`;
+}
+
+// O ABERTO/FECHADO MORA NO ESTADO, NÃO NO `<details>`.
+//
+// Este bloco era um `<details>` nativo. Como `render()` refaz o DOM inteiro e a
+// própria tela de conta redesenha sozinha (volta periódica da sincronização,
+// atualização da lista de aparelhos, qualquer aviso), o painel se fechava no
+// meio da digitação da senha. Quem tentava apagar a conta via o formulário
+// sumir sem explicação e concluía, com razão, que o botão não funcionava.
+function accountDangerCard(a) {
+  const aberto = !!state.accountDangerOpen;
+  const pronto = a.form.deleteText === "APAGAR CONTA" && a.form.deletePassword.length >= 10;
+  return `<section class="card account-danger${aberto ? " account-danger--open" : ""}">
+    <button type="button" class="account-danger__summary" data-action="account-danger-toggle" aria-expanded="${aberto ? "true" : "false"}" aria-controls="account-danger-body">
+      <span class="account-danger__row">
+        <span class="account-danger__icon">${svgIcon("trash", 18)}</span>
+        <span class="account-danger__heading"><span class="card-title">Apagar conta e dados</span><span class="card-subtitle">Exclua a conta e os dados guardados no servidor e neste aparelho.</span></span>
+        <span class="account-danger__chevron">${svgIcon("chevronDown", 18)}</span>
+      </span>
+    </button>
+    <div class="account-danger__body" id="account-danger-body" ${aberto ? "" : "hidden"}>
       <p class="card-subtitle">A cópia deste aparelho também será apagada. Outros aparelhos perderão o acesso ao servidor, mas manterão o que já estiver salvo neles.</p>
       <div class="field"><label class="field__label" for="account-delete-password">Senha atual</label><input id="account-delete-password" class="input" type="password" data-field="auth-delete-password" maxlength="128" value="${escapeHtml(a.form.deletePassword)}" autocomplete="current-password" /></div>
       <div class="field"><label class="field__label" for="account-delete-text">Digite APAGAR CONTA</label><input id="account-delete-text" class="input" data-field="auth-delete-text" maxlength="20" value="${escapeHtml(a.form.deleteText)}" autocomplete="off" /></div>
+      ${a.deleteHint ? `<p class="account-danger__hint" role="alert">${svgIcon("alertTriangle", 15)} ${escapeHtml(a.deleteHint)}</p>` : ""}
       <button class="btn btn--danger" data-action="account-delete-request" ${a.busy ? "disabled" : ""}>Apagar conta e dados</button>
+      ${pronto ? "" : `<p class="card-subtitle account-danger__requisito">Preencha a senha da conta (10 caracteres ou mais) e digite APAGAR CONTA para liberar a exclusão. A frase seguinte, na confirmação, também precisa vir em maiúsculas.</p>`}
     </div>
-  </details>`;
+  </section>`;
 }
 
 function renderAccountScreen() {

@@ -36,7 +36,7 @@ function renderMovementFilters() {
   return `<div class="movement-filters ${state.movementFiltersOpen ? "movement-filters--open" : ""}">
     <div class="search-row movement-search">
       <span class="search-icon">${svgIcon("search", 16)}</span>
-      <input id="analytics-search" class="input input--search" data-field="search" value="${escapeHtml(state.analyticsSearch)}" placeholder="Buscar descrição, valor, conta ou origem" autocomplete="off" />
+      <input id="analytics-search" class="input input--search" data-field="search" value="${escapeHtml(state.analyticsSearch)}" placeholder="Buscar" aria-label="Buscar por descrição, valor, conta ou origem" title="Buscar por descrição, valor, conta ou origem" autocomplete="off" />
       ${state.analyticsSearch ? `<button class="icon-btn" data-action="movement-search-clear" aria-label="Limpar busca">${svgIcon("x", 16)}</button>` : ""}
     </div>
     <button class="btn btn--secondary movement-filter-toggle" data-action="movement-filters-toggle" aria-expanded="${state.movementFiltersOpen}">${svgIcon("filter", 16)} Filtros</button>
