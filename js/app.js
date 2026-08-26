@@ -249,6 +249,9 @@ let state = {
     confirmDeleteId: null,   // exclusão em duas etapas
     applyPreview: null,      // prévia da recategorização em massa
   },
+  // Bloco que precisa aparecer para a pessoa DEPOIS do próximo render (id do
+  // elemento). Só vale uma vez: `afterRender` consome e zera. Ver revealAfterRender.
+  revealTarget: null,
   booting: true,             // primeiro paint: esqueleto no lugar dos dados
   // A pessoa já encostou no aplicativo (clique ou tecla). A partir daí a tela é
   // dela: nenhuma promessa de rede que resolve tarde pode tomá-la. Ver
@@ -776,8 +779,40 @@ function markEnterAnimations() {
   __enterModal = modalKey;
 }
 
+// O FORMULÁRIO QUE ABRE FORA DA TELA PARECE BOTÃO QUEBRADO.
+//
+// Vários cadastros (patrimônio, investimentos) desenham o formulário no TOPO da
+// tela, enquanto o botão que o abre está lá embaixo; no patrimônio, "Cadastrar
+// o primeiro item" fica depois de gráficos, comparação anual e leitura do
+// período. `render()` reconstrói o DOM e o navegador mantém a rolagem onde
+// estava: a pessoa clica, nada se move, e a conclusão razoável é que o botão
+// não funciona. Ela clica de novo, e de novo.
+//
+// Quem abre o formulário marca `state.revealTarget` com o id do bloco; aqui a
+// tela vai até ele e põe o cursor no primeiro campo. Vale uma vez só, porque
+// `render()` roda a cada tecla digitada e rolar a tela a cada letra seria pior
+// que o defeito original.
+function revealAfterRender() {
+  const id = state.revealTarget;
+  if (!id) return;
+  state.revealTarget = null;
+  const target = document.getElementById(id);
+  if (!target || typeof target.scrollIntoView !== "function") return;
+  try { target.scrollIntoView({ behavior: "smooth", block: "start" }); }
+  catch (e) { target.scrollIntoView(); }
+  const field = typeof target.querySelector === "function"
+    ? target.querySelector("input:not([type=hidden]), select, textarea")
+    : null;
+  // `preventScroll` evita que o foco desfaça a rolagem suave que acabou de
+  // começar; onde o navegador não conhece a opção, o foco simplesmente rola.
+  if (field && typeof field.focus === "function") {
+    try { field.focus({ preventScroll: true }); } catch (e) { field.focus(); }
+  }
+}
+
 function afterRender() {
   markEnterAnimations();
+  revealAfterRender();
   if (window.CofreUI) {
     window.CofreUI.dialogs.sync();
     window.CofreUI.forms.sync({ focus: false });
@@ -1098,6 +1133,101 @@ function exportBudgetsCsv() {
   if (status.items.length === 0) { notify("Nenhum orçamento definido ainda"); return; }
   downloadFile(`orcamentos-${keyOfCurrentMonth()}.csv`, buildBudgetsCsv(state.data, keyOfCurrentMonth()), "text/csv;charset=utf-8;");
   notify("Orçamentos exportados em CSV");
+}
+
+// ------------------------------------------------------------------
+// EXTRATO EM PDF
+// ------------------------------------------------------------------
+// O CSV serve para recalcular; o PDF serve para MOSTRAR. É o arquivo que se
+// manda para o contador, para o banco, para o processo de aluguel; e nenhum
+// deles abre uma planilha de 400 linhas para entender o mês da pessoa.
+//
+// Sai exatamente o que está na tela de Movimentações: mesmo período, mesma
+// busca, mesmos filtros. Exportar algo diferente do que a pessoa acabou de
+// conferir seria a forma mais rápida de tornar o arquivo pouco confiável.
+function statementPeriodLabel(filters) {
+  if (filters.period === "semana") return "Últimos 7 dias";
+  if (filters.period === "mes") return `${MONTH_NAMES[new Date().getMonth()]} de ${new Date().getFullYear()}`;
+  if (filters.period === "ano") return `Ano de ${new Date().getFullYear()}`;
+  if (filters.period === "custom") return `De ${fmtDateFull(filters.start)} até ${fmtDateFull(filters.end)}`;
+  return "Todo o histórico";
+}
+
+function statementFiltersLabel(filters) {
+  const parts = [];
+  const typeLabels = { income: "só entradas", expense: "só saídas", transfer: "só transferências", "card-payment": "só pagamentos de fatura" };
+  if (filters.type && typeLabels[filters.type]) parts.push(typeLabels[filters.type]);
+  if (filters.categoryId) parts.push(`categoria: ${categoryById(state.data, filters.categoryId).name}`);
+  if (filters.accountId) {
+    const account = accountById(state.data, filters.accountId);
+    const card = creditCardById(state.data, filters.accountId);
+    parts.push(`conta: ${(account && account.name) || (card && card.name) || filters.accountId}`);
+  }
+  if (filters.source) parts.push(`origem: ${movementSourceMeta(filters.source, null).label}`);
+  if (String(filters.search || "").trim()) parts.push(`busca: “${String(filters.search).trim()}”`);
+  return parts.length ? `Filtros aplicados: ${parts.join(" · ")}.` : "Sem filtros: todos os movimentos do período.";
+}
+
+function statementPdfInput(filters, model) {
+  const expenses = model.entries.filter((entry) => entry.type === "expense");
+  const totalExpense = sumMoney(expenses, (entry) => entry.amount);
+  const byCategory = {};
+  expenses.forEach((entry) => {
+    const key = entry.categoryId || "outros";
+    byCategory[key] = (byCategory[key] || 0) + moneyToCents(entry.amount);
+  });
+  const breakdown = Object.entries(byCategory)
+    .map(([id, cents]) => {
+      const category = categoryById(state.data, id);
+      const value = moneyFromCents(cents);
+      return { label: category.name, color: category.color, value: fmtBRL(value), pct: safePct(value, totalExpense), raw: value };
+    })
+    .sort((a, b) => b.raw - a.raw)
+    .slice(0, 12);
+
+  const now = new Date();
+  return {
+    title: "Extrato de movimentações",
+    brand: "Cofre",
+    subtitle: statementPeriodLabel(filters),
+    filtersLabel: statementFiltersLabel(filters),
+    generatedLabel: `Gerado em ${fmtDateFull(todayIso())} às ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`,
+    date: now,
+    summary: [
+      { label: "Entradas", value: fmtBRL(model.income), tone: "income" },
+      { label: "Saídas", value: fmtBRL(model.expense), tone: "expense" },
+      { label: "Saldo do período", value: fmtBRL(model.balance), tone: model.balance < 0 ? "expense" : "income" },
+      { label: "Movimentos", value: String(model.count), tone: "ink" },
+    ],
+    rows: model.entries.map((entry) => ({
+      date: fmtDateFull(entry.date),
+      description: entry.description,
+      category: entry.categoryName,
+      account: entry.accountName || entry.cardName || "",
+      amount: `${entry.type === "income" ? "+" : entry.type === "expense" ? "-" : ""}${fmtBRL(entry.amount)}`,
+      tone: entry.type === "income" ? "income" : entry.type === "expense" ? "expense" : "neutral",
+    })),
+    totalLabel: `Saldo do período (${plural(model.count, "movimento", "movimentos")})`,
+    totalValue: fmtBRL(model.balance),
+    totalTone: model.balance < 0 ? "expense" : "income",
+    breakdownTitle: "Saídas por categoria",
+    breakdown,
+    emptyLabel: "Nenhum movimento no período e nos filtros escolhidos.",
+    note: "Gerado pelo Cofre no seu próprio aparelho.",
+    notes: [
+      "Documento de conferência gerado a partir dos lançamentos deste aparelho. Não tem valor fiscal e não substitui o extrato oficial do banco nem a fatura do cartão.",
+      "Transferências entre contas e pagamentos de fatura aparecem na lista para a conferência ficar completa, mas não entram nas somas de entradas e saídas: o dinheiro só mudou de lugar.",
+    ],
+  };
+}
+
+function exportStatementPdf() {
+  const filters = movementFiltersSnapshot();
+  const model = buildMovementCenterModel(state.data, filters);
+  if (!model.entries.length) { notify("Nenhum movimento no período para exportar", "info"); return; }
+  const stamp = filters.period === "custom" ? `${filters.start}-a-${filters.end}` : todayIso();
+  downloadFile(`extrato-${stamp}.pdf`, buildStatementPdf(statementPdfInput(filters, model)), "application/pdf");
+  notify(`${plural(model.entries.length, "movimento exportado", "movimentos exportados")} em PDF`);
 }
 
 // Estado do backup em uma linha. Sem isso, o único jeito de saber se havia

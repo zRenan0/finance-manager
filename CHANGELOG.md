@@ -2,6 +2,88 @@
 
 ## Não publicado
 
+### A fatura do cartão parava de virar receita
+
+- **"Pagamento recebido" não é dinheiro entrando.** Na fatura do Nubank (e de
+  qualquer cartão), o pagamento do mês anterior aparece como CRÉDITO, com essa
+  descrição. O importador lia o número positivo e gravava receita: o mês fechava
+  com uma entrada que nunca existiu, o saldo mentia, a taxa de poupança mentia e
+  o Score subia por causa de uma dívida paga. `classifyStatementRow` (js/rules.js)
+  reconhece a linha e a tela de revisão a traz DESMARCADA, com a frase que
+  explica o motivo. A mesma descrição no extrato da CONTA continua entrando como
+  saída, porque ali o dinheiro sai de verdade.
+- **"Valor pendente do mês anterior" também vem desmarcado.** É o saldo rolado
+  da fatura: aquele gasto já foi contado no mês em que aconteceu, e importá-lo
+  de novo cobraria a pessoa duas vezes pela mesma compra.
+- **Multa, juros e IOF continuam entrando.** São gasto de verdade. O que mudou é
+  que agora eles têm categoria explicada ("Tarifas, juros e encargos do banco")
+  em vez de cair em "Outros" sem motivo aparente.
+- **A caixa de revisão limpa o que já entrou.** Quem importou a fatura antes
+  disso tem receitas que nunca existiram no histórico. A pendência
+  "Pagamento de fatura contado como receita" aparece no topo da caixa de revisão,
+  com o botão que exclui o lançamento depois de confirmar. Receita digitada à mão
+  nunca é apontada: aquilo foi decisão da pessoa.
+
+### O importador passou a entender o nome do estabelecimento
+
+- **O ruído do banco sai antes da comparação.** `statementMerchantCore` tira o
+  verbo ("COMPRA CARTAO", "PIX ENVIADO"), a máscara do cartão, o prefixo da
+  maquininha ("PAG*", "IFD*"), a data, a parcela e a UF do fim. "COMPRA CARTAO
+  5678 PAG*PADARIA DO ZE 12/08 SP" e "Compra com Cartão - 24/08 - Padaria do Zé"
+  viram a mesma chave. "UBER *TRIP" é preservado: ali o asterisco tem espaço
+  antes, e "uber" é o estabelecimento, não o código da maquininha.
+- **O app lembra do que você já corrigiu.** Categoria escolhida à mão (lançamento
+  manual ou categoria editada depois) vira memória por estabelecimento e volta
+  como sugestão de confiança alta no mês seguinte, com a explicação "você já
+  classificou este lugar assim". Voto manual pesa 4; palpite automático pesa 1,
+  para o motor não repetir o próprio erro com mais confiança. Empate real não
+  sugere nada. Regra escrita à mão continua acima de tudo.
+- **O dicionário de fábrica dobrou de tamanho.** Farmácias, supermercados,
+  companhias de energia e saneamento, corretoras, faculdades, streamings,
+  aplicativos de transporte e as maquininhas mais comuns do país. Duas novas
+  regras: "Compras e varejo" e "Tarifas, juros e encargos do banco".
+- **Dois enganos frequentes deixaram de acontecer.** "Mercado Livre" e "Mercado
+  Pago" não são mais supermercado, e "água mineral" comprada no mercado não vira
+  conta de água. A abreviação "MERC", que aparece em metade dos mercados de
+  bairro, passou a ser entendida.
+- **A tela de revisão diz de onde veio cada palpite.** Antes ela calculava a
+  confiança da sugestão e não mostrava nada. Agora cada linha traz o motivo
+  ("Delivery de comida", "sua regra", "você já classificou este lugar assim"), que
+  é o que permite corrigir de uma vez, criando uma regra, em vez de corrigir todo
+  mês.
+
+### Extrato em PDF
+
+- **`js/pdf.js` escreve o formato à mão, sem biblioteca e sem rede.** O arquivo
+  com todos os gastos da pessoa não pode passar por um servidor só para virar
+  PDF. Usa as fontes base-14 (nada embutido, poucos KB), WinAnsiEncoding para o
+  português inteiro e um byte por caractere, que é o que mantém o índice `xref`
+  do arquivo correto em descrição com acento.
+- **Sai o que está na tela.** O botão fica ao lado dos filtros em Movimentações e
+  respeita período, busca, tipo, categoria, conta e origem; o cabeçalho do
+  documento escreve por extenso o recorte aplicado. Ajustes também tem o botão,
+  junto dos outros exportadores.
+- **O documento tem cabeçalho com o resumo do período, tabela com dia,
+  descrição, categoria, conta e valor, saídas por categoria e rodapé numerado**
+  em todas as páginas, com a ressalva de que é documento de conferência e não
+  substitui o extrato oficial do banco.
+- **Regressão travada em `tests/test-pdf-export.js`:** 44 verificações, entre
+  elas a que confere, byte a byte, se cada deslocamento do `xref` cai no começo
+  do objeto que promete. É a falha que só apareceria abrindo o arquivo.
+
+### O botão de cadastrar deixou de parecer quebrado
+
+- **A tela agora vai até o formulário.** Em Patrimônio, "Cadastrar o primeiro
+  item" fica depois do gráfico, da comparação anual e da leitura do período,
+  enquanto o formulário nasce no TOPO da tela. Como `render()` refaz o DOM e o
+  navegador mantém a rolagem onde estava, a pessoa clicava, nada se mexia, e a
+  conclusão razoável era que o botão não funcionava. `state.revealTarget` marca o
+  bloco e `afterRender` leva a tela até ele, pondo o cursor no primeiro campo.
+- **Vale uma vez só.** `render()` roda a cada tecla digitada; rolar a tela a cada
+  letra seria pior que o defeito original.
+- **O mesmo conserto alcança os outros cadastros com o mesmo formato:** dívidas
+  (incluindo registrar pagamento), investimentos, contas, cartões e
+  transferências.
 ### O aparelho que só baixava volta a enviar
 
 - **O portão da subida não fica mais preso.** `CloudSync.prepareAccount()` fecha

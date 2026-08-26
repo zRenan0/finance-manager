@@ -10,7 +10,7 @@
 function renderDebtForm() {
   const f = state.debtsUi.form;
   if (!f) return "";
-  return `<div class="card debt-editor span-3">
+  return `<div class="card debt-editor span-3" id="debt-form" data-ui-css="scroll-margin-top:18px">
     <div class="screen-header"><div><p class="eyebrow">${f.id ? "Editar dívida" : "Nova dívida"}</p><p class="card-title" data-ui-css="margin:3px 0 0">Saldo e condições do contrato</p></div><button class="icon-btn" data-action="debt-form-cancel" aria-label="Fechar">${svgIcon("x",16)}</button></div>
     <div class="field-row"><div class="field"><label class="field__label" for="debt-name">Nome</label><input id="debt-name" class="input" data-field="debt-name" value="${escapeHtml(f.name)}" placeholder="Ex: Financiamento do carro" maxlength="60" /></div><div class="field"><label class="field__label" for="debt-value">Saldo devedor hoje</label><input id="debt-value" class="input" data-field="debt-value" value="${escapeHtml(f.value)}" inputmode="decimal" placeholder="0,00" /></div></div>
     <div class="field-row"><div class="field"><label class="field__label" for="debt-type">Tipo</label><select id="debt-type" class="input" data-action-select="debt-type">${Object.entries(DEBT_TYPE_LABELS).map(([id,label]) => `<option value="${id}" ${f.debtType === id ? "selected" : ""}>${label}</option>`).join("")}</select></div><div class="field"><label class="field__label" for="debt-creditor">Credor</label><input id="debt-creditor" class="input" data-field="debt-creditor" value="${escapeHtml(f.creditor)}" placeholder="Banco ou empresa" maxlength="80" /></div></div>
@@ -30,7 +30,7 @@ function renderDebtPaymentForm(model) {
   if (!p) return "";
   const debt = model.debts.find((d) => d.id === p.debtId) || (state.data.assets || []).find((d) => d.id === p.debtId);
   const accounts = (state.data.accounts || []).filter((a) => !a.archived);
-  return `<div class="card debt-editor span-3">
+  return `<div class="card debt-editor span-3" id="debt-payment-form" data-ui-css="scroll-margin-top:18px">
     <div class="screen-header"><div><p class="eyebrow">Registrar pagamento</p><p class="card-title" data-ui-css="margin:3px 0 0">${debt ? escapeHtml(debt.name) : "Dívida"}</p></div><button class="icon-btn" data-action="debt-payment-cancel" aria-label="Fechar">${svgIcon("x",16)}</button></div>
     <div class="field-row"><div class="field"><label class="field__label" for="debt-pay-amount">Valor pago</label><input id="debt-pay-amount" class="input" data-field="debt-pay-amount" value="${escapeHtml(p.amount)}" inputmode="decimal" placeholder="0,00" /></div><div class="field"><label class="field__label" for="debt-pay-date">Data</label><input id="debt-pay-date" type="date" class="input" data-field="debt-pay-date" value="${p.date}" /></div></div>
     <div class="field-row"><div class="field"><label class="field__label" for="debt-pay-account">Conta de origem</label><select id="debt-pay-account" class="input" data-action-select="debt-pay-account"><option value="">Sem conta vinculada</option>${accounts.map((a) => `<option value="${a.id}" ${p.accountId === a.id ? "selected" : ""}>${escapeHtml(a.name)}</option>`).join("")}</select></div><div class="field"><label class="field__label" for="debt-pay-category">Categoria</label><select id="debt-pay-category" class="input" data-action-select="debt-pay-category">${topLevelCategories(state.data).map((c) => `<option value="${c.id}" ${p.categoryId === c.id ? "selected" : ""}>${escapeHtml(c.name)}</option>`).join("")}</select></div></div>

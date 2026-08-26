@@ -40,6 +40,7 @@ function renderMovementFilters() {
       ${state.analyticsSearch ? `<button class="icon-btn" data-action="movement-search-clear" aria-label="Limpar busca">${svgIcon("x", 16)}</button>` : ""}
     </div>
     <button class="btn btn--secondary movement-filter-toggle" data-action="movement-filters-toggle" aria-expanded="${state.movementFiltersOpen}">${svgIcon("filter", 16)} Filtros</button>
+    <button class="btn btn--secondary movement-filter-toggle" data-action="export-statement-pdf" title="Baixar o extrato do período em PDF">${svgIcon("download", 16)} PDF</button>
     <div class="movement-filters__advanced">
       <div class="field"><label class="field__label" for="movement-type">Tipo</label><select id="movement-type" class="input" data-action-select="movement-type">
         ${[["all", "Todos"], ["income", "Entradas"], ["expense", "Saídas"], ["transfer", "Transferências"], ["card-payment", "Pagamentos de fatura"]].map(([id, label]) => `<option value="${id}" ${f.type === id ? "selected" : ""}>${label}</option>`).join("")}
@@ -102,12 +103,13 @@ function renderMovementBulkBar() {
 
 function renderReviewIssue(issue) {
   const tx = issue.txId ? state.data.transactions.find((item) => item.id === issue.txId) : null;
-  const icon = { category: "tag", duplicate: "file", transfer: "arrowRight", "card-payment": "creditCard", account: "bank" }[issue.type] || "alertTriangle";
+  const icon = { category: "tag", duplicate: "file", transfer: "arrowRight", "card-payment": "creditCard", "invoice-income": "creditCard", account: "bank" }[issue.type] || "alertTriangle";
   let action = "";
   if (issue.type === "category" && tx) action = `<select class="input review-category" data-action-select="review-category" data-id="${tx.id}" data-key="${issue.key}"><option value="">Escolher categoria</option>${state.data.categories.filter((c) => c.id !== "outros").map((c) => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join("")}</select>`;
   if (issue.type === "duplicate") action = `<button class="btn btn--secondary" data-action="review-delete-duplicate" data-id="${issue.txId}" data-key="${issue.key}">Revisar e excluir cópia</button>`;
   if (issue.type === "transfer") action = `<button class="btn btn--secondary" data-action="review-convert-transfer" data-id="${issue.txId}" data-key="${issue.key}">Converter em transferência</button>`;
   if (issue.type === "card-payment") action = `<button class="btn btn--secondary" data-action="review-card-payment-open" data-id="${issue.txId}" data-key="${issue.key}">Converter em pagamento</button>`;
+  if (issue.type === "invoice-income") action = `<button class="btn btn--secondary" data-action="review-delete-invoice-income" data-id="${issue.txId}" data-key="${issue.key}">Excluir a receita</button>`;
   if (issue.type === "account") action = `<button class="btn btn--secondary" data-action="review-reconcile-account" data-id="${issue.accountId}">Conferir saldo</button>`;
   return `<article class="review-issue">
     <span class="review-issue__icon">${svgIcon(icon, 18)}</span>

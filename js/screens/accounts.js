@@ -7,7 +7,7 @@
 function renderAccountForm() {
   const f = state.accountsUi.accountForm;
   if (!f) return "";
-  return `<div class="card account-editor">
+  return `<div class="card account-editor" id="account-form" data-ui-css="scroll-margin-top:18px">
     <div class="screen-header"><div><p class="eyebrow">Conta</p><p class="card-title" data-ui-css="margin:3px 0 0">${f.id ? "Editar conta" : "Nova conta"}</p></div>
       <button class="icon-btn" data-action="account-cancel" aria-label="Fechar">${svgIcon("x", 16)}</button></div>
     <div class="field"><label class="field__label" for="account-name-input">Nome</label><input id="account-name-input" class="input" data-field="account-name" value="${escapeHtml(f.name)}" placeholder="Ex: Nubank" maxlength="60" /></div>
@@ -24,7 +24,7 @@ function renderCardForm() {
   const f = state.accountsUi.cardForm;
   if (!f) return "";
   const accounts = (state.data.accounts || []).filter((a) => !a.archived);
-  return `<div class="card account-editor">
+  return `<div class="card account-editor" id="card-form" data-ui-css="scroll-margin-top:18px">
     <div class="screen-header"><div><p class="eyebrow">Cartão</p><p class="card-title" data-ui-css="margin:3px 0 0">${f.id ? "Editar cartão" : "Novo cartão"}</p></div>
       <button class="icon-btn" data-action="card-cancel" aria-label="Fechar">${svgIcon("x", 16)}</button></div>
     <div class="field"><label class="field__label" for="card-name-input">Nome</label><input id="card-name-input" class="input" data-field="card-name" value="${escapeHtml(f.name)}" placeholder="Ex: Mastercard Nubank" maxlength="60" /></div>
@@ -43,7 +43,7 @@ function renderTransferForm() {
   if (!f) return "";
   const accounts = (state.data.accounts || []).filter((a) => !a.archived);
   const options = (selected) => accounts.map((a) => `<option value="${a.id}" ${selected === a.id ? "selected" : ""}>${escapeHtml(a.name)}</option>`).join("");
-  return `<div class="card account-editor">
+  return `<div class="card account-editor" id="transfer-form" data-ui-css="scroll-margin-top:18px">
     <div class="screen-header"><p class="card-title" data-ui-css="margin:0">Transferir entre contas</p><button class="icon-btn" data-action="transfer-cancel" aria-label="Fechar">${svgIcon("x",16)}</button></div>
     <div class="field-row"><div class="field"><label class="field__label" for="transfer-from-select">Origem</label><select id="transfer-from-select" class="input" data-action-select="transfer-from">${options(f.fromAccountId)}</select></div><div class="field"><label class="field__label" for="transfer-to-select">Destino</label><select id="transfer-to-select" class="input" data-action-select="transfer-to">${options(f.toAccountId)}</select></div></div>
     <div class="field-row"><div class="field"><label class="field__label" for="transfer-amount-input">Valor</label><input id="transfer-amount-input" class="input" data-field="transfer-amount" value="${escapeHtml(f.amount)}" inputmode="decimal" placeholder="0,00" /></div><div class="field"><label class="field__label" for="transfer-date-input">Data</label><input id="transfer-date-input" type="date" class="input" data-field="transfer-date" value="${f.date}" /></div></div>

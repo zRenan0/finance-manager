@@ -1210,6 +1210,14 @@ Em **Ajustes → Backup e restauração**:
   **antes** de mexer nos seus dados.
 - **Exportar CSV** — lançamentos (com BOM UTF-8, para o Excel em português abrir
   com acentos certos) e orçamentos do mês.
+- **Exportar o extrato em PDF** — o mesmo recorte que estiver na tela de
+  Movimentações (período, busca e filtros) vira um documento com resumo,
+  tabela e saídas por categoria. O arquivo é escrito por `js/pdf.js`, em
+  JavaScript puro: sem biblioteca, sem CDN e sem servidor, porque um extrato
+  com todos os gastos da pessoa não deveria passar por terceiro para virar
+  PDF. Usa as fontes base-14 do formato (nada embutido) e WinAnsiEncoding,
+  que cobre o português inteiro. O botão fica ao lado dos filtros em
+  Movimentações e também em Ajustes, junto dos outros exportadores.
 - **Importar** — o arquivo é lido e mostrado numa **prévia** ("você tem 340
   lançamentos, o arquivo tem 355, ficará com 361") antes de qualquer gravação.
   Você escolhe o modo:
@@ -1285,11 +1293,24 @@ O ponto de partida do problema era grade de coluna fixa (`repeat(4, 1fr)`,
 Todos os recursos abaixo rodam **inteiramente no navegador** — nenhum dado do seu
 extrato, foto de nota ou lançamento é enviado para servidor algum.
 
-1. **Importador de extratos (OFX/CSV)** — em Ajustes → Ferramentas → "Importar
-   extrato", ou arrastando o arquivo direto na tela. Lê o formato OFX (padrão de
-   bancos) e CSV (com `;` ou `,`), detecta datas em `DD/MM/AAAA` ou `AAAA-MM-DD`,
-   sugere a categoria de cada gasto automaticamente e já marca prováveis duplicatas
-   (mesma data ± 3 dias, mesmo valor) para você revisar antes de importar.
+1. **Importador de extratos e faturas (OFX/CSV)** — em Ajustes → Ferramentas →
+   "Importar extrato", ou arrastando o arquivo direto na tela. Lê o formato OFX
+   (padrão de bancos) e CSV (com `;` ou `,`), detecta datas em `DD/MM/AAAA` ou
+   `AAAA-MM-DD`, sugere a categoria de cada gasto automaticamente e já marca
+   prováveis duplicatas (mesma data ± 3 dias, mesmo valor) para você revisar
+   antes de importar.
+   **Fatura de cartão é lida como fatura.** Nela, o pagamento do mês anterior
+   aparece como crédito ("Pagamento recebido"): lido como número positivo,
+   viraria uma receita que nunca existiu. Essa linha e o "Valor pendente do mês
+   anterior" chegam desmarcadas, com a explicação do motivo; as compras seguem
+   marcadas normalmente. A mesma descrição no extrato da CONTA continua entrando
+   como saída, porque ali o dinheiro sai de verdade.
+   **A sugestão de categoria diz de onde veio.** Ela consulta, nesta ordem: a
+   regra que você escreveu, o que você já classificou à mão naquele mesmo
+   estabelecimento (`statementMerchantCore` tira o verbo do banco, a máscara do
+   cartão, o prefixo da maquininha, a data e a UF, então "COMPRA CARTAO 5678
+   PAG*PADARIA DO ZE 12/08 SP" e "Padaria do Zé" viram a mesma chave) e o
+   dicionário de fábrica.
 2. **Leitor de QR Code de nota fiscal** — botão "Ler QR da nota" no topo do
    Dashboard ou em Ajustes. Usa a API nativa `BarcodeDetector` do navegador para ler
    o QR do cupom (NFC-e) pela câmera, sem enviar nenhuma imagem para fora do
@@ -1327,6 +1348,7 @@ index.html
 ├── js/budgets.js       [NOVO] motor de orçamentos (puro, sem DOM)
 ├── js/charts.js        gráficos em SVG
 ├── js/import.js        importação de extratos OFX/CSV
+├── js/pdf.js           [NOVO] escritor de PDF e extrato impresso (puro, sem DOM)
 ├── js/nlp.js           [NOVO] interpretação de frases em português
 ├── js/score.js         [M1] motor do Score financeiro (puro, sem DOM)
 ├── js/metrics.js       [M1] modelo de leitura do dashboard (puro, sem DOM)

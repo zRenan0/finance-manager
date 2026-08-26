@@ -48,22 +48,66 @@ function normalizeForMatch(str) {
   return normalizeText(str);
 }
 
-// Heurística principal: retorna o id da categoria mais provável para a descrição.
-// Se nenhuma regra casar (ou a categoria não existir mais), cai em "outros".
-function guessCategoryId(dataOrCategories, description) {
+// Heurística principal: qual categoria a descrição pede, com que confiança e
+// POR QUÊ. O "por quê" não é enfeite: a tela de revisão mostra a origem do
+// palpite, e um palpite que se explica é um palpite que a pessoa consegue
+// corrigir de uma vez (criando a regra) em vez de corrigir todo mês.
+//
+// A ordem das fontes é a ordem da autoridade sobre o assunto:
+//   1. Regra que a pessoa escreveu. Ela mandou; não há o que discutir.
+//   2. O que ela já classificou à mão neste mesmo estabelecimento. Ninguém
+//      sabe melhor que "MERC BOM JESUS" é mercado do que quem mora na rua.
+//   3. Dicionário de fábrica, no texto cru do extrato.
+//   4. Dicionário de fábrica, no nome limpo do estabelecimento; é o que faz
+//      uma regra "começa com padaria" alcançar "PAG*PADARIA DO ZE".
+//   5. Histórico sem escolha manual (o próprio palpite de antes), que serve
+//      para manter a coerência, mas entra com confiança média.
+function suggestCategoryForDescription(dataOrCategories, description) {
   const ctx = rulesContextOf(dataOrCategories);
   const categories = ctx.categories || [];
-  const text = normalizeForMatch(description);
-  if (!text) return fallbackCategoryId(categories);
+  const has = (id) => !!id && (categories.length === 0 || categories.some((c) => c.id === id));
+  const fallback = { categoryId: fallbackCategoryId(categories), confidence: "baixa", reason: null };
 
-  const best = matchCategoryRules(compileCategoryRules(ctx), text);
-  if (best && categories.some((c) => c.id === best.categoryId)) return best.categoryId;
-  // Se a subcategoria sugerida foi apagada, tenta a categoria pai equivalente.
-  if (best) {
-    const parentGuess = { mercado: "alimentacao", delivery: "alimentacao" }[best.categoryId];
-    if (parentGuess && categories.some((c) => c.id === parentGuess)) return parentGuess;
+  const text = normalizeForMatch(description);
+  if (!text) return fallback;
+
+  const compiled = compileCategoryRules(ctx);
+  const direct = matchCategoryRules(compiled, text);
+  const core = statementMerchantCore(description);
+  const fromCore = core && core !== text ? matchCategoryRules(compiled, core) : null;
+
+  const custom = [direct, fromCore].find((m) => m && m.source === "custom" && has(m.categoryId));
+  if (custom) return { categoryId: custom.categoryId, confidence: "alta", reason: `sua regra “${custom.label}”` };
+
+  const learned = recallCategoryFromMemory(ctx, description);
+  if (learned && learned.manual && has(learned.categoryId)) {
+    return { categoryId: learned.categoryId, confidence: "alta", reason: "você já classificou este lugar assim" };
   }
-  return fallbackCategoryId(categories);
+
+  const builtin = [direct, fromCore].find((m) => m && has(m.categoryId));
+  if (builtin) {
+    return { categoryId: builtin.categoryId, confidence: builtin.weight >= 5 ? "alta" : "media", reason: builtin.label };
+  }
+
+  if (learned && has(learned.categoryId)) {
+    return { categoryId: learned.categoryId, confidence: "media", reason: "mesma categoria de lançamentos parecidos" };
+  }
+
+  // A regra casou, mas a categoria dela foi apagada. Antes de desistir, tenta a
+  // categoria-mãe: quem apagou "Mercado" continua tendo "Alimentação".
+  const best = direct || fromCore;
+  if (best) {
+    const parent = { mercado: "alimentacao", delivery: "alimentacao" }[best.categoryId];
+    if (parent && has(parent)) return { categoryId: parent, confidence: "media", reason: best.label };
+  }
+  return fallback;
+}
+
+// Contratos antigos, mantidos porque o parser de linguagem natural, o leitor de
+// QR e os testes chamam estes dois nomes. Ambos são a mesma pergunta com
+// recortes diferentes da resposta.
+function guessCategoryId(dataOrCategories, description) {
+  return suggestCategoryForDescription(dataOrCategories, description).categoryId;
 }
 
 function fallbackCategoryId(categories) {
@@ -71,13 +115,8 @@ function fallbackCategoryId(categories) {
 }
 
 // Expõe a confiança da sugestão para a tela de revisão (badge "sugerido").
-// Regra escrita pelo usuário nasce com peso alto de propósito: se ele mandou
-// mandar, a sugestão é confiável por definição.
 function categorySuggestionConfidence(description, dataOrCategories) {
-  const ctx = rulesContextOf(dataOrCategories === undefined ? [] : dataOrCategories);
-  const best = matchCategoryRules(compileCategoryRules(ctx), normalizeForMatch(description));
-  const weight = best ? best.weight : 0;
-  return weight >= 5 ? "alta" : weight >= 3 ? "media" : "baixa";
+  return suggestCategoryForDescription(dataOrCategories === undefined ? [] : dataOrCategories, description).confidence;
 }
 
 // ------------------------------------------------------------------------------
@@ -271,13 +310,27 @@ function markDuplicates(rows, existingTx) {
 function prepareImportRows(rawText, filename, data) {
   const { rows, format, skipped } = parseStatementFile(rawText, filename);
   const withDup = markDuplicates(rows, data.transactions);
-  const prepared = withDup.map((r) => ({
-    ...r,
-    include: !r.duplicate,
-    categoryId: r.type === "expense" ? guessCategoryId(data, r.description) : null,
-    confidence: r.type === "expense" ? categorySuggestionConfidence(r.description, data) : "alta",
-  })).sort((a, b) => (a.date < b.date ? 1 : -1));
-  prepared.meta = { format, skipped, total: rows.length };
+  const prepared = withDup.map((r) => {
+    // O papel da linha vem antes da categoria: não adianta perguntar em que
+    // categoria entra um "Pagamento recebido" da fatura se ele não deveria
+    // entrar como lançamento nenhum.
+    const role = classifyStatementRow(r.description, r.type);
+    const suggestion = r.type === "expense" ? suggestCategoryForDescription(data, r.description) : null;
+    return {
+      ...r,
+      role: role ? role.id : null,
+      roleLabel: role ? role.label : null,
+      roleDetail: role ? role.detail : null,
+      include: !r.duplicate && !(role && role.skip),
+      categoryId: suggestion ? suggestion.categoryId : null,
+      confidence: suggestion ? suggestion.confidence : "alta",
+      categoryReason: suggestion ? suggestion.reason : null,
+    };
+  }).sort((a, b) => (a.date < b.date ? 1 : -1));
+  prepared.meta = {
+    format, skipped, total: rows.length,
+    roles: prepared.reduce((count, r) => (r.role ? { ...count, [r.role]: (count[r.role] || 0) + 1 } : count), {}),
+  };
   return prepared;
 }
 
@@ -286,17 +339,26 @@ function prepareImportRows(rawText, filename, data) {
 // ------------------------------------------------------------------------------
 function buildTransactionsFromRows(rows, format, accountId, filename) {
   const source = format === "ofx" ? "import-ofx" : "import-csv";
-  return rows.map((r) => makeTransaction({
-    type: r.type,
-    amount: r.amount,
-    categoryId: r.type === "expense" ? (r.categoryId || "outros") : "outros",
-    date: r.date,
-    payment: r.type === "expense" ? "Débito" : "Outro",
-    description: r.description,
-    source,
-    origin: { channel: source, label: source === "import-ofx" ? "Extrato OFX" : "Extrato CSV", reference: filename || null, importedAt: new Date().toISOString() },
-    accountId: accountId || null,
-  }));
+  return rows.map((r) => {
+    const tx = makeTransaction({
+      type: r.type,
+      amount: r.amount,
+      categoryId: r.type === "expense" ? (r.categoryId || "outros") : "outros",
+      date: r.date,
+      payment: r.type === "expense" ? "Débito" : "Outro",
+      description: r.description,
+      source,
+      origin: { channel: source, label: source === "import-ofx" ? "Extrato OFX" : "Extrato CSV", reference: filename || null, importedAt: new Date().toISOString() },
+      accountId: accountId || null,
+    });
+    // A linha veio desmarcada e a pessoa marcou de volta. Foi decisão dela, e
+    // a caixa de revisão não pode recebê-la de novo perguntando a mesma coisa
+    // que ela acabou de responder na tela ao lado.
+    if (r.role === "card-payment" && tx.type === "income" && typeof markTransactionIssueReviewed === "function") {
+      return markTransactionIssueReviewed(tx, `invoice-income:${tx.id}`);
+    }
+    return tx;
+  });
 }
 
 // ------------------------------------------------------------------------------

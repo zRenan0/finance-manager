@@ -186,8 +186,89 @@ section("5. Mesclagem de backup");
   check("padrão idêntico com id diferente não duplica", R(`mergeCategoryRules(__a, __dup)`).custom.length === 1);
 }
 
+section("6. Papel da linha do extrato (fatura de cartão)");
+{
+  const papel = (desc, tipo) => R(`(classifyStatementRow(${JSON.stringify(desc)}, ${JSON.stringify(tipo)}) || {}).id || null`);
+
+  // O defeito que originou a seção: na fatura do cartão, "Pagamento recebido" é
+  // crédito. Lido como receita, o mês fecha com uma entrada que nunca existiu e
+  // o aplicativo comemora uma dívida paga como se fosse dinheiro novo.
+  check("pagamento recebido no crédito é pagamento de fatura",
+    papel("Pagamento recebido", "income") === "card-payment");
+  check("pagamento de fatura por extenso também é reconhecido",
+    papel("PAGAMENTO DE FATURA CARTAO", "income") === "card-payment");
+  // No extrato da CONTA o mesmo texto é dinheiro saindo de verdade, e precisa
+  // continuar entrando como saída.
+  check("no débito o mesmo texto não é marcado",
+    papel("PAGAMENTO FATURA CARTAO NUBANK", "expense") === null);
+  check("saldo rolado da fatura é reconhecido",
+    papel("Valor pendente do mês anterior", "expense") === "carryover");
+  check("saldo restante da fatura anterior também",
+    papel("Saldo restante da fatura anterior", "expense") === "carryover");
+  // Multa e juros da fatura são gasto de verdade: não podem ser marcados.
+  check("multa por fatura atrasada continua sendo gasto",
+    papel("Multa por fatura atrasada", "expense") === null);
+  check("compra comum não tem papel", papel("SUPERMERCADO BOM PRECO", "expense") === null);
+  check("descrição vazia não quebra", papel("", "income") === null);
+}
+
+section("7. Nome do estabelecimento dentro do ruído do banco");
+{
+  const core = (s) => R(`statementMerchantCore(${JSON.stringify(s)})`);
+  check("verbo do banco e máscara do cartão saem",
+    core("COMPRA CARTAO 5678 PADARIA DO ZE") === "padaria do ze", core("COMPRA CARTAO 5678 PADARIA DO ZE"));
+  check("prefixo de maquininha sai",
+    core("PAG*PADARIA DO ZE") === "padaria do ze", core("PAG*PADARIA DO ZE"));
+  // "UBER *TRIP" tem espaço antes do asterisco: ali "uber" é o estabelecimento,
+  // não o código da maquininha, e não pode ser descartado.
+  check("nome antes de asterisco com espaço é preservado",
+    core("Uber *Trip") === "uber trip", core("Uber *Trip"));
+  check("data, parcela e UF somem",
+    core("PIZZARIA DO JOAO 12/08 3/10 SP") === "pizzaria do joao", core("PIZZARIA DO JOAO 12/08 3/10 SP"));
+  check("mesmo estabelecimento em dois formatos vira a mesma chave",
+    core("PIX ENVIADO CP :12345678 PADARIA DO ZE") === core("Compra com Cartão - 24/08 - Padaria do Zé"),
+    [core("PIX ENVIADO CP :12345678 PADARIA DO ZE"), core("Compra com Cartão - 24/08 - Padaria do Zé")]);
+  check("linha só de verbo e número não devolve vazio", core("PIX 1234").length > 0);
+}
+
+section("8. Memória: o que a pessoa já classificou à mão");
+{
+  const base = (transactions) => {
+    pure.__tx = transactions;
+    return R(`({ categories: __cats, categoryRules: { custom: [], builtin: {} }, transactions: __tx })`);
+  };
+  const editado = (categoryId, description) => ({
+    type: "expense", amount: 10, date: "2026-07-10", categoryId, description, source: "import-csv",
+    changeLog: [{ id: "l1", at: "2026-07-10T12:00:00.000Z", action: "edited", fields: ["categoryId"], actor: "user" }],
+  });
+
+  pure.__d = base([editado("mercado", "MERC BOM JESUS LTDA SP")]);
+  const lembrado = R(`recallCategoryFromMemory(__d, "COMPRA CARTAO 1234 MERC BOM JESUS 12/08 SP")`);
+  check("reconhece o mesmo estabelecimento em outro formato", !!lembrado && lembrado.categoryId === "mercado", lembrado);
+  check("sabe que a escolha foi da pessoa", !!lembrado && lembrado.manual === true);
+
+  // Palpite automático repetido não pode virar "certeza": ele é o próprio
+  // palpite do aplicativo voltando pela porta dos fundos.
+  pure.__d2 = base([{ type: "expense", amount: 10, date: "2026-07-10", categoryId: "lazer", description: "LOJA XPTO", source: "import-csv", changeLog: [] }]);
+  const automatico = R(`recallCategoryFromMemory(__d2, "LOJA XPTO")`);
+  check("lembra do automático sem marcá-lo como manual", !!automatico && automatico.manual === false);
+
+  // Duas categorias com o mesmo peso: escolher no par ou ímpar seria pior do
+  // que não sugerir nada.
+  pure.__d3 = base([editado("lazer", "LOJA DUPLA"), editado("saude", "LOJA DUPLA")]);
+  check("empate real não sugere nada", R(`recallCategoryFromMemory(__d3, "LOJA DUPLA")`) === null);
+
+  pure.__d4 = base([editado("categoria-apagada", "LOJA SUMIDA")]);
+  check("categoria apagada não é sugerida", R(`recallCategoryFromMemory(__d4, "LOJA SUMIDA")`) === null);
+  check("histórico vazio devolve null",
+    R(`recallCategoryFromMemory({ categories: __cats, transactions: [] }, "QUALQUER COISA")`) === null);
+  // Lançamento em "Outros" não ensina nada: é a ausência de decisão.
+  pure.__d5 = base([editado("outros", "LOJA SEM DECISAO")]);
+  check("categoria de sobra não vira memória", R(`recallCategoryFromMemory(__d5, "LOJA SEM DECISAO")`) === null);
+}
+
 /* ================================================================= BLOCO B */
-section("6. Integração: schema, importador e as ações da tela");
+section("9. Integração: schema, importador e as ações da tela");
 
 function fakeEl(tag) {
   return {
@@ -310,6 +391,97 @@ check("botão de salvar fica travado com padrão inválido", /data-action="rule-
 {
   const abre = (tela.match(/<div\b/g) || []).length, fecha = (tela.match(/<\/div>/g) || []).length;
   check(`<div> balanceadas (${abre}/${fecha})`, abre === fecha);
+}
+
+
+section("10. Dicionário ampliado e importador de fatura ponta a ponta");
+{
+  run(`state.data = migrate(defaultData());`);
+  const cat = (desc) => run(`guessCategoryId(state.data, ${JSON.stringify(desc)})`);
+
+  check("mercado livre não é supermercado", cat("MERCADO LIVRE*COMPRA") === "outros");
+  check("mercado pago também não", cat("MERCADOPAGO*LOJA") === "outros");
+  check("mercado de bairro continua sendo mercado", cat("MERCADO SAO JOSE") === "mercado");
+  check("abreviação MERC é entendida", cat("MERC BOM JESUS LTDA SP") === "mercado");
+  check("água mineral do mercado não vira conta de água", cat("SUPERMERCADO AGUA MINERAL") === "mercado");
+  check("uber eats é delivery, não transporte", cat("UBER EATS *PEDIDO") === "delivery");
+  check("uber viagem continua transporte", cat("UBER *TRIP") === "transporte");
+  check("maquininha não esconde a padaria", cat("PAG*PADARIA DO ZE 19/08 SAO PAULO BR") === "alimentacao");
+  check("tarifa do banco tem explicação própria",
+    run(`suggestCategoryForDescription(state.data, "Multa por fatura atrasada").reason`) === "Tarifas, juros e encargos do banco");
+
+  // A fatura inteira, como ela chega do banco: compras positivas, créditos
+  // negativos. O importador precisa separar o que é gasto do que é a própria
+  // fatura se explicando.
+  ctx.__fatura = [
+    "data,descricao,valor",
+    "2026-08-24,Multa por fatura atrasada,-35.56",
+    "2026-08-24,Pagamento recebido,1771.44",
+    "2026-08-24,Valor pendente do mês anterior,-1771.43",
+    "2026-08-20,IFD*IFOOD 20/08,-52.90",
+  ].join("\n");
+  const linhas = run(`prepareImportRows(__fatura, "fatura.csv", state.data)`);
+  const porDescricao = (texto) => linhas.find((r) => r.description.indexOf(texto) === 0);
+
+  check("pagamento da fatura chega desmarcado",
+    porDescricao("Pagamento recebido").include === false && porDescricao("Pagamento recebido").role === "card-payment");
+  check("saldo rolado chega desmarcado",
+    porDescricao("Valor pendente").include === false && porDescricao("Valor pendente").role === "carryover");
+  check("multa continua marcada como gasto",
+    porDescricao("Multa por fatura").include === true && porDescricao("Multa por fatura").type === "expense");
+  check("compra do delivery entra categorizada",
+    porDescricao("IFD*IFOOD").include === true && porDescricao("IFD*IFOOD").categoryId === "delivery");
+  check("o resumo conta os papéis para a tela explicar",
+    linhas.meta.roles["card-payment"] === 1 && linhas.meta.roles.carryover === 1, linhas.meta.roles);
+
+  // Marcar a caixa de volta é uma decisão explícita. A caixa de revisão não
+  // pode receber a mesma linha logo depois perguntando o que a pessoa acabou
+  // de responder na tela ao lado.
+  {
+    run(`
+      __linhas = prepareImportRows(__fatura, "fatura.csv", state.data);
+      __linhas.forEach((r) => { r.include = true; });
+      __tx = buildTransactionsFromRows(__linhas, "csv", null, "fatura.csv");
+    `);
+    const pagamento = run(`__tx.find((t) => t.type === "income")`);
+    check("forçar a inclusão já marca a pendência como resolvida",
+      !!pagamento && pagamento.reviewedIssues.some((k) => k.indexOf("invoice-income:") === 0), pagamento && pagamento.reviewedIssues);
+    check("e a decisão fica registrada no histórico do lançamento",
+      !!pagamento && pagamento.changeLog.some((l) => l.action === "reviewed"));
+    check("a compra comum não ganha carimbo nenhum",
+      run(`__tx.filter((t) => t.type === "expense").every((t) => t.reviewedIssues.length === 0)`));
+    // O efeito na caixa de revisão é conferido em tests/test-movements.js,
+    // que carrega js/movements.js.
+    run(`state.data = migrate(defaultData());`);
+  }
+
+  // A tela precisa dizer POR QUE as caixas vieram desmarcadas.
+  run(`state.importRows = prepareImportRows(__fatura, "fatura.csv", state.data); state.importFilename = "fatura.csv";`);
+  const telaImport = run(`renderImportScreen()`);
+  check("a revisão avisa que é fatura de cartão", /fatura de um cart/.test(telaImport));
+  check("a revisão marca a linha com o papel dela", /import-role-tag/.test(telaImport));
+  check("revisão sem lixo de template", !/undefined|NaN|\[object Object\]|\$\{/.test(telaImport));
+  run(`state.importRows = null; state.importFilename = null;`);
+
+  // E o histórico ensina: depois de corrigir uma vez, o palpite muda.
+  run(`
+    const corrigido = updateTransaction(makeTransaction({
+      type: "expense", amount: 240.15, categoryId: "outros", date: "2026-07-18",
+      description: "LOJA DO SEU JOAO", source: "import-csv",
+    }), { categoryId: "lazer" });
+    state.data = { ...state.data, transactions: [corrigido] };
+  `);
+  const aprendido = run(`suggestCategoryForDescription(state.data, "COMPRA CARTAO 9999 LOJA DO SEU JOAO 12/08 SP")`);
+  check("a correção manual vira palpite no mês seguinte", aprendido.categoryId === "lazer", aprendido);
+  check("e o palpite se explica", aprendido.reason === "você já classificou este lugar assim");
+  check("com confiança alta", aprendido.confidence === "alta");
+  // Regra escrita à mão continua acima da memória: ela é a ordem mais explícita
+  // que existe no aplicativo.
+  run(`state.data = { ...state.data, categoryRules: normalizeCategoryRules({ custom: [
+    { id: "u9", pattern: "loja do seu joao", categoryId: "saude", weight: 8 }] }) };`);
+  check("regra do usuário vence a memória",
+    run(`guessCategoryId(state.data, "COMPRA CARTAO 9999 LOJA DO SEU JOAO 12/08 SP")`) === "saude");
+  run(`state.data = migrate(defaultData());`);
 }
 
 console.log(`\n${fail === 0 ? "TODOS OS TESTES PASSARAM" : "FALHAS ENCONTRADAS"} — ${ok} ok, ${fail} falha(s)\n`);

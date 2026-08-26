@@ -821,6 +821,12 @@
   display: inline-block; font-size: 9.5px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase;
   color: var(--goal); background: var(--goal-soft); padding: 2px 7px; border-radius: 999px; margin-left: 7px;
 }
+/* Papel da linha na fatura (pagamento da fatura, saldo rolado). Tom de marca
+   e não de alerta: não é erro do arquivo, é informação sobre o que a linha é. */
+.import-role-tag {
+  display: inline-block; font-size: 9.5px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--brand); background: var(--brand-soft); padding: 2px 7px; border-radius: 999px; margin-left: 7px;
+}
 .import-row__amount { font-size: 13.5px; font-weight: 650; flex-shrink: 0; }
 .import-cat-select {
   font-size: 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--paper);

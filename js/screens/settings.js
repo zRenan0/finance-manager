@@ -441,9 +441,10 @@ function renderBackupCard() {
     <div class="settings-actions">
       <button class="btn btn--primary btn--sm" data-action="export-json">${svgIcon("download", 15)} Backup completo (JSON)</button>
       <button class="btn btn--secondary btn--sm" data-action="export-csv">${svgIcon("download", 15)} Lançamentos (CSV)</button>
+      <button class="btn btn--secondary btn--sm" data-action="export-statement-pdf">${svgIcon("download", 15)} Extrato (PDF)</button>
       <button class="btn btn--secondary btn--sm" data-action="export-budgets-csv">${svgIcon("download", 15)} Orçamentos (CSV)</button>
     </div>
-    <p class="field-hint">O JSON guarda tudo (lançamentos, categorias, tetos, metas e ajustes) e é o que restaura o app por completo. O CSV serve para abrir no Excel ou no Google Sheets.</p>
+    <p class="field-hint">O JSON guarda tudo (lançamentos, categorias, tetos, metas e ajustes) e é o que restaura o app por completo. O CSV serve para abrir no Excel ou no Google Sheets. O PDF é o extrato pronto para imprimir ou enviar, com o período e os filtros escolhidos em Movimentações (por padrão, o mês atual).</p>
     ${renderLastBackupLine()}
 
     <p class="field__label" data-ui-css="margin-top:14px">Importar</p>

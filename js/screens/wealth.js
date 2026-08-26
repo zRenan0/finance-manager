@@ -85,7 +85,7 @@ function renderWealthForm(f) {
   const isLiability = cls.kind === "liability";
   const isAccount = f.class === "conta" || f.class === "carteira";
 
-  return `<div class="card card--elevated span-3">
+  return `<div class="card card--elevated span-3" id="wealth-form" data-ui-css="scroll-margin-top:18px">
     <p class="card-title">${editing ? "Editar item" : "Cadastrar bem ou dívida"}</p>
 
     <div class="field"><p class="field__label">Tipo</p>

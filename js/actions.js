@@ -352,6 +352,17 @@ function onClick(e) {
       });
       break;
     }
+    case "review-delete-invoice-income": {
+      const tx = state.data.transactions.find((item) => item.id === id);
+      if (!tx) break;
+      requestConfirmation({
+        title: "Excluir a receita?",
+        message: `“${tx.description || "O lançamento"}”, de ${fmtBRL(tx.amount)}, veio da fatura do cartão: é o pagamento do mês anterior, não dinheiro recebido. Excluir devolve o mês ao valor real.`,
+        confirmLabel: "Excluir receita", tone: "danger",
+        onConfirm: () => { setData((d) => removeTransactionsWithIntegrity(d, [id])); notify("Receita excluída"); },
+      });
+      break;
+    }
     case "review-convert-transfer": {
       const issue = buildTransactionReviewModel(state.data).issues.find((item) => item.key === btn.dataset.key && item.type === "transfer");
       if (!issue) { notify("A sugestão não está mais disponível", "warn"); break; }
@@ -528,12 +539,13 @@ function onClick(e) {
 
     // ---- Contas, cartões e conciliação ----
     case "account-new":
+      state.revealTarget = "account-form";
       state.accountsUi.accountForm = freshAccountForm(); state.accountsUi.cardForm = null; render(); break;
     case "account-cancel": state.accountsUi.accountForm = null; render(); break;
     case "account-edit": {
       const a = accountById(state.data, id); if (!a) break;
       state.accountsUi.accountForm = { id:a.id, name:a.name, type:a.type, openingBalance:moneyDraft(a.openingBalance), openingDate:a.openingDate, color:a.color };
-      state.accountsUi.cardForm = null; render(); break;
+      state.accountsUi.cardForm = null; state.revealTarget = "account-form"; render(); break;
     }
     case "account-save": {
       const f = state.accountsUi.accountForm; if (!f) break;
@@ -621,12 +633,12 @@ function onClick(e) {
       state.accountsUi.reconcileId = null; state.accountsUi.reconcileValue = "";
       notify(result.adjustment ? `Conciliação registrada (${fmtBRL(result.adjustment.amount)})` : "O saldo já estava conciliado"); break;
     }
-    case "card-new": state.accountsUi.cardForm = freshCardForm(); state.accountsUi.accountForm = null; render(); break;
+    case "card-new": state.revealTarget = "card-form"; state.accountsUi.cardForm = freshCardForm(); state.accountsUi.accountForm = null; render(); break;
     case "card-cancel": state.accountsUi.cardForm = null; render(); break;
     case "card-edit": {
       const c = creditCardById(state.data,id); if (!c) break;
       state.accountsUi.cardForm = { id:c.id, name:c.name, accountId:c.accountId || "", limit:moneyDraft(c.limit), closingDay:String(c.closingDay), dueDay:String(c.dueDay), color:c.color };
-      state.accountsUi.accountForm = null; render(); break;
+      state.accountsUi.accountForm = null; state.revealTarget = "card-form"; render(); break;
     }
     case "card-save": {
       const f = state.accountsUi.cardForm; if (!f) break;
@@ -678,6 +690,7 @@ function onClick(e) {
     case "transfer-new": {
       const list = (state.data.accounts || []).filter((a) => !a.archived);
       state.accountsUi.transferForm = { fromAccountId:(list[0]||{}).id||"", toAccountId:(list[1]||{}).id||"", amount:"", date:todayIso(), description:"Transferência" };
+      state.revealTarget = "transfer-form";
       render(); break;
     }
     case "transfer-cancel": state.accountsUi.transferForm = null; render(); break;
@@ -724,6 +737,7 @@ function onClick(e) {
     }
     // ---- Central de Dívidas ----
     case "debt-new":
+      state.revealTarget = "debt-form";
       state.debtsUi.form = freshDebtForm(); state.debtsUi.payment = null; render(); break;
     case "debt-form-cancel": state.debtsUi.form = null; render(); break;
     case "debt-edit": {
@@ -737,7 +751,7 @@ function onClick(e) {
         amortizationSystem:d.amortizationSystem || "unknown", nextDueDate:d.nextDueDate || "", debtStatus:d.debtStatus || "active",
         balanceCheckedAt:d.balanceCheckedAt || "", note:d.note || "",
       };
-      state.debtsUi.payment = null; render(); break;
+      state.debtsUi.payment = null; state.revealTarget = "debt-form"; render(); break;
     }
     case "debt-save": {
       const f = state.debtsUi.form; if (!f) break;
@@ -765,7 +779,7 @@ function onClick(e) {
       state.debtsUi.form = null; notify(f.id ? "Dívida atualizada" : "Dívida cadastrada"); break;
     }
     case "debt-toggle": state.debtsUi.expandedId = state.debtsUi.expandedId === id ? null : id; state.debtsUi.confirmDeleteId = null; render(); break;
-    case "debt-payment-open": state.debtsUi.payment = freshDebtPayment(id); state.debtsUi.form = null; render(); break;
+    case "debt-payment-open": state.revealTarget = "debt-payment-form"; state.debtsUi.payment = freshDebtPayment(id); state.debtsUi.form = null; render(); break;
     case "debt-payment-cancel": state.debtsUi.payment = null; render(); break;
     case "debt-payment-save": {
       const p = state.debtsUi.payment; if (!p) break;
@@ -994,6 +1008,9 @@ function onClick(e) {
       render();
       break;
     case "wealth-new":
+      // O formulário nasce no topo da tela e o botão que o abre costuma estar no
+      // fim dela; sem revelar o bloco, cadastrar parecia não fazer nada.
+      state.revealTarget = "wealth-form";
       setState({ wealth: { ...state.wealth, form: freshWealthForm(), updatingId: null, confirmDeleteId: null } });
       break;
     case "wealth-set-class": {
@@ -1023,6 +1040,7 @@ function onClick(e) {
       };
       state.wealth.updatingId = null;
       state.wealth.confirmDeleteId = null;
+      state.revealTarget = "wealth-form";
       render();
       break;
     }
@@ -1100,6 +1118,7 @@ function onClick(e) {
       render();
       break;
     case "pf-new":
+      state.revealTarget = "portfolio-form";
       setState({ portfolio: { ...state.portfolio, form: freshPortfolioForm(), updatingId: null, dividendId: null, confirmDeleteId: null } });
       break;
     case "pf-set-type": {
@@ -1126,6 +1145,7 @@ function onClick(e) {
       state.portfolio.updatingId = null;
       state.portfolio.dividendId = null;
       state.portfolio.confirmDeleteId = null;
+      state.revealTarget = "portfolio-form";
       render();
       break;
     }
@@ -1642,6 +1662,7 @@ function onClick(e) {
     }
 
     case "export-csv": exportTransactionsCsv(); break;
+    case "export-statement-pdf": exportStatementPdf(); break;
     case "export-budgets-csv": exportBudgetsCsv(); break;
     case "export-json": exportBackupJson(); break;
     case "import-json-trigger": document.getElementById("import-file-input").click(); break;

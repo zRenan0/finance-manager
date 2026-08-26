@@ -76,6 +76,33 @@ ctx.__reviewData.transactions = ctx.__reviewData.transactions.map((tx) => tx.id 
 ctx.__reviewAfter = run("buildTransactionReviewModel(__reviewData)");
 check("sugestão revisada não reaparece", !ctx.__reviewAfter.issues.some((issue) => issue.key === duplicate.key));
 
+// FATURA IMPORTADA ANTES DE O IMPORTADOR APRENDER A LER FATURA.
+//
+// "Pagamento recebido" é o crédito que quita a fatura do mês anterior. Quem
+// importou o arquivo do cartão ficou com uma RECEITA que nunca existiu, e o
+// mês fecha sobrando um dinheiro que na verdade saiu da conta. O importador já
+// não deixa mais entrar; a caixa de revisão existe para limpar o que entrou.
+ctx.__faturaData = run(`migrate({ version:21,
+  accounts:[{id:'a1',name:'Principal',openingBalance:0,openingDate:'2026-01-01',reconciledAt:'2026-08-12'}],
+  transactions:[
+    {id:'pg1',type:'income',amount:1771.44,date:'2026-08-24',categoryId:'outros',description:'Pagamento recebido',source:'import-csv',accountId:'a1'},
+    {id:'sal',type:'income',amount:3200,date:'2026-08-05',categoryId:'outros',description:'Salário',source:'import-csv',accountId:'a1'},
+    {id:'man',type:'income',amount:50,date:'2026-08-06',categoryId:'outros',description:'Pagamento recebido',source:'manual',accountId:'a1'}
+  ]
+})`);
+ctx.__fatura = run("buildTransactionReviewModel(__faturaData)");
+const faturaIssues = ctx.__fatura.issues.filter((issue) => issue.type === "invoice-income");
+check("pagamento de fatura importado como receita é apontado", faturaIssues.length === 1 && faturaIssues[0].txId === "pg1", JSON.stringify(ctx.__fatura.counts));
+check("receita comum não é apontada", !ctx.__fatura.issues.some((issue) => issue.txId === "sal"));
+// Lançamento digitado à mão é decisão da pessoa: o app não a corrige.
+check("receita lançada à mão não é apontada", !faturaIssues.some((issue) => issue.txId === "man"));
+check("a pendência aparece antes das outras", ctx.__fatura.issues[0].type === "invoice-income");
+ctx.__faturaData.transactions = ctx.__faturaData.transactions.map((tx) => (tx.id === "pg1"
+  ? run(`markTransactionIssueReviewed(__faturaData.transactions.find((t) => t.id === "pg1"), "${faturaIssues[0].key}")`)
+  : tx));
+check("marcar como revisada silencia a pendência",
+  !run("buildTransactionReviewModel(__faturaData)").issues.some((issue) => issue.type === "invoice-income"));
+
 console.log("\n4. Conciliação sem diferença");
 ctx.__reconciled = run("reconcileAccount(__data, 'a1', accountBalance(__data, 'a1', '2026-08-12'), '2026-08-12')");
 check("conferência exata grava a data sem criar ajuste", ctx.__reconciled.adjustment === null && ctx.__reconciled.data.accounts.find((a) => a.id === "a1").reconciledAt === "2026-08-12");

@@ -902,66 +902,88 @@ function isRuleMatchType(t) {
 // Cada regra tem id estável (o override do usuário aponta para ele), rótulo em
 // português (a tela precisa mostrar algo legível) e `sample`: os termos que
 // resumem a regra para quem não vai ler o Regex.
+//
+// O dicionário é grande de propósito. Extrato brasileiro não escreve
+// "restaurante": escreve "PAG*BURGUERIABRASA", "IFD*IFOOD" ou "PIX ENVIADO CP
+// PADARIA DO ZE". Cada nome que falta aqui é uma linha caindo em "Outros", e
+// "Outros" é exatamente o trabalho manual que o aplicativo promete tirar da
+// frente da pessoa todo mês.
+//
+// Duas armadilhas resolvidas com `(?!...)`, ambas vistas em extrato real:
+//   - "mercado livre" e "mercado pago" NÃO são supermercado;
+//   - "agua mineral" comprada no mercado não é conta de água.
 const BUILTIN_CATEGORY_RULES = [
   {
     id: "std-assinaturas", categoryId: "assinaturas", weight: 6,
     label: "Assinaturas e serviços digitais",
     sample: "netflix, spotify, prime video, icloud, adobe…",
-    re: /\b(netflix|spotify|deezer|disney\+?|hbo|max\b|paramount|globoplay|prime ?video|amazon ?prime|youtube ?premium|icloud|google ?one|dropbox|office ?365|microsoft ?365|adobe|canva|chatgpt|openai|assinatura|mensalidade ?digital)\b/,
+    re: /\b(netflix|spotify|deezer|tidal|disney\+?|star ?\+|hbo|hbomax|max\b|paramount|globoplay|premiere|telecine|looke|mubi|crunchyroll|prime ?video|amazon ?prime|youtube ?premium|apple ?tv|apple ?music|apple\.com|itunes|icloud|google ?one|google ?storage|dropbox|onedrive|office ?365|microsoft ?365|adobe|canva|chatgpt|openai|midjourney|notion|evernote|linkedin ?premium|tinder|bumble|kindle ?unlimited|audible|skeelo|scribd|patreon|nordvpn|expressvpn|1password|github|figma|assinatura|mensalidade ?digital)\b/,
   },
   {
     id: "std-moradia", categoryId: "moradia", weight: 5,
     label: "Moradia e contas de casa",
     sample: "aluguel, condomínio, energia, água, internet…",
-    re: /\b(aluguel|condominio|iptu|energia|eletric|enel|cemig|cpfl|copel|celesc|coelba|light|neoenergia|sabesp|copasa|cedae|caesb|sanepar|saneamento|agua|gas ?natural|comgas|internet|vivo|claro|tim|oi ?fibra|net ?claro)\b/,
+    re: /\b(aluguel|imobiliaria|condominio|iptu|energia|eletropaulo|enel|cemig|cpfl|copel|celesc|coelba|cosern|celpe|elektro|edp ?(?:sp|es|br)?|light|neoenergia|equatorial|energisa|ceee|sabesp|copasa|cedae|caesb|sanepar|corsan|embasa|casan|cagece|compesa|saae|saneamento|agua(?! ?(?:mineral|com|sem|de coco))|gas ?natural|comgas|ultragaz|liquigas|copagaz|supergasbras|nacional ?gas|internet|banda ?larga|vivo|claro|tim|oi ?fibra|nextel|sky|net ?claro|algar|brisanet|unifique|sumicity|seguro ?residencial|leroy ?merlin|telha ?norte|material ?de ?construcao)\b/,
   },
   {
     id: "std-mercado", categoryId: "mercado", weight: 5,
     label: "Supermercado e mercearia",
     sample: "supermercado, atacadão, assaí, hortifruti…",
-    re: /\b(supermercado|mercado|atacadao|assai|carrefour|pao de acucar|extra|big ?bompreco|sendas|hortifruti|sacolao|acougue|mercearia|makro|tenda ?atacado|dia ?supermercado)\b/,
+    re: /\b(super ?mercado|hipermercado|mercadinho|minimercado|mercearia|mercado(?! ?(?:livre|pago|bitcoin|libre))|atacadao|atacarejo|assai|makro|tenda ?atacado|fort ?atacadista|sams? ?club|carrefour|pao de acucar|extra ?(?:hiper|super)|big ?bompreco|bompreco|sendas|prezunic|guanabara|zona ?sul|angeloni|condor|muffato|savegnago|st ?marche|oba ?hortifruti|natural ?da ?terra|verdemar|bh ?supermercados|super ?nosso|comper|bistek|nordestao|dia ?supermercado|hortifruti|sacolao|quitanda|feira ?livre|acougue|casa ?de ?carnes|peixaria|padoca|supermerc|merc)\b/,
   },
   {
     id: "std-delivery", categoryId: "delivery", weight: 5,
     label: "Delivery de comida",
     sample: "ifood, rappi, uber eats, aiqfome…",
-    re: /\b(ifood|rappi|uber ?eats|zedelivery|delivery ?much|aiqfome|99 ?food)\b/,
+    re: /\b(ifood|i ?food|rappi|uber ?eats|ubereats|ze ?delivery|zedelivery|delivery ?much|aiqfome|99 ?food|james ?delivery|goomer|anota ?ai|daki)\b/,
   },
   {
     id: "std-alimentacao", categoryId: "alimentacao", weight: 3,
     label: "Restaurantes e lanchonetes",
     sample: "restaurante, padaria, pizzaria, cafeteria…",
-    re: /\b(restaurante|lanchonete|padaria|pizzaria|hamburgueria|churrascaria|cafeteria|starbucks|mc ?donalds|burger ?king|subway|habibs|bobs|outback|coco ?bambu|self ?service|marmita|bistro|sushi)\b/,
+    re: /\b(restaurante|lanchonete|lancheria|padaria|panificadora|panificacao|confeitaria|doceria|pizzaria|hamburgueria|burgueria|churrascaria|espetinho|pastelaria|cafeteria|cafe\b|starbucks|the ?coffee|mc ?donalds|burger ?king|subway|habibs|bobs|outback|coco ?bambu|giraffas|spoleto|china ?in ?box|dominos|pizza ?hut|madero|jeronimo|patroni|divino ?fogao|sushi|temaki|yakisoba|acai|sorveteria|kopenhagen|cacau ?show|brasil ?cacau|self ?service|marmita|marmitex|bistro|rotisserie|buffet|food ?truck|quiosque)\b/,
   },
   {
     id: "std-transporte", categoryId: "transporte", weight: 5,
     label: "Transporte e veículo",
     sample: "uber, posto, pedágio, IPVA, estacionamento…",
-    re: /\b(uber|99 ?(app|pop|taxi)?|cabify|indriver|posto|ipiranga|shell|petrobras|br ?mania|gasolina|combustivel|etanol|alcool|diesel|estacionamento|zona ?azul|pedagio|sem ?parar|conectcar|veloe|metro|cptm|onibus|bilhete ?unico|passagem|rodoviaria|localiza|movida|unidas|detran|ipva|licenciamento|oficina|mecanica|pneu)\b/,
+    re: /\b(uber(?! ?eats)|99 ?(?:app|pop|taxi)?|cabify|indriver|blablacar|buser|clickbus|taxi|posto|ipiranga|shell|petrobras|br ?mania|ale ?combustiveis|texaco|gasolina|combustivel|etanol|alcool|diesel|gnv|estacionamento|estapar|zona ?azul|pedagio|sem ?parar|conectcar|veloe|move ?mais|taggy|metro|cptm|supervia|brt|onibus|bilhete ?unico|passagem|rodoviaria|localiza|movida|unidas|detran|ipva|licenciamento|dpvat|oficina|mecanica|auto ?center|centro ?automotivo|pneu|borracharia|lava ?rapido|lava ?jato|retifica)\b/,
   },
   {
     id: "std-saude", categoryId: "saude", weight: 5,
     label: "Saúde e bem-estar",
     sample: "farmácia, clínica, plano de saúde, academia…",
-    re: /\b(farmacia|drogaria|drogasil|raia|pacheco|pague ?menos|hospital|clinica|laboratorio|fleury|dasa|sabin|unimed|amil|bradesco ?saude|sulamerica|hapvida|notredame|plano ?de ?saude|dentista|odonto|psicolog|terapia|academia|smart ?fit|bluefit|gympass|totalpass)\b/,
+    re: /\b(farmacia|drogaria|drogasil|droga ?raia|raia|pacheco|pague ?menos|nissei|panvel|araujo|extrafarma|ultrafarma|hospital|clinica|laboratorio|fleury|dasa|delboni|sabin|hermes ?pardini|unimed|amil|bradesco ?saude|sulamerica|hapvida|notredame|prevent ?senior|golden ?cross|plano ?de ?saude|dentista|odonto|orthodontic|psicolog|psiquiatra|terapia|fisioterapia|nutricionista|academia|smart ?fit|bluefit|selfit|panobianco|bodytech|bio ?ritmo|gympass|totalpass|wellhub|crossfit|pilates|otica|oculos|vacina)\b/,
   },
   {
     id: "std-educacao", categoryId: "educacao", weight: 5,
     label: "Educação e cursos",
     sample: "escola, faculdade, udemy, alura, livraria…",
-    re: /\b(escola|colegio|faculdade|universidade|unip|estacio|anhanguera|senai|senac|curso|udemy|alura|coursera|rocketseat|hotmart|mensalidade ?escolar|material ?escolar|livraria|saraiva|amazon ?livros|kindle)\b/,
+    re: /\b(escola|colegio|faculdade|universidade|unip|estacio|anhanguera|uninove|unopar|fgv|senai|senac|sesi|kumon|wizard|ccaa|fisk|cultura ?inglesa|cna|curso|udemy|alura|coursera|rocketseat|origamid|hotmart|kiwify|eduzz|braip|mensalidade ?escolar|material ?escolar|papelaria|kalunga|livraria|saraiva|amazon ?livros|kindle)\b/,
   },
   {
     id: "std-lazer", categoryId: "lazer", weight: 4,
     label: "Lazer, viagem e entretenimento",
     sample: "cinema, bar, steam, hotel, airbnb, passagem…",
-    re: /\b(cinema|cinemark|kinoplex|uci|ingresso|ticket ?ma?ster|sympla|teatro|show|festival|bar|pub|boteco|balada|steam|playstation|psn|xbox|nintendo|epic ?games|riot|blizzard|viagem|hotel|pousada|airbnb|booking|decolar|latam|gol ?linhas|azul ?linhas|123 ?milhas|parque)\b/,
+    re: /\b(cinema|cinemark|kinoplex|uci|cinepolis|ingresso|ticket ?ma?ster|sympla|eventim|teatro|show|festival|bar|pub|boteco|adega|distribuidora ?de ?bebidas|balada|steam|playstation|psn|xbox|nintendo|epic ?games|riot|blizzard|battle ?net|garena|free ?fire|roblox|twitch|viagem|hotel|pousada|hostel|airbnb|booking|decolar|latam|gol ?linhas|azul ?linhas|voepass|123 ?milhas|maxmilhas|cvc|hurb|parque|beto ?carrero|hopi ?hari|zoologico|museu|boliche|paintball|kart)\b/,
+  },
+  {
+    id: "std-compras", categoryId: "outros", weight: 5,
+    label: "Compras e varejo",
+    sample: "mercado livre, shopee, magalu, renner…",
+    re: /\b(mercado ?livre|mercadolivre|mercado ?pago|mercadopago|shopee|aliexpress|shein|temu|magazine ?luiza|magalu|americanas|submarino|casas ?bahia|ponto ?frio|kabum|pichau|terabyte|renner|riachuelo|marisa|zara|hering|centauro|netshoes|decathlon|zattini|dafiti|amaro)\b/,
+  },
+  {
+    id: "std-tarifas", categoryId: "outros", weight: 6,
+    label: "Tarifas, juros e encargos do banco",
+    sample: "tarifa, anuidade, IOF, juros, multa por atraso…",
+    re: /\b(tarifa|cesta ?de ?servicos|manutencao ?de ?conta|anuidade|iof|juros|encargos|multa ?por|mora|credito ?rotativo|rotativo ?(?:do|da)|parcelamento ?de ?fatura|saldo ?parcelado|taxa ?de ?saque|seguro ?fatura|protecao ?(?:de|da) ?fatura)\b/,
   },
   {
     id: "std-investimento", categoryId: "investimento", weight: 6,
     label: "Aplicações e investimentos",
     sample: "tesouro direto, CDB, resgate, previdência…",
-    re: /\b(aplicacao|resgate|tesouro ?direto|cdb|lci|lca|fundo ?de ?investimento|xp ?investimentos|rico|clear|nuinvest|btg|previdencia)\b/,
+    re: /\b(aplicacao|resgate|tesouro ?direto|cdb|lci|lca|fundo ?de ?investimento|xp ?investimentos|rico ?investimentos|clear ?corretora|nuinvest|easynvest|btg|toro ?investimentos|genial ?investimentos|avenue|binance|mercado ?bitcoin|foxbit|novadax|coinbase|previdencia|pgbl|vgbl|aporte)\b/,
   },
 ];
 
@@ -1162,6 +1184,182 @@ function matchCategoryRules(compiled, normalizedText) {
 }
 
 // ------------------------------------------------------------------------------
+// O QUE A LINHA É, ANTES DE QUAL CATEGORIA ELA TEM
+// ------------------------------------------------------------------------------
+// Fatura de cartão não é extrato de conta, e tratar as duas como a mesma lista
+// de "entradas e saídas" produz um erro caro: na fatura do Nubank, o pagamento
+// que você fez no mês passado aparece como CRÉDITO, com a descrição "Pagamento
+// recebido". Lido como número positivo, o aplicativo registra receita; o mês
+// fecha com uma entrada que nunca existiu, o saldo mente, a taxa de poupança
+// mente e o Score sobe por causa de uma dívida paga.
+//
+// A mesma fatura traz "Valor pendente do mês anterior", que é o saldo rolado:
+// aquele gasto já foi contado no mês em que aconteceu, e importar de novo
+// cobraria a pessoa duas vezes pela mesma compra.
+//
+// Nenhuma das duas linhas é lixo (elas explicam a fatura), então o motor não as
+// esconde: ele as MARCA, a tela de revisão desmarca por padrão e escreve o
+// porquê. Quem discordar tem uma caixa de seleção do lado.
+const STATEMENT_ROW_ROLES = [
+  {
+    id: "card-payment",
+    // Só no crédito. No extrato da CONTA, "pagamento de fatura" é dinheiro
+    // saindo de verdade e precisa continuar entrando como saída.
+    appliesTo: "income",
+    label: "Pagamento de fatura",
+    detail: "É a fatura do mês passado sendo paga, não dinheiro entrando.",
+    re: /\bpagamento (?:recebido|de fatura|da fatura|fatura|efetuado|realizado)\b|\bpag(?:to|amento)? ?(?:de )?fatura\b|\bfatura paga\b|\bcredito de pagamento\b|\bpagamento em \d{2}\/\d{2}\b/,
+  },
+  {
+    id: "carryover",
+    appliesTo: "any",
+    label: "Saldo da fatura anterior",
+    detail: "Gasto do mês passado sendo rolado; já foi contado quando aconteceu.",
+    re: /\bvalor pendente do mes anterior\b|\bsaldo (?:restante|anterior|em aberto|remanescente)(?: da fatura)?\b|\b(?:total|saldo) da fatura anterior\b|\bfatura anterior\b|\bdivida do mes anterior\b|\bsaldo em atraso\b/,
+  },
+];
+
+// Devolve o papel da linha (ou null). `skip` é a recomendação de não importar;
+// a decisão final é sempre da pessoa, na tela de revisão.
+function classifyStatementRow(description, type) {
+  const text = normalizeText(description);
+  if (!text) return null;
+  for (const role of STATEMENT_ROW_ROLES) {
+    if (role.appliesTo !== "any" && role.appliesTo !== type) continue;
+    let hit = false;
+    try { hit = role.re.test(text); } catch (e) { hit = false; }
+    if (hit) return { id: role.id, label: role.label, detail: role.detail, skip: true };
+  }
+  return null;
+}
+
+// ------------------------------------------------------------------------------
+// NOME DO ESTABELECIMENTO DENTRO DO RUÍDO DO BANCO
+// ------------------------------------------------------------------------------
+// O banco não escreve "Padaria do Zé": escreve "COMPRA CARTAO 5678 PAG*PADARIA
+// DO ZE 12/08 SAO PAULO BR". Duas linhas do mesmo lugar quase nunca chegam
+// iguais, porque a data, a maquininha e a cidade mudam.
+//
+// Esta função extrai o miolo: tira o verbo do banco, o prefixo da maquininha,
+// a máscara do cartão, a parcela, a data e a UF do fim. É o que permite dizer
+// "isto é o mesmo estabelecimento de novembro" e reaproveitar a categoria que a
+// pessoa escolheu naquela vez.
+const STATEMENT_VERB_RE = /^(?:compra(?: com)?(?: cartao| debito| credito| aprovada)?|pagamento(?: de)?|pagto|pgto|pag|debito automatico|deb aut|dda|saque|transferencia(?: enviada| recebida)?|transf|ted|doc|pix(?: enviado| recebido| qrs| qr| cp)?|cip|recebimento|credito em conta|deposito|boleto|liquidacao|compras)\b[\s:-]*/;
+// A maquininha aparece grudada no nome ("PAG*PADARIA", "IFD*IFOOD") e nem
+// sempre no começo: o banco costuma pôr a máscara do cartão antes dela.
+const STATEMENT_MACHINE_RE = /\b[a-z0-9]{2,6}\*\s?/g;
+const STATEMENT_CARD_MASK_RE = /^\d{3,6}\b/;
+// Siglas que todo extrato repete e que nunca são o nome do estabelecimento.
+const STATEMENT_STOPWORD_RE = /\b(?:cp|cnpj|cpf|ltda|epp|eireli|me|sa|br|bra|ec|com|comercio de|servicos de)\b/g;
+const STATEMENT_TAIL_RE = [
+  /\*{2,}\s?\d+/g,                                   // máscara do cartão
+  /\bfinal\s+\d{3,6}\b/g,
+  /\bcartao\s+\d{3,6}\b/g,
+  /\bparcela\s+\d{1,2}\s?\/\s?\d{1,2}\b/g,
+  /\b\d{1,2}\s?\/\s?\d{1,2}(?:\s?\/\s?\d{2,4})?\b/g, // parcela ou data solta
+  /\bref\.?\s?\d+\b/g,
+  /\b\d{6,}\b/g,                                     // identificadores longos
+];
+const STATEMENT_UF_RE = /\s(?:ac|al|ap|am|ba|ce|df|es|go|ma|mt|ms|mg|pa|pb|pr|pe|pi|rj|rn|rs|ro|rr|sc|sp|se|to|br|bra)$/;
+
+function statementMerchantCore(description) {
+  let text = normalizeText(description);
+  if (!text) return "";
+  // Os verbos empilham ("PAGAMENTO PIX ENVIADO ..."); por isso o laço.
+  for (let i = 0; i < 3; i++) {
+    const stripped = text.replace(STATEMENT_VERB_RE, "").replace(STATEMENT_CARD_MASK_RE, "").trim();
+    if (stripped === text) break;
+    text = stripped;
+  }
+  text = text.replace(STATEMENT_MACHINE_RE, " ").replace(STATEMENT_STOPWORD_RE, " ");
+  STATEMENT_TAIL_RE.forEach((re) => { text = text.replace(re, " "); });
+  text = text.replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
+  for (let i = 0; i < 2; i++) text = text.replace(STATEMENT_UF_RE, "").trim();
+  // Sobrou nada (a linha era só verbo e número): devolve o texto original
+  // normalizado, que ao menos é estável para comparar com ele mesmo.
+  return text || normalizeText(description);
+}
+
+// ------------------------------------------------------------------------------
+// MEMÓRIA: O QUE A PESSOA JÁ CLASSIFICOU À MÃO
+// ------------------------------------------------------------------------------
+// O dicionário de fábrica sabe de marcas nacionais. Ele nunca vai saber que
+// "MERC BOM JESUS" é o mercado da esquina de quem mora ali. Mas o histórico
+// sabe: a pessoa já corrigiu essa linha uma vez.
+//
+// A memória vale mais quando a categoria foi ESCOLHIDA (lançamento manual ou
+// categoria editada depois) do que quando ela mesma foi um palpite do
+// aplicativo; senão o motor só repetiria o próprio erro com mais confiança.
+// Por isso o voto manual pesa 4 e o automático pesa 1.
+//
+// O índice é construído uma vez por versão dos dados. `setData` sempre cria um
+// array novo de transações, então o WeakMap invalida sozinho quando algo muda,
+// e uma importação de 300 linhas não varre o histórico 300 vezes.
+const __CATEGORY_MEMORY_CACHE = typeof WeakMap === "function" ? new WeakMap() : null;
+const CATEGORY_MEMORY_MIN_CORE = 4;
+
+function transactionCategoryChosenByUser(t) {
+  if (!t) return false;
+  if (t.source === "manual" || t.source === "nlp") return true;
+  return (Array.isArray(t.changeLog) ? t.changeLog : []).some((entry) => (
+    entry && entry.action === "edited" && Array.isArray(entry.fields) && entry.fields.includes("categoryId")
+  ));
+}
+
+function buildCategoryMemory(transactions) {
+  const memory = new Map();
+  (Array.isArray(transactions) ? transactions : []).forEach((t) => {
+    if (!t || t.type !== "expense") return;
+    const categoryId = t.categoryId;
+    if (!categoryId || categoryId === "outros") return;
+    const core = statementMerchantCore(t.description);
+    if (core.length < CATEGORY_MEMORY_MIN_CORE) return;
+    const manual = transactionCategoryChosenByUser(t);
+    const votes = memory.get(core) || new Map();
+    const vote = votes.get(categoryId) || { weight: 0, manual: false, count: 0 };
+    vote.weight += manual ? 4 : 1;
+    vote.count += 1;
+    vote.manual = vote.manual || manual;
+    votes.set(categoryId, vote);
+    memory.set(core, votes);
+  });
+  return memory;
+}
+
+function categoryMemoryOf(data) {
+  const transactions = data && Array.isArray(data.transactions) ? data.transactions : null;
+  if (!transactions) return null;
+  if (!__CATEGORY_MEMORY_CACHE) return buildCategoryMemory(transactions);
+  const cached = __CATEGORY_MEMORY_CACHE.get(transactions);
+  if (cached) return cached;
+  const memory = buildCategoryMemory(transactions);
+  __CATEGORY_MEMORY_CACHE.set(transactions, memory);
+  return memory;
+}
+
+// Devolve { categoryId, manual, count } do estabelecimento, ou null. Empate
+// entre duas categorias devolve a de maior peso; empate real devolve null, que
+// é melhor do que escolher no par ou ímpar.
+function recallCategoryFromMemory(data, description) {
+  const memory = categoryMemoryOf(data);
+  if (!memory || memory.size === 0) return null;
+  const core = statementMerchantCore(description);
+  if (core.length < CATEGORY_MEMORY_MIN_CORE) return null;
+  const votes = memory.get(core);
+  if (!votes) return null;
+  let best = null;
+  let tie = false;
+  votes.forEach((vote, categoryId) => {
+    if (!best || vote.weight > best.weight) { best = { categoryId, ...vote }; tie = false; return; }
+    if (vote.weight === best.weight) tie = true;
+  });
+  if (!best || tie) return null;
+  const categories = (data && Array.isArray(data.categories)) ? data.categories : [];
+  if (categories.length && !categories.some((c) => c.id === best.categoryId)) return null;
+  return best;
+}
+
+// ------------------------------------------------------------------------------
 // APLICAR ÀS TRANSAÇÕES JÁ EXISTENTES
 // ------------------------------------------------------------------------------
 // Criar uma regra e ver o histórico continuar errado é a queixa óbvia. Mas
@@ -1210,6 +1408,8 @@ if (typeof module !== "undefined" && module.exports) {
     defaultCategoryRules, normalizeCategoryRules, makeCategoryRule,
     compileRulePattern, compileCategoryRules, matchCategoryRules, mergeCategoryRules,
     previewRuleApplication, applyRulesToTransactions,
+    STATEMENT_ROW_ROLES, classifyStatementRow, statementMerchantCore,
+    buildCategoryMemory, recallCategoryFromMemory, transactionCategoryChosenByUser,
   };
 }
 
@@ -10441,6 +10641,28 @@ function buildTransactionReviewModel(data) {
     ownAccounts.get(transaction.accountId).push(transaction);
   });
 
+  // PAGAMENTO DE FATURA QUE ENTROU COMO RECEITA.
+  //
+  // Na fatura do cartão, o pagamento do mês anterior é um CRÉDITO com a
+  // descrição "Pagamento recebido". Quem importou a fatura antes de o
+  // importador aprender a reconhecer essa linha ficou com uma receita que
+  // nunca existiu: o mês fecha sobrando dinheiro que na verdade saiu da conta
+  // para quitar a dívida. O importador já não deixa mais isso entrar; aqui a
+  // caixa de revisão limpa o que entrou antes.
+  txs.forEach((t) => {
+    const key = `invoice-income:${t.id}`;
+    if (t.type !== "income") return;
+    if (!String(t.source || "").startsWith("import-")) return;
+    if (!classifyStatementRow(t.description, "income")) return;
+    if (transactionReviewIgnored(t, key)) return;
+    issues.push({
+      key, type: "invoice-income", txId: t.id, txIds: [t.id],
+      title: "Pagamento de fatura contado como receita",
+      detail: "Essa linha da fatura é a dívida do mês passado sendo paga, não dinheiro que entrou.",
+      date: t.date, amount: t.amount,
+    });
+  });
+
   txs.forEach((t) => {
     const key = `card-payment:${t.id}`;
     if (t.type === "expense" && t.source.startsWith("import-") && !t.goalId && !t.debtId && !t.installmentGroupId && !t.creditCardId && /\b(pagamento|pagto)\b.*\b(fatura|cartao)\b|\b(fatura|cartao)\b.*\b(pagamento|pagto)\b/.test(normalizeText(t.description)) && !transactionReviewIgnored(t, key)) {
@@ -10454,7 +10676,7 @@ function buildTransactionReviewModel(data) {
     if (overdue) issues.push({ key: `account:${account.id}`, type: "account", accountId: account.id, txIds: [], title: "Saldo da conta precisa ser conferido", detail: last ? `${account.name} não é conferida há mais de 30 dias.` : `${account.name} ainda não foi conferida.`, date: last || account.openingDate, amount: accountBalance(data, account.id, todayIso()) });
   });
 
-  const rank = { duplicate: 1, transfer: 2, "card-payment": 3, category: 4, account: 5 };
+  const rank = { "invoice-income": 1, duplicate: 2, transfer: 3, "card-payment": 4, category: 5, account: 6 };
   issues.sort((a, b) => (rank[a.type] || 9) - (rank[b.type] || 9) || b.date.localeCompare(a.date));
   return {
     issues,
@@ -11668,6 +11890,513 @@ function renderDivergingBars(rows) {
   </div>`;
 }
 
+// source: js/pdf.js
+// js/pdf.js. Escritor de PDF em JavaScript puro; sem biblioteca, sem rede.
+// ------------------------------------------------------------------------------
+// O aplicativo inteiro é local-first: o extrato que sai daqui não pode ser
+// gerado num servidor nem depender de CDN, senão o arquivo com TODOS os gastos
+// da pessoa passaria por um terceiro só para virar PDF. Por isso este módulo
+// escreve o formato à mão.
+//
+// Três decisões sustentam o resto:
+//
+//   1. Só fontes base-14 (Helvetica e Helvetica-Bold). Elas já existem em todo
+//      leitor de PDF, então não há fonte para embutir; o arquivo fica em poucos
+//      KB e abre igual no celular, no navegador e no Acrobat.
+//   2. Texto em WinAnsiEncoding, que cobre o português inteiro (á, ç, õ, “ ”).
+//      Cada caractere vira UM byte, e é isso que permite calcular o `xref` do
+//      arquivo contando o comprimento da string; sem essa garantia o índice de
+//      bytes sairia errado em qualquer descrição com acento e o leitor
+//      recusaria o documento.
+//   3. Coordenada de tela, não de PDF. A API recebe y crescendo para BAIXO
+//      (como todo mundo pensa uma página) e a conversão para o eixo do PDF
+//      (origem no canto inferior esquerdo) acontece num lugar só.
+//
+// Sem compressão de propósito: `FlateDecode` exigiria zlib, e o ganho num
+// documento de texto de poucas páginas não paga a dependência.
+"use strict";
+
+const PDF_PAGE_A4 = Object.freeze({ width: 595.28, height: 841.89 });
+
+// Larguras dos glifos em milésimos de em, direto das métricas AFM das fontes
+// base-14, para os códigos 32 a 126. Sem elas não há como alinhar valores à
+// direita nem cortar uma descrição no ponto certo: o app teria de chutar a
+// largura do texto, e todo chute erra em "R$ 1.771,44".
+const PDF_WIDTHS_REGULAR = "278 278 355 556 556 889 667 191 333 333 389 584 278 333 278 278 556 556 556 556 556 556 556 556 556 556 278 278 584 584 584 556 1015 667 667 722 722 667 611 778 722 278 500 667 556 833 722 778 667 778 722 667 611 722 667 944 667 667 611 278 278 278 469 556 333 556 556 500 556 556 278 556 556 222 222 500 222 833 556 556 556 556 333 500 278 556 500 722 500 500 500 334 260 334 584";
+const PDF_WIDTHS_BOLD = "278 333 474 556 556 889 722 238 333 333 389 584 278 333 278 278 556 556 556 556 556 556 556 556 556 556 333 333 584 584 584 611 975 722 722 722 722 667 611 778 722 278 556 722 611 833 722 778 667 778 722 667 611 722 667 944 667 667 611 333 278 333 584 556 333 556 611 556 611 556 333 611 611 278 278 556 278 889 611 611 611 611 389 556 333 611 556 778 556 556 500 389 280 389 584";
+
+// Caracteres tipográficos que o app usa nos textos ("aspas curvas", travessão)
+// e que no WinAnsi moram na faixa 0x80-0x9F, fora do Latin-1. Sem este mapa
+// eles virariam "?" justamente nos títulos.
+const PDF_WINANSI_EXTRA = Object.freeze({
+  "€": 0x80, "‚": 0x82, "ƒ": 0x83, "„": 0x84, "…": 0x85,
+  "†": 0x86, "‡": 0x87, "ˆ": 0x88, "‰": 0x89, "Š": 0x8A,
+  "‹": 0x8B, "Œ": 0x8C, "Ž": 0x8E, "‘": 0x91, "’": 0x92,
+  "\u201C": 0x93, "\u201D": 0x94, "\u2022": 0x95, "\u2013": 0x96, "\u2014": 0x97,
+  "˜": 0x98, "™": 0x99, "š": 0x9A, "›": 0x9B, "œ": 0x9C,
+  "ž": 0x9E, "Ÿ": 0x9F,
+});
+
+// Sinais que não existem em WinAnsi mas aparecem no app (o menos tipográfico
+// dos valores negativos, a seta dos textos de transferência). Sem este mapa
+// eles viravam "?" bem em cima do valor; e "?R$ 370,20" é pior que nada.
+const PDF_ASCII_FALLBACK = Object.freeze({
+  "−": "-", "‑": "-", "‒": "-", "→": "->", "←": "<-", "≈": "~", "≤": "<=", "≥": ">=",
+});
+
+// Tabela de largura por código de byte (0-255). Os acentuados do Latin-1 são
+// resolvidos pela decomposição Unicode: em Helvetica o "á" tem exatamente a
+// largura do "a", então basta perguntar pela letra-base.
+function buildPdfWidthTable(spec) {
+  const values = spec.split(" ").map(Number);
+  const table = new Array(256).fill(500);
+  for (let i = 0; i < values.length; i++) table[32 + i] = values[i];
+  for (let code = 0xA0; code <= 0xFF; code++) {
+    const base = String.fromCharCode(code).normalize("NFD")[0];
+    const baseCode = base ? base.charCodeAt(0) : 0;
+    table[code] = baseCode >= 32 && baseCode <= 126 ? table[baseCode] : 556;
+  }
+  table[0xA0] = table[32];   // espaço não separável mede como espaço
+  return table;
+}
+
+const PDF_WIDTH_TABLES = Object.freeze({
+  F1: buildPdfWidthTable(PDF_WIDTHS_REGULAR),
+  F2: buildPdfWidthTable(PDF_WIDTHS_BOLD),
+});
+
+// Texto do app (UTF-16 do JavaScript) para bytes WinAnsi. O que não existe na
+// codificação perde o acento antes de virar "?", porque "Sao Paulo" ainda se
+// lê e "S?o Paulo" não.
+function pdfEncodeText(value) {
+  const input = String(value == null ? "" : value);
+  let out = "";
+  for (const char of input) {
+    const code = char.codePointAt(0);
+    if (code >= 32 && code <= 126) { out += char; continue; }
+    if (code >= 0xA0 && code <= 0xFF) { out += char; continue; }
+    if (Object.prototype.hasOwnProperty.call(PDF_WINANSI_EXTRA, char)) {
+      out += String.fromCharCode(PDF_WINANSI_EXTRA[char]);
+      continue;
+    }
+    if (code === 9) { out += " "; continue; }
+    if (Object.prototype.hasOwnProperty.call(PDF_ASCII_FALLBACK, char)) { out += PDF_ASCII_FALLBACK[char]; continue; }
+    const stripped = char.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const fallback = stripped && stripped.charCodeAt(0) <= 0xFF ? stripped : "?";
+    out += fallback.length === 1 ? fallback : "?";
+  }
+  return out;
+}
+
+// String literal do PDF. Fora da faixa imprimível tudo vira escape octal: o
+// arquivo inteiro fica em ASCII, e aí o deslocamento em bytes de cada objeto é
+// simplesmente o comprimento da string acumulada.
+function pdfEscapeString(value) {
+  let out = "";
+  const encoded = pdfEncodeText(value);
+  for (let i = 0; i < encoded.length; i++) {
+    const code = encoded.charCodeAt(i);
+    const char = encoded[i];
+    if (char === "(" || char === ")" || char === "\\") { out += "\\" + char; continue; }
+    if (code < 32 || code > 126) { out += "\\" + code.toString(8).padStart(3, "0"); continue; }
+    out += char;
+  }
+  return out;
+}
+
+function pdfMeasureText(value, sizePt, bold) {
+  const table = PDF_WIDTH_TABLES[bold ? "F2" : "F1"];
+  const encoded = pdfEncodeText(value);
+  let total = 0;
+  for (let i = 0; i < encoded.length; i++) total += table[encoded.charCodeAt(i)] || 500;
+  return (total / 1000) * (sizePt || 10);
+}
+
+// Corta no limite de largura e devolve com reticências. Trabalha em cima do
+// texto já codificado para não cortar no meio de um par substituto.
+function pdfEllipsize(value, maxWidth, sizePt, bold) {
+  const text = String(value == null ? "" : value);
+  if (!text || pdfMeasureText(text, sizePt, bold) <= maxWidth) return text;
+  const ellipsis = "…";
+  let cut = text;
+  while (cut.length > 1 && pdfMeasureText(cut + ellipsis, sizePt, bold) > maxWidth) {
+    cut = cut.slice(0, -1);
+  }
+  return cut.trimEnd() + ellipsis;
+}
+
+// Quebra em linhas respeitando a largura. Palavra maior que a linha inteira é
+// cortada com reticências em vez de estourar a margem.
+function pdfWrapText(value, maxWidth, sizePt, bold) {
+  const words = String(value == null ? "" : value).split(/\s+/).filter(Boolean);
+  const lines = [];
+  let line = "";
+  words.forEach((word) => {
+    const candidate = line ? `${line} ${word}` : word;
+    if (pdfMeasureText(candidate, sizePt, bold) <= maxWidth) { line = candidate; return; }
+    if (line) lines.push(line);
+    line = pdfMeasureText(word, sizePt, bold) <= maxWidth ? word : pdfEllipsize(word, maxWidth, sizePt, bold);
+  });
+  if (line) lines.push(line);
+  return lines.length ? lines : [""];
+}
+
+// Cor em #rrggbb (ou "r,g,b" já normalizado) para os três números que o PDF
+// espera. Aceita o formato do CSS porque é de lá que os valores vêm.
+function pdfColor(value) {
+  const raw = String(value == null ? "#000000" : value).trim();
+  const hex = raw.replace("#", "");
+  if (/^[0-9a-f]{6}$/i.test(hex)) {
+    return [parseInt(hex.slice(0, 2), 16) / 255, parseInt(hex.slice(2, 4), 16) / 255, parseInt(hex.slice(4, 6), 16) / 255];
+  }
+  if (/^[0-9a-f]{3}$/i.test(hex)) {
+    return [parseInt(hex[0] + hex[0], 16) / 255, parseInt(hex[1] + hex[1], 16) / 255, parseInt(hex[2] + hex[2], 16) / 255];
+  }
+  return [0, 0, 0];
+}
+
+function pdfNum(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "0";
+  return (Math.round(n * 100) / 100).toString();
+}
+
+// ------------------------------------------------------------------------------
+// DOCUMENTO
+// ------------------------------------------------------------------------------
+// Cada página é uma lista de operadores de conteúdo já formatados. Guardar por
+// página (em vez de escrever direto num buffer) é o que permite voltar depois
+// para carimbar "Página 3 de 7": o total só existe quando o documento acaba.
+function createPdfDocument(options) {
+  const opts = options || {};
+  const size = opts.size || PDF_PAGE_A4;
+  const pages = [[]];
+  let current = 0;
+
+  function ops() { return pages[current]; }
+  function toPdfY(y) { return size.height - y; }
+
+  const doc = {
+    width: size.width,
+    height: size.height,
+    margin: opts.margin == null ? 38 : opts.margin,
+    get contentWidth() { return doc.width - doc.margin * 2; },
+    get pageCount() { return pages.length; },
+    get pageIndex() { return current; },
+
+    addPage() {
+      pages.push([]);
+      current = pages.length - 1;
+      return doc;
+    },
+    goToPage(index) {
+      if (index >= 0 && index < pages.length) current = index;
+      return doc;
+    },
+
+    measure(text, sizePt, bold) { return pdfMeasureText(text, sizePt, bold); },
+    wrap(text, maxWidth, sizePt, bold) { return pdfWrapText(text, maxWidth, sizePt, bold); },
+
+    text(value, x, y, config) {
+      const cfg = config || {};
+      const sizePt = cfg.size || 10;
+      const bold = !!cfg.bold;
+      const raw = String(value == null ? "" : value);
+      const content = cfg.maxWidth ? pdfEllipsize(raw, cfg.maxWidth, sizePt, bold) : raw;
+      if (!content) return doc;
+      const width = pdfMeasureText(content, sizePt, bold);
+      const left = cfg.align === "right" ? x - width : cfg.align === "center" ? x - width / 2 : x;
+      const [r, g, b] = pdfColor(cfg.color || "#111111");
+      ops().push(`BT /${bold ? "F2" : "F1"} ${pdfNum(sizePt)} Tf ${pdfNum(r)} ${pdfNum(g)} ${pdfNum(b)} rg ${pdfNum(left)} ${pdfNum(toPdfY(y))} Td (${pdfEscapeString(content)}) Tj ET`);
+      return doc;
+    },
+
+    rect(x, y, width, height, config) {
+      const cfg = config || {};
+      const [r, g, b] = pdfColor(cfg.color || "#eeeeee");
+      if (cfg.stroke) {
+        ops().push(`${pdfNum(r)} ${pdfNum(g)} ${pdfNum(b)} RG ${pdfNum(cfg.lineWidth || 0.6)} w ${pdfNum(x)} ${pdfNum(toPdfY(y + height))} ${pdfNum(width)} ${pdfNum(height)} re S`);
+      } else {
+        ops().push(`${pdfNum(r)} ${pdfNum(g)} ${pdfNum(b)} rg ${pdfNum(x)} ${pdfNum(toPdfY(y + height))} ${pdfNum(width)} ${pdfNum(height)} re f`);
+      }
+      return doc;
+    },
+
+    line(x1, y1, x2, y2, config) {
+      const cfg = config || {};
+      const [r, g, b] = pdfColor(cfg.color || "#dddddd");
+      ops().push(`${pdfNum(r)} ${pdfNum(g)} ${pdfNum(b)} RG ${pdfNum(cfg.width || 0.6)} w ${pdfNum(x1)} ${pdfNum(toPdfY(y1))} m ${pdfNum(x2)} ${pdfNum(toPdfY(y2))} l S`);
+      return doc;
+    },
+
+    build() { return assemblePdf(pages, size, opts); },
+  };
+
+  return doc;
+}
+
+// Monta o arquivo. A ordem dos objetos é fixa e o `xref` é calculado contando o
+// que já foi escrito; por isso nada aqui pode virar multibyte.
+function assemblePdf(pages, size, opts) {
+  const objects = [];
+  const pageObjectStart = 5;                        // 1 catálogo, 2 páginas, 3-4 fontes
+  const pageIds = pages.map((_, i) => pageObjectStart + i * 2);
+  const contentIds = pages.map((_, i) => pageObjectStart + i * 2 + 1);
+
+  objects[1] = "<< /Type /Catalog /Pages 2 0 R >>";
+  objects[2] = `<< /Type /Pages /Kids [${pageIds.map((id) => `${id} 0 R`).join(" ")}] /Count ${pages.length} >>`;
+  objects[3] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>";
+  objects[4] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>";
+
+  pages.forEach((page, i) => {
+    objects[pageIds[i]] = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pdfNum(size.width)} ${pdfNum(size.height)}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${contentIds[i]} 0 R >>`;
+    const stream = page.join("\n");
+    objects[contentIds[i]] = `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`;
+  });
+
+  const infoId = pageObjectStart + pages.length * 2;
+  const stamp = pdfTimestamp(opts.date);
+  objects[infoId] = `<< /Title (${pdfEscapeString(opts.title || "Extrato")}) /Author (${pdfEscapeString(opts.author || "Cofre")}) /Creator (${pdfEscapeString(opts.creator || "Cofre; organizador financeiro")}) /Producer (${pdfEscapeString(opts.creator || "Cofre; organizador financeiro")}) /CreationDate (${stamp}) /ModDate (${stamp}) >>`;
+
+  let file = "%PDF-1.4\n";
+  const offsets = [];
+  for (let id = 1; id <= infoId; id++) {
+    offsets[id] = file.length;
+    file += `${id} 0 obj\n${objects[id]}\nendobj\n`;
+  }
+
+  const xrefOffset = file.length;
+  let xref = `xref\n0 ${infoId + 1}\n0000000000 65535 f \n`;
+  for (let id = 1; id <= infoId; id++) {
+    xref += `${String(offsets[id]).padStart(10, "0")} 00000 n \n`;
+  }
+  file += xref;
+  file += `trailer\n<< /Size ${infoId + 1} /Root 1 0 R /Info ${infoId} 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+
+  const bytes = new Uint8Array(file.length);
+  for (let i = 0; i < file.length; i++) bytes[i] = file.charCodeAt(i) & 0xFF;
+  return bytes;
+}
+
+function pdfTimestamp(date) {
+  const d = date instanceof Date ? date : new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  return `D:${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+}
+
+// ==============================================================================
+// EXTRATO EM PDF
+// ------------------------------------------------------------------------------
+// A composição recebe LINHAS PRONTAS, não o banco do app. Quem sabe o que é uma
+// transação é o app.js; quem sabe desenhar uma página é este arquivo. Essa
+// fronteira é o que permite testar o layout no Node sem montar um estado
+// inteiro, e evita que uma mudança no formato do lançamento quebre o gerador.
+//
+// A paleta é sempre a clara. O PDF vai para papel branco (ou para a tela de
+// outra pessoa): imprimir o tema escuro gastaria toner e sairia ilegível.
+// ==============================================================================
+const PDF_STATEMENT_INK = "#0B1512";
+const PDF_STATEMENT_SOFT = "#55655F";
+const PDF_STATEMENT_BRAND = "#0B6B5C";
+const PDF_STATEMENT_POSITIVE = "#0E8A6E";
+const PDF_STATEMENT_NEGATIVE = "#BE443B";
+const PDF_STATEMENT_BORDER = "#E2E8E5";
+const PDF_STATEMENT_ZEBRA = "#F6F8F7";
+const PDF_STATEMENT_BAND = "#E2EFEB";
+
+const PDF_STATEMENT_ROW_H = 16;
+const PDF_STATEMENT_FOOTER_H = 46;
+
+function pdfStatementColumns(doc) {
+  const left = doc.margin;
+  const right = doc.width - doc.margin;
+  return {
+    date: { x: left, width: 48 },
+    description: { x: left + 56, width: 188 },
+    category: { x: left + 248, width: 92 },
+    account: { x: left + 344, width: 84 },
+    amount: { x: right, width: right - (left + 432) },
+    left, right,
+  };
+}
+
+function drawPdfStatementFooter(doc, index, total, note) {
+  const cols = pdfStatementColumns(doc);
+  const y = doc.height - PDF_STATEMENT_FOOTER_H + 12;
+  doc.line(cols.left, y - 10, cols.right, y - 10, { color: PDF_STATEMENT_BORDER, width: 0.6 });
+  doc.text(note, cols.left, y + 2, { size: 7.4, color: PDF_STATEMENT_SOFT, maxWidth: cols.right - cols.left - 90 });
+  doc.text(`Página ${index + 1} de ${total}`, cols.right, y + 2, { size: 7.4, color: PDF_STATEMENT_SOFT, align: "right" });
+}
+
+// Cabeçalho completo (primeira página) e o reduzido das seguintes. Repetir o
+// período em toda página não é enfeite: extrato impresso costuma ser lido
+// folha a folha, longe da primeira.
+function drawPdfStatementHeader(doc, input, first) {
+  const cols = pdfStatementColumns(doc);
+  let y = doc.margin + 14;
+
+  doc.text(input.title || "Extrato de movimentações", cols.left, y, { size: first ? 17 : 12, bold: true, color: PDF_STATEMENT_INK });
+  doc.text(input.brand || "Cofre", cols.right, y, { size: first ? 12 : 10, bold: true, color: PDF_STATEMENT_BRAND, align: "right" });
+  y += first ? 16 : 12;
+
+  if (input.subtitle) {
+    doc.text(input.subtitle, cols.left, y, { size: 9, color: PDF_STATEMENT_SOFT, maxWidth: cols.right - cols.left - 150 });
+  }
+  if (input.generatedLabel) {
+    doc.text(input.generatedLabel, cols.right, y, { size: 8, color: PDF_STATEMENT_SOFT, align: "right" });
+  }
+  y += first ? 14 : 10;
+
+  if (first && input.filtersLabel) {
+    doc.text(input.filtersLabel, cols.left, y, { size: 8, color: PDF_STATEMENT_SOFT, maxWidth: cols.right - cols.left });
+    y += 12;
+  }
+
+  if (first && Array.isArray(input.summary) && input.summary.length) {
+    const boxH = 42;
+    const gap = 8;
+    const boxW = (cols.right - cols.left - gap * (input.summary.length - 1)) / input.summary.length;
+    input.summary.forEach((item, i) => {
+      const x = cols.left + i * (boxW + gap);
+      doc.rect(x, y, boxW, boxH, { color: i === 0 ? PDF_STATEMENT_BAND : PDF_STATEMENT_ZEBRA });
+      doc.text(item.label, x + 9, y + 15, { size: 7.6, color: PDF_STATEMENT_SOFT, maxWidth: boxW - 18 });
+      doc.text(item.value, x + 9, y + 31, { size: 11.5, bold: true, color: pdfStatementTone(item.tone), maxWidth: boxW - 18 });
+    });
+    y += boxH + 14;
+  }
+
+  return y;
+}
+
+function pdfStatementTone(tone) {
+  if (tone === "income") return PDF_STATEMENT_POSITIVE;
+  if (tone === "expense") return PDF_STATEMENT_NEGATIVE;
+  if (tone === "brand") return PDF_STATEMENT_BRAND;
+  return PDF_STATEMENT_INK;
+}
+
+function drawPdfStatementTableHead(doc, y) {
+  const cols = pdfStatementColumns(doc);
+  doc.rect(cols.left, y, cols.right - cols.left, 18, { color: PDF_STATEMENT_BAND });
+  const baseline = y + 12.5;
+  doc.text("DATA", cols.date.x + 6, baseline, { size: 7.2, bold: true, color: PDF_STATEMENT_BRAND });
+  doc.text("DESCRIÇÃO", cols.description.x, baseline, { size: 7.2, bold: true, color: PDF_STATEMENT_BRAND });
+  doc.text("CATEGORIA", cols.category.x, baseline, { size: 7.2, bold: true, color: PDF_STATEMENT_BRAND });
+  doc.text("CONTA / CARTÃO", cols.account.x, baseline, { size: 7.2, bold: true, color: PDF_STATEMENT_BRAND });
+  doc.text("VALOR", cols.right - 6, baseline, { size: 7.2, bold: true, color: PDF_STATEMENT_BRAND, align: "right" });
+  return y + 18;
+}
+
+function buildStatementPdf(input) {
+  const data = input || {};
+  const rows = Array.isArray(data.rows) ? data.rows : [];
+  const note = data.note || "Gerado no seu próprio aparelho. Documento de conferência: não tem valor fiscal.";
+  const doc = createPdfDocument({ title: data.title || "Extrato", author: data.brand || "Cofre", date: data.date });
+  const cols = pdfStatementColumns(doc);
+  const bottom = doc.height - PDF_STATEMENT_FOOTER_H - 6;
+
+  let y = drawPdfStatementHeader(doc, data, true);
+  y = drawPdfStatementTableHead(doc, y);
+
+  if (!rows.length) {
+    doc.text(data.emptyLabel || "Nenhum movimento no período selecionado.", cols.left, y + 20, { size: 9.5, color: PDF_STATEMENT_SOFT });
+    y += 34;
+  }
+
+  let previousDate = null;
+  let zebra = false;
+  rows.forEach((row) => {
+    if (y + PDF_STATEMENT_ROW_H > bottom) {
+      doc.addPage();
+      y = drawPdfStatementHeader(doc, data, false);
+      y = drawPdfStatementTableHead(doc, y);
+      previousDate = null;
+      zebra = false;
+    }
+    if (zebra) doc.rect(cols.left, y, cols.right - cols.left, PDF_STATEMENT_ROW_H, { color: PDF_STATEMENT_ZEBRA });
+    // Régua fina quando o dia vira: é o que faz o olho encontrar "quinta-feira"
+    // numa página com quarenta linhas.
+    if (previousDate && row.date !== previousDate) {
+      doc.line(cols.left, y, cols.right, y, { color: PDF_STATEMENT_BORDER, width: 0.5 });
+    }
+    const baseline = y + 11;
+    doc.text(row.date || "", cols.date.x + 6, baseline, { size: 8.2, color: PDF_STATEMENT_SOFT, maxWidth: cols.date.width });
+    doc.text(row.description || "", cols.description.x, baseline, { size: 8.6, color: PDF_STATEMENT_INK, maxWidth: cols.description.width });
+    doc.text(row.category || "", cols.category.x, baseline, { size: 8, color: PDF_STATEMENT_SOFT, maxWidth: cols.category.width });
+    doc.text(row.account || "", cols.account.x, baseline, { size: 8, color: PDF_STATEMENT_SOFT, maxWidth: cols.account.width });
+    doc.text(row.amount || "", cols.right - 6, baseline, { size: 8.8, bold: true, color: pdfStatementTone(row.tone), align: "right" });
+    previousDate = row.date;
+    zebra = !zebra;
+    y += PDF_STATEMENT_ROW_H;
+  });
+
+  doc.line(cols.left, y, cols.right, y, { color: PDF_STATEMENT_BORDER, width: 0.8 });
+  y += 6;
+
+  if (data.totalLabel) {
+    doc.text(data.totalLabel, cols.left, y + 12, { size: 9, bold: true, color: PDF_STATEMENT_INK });
+    doc.text(data.totalValue || "", cols.right - 6, y + 12, { size: 9, bold: true, color: pdfStatementTone(data.totalTone), align: "right" });
+    y += 22;
+  }
+
+  const breakdown = Array.isArray(data.breakdown) ? data.breakdown : [];
+  if (breakdown.length) {
+    const needed = 34 + breakdown.length * 14;
+    if (y + needed > bottom) { doc.addPage(); y = drawPdfStatementHeader(doc, data, false); }
+    y += 16;
+    doc.text(data.breakdownTitle || "Saídas por categoria", cols.left, y, { size: 10.5, bold: true, color: PDF_STATEMENT_INK });
+    y += 12;
+    const barLeft = cols.left + 170;
+    const barMax = cols.right - barLeft - 96;
+    breakdown.forEach((item) => {
+      if (y + 14 > bottom) { doc.addPage(); y = drawPdfStatementHeader(doc, data, false) + 6; }
+      doc.text(item.label, cols.left, y + 9, { size: 8.6, color: PDF_STATEMENT_INK, maxWidth: 164 });
+      const pct = Math.max(0, Math.min(100, Number(item.pct) || 0));
+      doc.rect(barLeft, y + 3.5, barMax, 6, { color: PDF_STATEMENT_ZEBRA });
+      if (pct > 0) doc.rect(barLeft, y + 3.5, Math.max((barMax * pct) / 100, 1.5), 6, { color: item.color || PDF_STATEMENT_BRAND });
+      doc.text(`${pct.toFixed(0)}%`, barLeft + barMax + 26, y + 9, { size: 7.8, color: PDF_STATEMENT_SOFT, align: "right" });
+      doc.text(item.value, cols.right - 6, y + 9, { size: 8.6, color: PDF_STATEMENT_INK, align: "right" });
+      y += 14;
+    });
+  }
+
+  // As observações são um bloco só. Quebradas parágrafo a parágrafo, elas
+  // abriam uma página nova para duas linhas de rodapé legal e o extrato
+  // terminava com meia folha em branco; num arquivo que vai para a impressora
+  // isso é papel. Quando ainda assim não couberem, a página que sobra recebe
+  // o título "Observações": aí ela é uma página com propósito, e não uma
+  // folha que parece ter sobrado por defeito.
+  const notes = (Array.isArray(data.notes) ? data.notes : []).map((paragraph) => doc.wrap(paragraph, cols.right - cols.left, 7.8, false));
+  if (notes.length) {
+    const height = 26 + notes.reduce((total, lines) => total + lines.length * 10 + 4, 0);
+    if (y + height > bottom) { doc.addPage(); y = drawPdfStatementHeader(doc, data, false); }
+    y += 16;
+    doc.text(data.notesTitle || "Observações", cols.left, y, { size: 9.5, bold: true, color: PDF_STATEMENT_INK });
+    y += 12;
+    notes.forEach((lines) => {
+      lines.forEach((line) => {
+        doc.text(line, cols.left, y, { size: 7.8, color: PDF_STATEMENT_SOFT });
+        y += 10;
+      });
+      y += 4;
+    });
+  }
+
+  const total = doc.pageCount;
+  for (let i = 0; i < total; i++) {
+    doc.goToPage(i);
+    drawPdfStatementFooter(doc, i, total, note);
+  }
+  return doc.build();
+}
+
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = {
+    PDF_PAGE_A4, createPdfDocument, pdfEncodeText, pdfEscapeString,
+    pdfMeasureText, pdfEllipsize, pdfWrapText, pdfColor, buildStatementPdf,
+  };
+}
+
 // source: js/import.js
 // import.js. Módulo de importação offline de extratos bancários (OFX / CSV)
 // ------------------------------------------------------------------------------
@@ -11719,22 +12448,66 @@ function normalizeForMatch(str) {
   return normalizeText(str);
 }
 
-// Heurística principal: retorna o id da categoria mais provável para a descrição.
-// Se nenhuma regra casar (ou a categoria não existir mais), cai em "outros".
-function guessCategoryId(dataOrCategories, description) {
+// Heurística principal: qual categoria a descrição pede, com que confiança e
+// POR QUÊ. O "por quê" não é enfeite: a tela de revisão mostra a origem do
+// palpite, e um palpite que se explica é um palpite que a pessoa consegue
+// corrigir de uma vez (criando a regra) em vez de corrigir todo mês.
+//
+// A ordem das fontes é a ordem da autoridade sobre o assunto:
+//   1. Regra que a pessoa escreveu. Ela mandou; não há o que discutir.
+//   2. O que ela já classificou à mão neste mesmo estabelecimento. Ninguém
+//      sabe melhor que "MERC BOM JESUS" é mercado do que quem mora na rua.
+//   3. Dicionário de fábrica, no texto cru do extrato.
+//   4. Dicionário de fábrica, no nome limpo do estabelecimento; é o que faz
+//      uma regra "começa com padaria" alcançar "PAG*PADARIA DO ZE".
+//   5. Histórico sem escolha manual (o próprio palpite de antes), que serve
+//      para manter a coerência, mas entra com confiança média.
+function suggestCategoryForDescription(dataOrCategories, description) {
   const ctx = rulesContextOf(dataOrCategories);
   const categories = ctx.categories || [];
-  const text = normalizeForMatch(description);
-  if (!text) return fallbackCategoryId(categories);
+  const has = (id) => !!id && (categories.length === 0 || categories.some((c) => c.id === id));
+  const fallback = { categoryId: fallbackCategoryId(categories), confidence: "baixa", reason: null };
 
-  const best = matchCategoryRules(compileCategoryRules(ctx), text);
-  if (best && categories.some((c) => c.id === best.categoryId)) return best.categoryId;
-  // Se a subcategoria sugerida foi apagada, tenta a categoria pai equivalente.
-  if (best) {
-    const parentGuess = { mercado: "alimentacao", delivery: "alimentacao" }[best.categoryId];
-    if (parentGuess && categories.some((c) => c.id === parentGuess)) return parentGuess;
+  const text = normalizeForMatch(description);
+  if (!text) return fallback;
+
+  const compiled = compileCategoryRules(ctx);
+  const direct = matchCategoryRules(compiled, text);
+  const core = statementMerchantCore(description);
+  const fromCore = core && core !== text ? matchCategoryRules(compiled, core) : null;
+
+  const custom = [direct, fromCore].find((m) => m && m.source === "custom" && has(m.categoryId));
+  if (custom) return { categoryId: custom.categoryId, confidence: "alta", reason: `sua regra “${custom.label}”` };
+
+  const learned = recallCategoryFromMemory(ctx, description);
+  if (learned && learned.manual && has(learned.categoryId)) {
+    return { categoryId: learned.categoryId, confidence: "alta", reason: "você já classificou este lugar assim" };
   }
-  return fallbackCategoryId(categories);
+
+  const builtin = [direct, fromCore].find((m) => m && has(m.categoryId));
+  if (builtin) {
+    return { categoryId: builtin.categoryId, confidence: builtin.weight >= 5 ? "alta" : "media", reason: builtin.label };
+  }
+
+  if (learned && has(learned.categoryId)) {
+    return { categoryId: learned.categoryId, confidence: "media", reason: "mesma categoria de lançamentos parecidos" };
+  }
+
+  // A regra casou, mas a categoria dela foi apagada. Antes de desistir, tenta a
+  // categoria-mãe: quem apagou "Mercado" continua tendo "Alimentação".
+  const best = direct || fromCore;
+  if (best) {
+    const parent = { mercado: "alimentacao", delivery: "alimentacao" }[best.categoryId];
+    if (parent && has(parent)) return { categoryId: parent, confidence: "media", reason: best.label };
+  }
+  return fallback;
+}
+
+// Contratos antigos, mantidos porque o parser de linguagem natural, o leitor de
+// QR e os testes chamam estes dois nomes. Ambos são a mesma pergunta com
+// recortes diferentes da resposta.
+function guessCategoryId(dataOrCategories, description) {
+  return suggestCategoryForDescription(dataOrCategories, description).categoryId;
 }
 
 function fallbackCategoryId(categories) {
@@ -11742,13 +12515,8 @@ function fallbackCategoryId(categories) {
 }
 
 // Expõe a confiança da sugestão para a tela de revisão (badge "sugerido").
-// Regra escrita pelo usuário nasce com peso alto de propósito: se ele mandou
-// mandar, a sugestão é confiável por definição.
 function categorySuggestionConfidence(description, dataOrCategories) {
-  const ctx = rulesContextOf(dataOrCategories === undefined ? [] : dataOrCategories);
-  const best = matchCategoryRules(compileCategoryRules(ctx), normalizeForMatch(description));
-  const weight = best ? best.weight : 0;
-  return weight >= 5 ? "alta" : weight >= 3 ? "media" : "baixa";
+  return suggestCategoryForDescription(dataOrCategories === undefined ? [] : dataOrCategories, description).confidence;
 }
 
 // ------------------------------------------------------------------------------
@@ -11942,13 +12710,27 @@ function markDuplicates(rows, existingTx) {
 function prepareImportRows(rawText, filename, data) {
   const { rows, format, skipped } = parseStatementFile(rawText, filename);
   const withDup = markDuplicates(rows, data.transactions);
-  const prepared = withDup.map((r) => ({
-    ...r,
-    include: !r.duplicate,
-    categoryId: r.type === "expense" ? guessCategoryId(data, r.description) : null,
-    confidence: r.type === "expense" ? categorySuggestionConfidence(r.description, data) : "alta",
-  })).sort((a, b) => (a.date < b.date ? 1 : -1));
-  prepared.meta = { format, skipped, total: rows.length };
+  const prepared = withDup.map((r) => {
+    // O papel da linha vem antes da categoria: não adianta perguntar em que
+    // categoria entra um "Pagamento recebido" da fatura se ele não deveria
+    // entrar como lançamento nenhum.
+    const role = classifyStatementRow(r.description, r.type);
+    const suggestion = r.type === "expense" ? suggestCategoryForDescription(data, r.description) : null;
+    return {
+      ...r,
+      role: role ? role.id : null,
+      roleLabel: role ? role.label : null,
+      roleDetail: role ? role.detail : null,
+      include: !r.duplicate && !(role && role.skip),
+      categoryId: suggestion ? suggestion.categoryId : null,
+      confidence: suggestion ? suggestion.confidence : "alta",
+      categoryReason: suggestion ? suggestion.reason : null,
+    };
+  }).sort((a, b) => (a.date < b.date ? 1 : -1));
+  prepared.meta = {
+    format, skipped, total: rows.length,
+    roles: prepared.reduce((count, r) => (r.role ? { ...count, [r.role]: (count[r.role] || 0) + 1 } : count), {}),
+  };
   return prepared;
 }
 
@@ -11957,17 +12739,26 @@ function prepareImportRows(rawText, filename, data) {
 // ------------------------------------------------------------------------------
 function buildTransactionsFromRows(rows, format, accountId, filename) {
   const source = format === "ofx" ? "import-ofx" : "import-csv";
-  return rows.map((r) => makeTransaction({
-    type: r.type,
-    amount: r.amount,
-    categoryId: r.type === "expense" ? (r.categoryId || "outros") : "outros",
-    date: r.date,
-    payment: r.type === "expense" ? "Débito" : "Outro",
-    description: r.description,
-    source,
-    origin: { channel: source, label: source === "import-ofx" ? "Extrato OFX" : "Extrato CSV", reference: filename || null, importedAt: new Date().toISOString() },
-    accountId: accountId || null,
-  }));
+  return rows.map((r) => {
+    const tx = makeTransaction({
+      type: r.type,
+      amount: r.amount,
+      categoryId: r.type === "expense" ? (r.categoryId || "outros") : "outros",
+      date: r.date,
+      payment: r.type === "expense" ? "Débito" : "Outro",
+      description: r.description,
+      source,
+      origin: { channel: source, label: source === "import-ofx" ? "Extrato OFX" : "Extrato CSV", reference: filename || null, importedAt: new Date().toISOString() },
+      accountId: accountId || null,
+    });
+    // A linha veio desmarcada e a pessoa marcou de volta. Foi decisão dela, e
+    // a caixa de revisão não pode recebê-la de novo perguntando a mesma coisa
+    // que ela acabou de responder na tela ao lado.
+    if (r.role === "card-payment" && tx.type === "income" && typeof markTransactionIssueReviewed === "function") {
+      return markTransactionIssueReviewed(tx, `invoice-income:${tx.id}`);
+    }
+    return tx;
+  });
 }
 
 // ------------------------------------------------------------------------------
@@ -22487,7 +23278,7 @@ function renderBudgetRow(b, thresholds) {
 function renderAccountForm() {
   const f = state.accountsUi.accountForm;
   if (!f) return "";
-  return `<div class="card account-editor">
+  return `<div class="card account-editor" id="account-form" data-ui-css="scroll-margin-top:18px">
     <div class="screen-header"><div><p class="eyebrow">Conta</p><p class="card-title" data-ui-css="margin:3px 0 0">${f.id ? "Editar conta" : "Nova conta"}</p></div>
       <button class="icon-btn" data-action="account-cancel" aria-label="Fechar">${svgIcon("x", 16)}</button></div>
     <div class="field"><label class="field__label" for="account-name-input">Nome</label><input id="account-name-input" class="input" data-field="account-name" value="${escapeHtml(f.name)}" placeholder="Ex: Nubank" maxlength="60" /></div>
@@ -22504,7 +23295,7 @@ function renderCardForm() {
   const f = state.accountsUi.cardForm;
   if (!f) return "";
   const accounts = (state.data.accounts || []).filter((a) => !a.archived);
-  return `<div class="card account-editor">
+  return `<div class="card account-editor" id="card-form" data-ui-css="scroll-margin-top:18px">
     <div class="screen-header"><div><p class="eyebrow">Cartão</p><p class="card-title" data-ui-css="margin:3px 0 0">${f.id ? "Editar cartão" : "Novo cartão"}</p></div>
       <button class="icon-btn" data-action="card-cancel" aria-label="Fechar">${svgIcon("x", 16)}</button></div>
     <div class="field"><label class="field__label" for="card-name-input">Nome</label><input id="card-name-input" class="input" data-field="card-name" value="${escapeHtml(f.name)}" placeholder="Ex: Mastercard Nubank" maxlength="60" /></div>
@@ -22523,7 +23314,7 @@ function renderTransferForm() {
   if (!f) return "";
   const accounts = (state.data.accounts || []).filter((a) => !a.archived);
   const options = (selected) => accounts.map((a) => `<option value="${a.id}" ${selected === a.id ? "selected" : ""}>${escapeHtml(a.name)}</option>`).join("");
-  return `<div class="card account-editor">
+  return `<div class="card account-editor" id="transfer-form" data-ui-css="scroll-margin-top:18px">
     <div class="screen-header"><p class="card-title" data-ui-css="margin:0">Transferir entre contas</p><button class="icon-btn" data-action="transfer-cancel" aria-label="Fechar">${svgIcon("x",16)}</button></div>
     <div class="field-row"><div class="field"><label class="field__label" for="transfer-from-select">Origem</label><select id="transfer-from-select" class="input" data-action-select="transfer-from">${options(f.fromAccountId)}</select></div><div class="field"><label class="field__label" for="transfer-to-select">Destino</label><select id="transfer-to-select" class="input" data-action-select="transfer-to">${options(f.toAccountId)}</select></div></div>
     <div class="field-row"><div class="field"><label class="field__label" for="transfer-amount-input">Valor</label><input id="transfer-amount-input" class="input" data-field="transfer-amount" value="${escapeHtml(f.amount)}" inputmode="decimal" placeholder="0,00" /></div><div class="field"><label class="field__label" for="transfer-date-input">Data</label><input id="transfer-date-input" type="date" class="input" data-field="transfer-date" value="${f.date}" /></div></div>
@@ -22615,7 +23406,7 @@ function renderDataSourcesCenter(model) {
 function renderDebtForm() {
   const f = state.debtsUi.form;
   if (!f) return "";
-  return `<div class="card debt-editor span-3">
+  return `<div class="card debt-editor span-3" id="debt-form" data-ui-css="scroll-margin-top:18px">
     <div class="screen-header"><div><p class="eyebrow">${f.id ? "Editar dívida" : "Nova dívida"}</p><p class="card-title" data-ui-css="margin:3px 0 0">Saldo e condições do contrato</p></div><button class="icon-btn" data-action="debt-form-cancel" aria-label="Fechar">${svgIcon("x",16)}</button></div>
     <div class="field-row"><div class="field"><label class="field__label" for="debt-name">Nome</label><input id="debt-name" class="input" data-field="debt-name" value="${escapeHtml(f.name)}" placeholder="Ex: Financiamento do carro" maxlength="60" /></div><div class="field"><label class="field__label" for="debt-value">Saldo devedor hoje</label><input id="debt-value" class="input" data-field="debt-value" value="${escapeHtml(f.value)}" inputmode="decimal" placeholder="0,00" /></div></div>
     <div class="field-row"><div class="field"><label class="field__label" for="debt-type">Tipo</label><select id="debt-type" class="input" data-action-select="debt-type">${Object.entries(DEBT_TYPE_LABELS).map(([id,label]) => `<option value="${id}" ${f.debtType === id ? "selected" : ""}>${label}</option>`).join("")}</select></div><div class="field"><label class="field__label" for="debt-creditor">Credor</label><input id="debt-creditor" class="input" data-field="debt-creditor" value="${escapeHtml(f.creditor)}" placeholder="Banco ou empresa" maxlength="80" /></div></div>
@@ -22635,7 +23426,7 @@ function renderDebtPaymentForm(model) {
   if (!p) return "";
   const debt = model.debts.find((d) => d.id === p.debtId) || (state.data.assets || []).find((d) => d.id === p.debtId);
   const accounts = (state.data.accounts || []).filter((a) => !a.archived);
-  return `<div class="card debt-editor span-3">
+  return `<div class="card debt-editor span-3" id="debt-payment-form" data-ui-css="scroll-margin-top:18px">
     <div class="screen-header"><div><p class="eyebrow">Registrar pagamento</p><p class="card-title" data-ui-css="margin:3px 0 0">${debt ? escapeHtml(debt.name) : "Dívida"}</p></div><button class="icon-btn" data-action="debt-payment-cancel" aria-label="Fechar">${svgIcon("x",16)}</button></div>
     <div class="field-row"><div class="field"><label class="field__label" for="debt-pay-amount">Valor pago</label><input id="debt-pay-amount" class="input" data-field="debt-pay-amount" value="${escapeHtml(p.amount)}" inputmode="decimal" placeholder="0,00" /></div><div class="field"><label class="field__label" for="debt-pay-date">Data</label><input id="debt-pay-date" type="date" class="input" data-field="debt-pay-date" value="${p.date}" /></div></div>
     <div class="field-row"><div class="field"><label class="field__label" for="debt-pay-account">Conta de origem</label><select id="debt-pay-account" class="input" data-action-select="debt-pay-account"><option value="">Sem conta vinculada</option>${accounts.map((a) => `<option value="${a.id}" ${p.accountId === a.id ? "selected" : ""}>${escapeHtml(a.name)}</option>`).join("")}</select></div><div class="field"><label class="field__label" for="debt-pay-category">Categoria</label><select id="debt-pay-category" class="input" data-action-select="debt-pay-category">${topLevelCategories(state.data).map((c) => `<option value="${c.id}" ${p.categoryId === c.id ? "selected" : ""}>${escapeHtml(c.name)}</option>`).join("")}</select></div></div>
@@ -23236,6 +24027,7 @@ function renderMovementFilters() {
       ${state.analyticsSearch ? `<button class="icon-btn" data-action="movement-search-clear" aria-label="Limpar busca">${svgIcon("x", 16)}</button>` : ""}
     </div>
     <button class="btn btn--secondary movement-filter-toggle" data-action="movement-filters-toggle" aria-expanded="${state.movementFiltersOpen}">${svgIcon("filter", 16)} Filtros</button>
+    <button class="btn btn--secondary movement-filter-toggle" data-action="export-statement-pdf" title="Baixar o extrato do período em PDF">${svgIcon("download", 16)} PDF</button>
     <div class="movement-filters__advanced">
       <div class="field"><label class="field__label" for="movement-type">Tipo</label><select id="movement-type" class="input" data-action-select="movement-type">
         ${[["all", "Todos"], ["income", "Entradas"], ["expense", "Saídas"], ["transfer", "Transferências"], ["card-payment", "Pagamentos de fatura"]].map(([id, label]) => `<option value="${id}" ${f.type === id ? "selected" : ""}>${label}</option>`).join("")}
@@ -23298,12 +24090,13 @@ function renderMovementBulkBar() {
 
 function renderReviewIssue(issue) {
   const tx = issue.txId ? state.data.transactions.find((item) => item.id === issue.txId) : null;
-  const icon = { category: "tag", duplicate: "file", transfer: "arrowRight", "card-payment": "creditCard", account: "bank" }[issue.type] || "alertTriangle";
+  const icon = { category: "tag", duplicate: "file", transfer: "arrowRight", "card-payment": "creditCard", "invoice-income": "creditCard", account: "bank" }[issue.type] || "alertTriangle";
   let action = "";
   if (issue.type === "category" && tx) action = `<select class="input review-category" data-action-select="review-category" data-id="${tx.id}" data-key="${issue.key}"><option value="">Escolher categoria</option>${state.data.categories.filter((c) => c.id !== "outros").map((c) => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join("")}</select>`;
   if (issue.type === "duplicate") action = `<button class="btn btn--secondary" data-action="review-delete-duplicate" data-id="${issue.txId}" data-key="${issue.key}">Revisar e excluir cópia</button>`;
   if (issue.type === "transfer") action = `<button class="btn btn--secondary" data-action="review-convert-transfer" data-id="${issue.txId}" data-key="${issue.key}">Converter em transferência</button>`;
   if (issue.type === "card-payment") action = `<button class="btn btn--secondary" data-action="review-card-payment-open" data-id="${issue.txId}" data-key="${issue.key}">Converter em pagamento</button>`;
+  if (issue.type === "invoice-income") action = `<button class="btn btn--secondary" data-action="review-delete-invoice-income" data-id="${issue.txId}" data-key="${issue.key}">Excluir a receita</button>`;
   if (issue.type === "account") action = `<button class="btn btn--secondary" data-action="review-reconcile-account" data-id="${issue.accountId}">Conferir saldo</button>`;
   return `<article class="review-issue">
     <span class="review-issue__icon">${svgIcon(icon, 18)}</span>
@@ -24407,7 +25200,7 @@ function renderWealthForm(f) {
   const isLiability = cls.kind === "liability";
   const isAccount = f.class === "conta" || f.class === "carteira";
 
-  return `<div class="card card--elevated span-3">
+  return `<div class="card card--elevated span-3" id="wealth-form" data-ui-css="scroll-margin-top:18px">
     <p class="card-title">${editing ? "Editar item" : "Cadastrar bem ou dívida"}</p>
 
     <div class="field"><p class="field__label">Tipo</p>
@@ -24736,7 +25529,7 @@ function renderPortfolioForm(f) {
   const type = investmentTypeOf(f.invType);
   const editing = !!f.id;
 
-  return `<div class="card card--elevated span-3">
+  return `<div class="card card--elevated span-3" id="portfolio-form" data-ui-css="scroll-margin-top:18px">
     <p class="card-title">${editing ? "Editar aplicação" : "Nova aplicação"}</p>
 
     <div class="field"><p class="field__label">Tipo de aplicação</p>
@@ -27035,12 +27828,29 @@ function renderImportReview(rows) {
     ? included.filter((r) => String(r.date || "") < aberturaConta).length
     : 0;
 
+  // Linhas que a fatura traz para explicar a própria fatura: o pagamento do mês
+  // passado e o saldo rolado. Elas chegam desmarcadas, e o aviso diz por quê;
+  // sem essa frase o usuário só veria caixas desmarcadas sem explicação, o que
+  // é pior do que o erro que estamos evitando.
+  const papeis = (rows.meta && rows.meta.roles) || {};
+  const avisoPapeis = [];
+  if (papeis["card-payment"]) {
+    avisoPapeis.push(`${plural(papeis["card-payment"], "linha é o pagamento da própria fatura", "linhas são pagamentos da própria fatura")} e ${papeis["card-payment"] === 1 ? "veio desmarcada" : "vieram desmarcadas"}: esse dinheiro saiu da sua conta para quitar o mês passado, então lançá-lo como receita inflaria o que você recebeu`);
+  }
+  if (papeis.carryover) {
+    avisoPapeis.push(`${plural(papeis.carryover, "linha é o saldo da fatura anterior", "linhas são saldo da fatura anterior")}: aquele gasto já foi contado no mês em que aconteceu`);
+  }
+
   return `<div class="card">
     <div class="settings-row-header">
       <p class="card-title">Revisar lançamentos (${rows.length})</p>
       <button class="icon-btn" data-action="import-cancel" aria-label="Cancelar importação">${svgIcon("x", 16)}</button>
     </div>
     <p class="card-subtitle">${(rows.meta && rows.meta.format ? rows.meta.format.toUpperCase() + " · " : "")}${plural(included.length, "selecionado para importar", "selecionados para importar")}${partesTotal.length ? ` · ${partesTotal.join(" e ")}` : ""}. Duplicados já vêm desmarcados${rows.meta && rows.meta.skipped ? ` · ${plural(rows.meta.skipped, "linha ignorada", "linhas ignoradas")}` : ""}.</p>
+    ${avisoPapeis.length ? `<div class="import-notice">${svgIcon("creditCard", 16)}<div>
+      <b>Isto parece a fatura de um cartão.</b>
+      <span>${escapeHtml(avisoPapeis.join(". "))}. As compras continuam marcadas normalmente; se você quiser importar alguma dessas linhas mesmo assim, é só marcar a caixa.</span>
+    </div></div>` : ""}
     ${anterioresAoSaldo ? `<div class="import-notice">${svgIcon("info", 16)}<div>
       <b>${anterioresAoSaldo} ${anterioresAoSaldo === 1 ? "lançamento é anterior" : "lançamentos são anteriores"} à abertura de ${escapeHtml(contaDestino.name)} em ${fmtDateFull(aberturaConta)}.</b>
       <span>${anterioresAoSaldo === 1 ? "Ele entra" : "Eles entram"} nas despesas, categorias e gráficos, mas não ${anterioresAoSaldo === 1 ? "altera" : "alteram"} o saldo da conta: o saldo inicial que você informou já inclui esse período. Para que ${anterioresAoSaldo === 1 ? "ele conte" : "eles contem"} no saldo, edite a conta e recue a data de abertura.</span>
@@ -27049,8 +27859,8 @@ function renderImportReview(rows) {
       ${rows.map((r, idx) => `<div class="import-row ${!r.include ? "import-row--off" : ""}">
         <button class="checkbox ${r.include ? "checked" : ""}" data-action="import-toggle" data-id="${idx}">${r.include ? svgIcon("check", 13) : ""}</button>
         <div class="import-row__info">
-          <p class="import-row__desc">${escapeHtml(r.description || (r.type === "income" ? "Receita" : "Gasto"))} ${r.duplicate ? `<span class="import-dup-tag">possível duplicata</span>` : ""}</p>
-          <p class="import-row__meta">${fmtDateShort(r.date)} · ${r.type === "income" ? "Receita" : "Gasto"}</p>
+          <p class="import-row__desc">${escapeHtml(r.description || (r.type === "income" ? "Receita" : "Gasto"))} ${r.duplicate ? `<span class="import-dup-tag">possível duplicata</span>` : ""}${r.roleLabel ? `<span class="import-role-tag">${escapeHtml(r.roleLabel)}</span>` : ""}</p>
+          <p class="import-row__meta">${fmtDateShort(r.date)} · ${r.type === "income" ? "Receita" : "Gasto"}${r.roleDetail ? ` · ${escapeHtml(r.roleDetail)}` : (r.categoryReason ? ` · ${escapeHtml(r.categoryReason)}` : "")}</p>
         </div>
         ${r.type === "expense" ? `<select class="import-cat-select" data-action-select="import-category" data-id="${idx}">
           ${state.data.categories.map((c) => `<option value="${c.id}" ${c.id === r.categoryId ? "selected" : ""}>${escapeHtml(c.name)}</option>`).join("")}
@@ -28372,9 +29182,10 @@ function renderBackupCard() {
     <div class="settings-actions">
       <button class="btn btn--primary btn--sm" data-action="export-json">${svgIcon("download", 15)} Backup completo (JSON)</button>
       <button class="btn btn--secondary btn--sm" data-action="export-csv">${svgIcon("download", 15)} Lançamentos (CSV)</button>
+      <button class="btn btn--secondary btn--sm" data-action="export-statement-pdf">${svgIcon("download", 15)} Extrato (PDF)</button>
       <button class="btn btn--secondary btn--sm" data-action="export-budgets-csv">${svgIcon("download", 15)} Orçamentos (CSV)</button>
     </div>
-    <p class="field-hint">O JSON guarda tudo (lançamentos, categorias, tetos, metas e ajustes) e é o que restaura o app por completo. O CSV serve para abrir no Excel ou no Google Sheets.</p>
+    <p class="field-hint">O JSON guarda tudo (lançamentos, categorias, tetos, metas e ajustes) e é o que restaura o app por completo. O CSV serve para abrir no Excel ou no Google Sheets. O PDF é o extrato pronto para imprimir ou enviar, com o período e os filtros escolhidos em Movimentações (por padrão, o mês atual).</p>
     ${renderLastBackupLine()}
 
     <p class="field__label" data-ui-css="margin-top:14px">Importar</p>
@@ -29530,6 +30341,17 @@ function onClick(e) {
       });
       break;
     }
+    case "review-delete-invoice-income": {
+      const tx = state.data.transactions.find((item) => item.id === id);
+      if (!tx) break;
+      requestConfirmation({
+        title: "Excluir a receita?",
+        message: `“${tx.description || "O lançamento"}”, de ${fmtBRL(tx.amount)}, veio da fatura do cartão: é o pagamento do mês anterior, não dinheiro recebido. Excluir devolve o mês ao valor real.`,
+        confirmLabel: "Excluir receita", tone: "danger",
+        onConfirm: () => { setData((d) => removeTransactionsWithIntegrity(d, [id])); notify("Receita excluída"); },
+      });
+      break;
+    }
     case "review-convert-transfer": {
       const issue = buildTransactionReviewModel(state.data).issues.find((item) => item.key === btn.dataset.key && item.type === "transfer");
       if (!issue) { notify("A sugestão não está mais disponível", "warn"); break; }
@@ -29706,12 +30528,13 @@ function onClick(e) {
 
     // ---- Contas, cartões e conciliação ----
     case "account-new":
+      state.revealTarget = "account-form";
       state.accountsUi.accountForm = freshAccountForm(); state.accountsUi.cardForm = null; render(); break;
     case "account-cancel": state.accountsUi.accountForm = null; render(); break;
     case "account-edit": {
       const a = accountById(state.data, id); if (!a) break;
       state.accountsUi.accountForm = { id:a.id, name:a.name, type:a.type, openingBalance:moneyDraft(a.openingBalance), openingDate:a.openingDate, color:a.color };
-      state.accountsUi.cardForm = null; render(); break;
+      state.accountsUi.cardForm = null; state.revealTarget = "account-form"; render(); break;
     }
     case "account-save": {
       const f = state.accountsUi.accountForm; if (!f) break;
@@ -29799,12 +30622,12 @@ function onClick(e) {
       state.accountsUi.reconcileId = null; state.accountsUi.reconcileValue = "";
       notify(result.adjustment ? `Conciliação registrada (${fmtBRL(result.adjustment.amount)})` : "O saldo já estava conciliado"); break;
     }
-    case "card-new": state.accountsUi.cardForm = freshCardForm(); state.accountsUi.accountForm = null; render(); break;
+    case "card-new": state.revealTarget = "card-form"; state.accountsUi.cardForm = freshCardForm(); state.accountsUi.accountForm = null; render(); break;
     case "card-cancel": state.accountsUi.cardForm = null; render(); break;
     case "card-edit": {
       const c = creditCardById(state.data,id); if (!c) break;
       state.accountsUi.cardForm = { id:c.id, name:c.name, accountId:c.accountId || "", limit:moneyDraft(c.limit), closingDay:String(c.closingDay), dueDay:String(c.dueDay), color:c.color };
-      state.accountsUi.accountForm = null; render(); break;
+      state.accountsUi.accountForm = null; state.revealTarget = "card-form"; render(); break;
     }
     case "card-save": {
       const f = state.accountsUi.cardForm; if (!f) break;
@@ -29856,6 +30679,7 @@ function onClick(e) {
     case "transfer-new": {
       const list = (state.data.accounts || []).filter((a) => !a.archived);
       state.accountsUi.transferForm = { fromAccountId:(list[0]||{}).id||"", toAccountId:(list[1]||{}).id||"", amount:"", date:todayIso(), description:"Transferência" };
+      state.revealTarget = "transfer-form";
       render(); break;
     }
     case "transfer-cancel": state.accountsUi.transferForm = null; render(); break;
@@ -29902,6 +30726,7 @@ function onClick(e) {
     }
     // ---- Central de Dívidas ----
     case "debt-new":
+      state.revealTarget = "debt-form";
       state.debtsUi.form = freshDebtForm(); state.debtsUi.payment = null; render(); break;
     case "debt-form-cancel": state.debtsUi.form = null; render(); break;
     case "debt-edit": {
@@ -29915,7 +30740,7 @@ function onClick(e) {
         amortizationSystem:d.amortizationSystem || "unknown", nextDueDate:d.nextDueDate || "", debtStatus:d.debtStatus || "active",
         balanceCheckedAt:d.balanceCheckedAt || "", note:d.note || "",
       };
-      state.debtsUi.payment = null; render(); break;
+      state.debtsUi.payment = null; state.revealTarget = "debt-form"; render(); break;
     }
     case "debt-save": {
       const f = state.debtsUi.form; if (!f) break;
@@ -29943,7 +30768,7 @@ function onClick(e) {
       state.debtsUi.form = null; notify(f.id ? "Dívida atualizada" : "Dívida cadastrada"); break;
     }
     case "debt-toggle": state.debtsUi.expandedId = state.debtsUi.expandedId === id ? null : id; state.debtsUi.confirmDeleteId = null; render(); break;
-    case "debt-payment-open": state.debtsUi.payment = freshDebtPayment(id); state.debtsUi.form = null; render(); break;
+    case "debt-payment-open": state.revealTarget = "debt-payment-form"; state.debtsUi.payment = freshDebtPayment(id); state.debtsUi.form = null; render(); break;
     case "debt-payment-cancel": state.debtsUi.payment = null; render(); break;
     case "debt-payment-save": {
       const p = state.debtsUi.payment; if (!p) break;
@@ -30172,6 +30997,9 @@ function onClick(e) {
       render();
       break;
     case "wealth-new":
+      // O formulário nasce no topo da tela e o botão que o abre costuma estar no
+      // fim dela; sem revelar o bloco, cadastrar parecia não fazer nada.
+      state.revealTarget = "wealth-form";
       setState({ wealth: { ...state.wealth, form: freshWealthForm(), updatingId: null, confirmDeleteId: null } });
       break;
     case "wealth-set-class": {
@@ -30201,6 +31029,7 @@ function onClick(e) {
       };
       state.wealth.updatingId = null;
       state.wealth.confirmDeleteId = null;
+      state.revealTarget = "wealth-form";
       render();
       break;
     }
@@ -30278,6 +31107,7 @@ function onClick(e) {
       render();
       break;
     case "pf-new":
+      state.revealTarget = "portfolio-form";
       setState({ portfolio: { ...state.portfolio, form: freshPortfolioForm(), updatingId: null, dividendId: null, confirmDeleteId: null } });
       break;
     case "pf-set-type": {
@@ -30304,6 +31134,7 @@ function onClick(e) {
       state.portfolio.updatingId = null;
       state.portfolio.dividendId = null;
       state.portfolio.confirmDeleteId = null;
+      state.revealTarget = "portfolio-form";
       render();
       break;
     }
@@ -30820,6 +31651,7 @@ function onClick(e) {
     }
 
     case "export-csv": exportTransactionsCsv(); break;
+    case "export-statement-pdf": exportStatementPdf(); break;
     case "export-budgets-csv": exportBudgetsCsv(); break;
     case "export-json": exportBackupJson(); break;
     case "import-json-trigger": document.getElementById("import-file-input").click(); break;
@@ -31207,6 +32039,9 @@ let state = {
     confirmDeleteId: null,   // exclusão em duas etapas
     applyPreview: null,      // prévia da recategorização em massa
   },
+  // Bloco que precisa aparecer para a pessoa DEPOIS do próximo render (id do
+  // elemento). Só vale uma vez: `afterRender` consome e zera. Ver revealAfterRender.
+  revealTarget: null,
   booting: true,             // primeiro paint: esqueleto no lugar dos dados
   // A pessoa já encostou no aplicativo (clique ou tecla). A partir daí a tela é
   // dela: nenhuma promessa de rede que resolve tarde pode tomá-la. Ver
@@ -31734,8 +32569,40 @@ function markEnterAnimations() {
   __enterModal = modalKey;
 }
 
+// O FORMULÁRIO QUE ABRE FORA DA TELA PARECE BOTÃO QUEBRADO.
+//
+// Vários cadastros (patrimônio, investimentos) desenham o formulário no TOPO da
+// tela, enquanto o botão que o abre está lá embaixo; no patrimônio, "Cadastrar
+// o primeiro item" fica depois de gráficos, comparação anual e leitura do
+// período. `render()` reconstrói o DOM e o navegador mantém a rolagem onde
+// estava: a pessoa clica, nada se move, e a conclusão razoável é que o botão
+// não funciona. Ela clica de novo, e de novo.
+//
+// Quem abre o formulário marca `state.revealTarget` com o id do bloco; aqui a
+// tela vai até ele e põe o cursor no primeiro campo. Vale uma vez só, porque
+// `render()` roda a cada tecla digitada e rolar a tela a cada letra seria pior
+// que o defeito original.
+function revealAfterRender() {
+  const id = state.revealTarget;
+  if (!id) return;
+  state.revealTarget = null;
+  const target = document.getElementById(id);
+  if (!target || typeof target.scrollIntoView !== "function") return;
+  try { target.scrollIntoView({ behavior: "smooth", block: "start" }); }
+  catch (e) { target.scrollIntoView(); }
+  const field = typeof target.querySelector === "function"
+    ? target.querySelector("input:not([type=hidden]), select, textarea")
+    : null;
+  // `preventScroll` evita que o foco desfaça a rolagem suave que acabou de
+  // começar; onde o navegador não conhece a opção, o foco simplesmente rola.
+  if (field && typeof field.focus === "function") {
+    try { field.focus({ preventScroll: true }); } catch (e) { field.focus(); }
+  }
+}
+
 function afterRender() {
   markEnterAnimations();
+  revealAfterRender();
   if (window.CofreUI) {
     window.CofreUI.dialogs.sync();
     window.CofreUI.forms.sync({ focus: false });
@@ -32056,6 +32923,101 @@ function exportBudgetsCsv() {
   if (status.items.length === 0) { notify("Nenhum orçamento definido ainda"); return; }
   downloadFile(`orcamentos-${keyOfCurrentMonth()}.csv`, buildBudgetsCsv(state.data, keyOfCurrentMonth()), "text/csv;charset=utf-8;");
   notify("Orçamentos exportados em CSV");
+}
+
+// ------------------------------------------------------------------
+// EXTRATO EM PDF
+// ------------------------------------------------------------------
+// O CSV serve para recalcular; o PDF serve para MOSTRAR. É o arquivo que se
+// manda para o contador, para o banco, para o processo de aluguel; e nenhum
+// deles abre uma planilha de 400 linhas para entender o mês da pessoa.
+//
+// Sai exatamente o que está na tela de Movimentações: mesmo período, mesma
+// busca, mesmos filtros. Exportar algo diferente do que a pessoa acabou de
+// conferir seria a forma mais rápida de tornar o arquivo pouco confiável.
+function statementPeriodLabel(filters) {
+  if (filters.period === "semana") return "Últimos 7 dias";
+  if (filters.period === "mes") return `${MONTH_NAMES[new Date().getMonth()]} de ${new Date().getFullYear()}`;
+  if (filters.period === "ano") return `Ano de ${new Date().getFullYear()}`;
+  if (filters.period === "custom") return `De ${fmtDateFull(filters.start)} até ${fmtDateFull(filters.end)}`;
+  return "Todo o histórico";
+}
+
+function statementFiltersLabel(filters) {
+  const parts = [];
+  const typeLabels = { income: "só entradas", expense: "só saídas", transfer: "só transferências", "card-payment": "só pagamentos de fatura" };
+  if (filters.type && typeLabels[filters.type]) parts.push(typeLabels[filters.type]);
+  if (filters.categoryId) parts.push(`categoria: ${categoryById(state.data, filters.categoryId).name}`);
+  if (filters.accountId) {
+    const account = accountById(state.data, filters.accountId);
+    const card = creditCardById(state.data, filters.accountId);
+    parts.push(`conta: ${(account && account.name) || (card && card.name) || filters.accountId}`);
+  }
+  if (filters.source) parts.push(`origem: ${movementSourceMeta(filters.source, null).label}`);
+  if (String(filters.search || "").trim()) parts.push(`busca: “${String(filters.search).trim()}”`);
+  return parts.length ? `Filtros aplicados: ${parts.join(" · ")}.` : "Sem filtros: todos os movimentos do período.";
+}
+
+function statementPdfInput(filters, model) {
+  const expenses = model.entries.filter((entry) => entry.type === "expense");
+  const totalExpense = sumMoney(expenses, (entry) => entry.amount);
+  const byCategory = {};
+  expenses.forEach((entry) => {
+    const key = entry.categoryId || "outros";
+    byCategory[key] = (byCategory[key] || 0) + moneyToCents(entry.amount);
+  });
+  const breakdown = Object.entries(byCategory)
+    .map(([id, cents]) => {
+      const category = categoryById(state.data, id);
+      const value = moneyFromCents(cents);
+      return { label: category.name, color: category.color, value: fmtBRL(value), pct: safePct(value, totalExpense), raw: value };
+    })
+    .sort((a, b) => b.raw - a.raw)
+    .slice(0, 12);
+
+  const now = new Date();
+  return {
+    title: "Extrato de movimentações",
+    brand: "Cofre",
+    subtitle: statementPeriodLabel(filters),
+    filtersLabel: statementFiltersLabel(filters),
+    generatedLabel: `Gerado em ${fmtDateFull(todayIso())} às ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`,
+    date: now,
+    summary: [
+      { label: "Entradas", value: fmtBRL(model.income), tone: "income" },
+      { label: "Saídas", value: fmtBRL(model.expense), tone: "expense" },
+      { label: "Saldo do período", value: fmtBRL(model.balance), tone: model.balance < 0 ? "expense" : "income" },
+      { label: "Movimentos", value: String(model.count), tone: "ink" },
+    ],
+    rows: model.entries.map((entry) => ({
+      date: fmtDateFull(entry.date),
+      description: entry.description,
+      category: entry.categoryName,
+      account: entry.accountName || entry.cardName || "",
+      amount: `${entry.type === "income" ? "+" : entry.type === "expense" ? "-" : ""}${fmtBRL(entry.amount)}`,
+      tone: entry.type === "income" ? "income" : entry.type === "expense" ? "expense" : "neutral",
+    })),
+    totalLabel: `Saldo do período (${plural(model.count, "movimento", "movimentos")})`,
+    totalValue: fmtBRL(model.balance),
+    totalTone: model.balance < 0 ? "expense" : "income",
+    breakdownTitle: "Saídas por categoria",
+    breakdown,
+    emptyLabel: "Nenhum movimento no período e nos filtros escolhidos.",
+    note: "Gerado pelo Cofre no seu próprio aparelho.",
+    notes: [
+      "Documento de conferência gerado a partir dos lançamentos deste aparelho. Não tem valor fiscal e não substitui o extrato oficial do banco nem a fatura do cartão.",
+      "Transferências entre contas e pagamentos de fatura aparecem na lista para a conferência ficar completa, mas não entram nas somas de entradas e saídas: o dinheiro só mudou de lugar.",
+    ],
+  };
+}
+
+function exportStatementPdf() {
+  const filters = movementFiltersSnapshot();
+  const model = buildMovementCenterModel(state.data, filters);
+  if (!model.entries.length) { notify("Nenhum movimento no período para exportar", "info"); return; }
+  const stamp = filters.period === "custom" ? `${filters.start}-a-${filters.end}` : todayIso();
+  downloadFile(`extrato-${stamp}.pdf`, buildStatementPdf(statementPdfInput(filters, model)), "application/pdf");
+  notify(`${plural(model.entries.length, "movimento exportado", "movimentos exportados")} em PDF`);
 }
 
 // Estado do backup em uma linha. Sem isso, o único jeito de saber se havia

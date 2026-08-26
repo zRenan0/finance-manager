@@ -20,7 +20,7 @@
 /* `minmax(0, 1fr)` e não `minmax(220px, 1fr)`: com o mínimo em 220px a busca
    se recusava a encolher e, num aparelho de 320px, o botão "Filtros" saía
    pela borda do cartão cortado ao meio. A busca é quem cede. */
-.movement-filters { display:grid; grid-template-columns:minmax(0, 1fr) auto; gap:10px; align-items:center; }
+.movement-filters { display:grid; grid-template-columns:minmax(0, 1fr) auto auto; gap:10px; align-items:center; }
 .movement-search { margin:0; }
 .movement-search .icon-btn { min-width:44px; min-height:44px; }
 .movement-filter-toggle { min-height:44px; }
@@ -77,4 +77,13 @@
   .movement-detail__facts { grid-template-columns:1fr; }
   .movement-bulk { bottom:76px; top:auto; }
   .movement-bulk .input, .movement-bulk .btn { flex:1 1 100%; }
+}
+
+/* O botão de PDF virou a terceira coluna da barra de filtros. Num celular de
+   375px isso deixava a busca com 92px, estreita demais para ler o que se
+   digita. Abaixo de 560px a busca toma a linha inteira e os dois botões
+   dividem a de baixo, que é a única divisão honesta nessa largura. */
+@media (max-width: 560px) {
+  .movement-filters { grid-template-columns:1fr auto; }
+  .movement-search { grid-column:1 / -1; }
 }

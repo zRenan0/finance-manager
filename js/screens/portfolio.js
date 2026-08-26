@@ -80,7 +80,7 @@ function renderPortfolioForm(f) {
   const type = investmentTypeOf(f.invType);
   const editing = !!f.id;
 
-  return `<div class="card card--elevated span-3">
+  return `<div class="card card--elevated span-3" id="portfolio-form" data-ui-css="scroll-margin-top:18px">
     <p class="card-title">${editing ? "Editar aplicação" : "Nova aplicação"}</p>
 
     <div class="field"><p class="field__label">Tipo de aplicação</p>

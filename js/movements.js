@@ -175,6 +175,28 @@ function buildTransactionReviewModel(data) {
     ownAccounts.get(transaction.accountId).push(transaction);
   });
 
+  // PAGAMENTO DE FATURA QUE ENTROU COMO RECEITA.
+  //
+  // Na fatura do cartão, o pagamento do mês anterior é um CRÉDITO com a
+  // descrição "Pagamento recebido". Quem importou a fatura antes de o
+  // importador aprender a reconhecer essa linha ficou com uma receita que
+  // nunca existiu: o mês fecha sobrando dinheiro que na verdade saiu da conta
+  // para quitar a dívida. O importador já não deixa mais isso entrar; aqui a
+  // caixa de revisão limpa o que entrou antes.
+  txs.forEach((t) => {
+    const key = `invoice-income:${t.id}`;
+    if (t.type !== "income") return;
+    if (!String(t.source || "").startsWith("import-")) return;
+    if (!classifyStatementRow(t.description, "income")) return;
+    if (transactionReviewIgnored(t, key)) return;
+    issues.push({
+      key, type: "invoice-income", txId: t.id, txIds: [t.id],
+      title: "Pagamento de fatura contado como receita",
+      detail: "Essa linha da fatura é a dívida do mês passado sendo paga, não dinheiro que entrou.",
+      date: t.date, amount: t.amount,
+    });
+  });
+
   txs.forEach((t) => {
     const key = `card-payment:${t.id}`;
     if (t.type === "expense" && t.source.startsWith("import-") && !t.goalId && !t.debtId && !t.installmentGroupId && !t.creditCardId && /\b(pagamento|pagto)\b.*\b(fatura|cartao)\b|\b(fatura|cartao)\b.*\b(pagamento|pagto)\b/.test(normalizeText(t.description)) && !transactionReviewIgnored(t, key)) {
@@ -188,7 +210,7 @@ function buildTransactionReviewModel(data) {
     if (overdue) issues.push({ key: `account:${account.id}`, type: "account", accountId: account.id, txIds: [], title: "Saldo da conta precisa ser conferido", detail: last ? `${account.name} não é conferida há mais de 30 dias.` : `${account.name} ainda não foi conferida.`, date: last || account.openingDate, amount: accountBalance(data, account.id, todayIso()) });
   });
 
-  const rank = { duplicate: 1, transfer: 2, "card-payment": 3, category: 4, account: 5 };
+  const rank = { "invoice-income": 1, duplicate: 2, transfer: 3, "card-payment": 4, category: 5, account: 6 };
   issues.sort((a, b) => (rank[a.type] || 9) - (rank[b.type] || 9) || b.date.localeCompare(a.date));
   return {
     issues,

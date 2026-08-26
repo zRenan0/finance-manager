@@ -66,12 +66,29 @@ function renderImportReview(rows) {
     ? included.filter((r) => String(r.date || "") < aberturaConta).length
     : 0;
 
+  // Linhas que a fatura traz para explicar a própria fatura: o pagamento do mês
+  // passado e o saldo rolado. Elas chegam desmarcadas, e o aviso diz por quê;
+  // sem essa frase o usuário só veria caixas desmarcadas sem explicação, o que
+  // é pior do que o erro que estamos evitando.
+  const papeis = (rows.meta && rows.meta.roles) || {};
+  const avisoPapeis = [];
+  if (papeis["card-payment"]) {
+    avisoPapeis.push(`${plural(papeis["card-payment"], "linha é o pagamento da própria fatura", "linhas são pagamentos da própria fatura")} e ${papeis["card-payment"] === 1 ? "veio desmarcada" : "vieram desmarcadas"}: esse dinheiro saiu da sua conta para quitar o mês passado, então lançá-lo como receita inflaria o que você recebeu`);
+  }
+  if (papeis.carryover) {
+    avisoPapeis.push(`${plural(papeis.carryover, "linha é o saldo da fatura anterior", "linhas são saldo da fatura anterior")}: aquele gasto já foi contado no mês em que aconteceu`);
+  }
+
   return `<div class="card">
     <div class="settings-row-header">
       <p class="card-title">Revisar lançamentos (${rows.length})</p>
       <button class="icon-btn" data-action="import-cancel" aria-label="Cancelar importação">${svgIcon("x", 16)}</button>
     </div>
     <p class="card-subtitle">${(rows.meta && rows.meta.format ? rows.meta.format.toUpperCase() + " · " : "")}${plural(included.length, "selecionado para importar", "selecionados para importar")}${partesTotal.length ? ` · ${partesTotal.join(" e ")}` : ""}. Duplicados já vêm desmarcados${rows.meta && rows.meta.skipped ? ` · ${plural(rows.meta.skipped, "linha ignorada", "linhas ignoradas")}` : ""}.</p>
+    ${avisoPapeis.length ? `<div class="import-notice">${svgIcon("creditCard", 16)}<div>
+      <b>Isto parece a fatura de um cartão.</b>
+      <span>${escapeHtml(avisoPapeis.join(". "))}. As compras continuam marcadas normalmente; se você quiser importar alguma dessas linhas mesmo assim, é só marcar a caixa.</span>
+    </div></div>` : ""}
     ${anterioresAoSaldo ? `<div class="import-notice">${svgIcon("info", 16)}<div>
       <b>${anterioresAoSaldo} ${anterioresAoSaldo === 1 ? "lançamento é anterior" : "lançamentos são anteriores"} à abertura de ${escapeHtml(contaDestino.name)} em ${fmtDateFull(aberturaConta)}.</b>
       <span>${anterioresAoSaldo === 1 ? "Ele entra" : "Eles entram"} nas despesas, categorias e gráficos, mas não ${anterioresAoSaldo === 1 ? "altera" : "alteram"} o saldo da conta: o saldo inicial que você informou já inclui esse período. Para que ${anterioresAoSaldo === 1 ? "ele conte" : "eles contem"} no saldo, edite a conta e recue a data de abertura.</span>
@@ -80,8 +97,8 @@ function renderImportReview(rows) {
       ${rows.map((r, idx) => `<div class="import-row ${!r.include ? "import-row--off" : ""}">
         <button class="checkbox ${r.include ? "checked" : ""}" data-action="import-toggle" data-id="${idx}">${r.include ? svgIcon("check", 13) : ""}</button>
         <div class="import-row__info">
-          <p class="import-row__desc">${escapeHtml(r.description || (r.type === "income" ? "Receita" : "Gasto"))} ${r.duplicate ? `<span class="import-dup-tag">possível duplicata</span>` : ""}</p>
-          <p class="import-row__meta">${fmtDateShort(r.date)} · ${r.type === "income" ? "Receita" : "Gasto"}</p>
+          <p class="import-row__desc">${escapeHtml(r.description || (r.type === "income" ? "Receita" : "Gasto"))} ${r.duplicate ? `<span class="import-dup-tag">possível duplicata</span>` : ""}${r.roleLabel ? `<span class="import-role-tag">${escapeHtml(r.roleLabel)}</span>` : ""}</p>
+          <p class="import-row__meta">${fmtDateShort(r.date)} · ${r.type === "income" ? "Receita" : "Gasto"}${r.roleDetail ? ` · ${escapeHtml(r.roleDetail)}` : (r.categoryReason ? ` · ${escapeHtml(r.categoryReason)}` : "")}</p>
         </div>
         ${r.type === "expense" ? `<select class="import-cat-select" data-action-select="import-category" data-id="${idx}">
           ${state.data.categories.map((c) => `<option value="${c.id}" ${c.id === r.categoryId ? "selected" : ""}>${escapeHtml(c.name)}</option>`).join("")}

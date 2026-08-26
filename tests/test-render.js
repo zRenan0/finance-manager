@@ -358,6 +358,36 @@ console.log("\n5. Fluxo de cadastro ponta a ponta (clique → estado → dados)"
   click("wealth-new");
   check("clique abre o formulário", run("!!state.wealth.form"));
 
+  // O FORMULÁRIO ABRE NO TOPO; O BOTÃO QUE O ABRE FICA NO FIM DA TELA.
+  //
+  // `render()` refaz o DOM e o navegador mantém a rolagem onde estava. Em
+  // Patrimônio, "Cadastrar o primeiro item" vem depois de gráfico, comparação
+  // anual e leitura do período: a pessoa clicava, nada se mexia, e a conclusão
+  // razoável era que o botão estava quebrado. Aqui a tela precisa provar que
+  // vai até o formulário e põe o cursor no primeiro campo.
+  {
+    const originalGetById = documentStub.getElementById;
+    ctx.__rolou = [];
+    ctx.__focou = [];
+    documentStub.getElementById = function (id) {
+      const el = originalGetById.call(this, id);
+      el.scrollIntoView = () => { ctx.__rolou.push(id); };
+      el.querySelector = () => ({ focus: () => { ctx.__focou.push(id); } });
+      return el;
+    };
+    run("state.wealth.form = null;");
+    click("wealth-new");
+    check("a tela vai até o formulário de patrimônio", ctx.__rolou.includes("wealth-form"), ctx.__rolou.join(","));
+    check("e o cursor cai no primeiro campo", ctx.__focou.includes("wealth-form"));
+    // Vale uma vez só: `render()` roda a cada tecla digitada, e rolar a tela
+    // a cada letra seria pior que o defeito original.
+    check("a marca é consumida no primeiro render", run("state.revealTarget") === null);
+    ctx.__rolou = [];
+    run("render();");
+    check("render seguinte não rola de novo", ctx.__rolou.length === 0);
+    documentStub.getElementById = originalGetById;
+  }
+
   click("wealth-set-class", { value: "imovel" });
   check("classe trocada para imóvel", run("state.wealth.form.class") === "imovel");
   type("wealth-name", "Apartamento");
