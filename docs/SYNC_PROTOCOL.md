@@ -156,6 +156,55 @@ que começaram a gravar; se uma edição chegar durante a transação, ela é
 reaplicada sobre o resultado e confirmada em seguida. Enquanto um novo escopo
 ainda está abrindo, ações da tela anterior são recusadas e não escrevem mirror.
 
+### Reconciliação completa
+
+O ciclo é incremental, e o incremental se apoia em duas promessas que ele não
+consegue reavaliar sozinho:
+
+- o **cursor** promete "já apliquei tudo até aqui", e o servidor nunca reenvia o
+  que ficou atrás dele;
+- o **recibo de semeadura** promete "já ofereci minha base inteira", e a fila
+  nunca reapresenta o que já foi confirmado.
+
+Basta uma operação escapar **uma** vez para as duas passarem a mentir. Escapar
+não exige defeito de protocolo: uma marca recusada porque o registro local
+nasceu de um relógio adiantado, uma gravação que o navegador desfez por cota,
+uma aba fechada entre a resposta do servidor e o disco. A partir daí o aparelho
+fica atrasado (ou adiantado) **para sempre**, e sem sinal nenhum: ele cumpriu as
+duas promessas, então a tela diz "Tudo sincronizado". Na prática isso aparece
+como a mesma conta mostrando saldos diferentes em navegadores diferentes.
+
+A reconciliação (`CloudSync.reconcile()`) retira as duas promessas ao mesmo
+tempo, no começo do ciclo e dentro do mesmo bloqueio de aba:
+
+1. grava `syncCursor = "0"`;
+2. apaga o recibo de semeadura (`syncSeedReceipt`);
+3. grava `syncReconcileReceipt`, nessa ordem — se a sessão parar no meio, a
+   volta seguinte refaz o preparo em vez de considerá-lo feito.
+
+O ciclo seguinte então relê a conta inteira e reoferece a base inteira. **Nos
+dois sentidos quem decide continua sendo a marca do relógio lógico**, como em
+qualquer volta: nada é sobrescrito às cegas, nada é apagado, nada é duplicado. O
+efeito é um só — os dois lados voltam a **conhecer** tudo o que o outro tem, e a
+mesma regra passa a produzir o mesmo resultado nos dois. É isso que converge.
+
+A ordem importa: a descida acontece **antes** da semeadura, então o aparelho já
+chega à reoferta com as marcas do servidor em mãos. Sem isso, um aparelho que
+tivesse perdido o mapa local de marcas de configuração (`financas_db_clock`, no
+localStorage) cunharia marcas novas e promoveria os próprios valores por cima
+dos da conta.
+
+Reler do zero não é caro: o log do servidor é **compactado**, uma linha por
+registro, e não o histórico de alterações. O custo é o tamanho da base, uma vez.
+
+Ela roda sozinha **uma vez por conta em cada aparelho** — é o reparo de quem já
+divergiu — e sob demanda, pelo botão "Conferir a conta inteira" no cartão de
+sincronização da tela de conta. O botão fica sempre visível de propósito: a
+pessoa que precisa dele está justamente olhando uma tela que afirma estar tudo
+em dia.
+
+Coberto por `tests/test-sync-reconcile.js`.
+
 ### Quando o ciclo roda
 
 | Gatilho | Quando |

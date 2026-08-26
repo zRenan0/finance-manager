@@ -437,6 +437,11 @@ const META_SEED_RECEIPT = "syncSeedReceipt";   // semeadura confirmada pelo serv
 const META_SEED_JOURNAL = "syncSeedJournal";   // semeadura em andamento
 const META_LINK_JOURNAL = "guestLinkJournal";  // vínculo em andamento, com as marcas já cunhadas
 const META_LINK_RECEIPT = "guestLinkReceipt";  // decisão registrada pela impressão do conteúdo
+// Reconciliação completa já executada neste aparelho, para esta conta. Ver o
+// bloco "RECONCILIAÇÃO COMPLETA" em js/cloud-sync.js: sem ela, um aparelho que
+// deixou passar uma operação fica com números diferentes dos outros para sempre,
+// porque o servidor nunca reenvia o que ficou atrás do cursor.
+const META_RECONCILE_RECEIPT = "syncReconcileReceipt";
 const COLLECTIONS = [STORE_TX, STORE_CAT, STORE_GOALS, STORE_ASSETS];
 const ALL_STORES = [STORE_TX, STORE_CAT, STORE_GOALS, STORE_ASSETS, STORE_SETTINGS];
 

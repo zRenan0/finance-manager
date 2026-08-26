@@ -98,6 +98,24 @@
   color: var(--goal);
 }
 
+/* A conferência completa da conta é uma saída para um defeito raro, não o
+   caminho de todo dia. Ocupa a linha inteira, embaixo e separada por um filete,
+   para não disputar a atenção com o estado da sincronização nem parecer a ação
+   principal do cartão. */
+.account-sync__repair {
+  flex: 1 0 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.account-sync__repair .field-hint {
+  margin: 0;
+}
+
 .account-sync__icon--syncing svg,
 .account-sync__icon--checking svg,
 .account-sync__icon--linking svg {

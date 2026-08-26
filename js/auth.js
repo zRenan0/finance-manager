@@ -484,6 +484,28 @@ function accountPostponeGuestLink() {
   setGuestLink({ phase: "idle" });
 }
 
+// ENTRAR NÃO PODE TERMINAR NA TELA DE ENTRAR.
+//
+// Quem acabou de se autenticar já respondeu o que a tela de conta tinha a
+// perguntar. Deixá-lo ali, olhando o mesmo formulário agora trocado por
+// "Conta conectada", faz o login parecer que não aconteceu: é preciso ir até o
+// menu e escolher Início para ver o próprio dinheiro.
+//
+// A ÚNICA EXCEÇÃO É UMA PERGUNTA SEM RESPOSTA. O cartão do vínculo ("Trazer os
+// dados deste aparelho?") e o do vínculo pendente só existem nesta tela. Levar
+// a pessoa embora esconderia a decisão que o app precisa que ela tome, e ela
+// não teria como saber que existe. Nesses dois estados a tela fica.
+// O `typeof` acompanha o resto do arquivo: `setState` e `Router` moram na
+// camada de tela, e esta camada precisa continuar carregável sem ela.
+function goHomeAfterSignIn() {
+  if (typeof setState !== "function" || typeof Router === "undefined") return false;
+  if (state.tab !== "account") return false;
+  const fase = String(state.account.guestLink && state.account.guestLink.phase || "");
+  if (fase === "confirm" || fase === "pending") return false;
+  setState({ tab: Router.DEFAULT });
+  return true;
+}
+
 // "Rever": traz o cartão de volta, com o resumo recalculado.
 async function accountReviewGuestLink() {
   setGuestLink({ phase: "checking", busy: true, error: "", errorCode: "" });
@@ -1181,6 +1203,13 @@ async function accountSubmit(kind) {
         else await CloudSync.syncNow();
         if (state.account.authenticated && CloudSync.isEnabled()) __accountReadyScope = currentScope;
       }
+    }
+    // A ida para o Início acontece SÓ AGORA, depois de a sessão, o escopo e a
+    // decisão de vínculo terem terminado: é o que garante que a tela de conta
+    // ainda esteja à frente se ela tiver uma pergunta a fazer, e que o Início
+    // já apareça com os dados da conta em vez do banco vazio deste aparelho.
+    if ((kind === "login" || kind === "register") && state.account.authenticated) {
+      if (goHomeAfterSignIn()) notify(kind === "register" ? "Conta criada" : "Acesso confirmado");
     }
   } catch (error) {
     // Também no erro: senha errada continua sendo senha, e a tentativa seguinte

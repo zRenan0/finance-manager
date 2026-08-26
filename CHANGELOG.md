@@ -2,6 +2,56 @@
 
 ## Não publicado
 
+### A mesma conta mostrava saldos diferentes em cada navegador
+
+- **O ciclo incremental não tem como se corrigir sozinho, e essa era a causa.**
+  O cursor promete "já apliquei tudo até aqui" e o servidor nunca reenvia o que
+  ficou atrás dele; o recibo de semeadura promete "já ofereci minha base
+  inteira" e a fila nunca reapresenta o que já foi confirmado. Basta uma
+  operação escapar uma vez — uma marca recusada por um registro local gravado
+  com o relógio adiantado, uma gravação que o navegador desfez por cota, uma aba
+  fechada entre a resposta do servidor e o disco — para as duas promessas
+  passarem a mentir, e nada no funcionamento normal desfaz isso. O aparelho
+  ficava atrasado para sempre, sem sinal nenhum: a tela dizia "Tudo
+  sincronizado", porque do ponto de vista dele era verdade.
+- **A reconciliação completa retira as duas promessas ao mesmo tempo.** Zera o
+  cursor e apaga o recibo de semeadura; o ciclo seguinte relê a conta inteira e
+  reoferece a base inteira. Nos dois sentidos quem decide continua sendo a marca
+  do relógio lógico, então nada é sobrescrito às cegas: o efeito é só um, os
+  dois lados voltam a CONHECER tudo o que o outro tem, e a mesma regra passa a
+  produzir o mesmo resultado nos dois. Não é caro, porque o log do servidor é
+  compactado: uma linha por registro, não o histórico de alterações.
+- **Ela roda sozinha uma vez por conta em cada aparelho.** É o reparo de quem já
+  divergiu antes desta versão. O recibo fica no banco local, então isso não se
+  repete a cada entrada.
+- **E fica à mão, no cartão de sincronização, como "Conferir a conta inteira".**
+  O botão precisa existir justamente porque a pessoa que precisa dele está
+  olhando uma tela que afirma estar tudo em dia.
+
+### "Juntar dados" mudava só o aparelho onde foi clicado
+
+- **O lote do vínculo podia ficar parado na fila.** Com o portão da subida já
+  aberto e um ciclo em curso, `finishAccountBootstrap` DEVOLVIA a promessa desse
+  ciclo em vez de pedir outro, para economizar uma volta de rede. Só que quem a
+  chama depois de "Juntar dados" acabou de gravar na fila, e o ciclo em curso
+  podia já ter passado da subida. O resultado era exatamente o relato: o saldo
+  somava aqui, a tela mostrava "Vínculo pendente" e nos outros aparelhos não
+  aparecia nada. Agora ela sempre pede um ciclo novo; `syncNow` já agenda UMA
+  reexecução compartilhada quando há ciclo em curso, então continua barato.
+
+### Entrar na conta leva para o Início
+
+- **A tela de entrar deixou de ser o destino de quem acabou de entrar.** O
+  login terminava no mesmo lugar onde começou, com o formulário trocado por
+  "Conta conectada", e era preciso ir ao menu para ver o próprio dinheiro.
+- **A troca acontece depois de a sessão, o escopo e a decisão de vínculo
+  terminarem**, e não no instante em que o servidor responde: assim o Início já
+  abre com os dados da conta, e não com o banco vazio deste aparelho.
+- **Com uma exceção, de propósito.** Se o cartão do vínculo estiver perguntando
+  ("Trazer os dados deste aparelho?") ou pendente, a tela fica: essa pergunta só
+  existe ali, e levar a pessoa embora esconderia a decisão que o app precisa que
+  ela tome.
+
 ### Faturas e extratos em PDF agora entram no app
 
 - **A importação aceita PDF com texto selecionável.** A leitura usa PDF.js do

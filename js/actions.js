@@ -273,6 +273,14 @@ function onClick(e) {
     // `retry` e não `syncNow`: quando o motor parou por erro, sincronizar
     // agora não faz nada, e é justamente nesse estado que o botão aparece.
     case "account-sync-now": if (typeof CloudSync !== "undefined") CloudSync.retry(); break;
+    // Saída para o defeito que o ciclo comum não alcança: a mesma conta com
+    // números diferentes em dois aparelhos. Relê a conta inteira e reoferece a
+    // base inteira; nada é apagado de nenhum dos lados.
+    case "account-reconcile":
+      if (typeof CloudSync === "undefined") break;
+      notify("Conferindo a conta inteira neste aparelho");
+      CloudSync.reconcile();
+      break;
     // Vínculo dos dados deste aparelho com a conta. Cada ação é uma escolha
     // diferente; nenhuma delas substitui ou apaga um dos lados.
     case "account-link-confirm": accountLinkGuest(); break;

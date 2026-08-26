@@ -146,6 +146,16 @@ function accountSyncCard() {
   // uma falha e a pessoa precisa de uma saída imediata além da recuperação do
   // próprio motor.
   const podeTentar = phase === "error";
+  // A CONFERÊNCIA COMPLETA É UMA SAÍDA, NÃO UMA ROTINA.
+  //
+  // O ciclo comum é incremental: o cursor diz até onde este aparelho já leu, e
+  // o servidor nunca reenvia o que ficou atrás dele. Quando uma operação escapa
+  // (marca recusada, gravação desfeita, aba fechada na hora errada), o aparelho
+  // fica atrasado sem ter como perceber, e a conta aparece com saldos
+  // diferentes em cada navegador. Este botão é o caminho de volta: relê a conta
+  // inteira e reoferece a base inteira. Fica sempre à mão porque a pessoa que
+  // precisa dele está justamente vendo uma tela que diz "Tudo sincronizado".
+  const podeConferir = phase !== "disabled" && phase !== "syncing";
   return `<div class="card account-sync">
     <div class="account-sync__head">
       <span class="account-sync__icon account-sync__icon--${escapeHtml(phase)}">${svgIcon(view.icon, 18)}</span>
@@ -158,6 +168,10 @@ function accountSyncCard() {
       </div>
     </div>
     ${podeTentar ? `<button class="btn btn--secondary btn--sm" data-action="account-sync-now">${svgIcon("refresh", 15)} Tentar novamente</button>` : ""}
+    ${podeConferir ? `<div class="account-sync__repair">
+      <button class="btn btn--secondary btn--sm" data-action="account-reconcile">${svgIcon("refresh", 15)} Conferir a conta inteira</button>
+      <p class="field-hint">Use se este aparelho mostrar números diferentes de outro na mesma conta. Ele relê tudo o que está na conta e reapresenta tudo o que está aqui. Nada é apagado dos dois lados: quando o mesmo registro existe nos dois, vence a versão mais recente.</p>
+    </div>` : ""}
   </div>`;
 }
 

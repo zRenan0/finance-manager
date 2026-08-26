@@ -2206,6 +2206,11 @@ const META_SEED_RECEIPT = "syncSeedReceipt";   // semeadura confirmada pelo serv
 const META_SEED_JOURNAL = "syncSeedJournal";   // semeadura em andamento
 const META_LINK_JOURNAL = "guestLinkJournal";  // vínculo em andamento, com as marcas já cunhadas
 const META_LINK_RECEIPT = "guestLinkReceipt";  // decisão registrada pela impressão do conteúdo
+// Reconciliação completa já executada neste aparelho, para esta conta. Ver o
+// bloco "RECONCILIAÇÃO COMPLETA" em js/cloud-sync.js: sem ela, um aparelho que
+// deixou passar uma operação fica com números diferentes dos outros para sempre,
+// porque o servidor nunca reenvia o que ficou atrás do cursor.
+const META_RECONCILE_RECEIPT = "syncReconcileReceipt";
 const COLLECTIONS = [STORE_TX, STORE_CAT, STORE_GOALS, STORE_ASSETS];
 const ALL_STORES = [STORE_TX, STORE_CAT, STORE_GOALS, STORE_ASSETS, STORE_SETTINGS];
 
@@ -8035,6 +8040,28 @@ function accountPostponeGuestLink() {
   setGuestLink({ phase: "idle" });
 }
 
+// ENTRAR NÃO PODE TERMINAR NA TELA DE ENTRAR.
+//
+// Quem acabou de se autenticar já respondeu o que a tela de conta tinha a
+// perguntar. Deixá-lo ali, olhando o mesmo formulário agora trocado por
+// "Conta conectada", faz o login parecer que não aconteceu: é preciso ir até o
+// menu e escolher Início para ver o próprio dinheiro.
+//
+// A ÚNICA EXCEÇÃO É UMA PERGUNTA SEM RESPOSTA. O cartão do vínculo ("Trazer os
+// dados deste aparelho?") e o do vínculo pendente só existem nesta tela. Levar
+// a pessoa embora esconderia a decisão que o app precisa que ela tome, e ela
+// não teria como saber que existe. Nesses dois estados a tela fica.
+// O `typeof` acompanha o resto do arquivo: `setState` e `Router` moram na
+// camada de tela, e esta camada precisa continuar carregável sem ela.
+function goHomeAfterSignIn() {
+  if (typeof setState !== "function" || typeof Router === "undefined") return false;
+  if (state.tab !== "account") return false;
+  const fase = String(state.account.guestLink && state.account.guestLink.phase || "");
+  if (fase === "confirm" || fase === "pending") return false;
+  setState({ tab: Router.DEFAULT });
+  return true;
+}
+
 // "Rever": traz o cartão de volta, com o resumo recalculado.
 async function accountReviewGuestLink() {
   setGuestLink({ phase: "checking", busy: true, error: "", errorCode: "" });
@@ -8733,6 +8760,13 @@ async function accountSubmit(kind) {
         if (state.account.authenticated && CloudSync.isEnabled()) __accountReadyScope = currentScope;
       }
     }
+    // A ida para o Início acontece SÓ AGORA, depois de a sessão, o escopo e a
+    // decisão de vínculo terem terminado: é o que garante que a tela de conta
+    // ainda esteja à frente se ela tiver uma pergunta a fazer, e que o Início
+    // já apareça com os dados da conta em vez do banco vazio deste aparelho.
+    if ((kind === "login" || kind === "register") && state.account.authenticated) {
+      if (goHomeAfterSignIn()) notify(kind === "register" ? "Conta criada" : "Acesso confirmado");
+    }
   } catch (error) {
     // Também no erro: senha errada continua sendo senha, e a tentativa seguinte
     // é digitada do zero.
@@ -8999,8 +9033,9 @@ const CLOUD_SYNC_POLL_MS = 15000;         // volta periódica enquanto o app est
 // Chaves antigas, no localStorage. Continuam sendo LIDAS uma única vez, para
 // importar o progresso de quem já usava o app; a partir daí o cursor e o recibo
 // moram no banco local, na mesma transação que grava os dados.
-// As chaves do `localMeta` (META_CURSOR, META_SEED_RECEIPT, META_SEED_JOURNAL e
-// META_LINK_JOURNAL) são declaradas em `js/storage.js`, que é quem as grava.
+// As chaves do `localMeta` (META_CURSOR, META_SEED_RECEIPT, META_SEED_JOURNAL,
+// META_LINK_JOURNAL e META_RECONCILE_RECEIPT) são declaradas em `js/storage.js`,
+// que é quem as grava.
 const CLOUD_CURSOR_KEY = "cofre_sync_cursor";
 
 const CloudSync = (() => {
@@ -9040,6 +9075,10 @@ const CloudSync = (() => {
   let observedRevision = null;
   let cursorCache = null;
   let cursorScope = null;
+  // Reconciliação completa: escopo cujo recibo já foi conferido nesta sessão, e
+  // pedido manual vindo da tela de conta. Ver o bloco "RECONCILIAÇÃO COMPLETA".
+  let reconcileScope = null;
+  let reconcileRequested = false;
 
   let state = {
     enabled: false,
@@ -9165,6 +9204,76 @@ const CloudSync = (() => {
     if (context) assertCurrentCycle(context);
     cursorScope = scope;
     cursorCache = String(value);
+  }
+
+  // ---------------------------------------------------------------------------
+  // RECONCILIAÇÃO COMPLETA
+  // ---------------------------------------------------------------------------
+  // O DEFEITO QUE ISTO CORRIGE
+  //
+  // A MESMA conta, aberta em dois navegadores, mostrando saldos diferentes; e
+  // nenhum dos dois acusando erro. Os dois dizem "Tudo sincronizado", porque
+  // para cada um deles isso é verdade: as duas afirmações do protocolo estão
+  // cumpridas do lado de quem responde.
+  //
+  //   - O CURSOR é a promessa "já apliquei tudo até aqui". O servidor nunca
+  //     reenvia o que ficou atrás dele.
+  //   - O RECIBO DE SEMEADURA é a promessa "já ofereci minha base inteira". A
+  //     fila nunca reapresenta o que já foi confirmado.
+  //
+  // Basta uma operação escapar uma vez para as duas promessas passarem a
+  // mentir, e nada no funcionamento normal desfaz isso: a descida não volta
+  // atrás e a subida não recomeça. Escapar acontece por caminhos que o app não
+  // consegue observar depois: uma comparação de marcas que recusou a operação
+  // (registro local com marca maior, gravado por um relógio adiantado), uma
+  // gravação que o navegador desfez por cota, uma aba fechada entre a resposta
+  // do servidor e a gravação. O aparelho fica atrasado para sempre, e a única
+  // saída conhecida era apagar os dados do site.
+  //
+  // A reconciliação retira as duas promessas ao mesmo tempo: zera o cursor e
+  // apaga o recibo de semeadura. O ciclo seguinte relê a conta inteira e
+  // reoferece a base inteira.
+  //
+  // ISTO NÃO É CARO. O log do servidor é COMPACTADO: uma linha por registro,
+  // com a operação vencedora, e não o histórico de alterações. Reler do zero
+  // custa o tamanho da base, uma vez.
+  //
+  // ISTO NÃO SOBRESCREVE NADA ÀS CEGAS. Nos dois sentidos quem decide continua
+  // sendo a marca do relógio lógico, exatamente como num ciclo comum. O efeito
+  // é só um: os dois lados voltam a CONHECER tudo o que o outro tem. A partir
+  // daí a mesma regra produz o mesmo resultado nos dois, que é a definição de
+  // convergir.
+  //
+  // Roda sozinha uma vez por conta em cada aparelho (é o reparo de quem já
+  // divergiu antes desta versão) e sob demanda, pelo botão da tela de conta.
+  async function prepareReconcile(context) {
+    await FinanceStore.localMetaPut(META_CURSOR, "0", context.scope);
+    assertCurrentCycle(context);
+    cursorScope = context.scope;
+    cursorCache = "0";
+    await FinanceStore.localMetaDelete(META_SEED_RECEIPT, context.scope);
+    assertCurrentCycle(context);
+    // O recibo nasce DEPOIS das duas remoções. Se a sessão parar no meio, a
+    // próxima volta refaz o preparo em vez de considerá-lo feito.
+    await FinanceStore.localMetaPut(META_RECONCILE_RECEIPT, {
+      version: 1, at: new Date().toISOString(),
+    }, context.scope);
+    assertCurrentCycle(context);
+  }
+
+  // Conferência no começo do ciclo. O recibo é lido uma vez por escopo e por
+  // sessão: relê-lo a cada volta de 15 segundos seria uma consulta ao banco
+  // local para uma resposta que não muda.
+  async function reconcileIfNeeded(context) {
+    if (!reconcileRequested && reconcileScope === context.scope) return;
+    const pedido = reconcileRequested;
+    reconcileRequested = false;
+    const recibo = pedido
+      ? null
+      : await FinanceStore.localMetaGet(META_RECONCILE_RECEIPT, context.scope);
+    assertCurrentCycle(context);
+    if (pedido || !recibo) await prepareReconcile(context);
+    reconcileScope = context.scope;
   }
 
   // ---------------------------------------------------------------------------
@@ -9353,6 +9462,11 @@ const CloudSync = (() => {
     //    nem ser sobrescrita pela primeira descida.
     const gravou = await FinanceStore.flush();
     if (gravou === false) throw syncError("O aparelho não conseguiu salvar antes de sincronizar.", "local_write_failed");
+    assertCurrentCycle(context);
+
+    // 1b. Reconciliação, quando ela é devida. Precisa vir ANTES da leitura do
+    //     cursor, porque é justamente o cursor que ela zera.
+    await reconcileIfNeeded(context);
     assertCurrentCycle(context);
 
     let cursor = await readCursor(context);
@@ -9724,6 +9838,16 @@ const CloudSync = (() => {
     return enable();
   }
 
+  // O botão "Conferir a conta inteira" da tela de conta. Marca o pedido e deixa
+  // o próprio ciclo executá-lo: assim ele acontece dentro do bloqueio de aba e
+  // com as mesmas conferências de escopo e geração de qualquer outra volta.
+  function reconcile() {
+    reconcileRequested = true;
+    if (sessionRefreshAccountId === expectedAccountId()) sessionRefreshAccountId = "";
+    if (!state.enabled) return enable();
+    return syncNow();
+  }
+
   // ---------------------------------------------------------------------------
   // Apagar tudo na conta
   // ---------------------------------------------------------------------------
@@ -9957,20 +10081,27 @@ const CloudSync = (() => {
   // Libera a fila e a semeadura depois da decisão de vínculo, e devolve o
   // resultado real do ciclo que roda em seguida.
   //
-  // CHAMAR DUAS VEZES PRECISA SER BARATO.
+  // CHAMAR DUAS VEZES PRECISA SER BARATO, MAS NUNCA À CUSTA DO LOTE.
   //
-  // A camada de conta agora libera o portão também numa rede de segurança, no
+  // A camada de conta libera o portão também numa rede de segurança, no
   // `finally` do vínculo, porque deixar `bootstrapHeld` preso era o defeito que
-  // fazia um aparelho BAIXAR para sempre e nunca ENVIAR: a tela dizia
-  // "sincronizado", a fila ficava parada e o outro aparelho nunca via nada
-  // daquele. Quando o portão já estava aberto e um ciclo já está em curso, esse
-  // segundo pedido acompanha o ciclo existente em vez de agendar mais um.
+  // fazia um aparelho BAIXAR para sempre e nunca ENVIAR.
+  //
+  // A versão anterior economizava uma volta de rede: com o portão já aberto e
+  // um ciclo em curso, ela DEVOLVIA a promessa desse ciclo em vez de pedir
+  // outro. Só que quem chama isto depois de "Juntar dados" acabou de GRAVAR na
+  // fila, e o ciclo em curso pode já ter passado da subida. O lote do vínculo
+  // ficava parado no aparelho: a tela mostrava "Vínculo pendente", o saldo
+  // subia só aqui, e nos outros aparelhos não aparecia nada. Era exatamente o
+  // relato de "juntei os valores e não atualizou em lugar nenhum".
+  //
+  // `syncNow` já resolve a corrida sozinho: com um ciclo em curso ele agenda UMA
+  // reexecução, compartilhada por todos os chamadores da mesma geração, em vez
+  // de uma segunda volta simultânea. Continua barato, e agora sempre envia.
   async function finishAccountBootstrap() {
-    const estavaPreso = bootstrapHeld;
     bootstrapHeld = false;
     setState({ bootstrapHeld: false }, true);
     if (!state.enabled) return enable();
-    if (!estavaPreso && running && activeRunPromise) return activeRunPromise;
     return syncNow();
   }
 
@@ -9996,6 +10127,9 @@ const CloudSync = (() => {
     adapter = null;
     cursorCache = null;
     cursorScope = null;
+    // O recibo de reconciliação é POR CONTA. Entrar noutra conta precisa
+    // conferir o recibo dela, e não herdar a resposta da anterior.
+    if (reconcileScope !== nextScope) reconcileScope = null;
     const promise = performEnable({ generation, scope: nextScope, expectedAccountId: accountId });
     enablePromise = promise;
     enableKey = key;
@@ -10061,6 +10195,11 @@ const CloudSync = (() => {
     observedRevision = null;
     cursorCache = null;
     cursorScope = null;
+    reconcileScope = null;
+    // Um pedido manual de reconciliação que não chegou a rodar não sobrevive ao
+    // desligamento: quem pediu vai pedir de novo, e aplicá-lo à conta seguinte
+    // seria fazer trabalho que ninguém mandou fazer.
+    reconcileRequested = false;
     // A fila NÃO é apagada: ela é o que ainda não chegou ao servidor. Apagar
     // aqui perderia lançamentos feitos offline logo antes de sair.
     // O motor pode parar por rede, atualização ou configuração incompleta sem
@@ -10097,6 +10236,7 @@ const CloudSync = (() => {
     syncNow,
     flushOnHide,
     retry,
+    reconcile,
     resetRemote,
     createCheckpoint,
     listCheckpoints,
@@ -30017,6 +30157,16 @@ function accountSyncCard() {
   // uma falha e a pessoa precisa de uma saída imediata além da recuperação do
   // próprio motor.
   const podeTentar = phase === "error";
+  // A CONFERÊNCIA COMPLETA É UMA SAÍDA, NÃO UMA ROTINA.
+  //
+  // O ciclo comum é incremental: o cursor diz até onde este aparelho já leu, e
+  // o servidor nunca reenvia o que ficou atrás dele. Quando uma operação escapa
+  // (marca recusada, gravação desfeita, aba fechada na hora errada), o aparelho
+  // fica atrasado sem ter como perceber, e a conta aparece com saldos
+  // diferentes em cada navegador. Este botão é o caminho de volta: relê a conta
+  // inteira e reoferece a base inteira. Fica sempre à mão porque a pessoa que
+  // precisa dele está justamente vendo uma tela que diz "Tudo sincronizado".
+  const podeConferir = phase !== "disabled" && phase !== "syncing";
   return `<div class="card account-sync">
     <div class="account-sync__head">
       <span class="account-sync__icon account-sync__icon--${escapeHtml(phase)}">${svgIcon(view.icon, 18)}</span>
@@ -30029,6 +30179,10 @@ function accountSyncCard() {
       </div>
     </div>
     ${podeTentar ? `<button class="btn btn--secondary btn--sm" data-action="account-sync-now">${svgIcon("refresh", 15)} Tentar novamente</button>` : ""}
+    ${podeConferir ? `<div class="account-sync__repair">
+      <button class="btn btn--secondary btn--sm" data-action="account-reconcile">${svgIcon("refresh", 15)} Conferir a conta inteira</button>
+      <p class="field-hint">Use se este aparelho mostrar números diferentes de outro na mesma conta. Ele relê tudo o que está na conta e reapresenta tudo o que está aqui. Nada é apagado dos dois lados: quando o mesmo registro existe nos dois, vence a versão mais recente.</p>
+    </div>` : ""}
   </div>`;
 }
 
@@ -30726,6 +30880,14 @@ function onClick(e) {
     // `retry` e não `syncNow`: quando o motor parou por erro, sincronizar
     // agora não faz nada, e é justamente nesse estado que o botão aparece.
     case "account-sync-now": if (typeof CloudSync !== "undefined") CloudSync.retry(); break;
+    // Saída para o defeito que o ciclo comum não alcança: a mesma conta com
+    // números diferentes em dois aparelhos. Relê a conta inteira e reoferece a
+    // base inteira; nada é apagado de nenhum dos lados.
+    case "account-reconcile":
+      if (typeof CloudSync === "undefined") break;
+      notify("Conferindo a conta inteira neste aparelho");
+      CloudSync.reconcile();
+      break;
     // Vínculo dos dados deste aparelho com a conta. Cada ação é uma escolha
     // diferente; nenhuma delas substitui ou apaga um dos lados.
     case "account-link-confirm": accountLinkGuest(); break;
