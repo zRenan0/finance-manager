@@ -4,10 +4,11 @@
   "private": true,
   "description": "Organizador financeiro local-first em HTML, CSS e JavaScript",
   "scripts": {
+    "postinstall": "node scripts/sync-pdfjs.js",
     "start": "node scripts/serve.js",
-    "start:dist": "node scripts/build-dist.js && node scripts/serve.js --dist",
-    "build": "node scripts/build-app-module.js",
-    "build:dist": "node scripts/build-app-module.js && node scripts/build-dist.js",
+    "start:dist": "node scripts/sync-pdfjs.js && node scripts/build-dist.js && node scripts/serve.js --dist",
+    "build": "node scripts/sync-pdfjs.js && node scripts/build-app-module.js",
+    "build:dist": "node scripts/sync-pdfjs.js && node scripts/build-app-module.js && node scripts/build-dist.js",
     "check:build": "node scripts/build-app-module.js --check",
     "test": "node tests/run-all.js",
     "test:browser": "node tests/browser/run-browser.js",
@@ -19,6 +20,7 @@
     "test:coverage": "node scripts/coverage.js"
   },
   "devDependencies": {
+    "pdfjs-dist": "^6.2.108",
     "playwright": "^1.55.0"
   },
   "engines": {

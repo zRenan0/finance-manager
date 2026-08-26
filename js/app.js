@@ -46,6 +46,13 @@ function defaultCashAccountId() {
   return account ? account.id : null;
 }
 
+function defaultImportDestinationId(documentKind) {
+  const list = documentKind === "card"
+    ? (state.data.creditCards || []).filter((card) => !card.archived)
+    : (state.data.accounts || []).filter((account) => !account.archived);
+  return list[0] ? list[0].id : "";
+}
+
 // [M4] Estado inicial do formulário de meta. Vira fábrica porque agora o mesmo
 // componente cria, edita e é pré-preenchido por modelo; três caminhos que
 // precisam voltar exatamente ao mesmo ponto de partida ao serem cancelados.
@@ -134,8 +141,12 @@ let state = {
   // impressão de estar quebrada.
   accountDangerOpen: false,
   // ---- novos recursos ----
-  importRows: null,        // linhas parseadas de OFX/CSV aguardando revisão
+  importRows: null,        // linhas parseadas de OFX/CSV/PDF aguardando revisão
   importFilename: null,
+  importDocumentKind: "account",
+  importDestinationId: "",
+  importPendingFile: null,
+  importPassword: "",
   importDragOver: false,
   importError: null,       // { title, detail }; erro visual da importação
   importLoading: false,
@@ -897,32 +908,50 @@ function applyQrDraftToForm(draft) {
 
 // Importação 100% offline: lê, decodifica, parseia e categoriza no navegador.
 // Qualquer falha vira um erro visual explicativo na própria tela de importação.
-async function handleStatementFile(file) {
+async function handleStatementFile(file, password) {
   state.importError = null;
   state.importLoading = true;
   state.importRows = null;
+  state.importPendingFile = typeof isPdfStatementFile === "function" && isPdfStatementFile(file) ? file : null;
   render();
 
   try {
-    const text = await readStatementFile(file);
-    const rows = prepareImportRows(text, file.name, state.data);
+    const content = await readStatementFile(file, { password: password || "" });
+    const rows = prepareImportRows(content, file.name, state.data);
+    const meta = rows.meta || {};
     state.importRows = rows;
     state.importFilename = file.name;
+    state.importDocumentKind = meta.documentKind === "card" ? "card" : "account";
+    state.importDestinationId = defaultImportDestinationId(state.importDocumentKind);
+    state.importPendingFile = null;
+    state.importPassword = "";
     state.importLoading = false;
     render();
-    const meta = rows.meta || {};
     notify(`${rows.length} lançamento${rows.length === 1 ? "" : "s"} lido${rows.length === 1 ? "" : "s"} do ${(meta.format || "arquivo").toUpperCase()}`);
   } catch (err) {
     state.importLoading = false;
     if (typeof reportSafeError === "function") reportSafeError("import", err, "import_read");
     state.importRows = null;
+    const code = err && err.code;
+    const needsPassword = code === "PDF_PASSWORD_REQUIRED" || code === "PDF_PASSWORD_INCORRECT";
+    if (!needsPassword) {
+      state.importPendingFile = null;
+      state.importPassword = "";
+    }
     state.importError = {
       title: (err && err.message) || "Não foi possível ler o arquivo.",
-      detail: err && err.code === "UNKNOWN_FORMAT"
-        ? "Formatos aceitos: .OFX e .CSV. No app do seu banco, procure por “Exportar extrato”."
-        : (err && err.code === "NO_ROWS"
-          ? "Confira se o período exportado realmente contém movimentações."
-          : "Nenhum dado foi enviado para a internet; tudo acontece no seu navegador."),
+      code,
+      detail: needsPassword
+        ? "Digite a senha abaixo. Ela será usada apenas na memória deste aparelho."
+        : (code === "UNKNOWN_FORMAT"
+          ? "Formatos aceitos: .OFX, .CSV e .PDF. No app do banco, procure por exportar extrato ou baixar fatura."
+          : (code === "PDF_NO_TEXT"
+            ? "Baixe a versão digital no app do banco. PDF escaneado ou fotografado não tem texto para selecionar."
+            : (code === "PDF_DATE_YEAR"
+              ? "O arquivo precisa mostrar o ano ou o período completo para evitar lançamentos no mês errado."
+              : (code === "NO_ROWS"
+                ? "Confira se o arquivo contém movimentações e se foi baixado diretamente do banco."
+                : "Nenhum dado foi enviado para a internet; tudo acontece no seu navegador.")))),
     };
     render();
   }
@@ -973,7 +1002,7 @@ function renderShell() {
     <div class="sr-live" role="status" aria-live="polite" aria-atomic="true">${state.toast ? escapeHtml(state.toast) : ""}</div>
     ${state.toast ? `<div class="toast ${state.toastTone ? `toast--${state.toastTone}` : ""}" aria-hidden="true">${svgIcon(state.toastTone === "danger" || state.toastTone === "warn" ? "alertTriangle" : "checkCircle", 16)}<span>${escapeHtml(state.toast)}</span></div>` : ""}
     <input type="file" id="import-file-input" accept="application/json,.json" data-ui-css="display:none" />
-    <input type="file" id="statement-file-input" accept=".ofx,.csv,.txt,text/csv,application/x-ofx" data-ui-css="display:none" />
+    <input type="file" id="statement-file-input" accept=".ofx,.csv,.pdf,.txt,text/csv,application/x-ofx,application/pdf" data-ui-css="display:none" />
     ${state.qr.open ? renderQrModal() : ""}
     ${state.wrapped.open ? renderWrappedModal() : ""}
     ${state.categoryPickerFor ? renderCategoryPickerModal() : ""}
@@ -1453,6 +1482,7 @@ function onInput(e) {
     case "qr-amount": if (state.qr.draft) { state.qr.draft.amount = val; patchQrSaveButton(); } break;
     case "qr-estab": if (state.qr.draft) state.qr.draft.description = val; break;
     case "nlp-text": state.nlp.text = val; state.nlp.touched = true; patchNlpButton(); break;
+    case "import-password": state.importPassword = val; break;
     // O formulário pode ter sido fechado entre o keypress e o evento; guardas
     // baratas evitam um TypeError que derrubaria toda a delegação de eventos.
     case "wealth-name": if (state.wealth.form) state.wealth.form.name = val; break;
@@ -1513,6 +1543,13 @@ function onChange(e) {
     if (state.importRows && state.importRows[idx]) state.importRows[idx].categoryId = e.target.value;
     return;
   }
+  if (actionSelect === "import-document-kind") {
+    state.importDocumentKind = e.target.value === "card" ? "card" : "account";
+    state.importDestinationId = defaultImportDestinationId(state.importDocumentKind);
+    render();
+    return;
+  }
+  if (actionSelect === "import-destination") { state.importDestinationId = e.target.value; render(); return; }
   if (actionSelect === "movement-type") { state.movementFilters.type = e.target.value; state.analyticsLimit = 30; render(); return; }
   if (actionSelect === "movement-category") { state.movementFilters.categoryId = e.target.value; state.analyticsLimit = 30; render(); return; }
   if (actionSelect === "movement-account") { state.movementFilters.accountId = e.target.value; state.analyticsLimit = 30; render(); return; }
@@ -1708,6 +1745,11 @@ function onKeydown(e) {
   if (e.key === "Enter" && field === "nlp-text") {
     e.preventDefault();
     runNaturalEntryParse();
+    return;
+  }
+  if (e.key === "Enter" && field === "import-password") {
+    e.preventDefault();
+    if (state.importPendingFile) handleStatementFile(state.importPendingFile, state.importPassword);
     return;
   }
   // No editor de categoria o Enter confirma, como em qualquer formulário curto.

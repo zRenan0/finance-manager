@@ -806,6 +806,21 @@
 .dropzone__title { font-size: 14.5px; font-weight: 700; color: var(--ink); letter-spacing: -0.015em; }
 .dropzone__subtitle { font-size: 12.5px; }
 
+.import-password {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px;
+  align-items: end; margin: 12px 0 16px;
+}
+.import-password .field { margin: 0; }
+
+.import-destination-grid {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px;
+  margin-top: 16px; padding: 14px; border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm); background: var(--card-alt);
+}
+.import-destination-grid .field { margin: 0; min-width: 0; }
+.import-destination-error { align-items: center; }
+.import-destination-error .btn { flex: 0 0 auto; }
+
 .import-list { margin-top: 14px; display: flex; flex-direction: column; max-height: 52vh; overflow-y: auto; }
 .import-row {
   display: flex; align-items: center; gap: 11px; padding: 11px 0;
@@ -831,6 +846,13 @@
 .import-cat-select {
   font-size: 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--paper);
   color: var(--ink); padding: 7px; max-width: 128px; flex: 0 1 116px; min-width: 88px;
+}
+
+@media (max-width: 560px) {
+  .import-password, .import-destination-grid { grid-template-columns: minmax(0, 1fr); }
+  .import-password .btn { width: 100%; }
+  .import-destination-error { flex-wrap: wrap; }
+  .import-destination-error .btn { width: 100%; }
 }
 .checkbox {
   width: 24px; height: 24px; border-radius: 8px; border: 2px solid var(--border); flex-shrink: 0;

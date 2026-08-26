@@ -1,7 +1,7 @@
 // data-sources.js. Visão agregada e local das contas e origens dos dados.
 "use strict";
 
-const DATA_SOURCE_ORDER = ["manual", "import-ofx", "import-csv", "qrcode-pix", "qrcode-nfce", "nlp", "transfer", "card-payment", "adjustment"];
+const DATA_SOURCE_ORDER = ["manual", "import-ofx", "import-csv", "import-pdf", "qrcode-pix", "qrcode-nfce", "nlp", "transfer", "card-payment", "adjustment"];
 
 function sourceTimestamp(entry) {
   return String(entry.updatedAt || entry.createdAt || (entry.origin && entry.origin.importedAt) || entry.date || "");
@@ -32,6 +32,7 @@ function buildDataSourcesModel(data) {
     manual: { label: "Lançamentos manuais", icon: "pencil", status: "Dados locais", detail: "Incluídos por você neste aparelho." },
     "import-ofx": { label: "Arquivos OFX", icon: "upload", status: "Arquivo importado", detail: "Extratos lidos no navegador, sem envio para terceiros." },
     "import-csv": { label: "Arquivos CSV", icon: "upload", status: "Arquivo importado", detail: "Planilhas de extrato lidas no navegador." },
+    "import-pdf": { label: "Arquivos PDF", icon: "file", status: "Arquivo importado", detail: "Faturas e extratos com texto lidos somente no navegador." },
     "qrcode-pix": { label: "QR Code Pix", icon: "scan", status: "Leitura local", detail: "Dados extraídos da cobrança conferida por você." },
     "qrcode-nfce": { label: "QR Code de nota", icon: "scan", status: "Leitura conferida", detail: "Dados extraídos do cupom fiscal." },
     nlp: { label: "Texto livre", icon: "sparkles", status: "Interpretação local", detail: "Lançamentos criados pelo campo de texto inteligente." },

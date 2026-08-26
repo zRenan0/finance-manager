@@ -2383,6 +2383,7 @@ const TRANSACTION_ORIGIN_LABELS = Object.freeze({
   manual: "Lançamento manual",
   "import-ofx": "Extrato OFX",
   "import-csv": "Extrato CSV",
+  "import-pdf": "PDF bancário",
   nlp: "Lançamento inteligente",
   "goal-upfront": "Aporte inicial de meta",
   "qrcode-pix": "Pix lido por QR Code",
@@ -10199,6 +10200,14 @@ function cardStatementDueDate(card, statementKey) {
   return `${parts[0]}-${String(parts[1]).padStart(2, "0")}-${String(Math.min(card.dueDay, last)).padStart(2, "0")}`;
 }
 
+function cardStatementTransactionAmount(transaction) {
+  const t = transaction || {};
+  if (t.type === "expense") return roundMoney(t.amount);
+  const nature = t.nature || deriveTransactionNature(t);
+  if (t.type === "income" && nature === "estorno") return -roundMoney(t.amount);
+  return 0;
+}
+
 function cardStatements(data, cardId) {
   const card = creditCardById(data, cardId);
   if (!card) return [];
@@ -10208,9 +10217,11 @@ function cardStatements(data, cardId) {
     return map.get(key);
   };
   (data.transactions || []).forEach((t) => {
-    if (t.creditCardId !== cardId || t.type !== "expense") return;
+    if (t.creditCardId !== cardId) return;
+    const amount = cardStatementTransactionAmount(t);
+    if (!amount) return;
     const row = ensure(cardStatementKeyForDate(card, t.date));
-    row.purchases = addMoney(row.purchases, t.amount);
+    row.purchases = addMoney(row.purchases, amount);
     row.count++;
   });
   (data.cardPayments || []).forEach((p) => {
@@ -10248,13 +10259,15 @@ function cardLiabilityStatements(data, cardId, asOf) {
   };
 
   (data.transactions || []).forEach((t) => {
-    if (t.creditCardId !== cardId || t.type !== "expense") return;
+    if (t.creditCardId !== cardId) return;
+    const amount = cardStatementTransactionAmount(t);
+    if (!amount) return;
     const recognized = t.installmentGroupId
       ? groupStarts.get(t.installmentGroupId) <= limit
       : t.date <= limit;
     if (!recognized) return;
     const row = ensure(cardStatementKeyForDate(card, t.date));
-    row.purchases = addMoney(row.purchases, t.amount);
+    row.purchases = addMoney(row.purchases, amount);
     row.count++;
   });
 
@@ -10471,6 +10484,7 @@ const MOVEMENT_SOURCE_META = Object.freeze({
   manual: { label: "Manual", icon: "pencil" },
   "import-ofx": { label: "Extrato OFX", icon: "upload" },
   "import-csv": { label: "Extrato CSV", icon: "upload" },
+  "import-pdf": { label: "PDF bancário", icon: "file" },
   nlp: { label: "Lançamento inteligente", icon: "sparkles" },
   "goal-upfront": { label: "Meta", icon: "target" },
   "qrcode-pix": { label: "QR Pix", icon: "scan" },
@@ -10692,7 +10706,7 @@ if (typeof module !== "undefined" && module.exports) {
 // data-sources.js. Visão agregada e local das contas e origens dos dados.
 "use strict";
 
-const DATA_SOURCE_ORDER = ["manual", "import-ofx", "import-csv", "qrcode-pix", "qrcode-nfce", "nlp", "transfer", "card-payment", "adjustment"];
+const DATA_SOURCE_ORDER = ["manual", "import-ofx", "import-csv", "import-pdf", "qrcode-pix", "qrcode-nfce", "nlp", "transfer", "card-payment", "adjustment"];
 
 function sourceTimestamp(entry) {
   return String(entry.updatedAt || entry.createdAt || (entry.origin && entry.origin.importedAt) || entry.date || "");
@@ -10723,6 +10737,7 @@ function buildDataSourcesModel(data) {
     manual: { label: "Lançamentos manuais", icon: "pencil", status: "Dados locais", detail: "Incluídos por você neste aparelho." },
     "import-ofx": { label: "Arquivos OFX", icon: "upload", status: "Arquivo importado", detail: "Extratos lidos no navegador, sem envio para terceiros." },
     "import-csv": { label: "Arquivos CSV", icon: "upload", status: "Arquivo importado", detail: "Planilhas de extrato lidas no navegador." },
+    "import-pdf": { label: "Arquivos PDF", icon: "file", status: "Arquivo importado", detail: "Faturas e extratos com texto lidos somente no navegador." },
     "qrcode-pix": { label: "QR Code Pix", icon: "scan", status: "Leitura local", detail: "Dados extraídos da cobrança conferida por você." },
     "qrcode-nfce": { label: "QR Code de nota", icon: "scan", status: "Leitura conferida", detail: "Dados extraídos do cupom fiscal." },
     nlp: { label: "Texto livre", icon: "sparkles", status: "Interpretação local", detail: "Lançamentos criados pelo campo de texto inteligente." },
@@ -12398,7 +12413,7 @@ if (typeof module !== "undefined" && module.exports) {
 }
 
 // source: js/import.js
-// import.js. Módulo de importação offline de extratos bancários (OFX / CSV)
+// import.js. Módulo de importação offline de extratos e faturas (OFX / CSV / PDF)
 // ------------------------------------------------------------------------------
 // 100% client-side: o arquivo é lido pelo FileReader, parseado em memória e
 // gravado direto no IndexedDB via storage.js. NENHUM byte é enviado a servidor.
@@ -12527,15 +12542,19 @@ function categorySuggestionConfidence(description, dataOrCategories) {
 // de substituição, refazemos em windows-1252.
 // A decodificação (UTF-8 → windows-1252) vive em utils.js/readFileAsText e é
 // compartilhada com o restore de backup; antes havia duas implementações.
-async function readStatementFile(file) {
+async function readStatementFile(file, options) {
   if (!file) throw new ImportError("READ_FAIL", "Nenhum arquivo selecionado.");
   if (file.size === 0) throw new ImportError("EMPTY", "O arquivo está vazio.");
   if (file.size > MAX_IMPORT_BYTES) {
     throw new ImportError("TOO_LARGE", "Arquivo muito grande (limite de 12 MB). Exporte um período menor no seu banco.");
   }
   try {
+    if (typeof isPdfStatementFile === "function" && isPdfStatementFile(file)) {
+      return await readPdfStatementFile(file, options && options.password);
+    }
     return await readFileAsText(file);
   } catch (err) {
+    if (err instanceof ImportError) throw err;
     throw new ImportError("READ_FAIL", "Não foi possível ler o arquivo. Tente selecioná-lo novamente.", String(err));
   }
 }
@@ -12673,7 +12692,7 @@ function parseStatementFile(text, filename) {
   if (!text || !text.trim()) throw new ImportError("EMPTY", "O arquivo está vazio.");
   const format = detectFormat(text, filename);
   if (!format) {
-    throw new ImportError("UNKNOWN_FORMAT", "Formato não reconhecido. Envie um extrato .OFX ou .CSV exportado do seu banco.");
+    throw new ImportError("UNKNOWN_FORMAT", "Formato não reconhecido. Envie um arquivo .OFX, .CSV ou .PDF exportado do seu banco.");
   }
   const parsed = format === "ofx" ? parseOfxStatement(text) : parseCsvStatement(text);
   if (parsed.rows.length === 0) {
@@ -12707,8 +12726,11 @@ function markDuplicates(rows, existingTx) {
 
 // Monta as linhas prontas para a tela de revisão (com categoria já sugerida).
 
-function prepareImportRows(rawText, filename, data) {
-  const { rows, format, skipped } = parseStatementFile(rawText, filename);
+function prepareImportRows(rawFile, filename, data) {
+  const parsed = rawFile && typeof rawFile === "object" && rawFile.format === "pdf"
+    ? rawFile
+    : parseStatementFile(rawFile, filename);
+  const { rows, format, skipped } = parsed;
   const withDup = markDuplicates(rows, data.transactions);
   const prepared = withDup.map((r) => {
     // O papel da linha vem antes da categoria: não adianta perguntar em que
@@ -12727,9 +12749,16 @@ function prepareImportRows(rawText, filename, data) {
       categoryReason: suggestion ? suggestion.reason : null,
     };
   }).sort((a, b) => (a.date < b.date ? 1 : -1));
+  const roleCounts = prepared.reduce((count, r) => (r.role ? { ...count, [r.role]: (count[r.role] || 0) + 1 } : count), {});
+  const filenameLooksLikeCard = /\b(fatura|cartao|card)\b/.test(normalizeForMatch(filename || ""));
+  const documentKind = parsed.documentKind || (filenameLooksLikeCard || roleCounts.carryover ? "card" : "account");
   prepared.meta = {
-    format, skipped, total: rows.length,
-    roles: prepared.reduce((count, r) => (r.role ? { ...count, [r.role]: (count[r.role] || 0) + 1 } : count), {}),
+    format, skipped, total: rows.length, documentKind,
+    bank: parsed.bank || null,
+    profile: parsed.profile || null,
+    confidence: parsed.confidence || "alta",
+    pageCount: parsed.pageCount || null,
+    roles: roleCounts,
   };
   return prepared;
 }
@@ -12737,19 +12766,27 @@ function prepareImportRows(rawText, filename, data) {
 // ------------------------------------------------------------------------------
 // GRAVAÇÃO; transforma as linhas revisadas em transações e persiste no IndexedDB
 // ------------------------------------------------------------------------------
-function buildTransactionsFromRows(rows, format, accountId, filename) {
-  const source = format === "ofx" ? "import-ofx" : "import-csv";
+function buildTransactionsFromRows(rows, format, destination, filename) {
+  const settings = destination && typeof destination === "object"
+    ? destination
+    : { documentKind: "account", destinationId: destination || null };
+  const documentKind = settings.documentKind === "card" ? "card" : "account";
+  const destinationId = settings.destinationId || null;
+  const source = format === "ofx" ? "import-ofx" : (format === "pdf" ? "import-pdf" : "import-csv");
+  const label = source === "import-ofx" ? "Extrato OFX" : (source === "import-pdf" ? "PDF bancário" : "Extrato CSV");
   return rows.map((r) => {
     const tx = makeTransaction({
       type: r.type,
       amount: r.amount,
       categoryId: r.type === "expense" ? (r.categoryId || "outros") : "outros",
       date: r.date,
-      payment: r.type === "expense" ? "Débito" : "Outro",
+      payment: documentKind === "card" ? "Crédito" : (r.type === "expense" ? "Débito" : "Outro"),
       description: r.description,
       source,
-      origin: { channel: source, label: source === "import-ofx" ? "Extrato OFX" : "Extrato CSV", reference: filename || null, importedAt: new Date().toISOString() },
-      accountId: accountId || null,
+      origin: { channel: source, label, reference: filename || null, importedAt: new Date().toISOString() },
+      accountId: documentKind === "account" ? destinationId : null,
+      creditCardId: documentKind === "card" ? destinationId : null,
+      nature: r.nature || (documentKind === "card" && r.type === "income" ? "estorno" : null),
     });
     // A linha veio desmarcada e a pessoa marcou de volta. Foi decisão dela, e
     // a caixa de revisão não pode recebê-la de novo perguntando a mesma coisa
@@ -12809,6 +12846,392 @@ function detectSubscriptions(data) {
   const monthlyTotal = subs.reduce((s, x) => s + x.lastAmount, 0);
   const increasing = subs.filter((s) => s.increasePct > 3);
   return { subs, monthlyTotal, increasing };
+}
+
+// source: js/pdf-import.js
+// pdf-import.js. Leitura local de faturas e extratos em PDF com texto.
+//
+// O PDF.js é servido pelo próprio aplicativo e só entra na memória quando um
+// PDF é escolhido. O arquivo, o texto e a senha nunca saem do navegador.
+"use strict";
+
+const PDF_IMPORT_MODULE_PATH = "vendor/pdfjs/pdf.min.mjs";
+const PDF_IMPORT_WORKER_PATH = "vendor/pdfjs/pdf.worker.min.mjs";
+const PDF_IMPORT_MAX_PAGES = 80;
+const PDF_IMPORT_LINE_TOLERANCE = 2.5;
+const PDF_IMPORT_MONEY_SOURCE = "(?:R\\$\\s*)?(?:\\(\\s*)?[+-]?\\s*(?:\\d{1,3}(?:\\.\\d{3})+|\\d+),\\d{2}\\s*(?:[DC]|[-+])?\\s*\\)?";
+const PDF_IMPORT_DATE_AT_START_RE = /^\s*(\d{1,2}[\/.\-]\d{1,2}(?:[\/.\-]\d{2,4})?)\b\s*(.*)$/;
+const PDF_IMPORT_REFUND_RE = /\b(estorno|reembolso|devolucao|cancelamento|credito de compra|credito estabelecimento|ajuste a credito)\b/;
+const PDF_IMPORT_PAYMENT_RE = /\bpagamento (?:recebido|efetuado|realizado|de fatura|da fatura|em \d{2}\/\d{2})\b|\bpag(?:to|amento)? ?(?:de )?fatura\b|\bfatura paga\b/;
+const PDF_IMPORT_DEBIT_RE = /\b(pix enviado|pagamento|compra|saque|tarifa|debito|boleto|transferencia enviada|ted enviada|doc enviado)\b/;
+const PDF_IMPORT_CREDIT_RE = /\b(pix recebido|recebimento|salario|deposito|credito em conta|transferencia recebida|ted recebida)\b/;
+const PDF_IMPORT_NON_TRANSACTION_RE = /^(?:total(?: da)? fatura|total(?: do)? periodo|subtotal|limite(?: disponivel| total)?|pagamento minimo|melhor dia|vencimento|fechamento|data descricao|data historico|lancamentos?)\b/;
+
+let pdfImportLibraryPromise = null;
+
+function pdfImportAssetUrl(pathname) {
+  if (typeof document !== "undefined" && document.baseURI) return new URL(pathname, document.baseURI).href;
+  return pathname;
+}
+
+async function loadPdfImportLibrary() {
+  if (!pdfImportLibraryPromise) {
+    const moduleUrl = pdfImportAssetUrl(PDF_IMPORT_MODULE_PATH);
+    pdfImportLibraryPromise = import(moduleUrl).then((pdfjs) => {
+      pdfjs.GlobalWorkerOptions.workerSrc = pdfImportAssetUrl(PDF_IMPORT_WORKER_PATH);
+      return pdfjs;
+    }).catch((error) => {
+      pdfImportLibraryPromise = null;
+      throw error;
+    });
+  }
+  return pdfImportLibraryPromise;
+}
+
+function isPdfStatementFile(file) {
+  const name = String(file && file.name || "");
+  const type = String(file && file.type || "").toLowerCase();
+  return type === "application/pdf" || /\.pdf$/i.test(name);
+}
+
+async function readPdfImportBytes(file) {
+  if (file && typeof file.arrayBuffer === "function") return new Uint8Array(await file.arrayBuffer());
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(new Uint8Array(reader.result));
+    reader.onerror = () => reject(reader.error || new Error("Falha ao ler o PDF"));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+function pdfItemsToLines(items, pageNumber) {
+  const positioned = (Array.isArray(items) ? items : [])
+    .filter((item) => item && typeof item.str === "string" && item.str.trim())
+    .map((item) => ({
+      text: item.str.replace(/\s+/g, " ").trim(),
+      x: Number(item.transform && item.transform[4]) || 0,
+      y: Number(item.transform && item.transform[5]) || 0,
+      width: Math.max(0, Number(item.width) || 0),
+      height: Math.max(1, Number(item.height) || Math.abs(Number(item.transform && item.transform[3])) || 10),
+    }))
+    .sort((a, b) => Math.abs(b.y - a.y) > PDF_IMPORT_LINE_TOLERANCE ? b.y - a.y : a.x - b.x);
+
+  const grouped = [];
+  positioned.forEach((item) => {
+    let line = grouped.find((candidate) => Math.abs(candidate.y - item.y) <= PDF_IMPORT_LINE_TOLERANCE);
+    if (!line) {
+      line = { page: pageNumber, y: item.y, items: [] };
+      grouped.push(line);
+    }
+    line.items.push(item);
+    line.y = (line.y * (line.items.length - 1) + item.y) / line.items.length;
+  });
+
+  return grouped.sort((a, b) => b.y - a.y).map((line) => {
+    line.items.sort((a, b) => a.x - b.x);
+    let text = "";
+    let previous = null;
+    line.items.forEach((item) => {
+      const gap = previous ? item.x - (previous.x + previous.width) : 0;
+      const threshold = previous ? Math.max(1.5, Math.min(previous.height, item.height) * 0.16) : 0;
+      if (text && gap > threshold && !/\s$/.test(text)) text += " ";
+      text += item.text;
+      previous = item;
+    });
+    return { ...line, text: text.replace(/\s+/g, " ").trim() };
+  }).filter((line) => line.text);
+}
+
+function pdfMoneyTokens(text) {
+  const matcher = new RegExp(PDF_IMPORT_MONEY_SOURCE, "gi");
+  const tokens = [];
+  let match;
+  while ((match = matcher.exec(String(text || ""))) !== null) {
+    const parsed = parsePdfMoneyToken(match[0]);
+    if (parsed) tokens.push({ ...parsed, raw: match[0], index: match.index, end: matcher.lastIndex });
+  }
+  return tokens;
+}
+
+function parsePdfMoneyToken(raw) {
+  const text = String(raw || "").replace(/\u00a0/g, " ").trim();
+  const normalized = text.toUpperCase().replace(/\s+/g, "");
+  const marker = /D\)?$/.test(normalized) ? "debit" : (/C\)?$/.test(normalized) ? "credit" : null);
+  const negative = marker === "debit" || /^-/.test(normalized.replace(/^R\$/, "")) || /-$/.test(normalized) || /^\(/.test(normalized);
+  const positive = marker === "credit" || /^\+/.test(normalized.replace(/^R\$/, "")) || /\+$/.test(normalized);
+  const numeric = text.replace(/R\$/gi, "").replace(/[DC]/gi, "").replace(/[()\s+\-]/g, "");
+  const amount = parseBrNumber(numeric);
+  if (!Number.isFinite(amount) || amount === 0) return null;
+  return { amount: negative ? -Math.abs(amount) : Math.abs(amount), explicitDirection: negative || positive, marker };
+}
+
+function pdfTokenX(line, token) {
+  const digits = String(token && token.raw || "").replace(/\D/g, "");
+  if (!digits) return null;
+  const item = (line.items || []).find((candidate) => {
+    const candidateDigits = String(candidate.text || "").replace(/\D/g, "");
+    return candidateDigits && (candidateDigits.includes(digits) || digits.includes(candidateDigits));
+  });
+  return item ? item.x : null;
+}
+
+function detectPdfAccountColumns(lines) {
+  const columns = {};
+  (lines || []).forEach((line) => {
+    const normalizedLine = normalizeText(line.text);
+    if (!/\b(data|historico|descricao|lancamento)\b/.test(normalizedLine)) return;
+    (line.items || []).forEach((item) => {
+      const text = normalizeText(item.text);
+      if (/\b(debito|saida)\b/.test(text)) columns.debit = item.x;
+      if (/\b(credito|entrada)\b/.test(text)) columns.credit = item.x;
+      if (/\bsaldo\b/.test(text)) columns.balance = item.x;
+      if (/\bvalor\b/.test(text) && columns.value == null) columns.value = item.x;
+    });
+  });
+  return columns;
+}
+
+function nearestPdfColumn(x, columns) {
+  if (x == null) return null;
+  const candidates = ["debit", "credit", "balance", "value"]
+    .filter((key) => Number.isFinite(columns[key]))
+    .map((key) => ({ key, distance: Math.abs(x - columns[key]) }))
+    .sort((a, b) => a.distance - b.distance);
+  return candidates[0] || null;
+}
+
+function selectPdfAccountMoney(tokens, line, columns) {
+  const positioned = tokens.map((token) => ({ ...token, x: pdfTokenX(line, token) }));
+  const withColumns = positioned.map((token) => ({ ...token, column: nearestPdfColumn(token.x, columns) }));
+  const transactionColumns = withColumns.filter((token) => token.column && token.column.key !== "balance");
+  if (transactionColumns.length) {
+    const selected = transactionColumns.sort((a, b) => a.column.distance - b.column.distance)[0];
+    return { ...selected, column: selected.column.key };
+  }
+  const selected = withColumns.length > 1 ? withColumns[withColumns.length - 2] : withColumns[withColumns.length - 1];
+  return selected ? { ...selected, column: selected.column ? selected.column.key : null } : null;
+}
+
+function detectPdfStatementProfile(lines, filename) {
+  const fullText = (lines || []).map((line) => line.text).join("\n");
+  const text = normalizeText(`${filename || ""}\n${fullText}`);
+  const bank = /\bsantander\b|banco santander/.test(text) ? "Santander" : null;
+  const cardMarkers = ["fatura", "vencimento", "pagamento minimo", "limite disponivel", "melhor dia de compra", "final do cartao", "cartao final"];
+  const accountMarkers = ["extrato", "conta corrente", "saldo disponivel", "saldo da conta", "agencia", "periodo do extrato"];
+  const cardScore = cardMarkers.reduce((score, marker) => score + (text.includes(marker) ? 1 : 0), 0);
+  const accountScore = accountMarkers.reduce((score, marker) => score + (text.includes(marker) ? 1 : 0), 0);
+  const documentKind = cardScore > accountScore ? "card" : "account";
+  const knownStructure = cardScore > 0 || accountScore > 0;
+  return {
+    bank,
+    profile: bank ? "santander" : "structural",
+    documentKind,
+    confidence: bank && knownStructure ? "alta" : (knownStructure ? "media" : "baixa"),
+    fullText,
+  };
+}
+
+function pdfDateContext(lines, filename) {
+  const prioritized = [];
+  const remaining = [];
+  const fullDateRe = /\b(\d{1,2}[\/.\-]\d{1,2}[\/.\-](?:19|20)\d{2})\b/g;
+  (lines || []).forEach((line) => {
+    const target = /\b(vencimento|fechamento|periodo|emissao|ate)\b/.test(normalizeText(line.text)) ? prioritized : remaining;
+    let match;
+    while ((match = fullDateRe.exec(line.text)) !== null) {
+      const iso = parseBrDate(match[1]);
+      if (iso) target.push(iso);
+    }
+  });
+  const namedYear = String(filename || "").match(/\b(20\d{2})\b/);
+  const anchor = prioritized[prioritized.length - 1] || remaining[remaining.length - 1] || null;
+  return {
+    anchor,
+    year: anchor ? Number(anchor.slice(0, 4)) : (namedYear ? Number(namedYear[1]) : null),
+    month: anchor ? Number(anchor.slice(5, 7)) : null,
+  };
+}
+
+function resolvePdfRowDate(raw, context) {
+  const direct = parseBrDate(raw);
+  if (direct) return direct;
+  const match = String(raw || "").match(/^(\d{1,2})[\/.\-](\d{1,2})$/);
+  if (!match || !context || !context.year) return null;
+  const day = Number(match[1]);
+  const month = Number(match[2]);
+  let year = context.year;
+  if (context.month && month - context.month > 6) year--;
+  else if (context.month && context.month - month > 6) year++;
+  const iso = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  return isRealIsoDate(iso) ? iso : null;
+}
+
+function joinPdfStatementLines(lines) {
+  const joined = [];
+  let pending = null;
+  (lines || []).forEach((line) => {
+    const beginsWithDate = PDF_IMPORT_DATE_AT_START_RE.test(line.text);
+    const hasMoney = pdfMoneyTokens(line.text).length > 0;
+    if (beginsWithDate) {
+      if (pending) joined.push(pending);
+      pending = { ...line, items: [...(line.items || [])] };
+      if (hasMoney) { joined.push(pending); pending = null; }
+      return;
+    }
+    if (pending && line.page === pending.page) {
+      pending.text = `${pending.text} ${line.text}`.replace(/\s+/g, " ").trim();
+      pending.items.push(...(line.items || []));
+      if (hasMoney) { joined.push(pending); pending = null; }
+    }
+  });
+  if (pending) joined.push(pending);
+  return joined;
+}
+
+function parsePdfStatementLines(lines, filename, pageCount) {
+  const profile = detectPdfStatementProfile(lines, filename);
+  const context = pdfDateContext(lines, filename);
+  const columns = detectPdfAccountColumns(lines);
+  const candidates = joinPdfStatementLines(lines);
+  const rows = [];
+  let skipped = Math.max(0, lines.length - candidates.length);
+
+  candidates.forEach((line) => {
+    const match = line.text.match(PDF_IMPORT_DATE_AT_START_RE);
+    if (!match) { skipped++; return; }
+    const date = resolvePdfRowDate(match[1], context);
+    const remainder = match[2] || "";
+    const tokens = pdfMoneyTokens(remainder);
+    if (!date || !tokens.length) { skipped++; return; }
+
+    const selected = profile.documentKind === "card"
+      ? { ...tokens[tokens.length - 1], column: null }
+      : selectPdfAccountMoney(tokens, line, columns);
+    if (!selected) { skipped++; return; }
+
+    const firstAmountIndex = Math.min(...tokens.map((token) => token.index));
+    const description = remainder.slice(0, firstAmountIndex)
+      .replace(/[|•]+/g, " ")
+      .replace(/\s+/g, " ")
+      .replace(/[\s:;,-]+$/g, "")
+      .trim();
+    const normalizedDescription = normalizeText(description);
+    const accountNoise = profile.documentKind === "account" && NOISE_RE.test(normalizedDescription);
+    if (!description || PDF_IMPORT_NON_TRANSACTION_RE.test(normalizedDescription) || accountNoise) {
+      skipped++;
+      return;
+    }
+
+    let type;
+    let nature = null;
+    if (profile.documentKind === "card") {
+      const isPayment = PDF_IMPORT_PAYMENT_RE.test(normalizedDescription);
+      const isRefund = PDF_IMPORT_REFUND_RE.test(normalizedDescription) || (selected.amount < 0 && !isPayment);
+      type = isPayment || isRefund ? "income" : "expense";
+      if (isRefund) nature = "estorno";
+    } else if (selected.column === "debit") {
+      type = "expense";
+    } else if (selected.column === "credit") {
+      type = "income";
+    } else if (selected.explicitDirection) {
+      type = selected.amount < 0 ? "expense" : "income";
+    } else if (PDF_IMPORT_CREDIT_RE.test(normalizedDescription)) {
+      type = "income";
+    } else if (PDF_IMPORT_DEBIT_RE.test(normalizedDescription)) {
+      type = "expense";
+    } else {
+      type = "expense";
+    }
+
+    rows.push({
+      date,
+      amount: Math.abs(roundMoney(selected.amount)),
+      description,
+      type,
+      nature,
+      page: line.page,
+    });
+  });
+
+  if (!context.year && candidates.some((line) => /^\s*\d{1,2}[\/.\-]\d{1,2}\b/.test(line.text))) {
+    throw new ImportError("PDF_DATE_YEAR", "O PDF não informa o ano dos lançamentos.", "Use uma fatura ou um extrato que mostre o período completo.");
+  }
+  if (!rows.length) {
+    throw new ImportError("NO_ROWS", "O PDF foi lido, mas a tabela de lançamentos não foi reconhecida.", "Tente o PDF digital baixado diretamente do banco.");
+  }
+
+  return {
+    rows,
+    format: "pdf",
+    skipped,
+    bank: profile.bank,
+    profile: profile.profile,
+    documentKind: profile.documentKind,
+    confidence: profile.confidence,
+    pageCount: Number(pageCount) || Math.max(...rows.map((row) => row.page || 1)),
+  };
+}
+
+async function readPdfStatementFile(file, password) {
+  let bytes;
+  try {
+    bytes = await readPdfImportBytes(file);
+  } catch (error) {
+    throw new ImportError("READ_FAIL", "Não foi possível ler o PDF. Selecione o arquivo novamente.", String(error));
+  }
+  const signature = Array.from(bytes.slice(0, 5)).map((byte) => String.fromCharCode(byte)).join("");
+  if (signature !== "%PDF-") throw new ImportError("PDF_INVALID", "O arquivo não é um PDF válido.");
+
+  let pdfjs;
+  try {
+    pdfjs = await loadPdfImportLibrary();
+  } catch (error) {
+    throw new ImportError("PDF_READER_FAIL", "O leitor de PDF não pôde ser carregado.", String(error));
+  }
+
+  let loadingTask;
+  let documentProxy;
+  try {
+    loadingTask = pdfjs.getDocument({
+      data: bytes,
+      password: password || undefined,
+      isEvalSupported: false,
+      stopAtErrors: false,
+      verbosity: 0,
+    });
+    documentProxy = await loadingTask.promise;
+  } catch (error) {
+    const passwordError = error && (error.name === "PasswordException" || error.code === 1 || error.code === 2);
+    if (passwordError) {
+      const incorrect = !!password && error.code === 2;
+      throw new ImportError(
+        incorrect ? "PDF_PASSWORD_INCORRECT" : "PDF_PASSWORD_REQUIRED",
+        incorrect ? "A senha do PDF está incorreta." : "Este PDF é protegido por senha.",
+        "Digite a senha para continuar. Ela fica somente neste aparelho."
+      );
+    }
+    throw new ImportError("PDF_INVALID", "Não foi possível abrir o PDF.", String(error));
+  }
+
+  try {
+    if (documentProxy.numPages > PDF_IMPORT_MAX_PAGES) {
+      throw new ImportError("PDF_TOO_MANY_PAGES", `O PDF tem mais de ${PDF_IMPORT_MAX_PAGES} páginas. Exporte um período menor.`);
+    }
+    const lines = [];
+    for (let pageNumber = 1; pageNumber <= documentProxy.numPages; pageNumber++) {
+      const page = await documentProxy.getPage(pageNumber);
+      const content = await page.getTextContent({ disableNormalization: false, includeMarkedContent: false });
+      lines.push(...pdfItemsToLines(content.items, pageNumber));
+      page.cleanup();
+    }
+    if (!lines.length || !lines.some((line) => line.text.replace(/\s/g, "").length >= 3)) {
+      throw new ImportError("PDF_NO_TEXT", "Este PDF não tem texto selecionável.", "Baixe a versão digital no app do banco. PDF escaneado ou fotografado não funciona nesta importação.");
+    }
+    return parsePdfStatementLines(lines, file && file.name, documentProxy.numPages);
+  } finally {
+    if (documentProxy && typeof documentProxy.destroy === "function") await documentProxy.destroy();
+    else if (loadingTask && typeof loadingTask.destroy === "function") await loadingTask.destroy();
+  }
 }
 
 // source: js/nlp.js
@@ -24017,7 +24440,7 @@ function renderMovementFilters() {
   const f = state.movementFilters;
   const sourceOptions = [
     ["", "Todas as origens"], ["manual", "Manual"], ["import-ofx", "Extrato OFX"],
-    ["import-csv", "Extrato CSV"], ["nlp", "Lançamento inteligente"], ["qrcode-pix", "QR Pix"],
+    ["import-csv", "Extrato CSV"], ["import-pdf", "PDF bancário"], ["nlp", "Lançamento inteligente"], ["qrcode-pix", "QR Pix"],
     ["qrcode-nfce", "QR nota fiscal"], ["transfer", "Transferência"], ["card-payment", "Pagamento de fatura"],
   ];
   return `<div class="movement-filters ${state.movementFiltersOpen ? "movement-filters--open" : ""}">
@@ -27760,14 +28183,14 @@ function renderAchievementsHero(m) {
 }
 
 // source: js/screens/import.js
-// js/screens/import.js. Importação de extrato (OFX/CSV). Parser em import.js.
+// js/screens/import.js. Importação de extrato e fatura (OFX/CSV/PDF).
 //
 // Fatiado de app.js. Carregado como script global (sem módulos ES), então
 // todas as funções continuam visíveis para o restante do app.
 "use strict";
 
 // ==================================================================
-// IMPORTADOR DE EXTRATOS (OFX/CSV)
+// IMPORTADOR DE EXTRATOS E FATURAS (OFX/CSV/PDF)
 // ==================================================================
 function renderImportScreen() {
   const rows = state.importRows;
@@ -27776,7 +28199,7 @@ function renderImportScreen() {
 
     ${!rows ? `
       <div class="card">
-        <p class="card-subtitle" data-ui-css="margin-top:0">Baixe o extrato OFX ou CSV no app do seu banco e solte aqui. A leitura e a categorização acontecem no seu aparelho; nada é enviado para nenhum servidor.</p>
+        <p class="card-subtitle" data-ui-css="margin-top:0">Baixe o extrato ou a fatura no app do seu banco e solte aqui. Aceita OFX, CSV e PDF com texto selecionável. A leitura e a categorização acontecem no seu aparelho; nada é enviado para nenhum servidor.</p>
         ${state.importError ? `<div class="inline-error">
           ${svgIcon("alertTriangle", 16)}
           <div>
@@ -27785,11 +28208,19 @@ function renderImportScreen() {
           </div>
           <button class="icon-btn icon-btn--muted" data-action="dismiss-import-error" aria-label="Fechar erro de importação">${svgIcon("x", 14)}</button>
         </div>` : ""}
+        ${state.importError && (state.importError.code === "PDF_PASSWORD_REQUIRED" || state.importError.code === "PDF_PASSWORD_INCORRECT") && state.importPendingFile ? `
+        <div class="import-password">
+          <div class="field">
+            <label class="field__label" for="import-pdf-password">Senha do PDF</label>
+            <input id="import-pdf-password" class="input" type="password" autocomplete="off" data-field="import-password" value="${escapeHtml(state.importPassword || "")}" />
+          </div>
+          <button class="btn btn--primary" data-action="import-password-retry">Abrir PDF</button>
+        </div>` : ""}
         ${state.importLoading ? `<div class="ai-loading"><span class="spinner"></span> Lendo e categorizando o extrato…</div>` : `
         <label class="dropzone ${state.importDragOver ? "dropzone--over" : ""}" id="statement-dropzone" data-action="statement-dropzone-click">
           ${svgIcon("file", 30)}
           <span class="dropzone__title">Arraste o arquivo aqui</span>
-          <span class="dropzone__subtitle">ou toque para escolher (.ofx, .csv)</span>
+          <span class="dropzone__subtitle">ou toque para escolher (.ofx, .csv, .pdf)</span>
         </label>`}
       </div>` : renderImportReview(rows)}
   </div>`;
@@ -27797,6 +28228,14 @@ function renderImportScreen() {
 
 function renderImportReview(rows) {
   const included = rows.filter((r) => r.include);
+  const meta = rows.meta || {};
+  const documentKind = state.importDocumentKind === "card" ? "card" : "account";
+  const destinations = documentKind === "card"
+    ? (state.data.creditCards || []).filter((card) => !card.archived)
+    : (state.data.accounts || []).filter((account) => !account.archived);
+  const destinationId = destinations.some((item) => item.id === state.importDestinationId)
+    ? state.importDestinationId
+    : (destinations[0] ? destinations[0].id : "");
 
   // O "total" antigo somava receita e despesa no mesmo balde e devolvia um
   // número que não existe em lugar nenhum do extrato: R$ 5.420,00 de salário
@@ -27822,7 +28261,7 @@ function renderImportReview(rows) {
   // duas vezes. A regra é correta; o que faltava era dizê-la. Sem isso o
   // usuário importa agosto, vê o gasto subir, vê o saldo parado e conclui,
   // razoavelmente, que a conta do aplicativo está errada.
-  const contaDestino = accountById(state.data, defaultCashAccountId());
+  const contaDestino = documentKind === "account" ? accountById(state.data, destinationId) : null;
   const aberturaConta = contaDestino ? String(contaDestino.openingDate || "") : "";
   const anterioresAoSaldo = aberturaConta
     ? included.filter((r) => String(r.date || "") < aberturaConta).length
@@ -27832,7 +28271,7 @@ function renderImportReview(rows) {
   // passado e o saldo rolado. Elas chegam desmarcadas, e o aviso diz por quê;
   // sem essa frase o usuário só veria caixas desmarcadas sem explicação, o que
   // é pior do que o erro que estamos evitando.
-  const papeis = (rows.meta && rows.meta.roles) || {};
+  const papeis = meta.roles || {};
   const avisoPapeis = [];
   if (papeis["card-payment"]) {
     avisoPapeis.push(`${plural(papeis["card-payment"], "linha é o pagamento da própria fatura", "linhas são pagamentos da própria fatura")} e ${papeis["card-payment"] === 1 ? "veio desmarcada" : "vieram desmarcadas"}: esse dinheiro saiu da sua conta para quitar o mês passado, então lançá-lo como receita inflaria o que você recebeu`);
@@ -27841,12 +28280,37 @@ function renderImportReview(rows) {
     avisoPapeis.push(`${plural(papeis.carryover, "linha é o saldo da fatura anterior", "linhas são saldo da fatura anterior")}: aquele gasto já foi contado no mês em que aconteceu`);
   }
 
+  const documentLabel = documentKind === "card" ? "Fatura de cartão" : "Extrato bancário";
+  const sourceParts = [meta.format ? meta.format.toUpperCase() : "ARQUIVO"];
+  if (meta.bank) sourceParts.push(meta.bank);
+  sourceParts.push(documentLabel);
+  if (meta.pageCount) sourceParts.push(plural(meta.pageCount, "página", "páginas"));
+
   return `<div class="card">
     <div class="settings-row-header">
       <p class="card-title">Revisar lançamentos (${rows.length})</p>
       <button class="icon-btn" data-action="import-cancel" aria-label="Cancelar importação">${svgIcon("x", 16)}</button>
     </div>
-    <p class="card-subtitle">${(rows.meta && rows.meta.format ? rows.meta.format.toUpperCase() + " · " : "")}${plural(included.length, "selecionado para importar", "selecionados para importar")}${partesTotal.length ? ` · ${partesTotal.join(" e ")}` : ""}. Duplicados já vêm desmarcados${rows.meta && rows.meta.skipped ? ` · ${plural(rows.meta.skipped, "linha ignorada", "linhas ignoradas")}` : ""}.</p>
+    <p class="card-subtitle">${sourceParts.map(escapeHtml).join(" · ")} · ${plural(included.length, "selecionado para importar", "selecionados para importar")}${partesTotal.length ? ` · ${partesTotal.join(" e ")}` : ""}. Duplicados já vêm desmarcados${meta.skipped ? ` · ${plural(meta.skipped, "linha ignorada", "linhas ignoradas")}` : ""}.</p>
+    <div class="import-destination-grid">
+      <div class="field">
+        <label class="field__label" for="import-document-kind">O que este arquivo contém</label>
+        <select id="import-document-kind" class="input" data-action-select="import-document-kind">
+          <option value="account" ${documentKind === "account" ? "selected" : ""}>Extrato bancário</option>
+          <option value="card" ${documentKind === "card" ? "selected" : ""}>Fatura de cartão</option>
+        </select>
+      </div>
+      <div class="field">
+        <label class="field__label" for="import-destination">${documentKind === "card" ? "Cartão da fatura" : "Conta do extrato"}</label>
+        <select id="import-destination" class="input" data-action-select="import-destination" ${destinations.length ? "" : "disabled"}>
+          ${destinations.length
+            ? destinations.map((item) => `<option value="${item.id}" ${item.id === destinationId ? "selected" : ""}>${escapeHtml(item.name)}</option>`).join("")
+            : `<option value="">${documentKind === "card" ? "Nenhum cartão cadastrado" : "Nenhuma conta cadastrada"}</option>`}
+        </select>
+      </div>
+    </div>
+    ${!destinations.length ? `<div class="inline-error import-destination-error">${svgIcon("alertTriangle", 16)}<div><p class="inline-error__title">Cadastre ${documentKind === "card" ? "um cartão" : "uma conta"} antes de importar.</p><p class="inline-error__detail">O destino é obrigatório para manter saldos e faturas corretos.</p></div><button class="btn btn--secondary btn--sm" data-action="nav" data-tab="accounts">Cadastrar</button></div>` : ""}
+    ${meta.confidence === "baixa" ? `<div class="import-notice">${svgIcon("alertTriangle", 16)}<div><b>Confira o tipo e os valores com atenção.</b><span>O banco ou o formato da tabela não foi reconhecido com segurança. Nada será gravado antes de você confirmar.</span></div></div>` : ""}
     ${avisoPapeis.length ? `<div class="import-notice">${svgIcon("creditCard", 16)}<div>
       <b>Isto parece a fatura de um cartão.</b>
       <span>${escapeHtml(avisoPapeis.join(". "))}. As compras continuam marcadas normalmente; se você quiser importar alguma dessas linhas mesmo assim, é só marcar a caixa.</span>
@@ -27860,7 +28324,7 @@ function renderImportReview(rows) {
         <button class="checkbox ${r.include ? "checked" : ""}" data-action="import-toggle" data-id="${idx}">${r.include ? svgIcon("check", 13) : ""}</button>
         <div class="import-row__info">
           <p class="import-row__desc">${escapeHtml(r.description || (r.type === "income" ? "Receita" : "Gasto"))} ${r.duplicate ? `<span class="import-dup-tag">possível duplicata</span>` : ""}${r.roleLabel ? `<span class="import-role-tag">${escapeHtml(r.roleLabel)}</span>` : ""}</p>
-          <p class="import-row__meta">${fmtDateShort(r.date)} · ${r.type === "income" ? "Receita" : "Gasto"}${r.roleDetail ? ` · ${escapeHtml(r.roleDetail)}` : (r.categoryReason ? ` · ${escapeHtml(r.categoryReason)}` : "")}</p>
+          <p class="import-row__meta">${fmtDateShort(r.date)} · ${r.nature === "estorno" ? "Estorno" : (r.type === "income" ? "Receita" : "Gasto")}${r.page ? ` · página ${r.page}` : ""}${r.roleDetail ? ` · ${escapeHtml(r.roleDetail)}` : (r.categoryReason ? ` · ${escapeHtml(r.categoryReason)}` : "")}</p>
         </div>
         ${r.type === "expense" ? `<select class="import-cat-select" data-action-select="import-category" data-id="${idx}">
           ${state.data.categories.map((c) => `<option value="${c.id}" ${c.id === r.categoryId ? "selected" : ""}>${escapeHtml(c.name)}</option>`).join("")}
@@ -27868,7 +28332,7 @@ function renderImportReview(rows) {
         <span class="import-row__amount ${r.type === "income" ? "tx-amount--income" : ""}">${r.type === "income" ? "+" : "-"}${fmtBRL(r.amount)}</span>
       </div>`).join("")}
     </div>
-    <button class="btn btn--primary btn--block" data-ui-css="margin-top:14px" data-action="import-confirm" ${included.length === 0 ? "disabled" : ""}>Importar ${plural(included.length, "lançamento", "lançamentos")}</button>
+    <button class="btn btn--primary btn--block" data-ui-css="margin-top:14px" data-action="import-confirm" ${included.length === 0 || !destinationId ? "disabled" : ""}>Importar ${plural(included.length, "lançamento", "lançamentos")}</button>
     <button class="btn btn--ghost btn--block btn--sm" data-ui-css="margin-top:8px" data-action="nav" data-tab="rules">
       ${svgIcon("tag", 14)} Corrigindo a mesma categoria várias vezes? Crie uma regra
     </button>
@@ -31725,14 +32189,33 @@ function onClick(e) {
       render();
       break;
     }
-    case "import-cancel": state.importRows = null; state.importFilename = null; state.importError = null; render(); break;
-    case "dismiss-import-error": state.importError = null; render(); break;
+    case "import-cancel":
+      state.importRows = null; state.importFilename = null; state.importError = null;
+      state.importPendingFile = null; state.importPassword = ""; state.importDestinationId = "";
+      render();
+      break;
+    case "dismiss-import-error":
+      state.importError = null; state.importPendingFile = null; state.importPassword = ""; render(); break;
+    case "import-password-retry":
+      if (state.importPendingFile) handleStatementFile(state.importPendingFile, state.importPassword);
+      break;
     case "import-confirm": {
       const included = (state.importRows || []).filter((r) => r.include);
       const meta = (state.importRows && state.importRows.meta) || {};
-      const newTx = buildTransactionsFromRows(included, meta.format, defaultCashAccountId(), state.importFilename);
+      const documentKind = state.importDocumentKind === "card" ? "card" : "account";
+      const destinations = documentKind === "card"
+        ? (state.data.creditCards || []).filter((card) => !card.archived)
+        : (state.data.accounts || []).filter((account) => !account.archived);
+      const destinationId = destinations.some((item) => item.id === state.importDestinationId)
+        ? state.importDestinationId
+        : (destinations[0] ? destinations[0].id : "");
+      if (!destinationId) {
+        notify(documentKind === "card" ? "Cadastre ou escolha um cartão" : "Cadastre ou escolha uma conta", "warn");
+        break;
+      }
+      const newTx = buildTransactionsFromRows(included, meta.format, { documentKind, destinationId }, state.importFilename);
       setData((d) => ({ ...d, transactions: [...d.transactions, ...newTx] }));
-      state.importRows = null; state.importFilename = null;
+      state.importRows = null; state.importFilename = null; state.importDestinationId = "";
       notify(plural(newTx.length, "lançamento importado", "lançamentos importados"));
       setState({ tab: "dashboard" });
       break;
@@ -31836,6 +32319,13 @@ function defaultCashAccountId() {
   return account ? account.id : null;
 }
 
+function defaultImportDestinationId(documentKind) {
+  const list = documentKind === "card"
+    ? (state.data.creditCards || []).filter((card) => !card.archived)
+    : (state.data.accounts || []).filter((account) => !account.archived);
+  return list[0] ? list[0].id : "";
+}
+
 // [M4] Estado inicial do formulário de meta. Vira fábrica porque agora o mesmo
 // componente cria, edita e é pré-preenchido por modelo; três caminhos que
 // precisam voltar exatamente ao mesmo ponto de partida ao serem cancelados.
@@ -31924,8 +32414,12 @@ let state = {
   // impressão de estar quebrada.
   accountDangerOpen: false,
   // ---- novos recursos ----
-  importRows: null,        // linhas parseadas de OFX/CSV aguardando revisão
+  importRows: null,        // linhas parseadas de OFX/CSV/PDF aguardando revisão
   importFilename: null,
+  importDocumentKind: "account",
+  importDestinationId: "",
+  importPendingFile: null,
+  importPassword: "",
   importDragOver: false,
   importError: null,       // { title, detail }; erro visual da importação
   importLoading: false,
@@ -32687,32 +33181,50 @@ function applyQrDraftToForm(draft) {
 
 // Importação 100% offline: lê, decodifica, parseia e categoriza no navegador.
 // Qualquer falha vira um erro visual explicativo na própria tela de importação.
-async function handleStatementFile(file) {
+async function handleStatementFile(file, password) {
   state.importError = null;
   state.importLoading = true;
   state.importRows = null;
+  state.importPendingFile = typeof isPdfStatementFile === "function" && isPdfStatementFile(file) ? file : null;
   render();
 
   try {
-    const text = await readStatementFile(file);
-    const rows = prepareImportRows(text, file.name, state.data);
+    const content = await readStatementFile(file, { password: password || "" });
+    const rows = prepareImportRows(content, file.name, state.data);
+    const meta = rows.meta || {};
     state.importRows = rows;
     state.importFilename = file.name;
+    state.importDocumentKind = meta.documentKind === "card" ? "card" : "account";
+    state.importDestinationId = defaultImportDestinationId(state.importDocumentKind);
+    state.importPendingFile = null;
+    state.importPassword = "";
     state.importLoading = false;
     render();
-    const meta = rows.meta || {};
     notify(`${rows.length} lançamento${rows.length === 1 ? "" : "s"} lido${rows.length === 1 ? "" : "s"} do ${(meta.format || "arquivo").toUpperCase()}`);
   } catch (err) {
     state.importLoading = false;
     if (typeof reportSafeError === "function") reportSafeError("import", err, "import_read");
     state.importRows = null;
+    const code = err && err.code;
+    const needsPassword = code === "PDF_PASSWORD_REQUIRED" || code === "PDF_PASSWORD_INCORRECT";
+    if (!needsPassword) {
+      state.importPendingFile = null;
+      state.importPassword = "";
+    }
     state.importError = {
       title: (err && err.message) || "Não foi possível ler o arquivo.",
-      detail: err && err.code === "UNKNOWN_FORMAT"
-        ? "Formatos aceitos: .OFX e .CSV. No app do seu banco, procure por “Exportar extrato”."
-        : (err && err.code === "NO_ROWS"
-          ? "Confira se o período exportado realmente contém movimentações."
-          : "Nenhum dado foi enviado para a internet; tudo acontece no seu navegador."),
+      code,
+      detail: needsPassword
+        ? "Digite a senha abaixo. Ela será usada apenas na memória deste aparelho."
+        : (code === "UNKNOWN_FORMAT"
+          ? "Formatos aceitos: .OFX, .CSV e .PDF. No app do banco, procure por exportar extrato ou baixar fatura."
+          : (code === "PDF_NO_TEXT"
+            ? "Baixe a versão digital no app do banco. PDF escaneado ou fotografado não tem texto para selecionar."
+            : (code === "PDF_DATE_YEAR"
+              ? "O arquivo precisa mostrar o ano ou o período completo para evitar lançamentos no mês errado."
+              : (code === "NO_ROWS"
+                ? "Confira se o arquivo contém movimentações e se foi baixado diretamente do banco."
+                : "Nenhum dado foi enviado para a internet; tudo acontece no seu navegador.")))),
     };
     render();
   }
@@ -32763,7 +33275,7 @@ function renderShell() {
     <div class="sr-live" role="status" aria-live="polite" aria-atomic="true">${state.toast ? escapeHtml(state.toast) : ""}</div>
     ${state.toast ? `<div class="toast ${state.toastTone ? `toast--${state.toastTone}` : ""}" aria-hidden="true">${svgIcon(state.toastTone === "danger" || state.toastTone === "warn" ? "alertTriangle" : "checkCircle", 16)}<span>${escapeHtml(state.toast)}</span></div>` : ""}
     <input type="file" id="import-file-input" accept="application/json,.json" data-ui-css="display:none" />
-    <input type="file" id="statement-file-input" accept=".ofx,.csv,.txt,text/csv,application/x-ofx" data-ui-css="display:none" />
+    <input type="file" id="statement-file-input" accept=".ofx,.csv,.pdf,.txt,text/csv,application/x-ofx,application/pdf" data-ui-css="display:none" />
     ${state.qr.open ? renderQrModal() : ""}
     ${state.wrapped.open ? renderWrappedModal() : ""}
     ${state.categoryPickerFor ? renderCategoryPickerModal() : ""}
@@ -33243,6 +33755,7 @@ function onInput(e) {
     case "qr-amount": if (state.qr.draft) { state.qr.draft.amount = val; patchQrSaveButton(); } break;
     case "qr-estab": if (state.qr.draft) state.qr.draft.description = val; break;
     case "nlp-text": state.nlp.text = val; state.nlp.touched = true; patchNlpButton(); break;
+    case "import-password": state.importPassword = val; break;
     // O formulário pode ter sido fechado entre o keypress e o evento; guardas
     // baratas evitam um TypeError que derrubaria toda a delegação de eventos.
     case "wealth-name": if (state.wealth.form) state.wealth.form.name = val; break;
@@ -33303,6 +33816,13 @@ function onChange(e) {
     if (state.importRows && state.importRows[idx]) state.importRows[idx].categoryId = e.target.value;
     return;
   }
+  if (actionSelect === "import-document-kind") {
+    state.importDocumentKind = e.target.value === "card" ? "card" : "account";
+    state.importDestinationId = defaultImportDestinationId(state.importDocumentKind);
+    render();
+    return;
+  }
+  if (actionSelect === "import-destination") { state.importDestinationId = e.target.value; render(); return; }
   if (actionSelect === "movement-type") { state.movementFilters.type = e.target.value; state.analyticsLimit = 30; render(); return; }
   if (actionSelect === "movement-category") { state.movementFilters.categoryId = e.target.value; state.analyticsLimit = 30; render(); return; }
   if (actionSelect === "movement-account") { state.movementFilters.accountId = e.target.value; state.analyticsLimit = 30; render(); return; }
@@ -33498,6 +34018,11 @@ function onKeydown(e) {
   if (e.key === "Enter" && field === "nlp-text") {
     e.preventDefault();
     runNaturalEntryParse();
+    return;
+  }
+  if (e.key === "Enter" && field === "import-password") {
+    e.preventDefault();
+    if (state.importPendingFile) handleStatementFile(state.importPendingFile, state.importPassword);
     return;
   }
   // No editor de categoria o Enter confirma, como em qualquer formulário curto.

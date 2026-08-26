@@ -88,6 +88,14 @@ function cardStatementDueDate(card, statementKey) {
   return `${parts[0]}-${String(parts[1]).padStart(2, "0")}-${String(Math.min(card.dueDay, last)).padStart(2, "0")}`;
 }
 
+function cardStatementTransactionAmount(transaction) {
+  const t = transaction || {};
+  if (t.type === "expense") return roundMoney(t.amount);
+  const nature = t.nature || deriveTransactionNature(t);
+  if (t.type === "income" && nature === "estorno") return -roundMoney(t.amount);
+  return 0;
+}
+
 function cardStatements(data, cardId) {
   const card = creditCardById(data, cardId);
   if (!card) return [];
@@ -97,9 +105,11 @@ function cardStatements(data, cardId) {
     return map.get(key);
   };
   (data.transactions || []).forEach((t) => {
-    if (t.creditCardId !== cardId || t.type !== "expense") return;
+    if (t.creditCardId !== cardId) return;
+    const amount = cardStatementTransactionAmount(t);
+    if (!amount) return;
     const row = ensure(cardStatementKeyForDate(card, t.date));
-    row.purchases = addMoney(row.purchases, t.amount);
+    row.purchases = addMoney(row.purchases, amount);
     row.count++;
   });
   (data.cardPayments || []).forEach((p) => {
@@ -137,13 +147,15 @@ function cardLiabilityStatements(data, cardId, asOf) {
   };
 
   (data.transactions || []).forEach((t) => {
-    if (t.creditCardId !== cardId || t.type !== "expense") return;
+    if (t.creditCardId !== cardId) return;
+    const amount = cardStatementTransactionAmount(t);
+    if (!amount) return;
     const recognized = t.installmentGroupId
       ? groupStarts.get(t.installmentGroupId) <= limit
       : t.date <= limit;
     if (!recognized) return;
     const row = ensure(cardStatementKeyForDate(card, t.date));
-    row.purchases = addMoney(row.purchases, t.amount);
+    row.purchases = addMoney(row.purchases, amount);
     row.count++;
   });
 

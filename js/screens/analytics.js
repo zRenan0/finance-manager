@@ -30,7 +30,7 @@ function renderMovementFilters() {
   const f = state.movementFilters;
   const sourceOptions = [
     ["", "Todas as origens"], ["manual", "Manual"], ["import-ofx", "Extrato OFX"],
-    ["import-csv", "Extrato CSV"], ["nlp", "Lançamento inteligente"], ["qrcode-pix", "QR Pix"],
+    ["import-csv", "Extrato CSV"], ["import-pdf", "PDF bancário"], ["nlp", "Lançamento inteligente"], ["qrcode-pix", "QR Pix"],
     ["qrcode-nfce", "QR nota fiscal"], ["transfer", "Transferência"], ["card-payment", "Pagamento de fatura"],
   ];
   return `<div class="movement-filters ${state.movementFiltersOpen ? "movement-filters--open" : ""}">

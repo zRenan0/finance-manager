@@ -614,6 +614,7 @@ const TRANSACTION_ORIGIN_LABELS = Object.freeze({
   manual: "Lançamento manual",
   "import-ofx": "Extrato OFX",
   "import-csv": "Extrato CSV",
+  "import-pdf": "PDF bancário",
   nlp: "Lançamento inteligente",
   "goal-upfront": "Aporte inicial de meta",
   "qrcode-pix": "Pix lido por QR Code",

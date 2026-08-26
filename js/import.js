@@ -1,4 +1,4 @@
-// import.js. Módulo de importação offline de extratos bancários (OFX / CSV)
+// import.js. Módulo de importação offline de extratos e faturas (OFX / CSV / PDF)
 // ------------------------------------------------------------------------------
 // 100% client-side: o arquivo é lido pelo FileReader, parseado em memória e
 // gravado direto no IndexedDB via storage.js. NENHUM byte é enviado a servidor.
@@ -127,15 +127,19 @@ function categorySuggestionConfidence(description, dataOrCategories) {
 // de substituição, refazemos em windows-1252.
 // A decodificação (UTF-8 → windows-1252) vive em utils.js/readFileAsText e é
 // compartilhada com o restore de backup; antes havia duas implementações.
-async function readStatementFile(file) {
+async function readStatementFile(file, options) {
   if (!file) throw new ImportError("READ_FAIL", "Nenhum arquivo selecionado.");
   if (file.size === 0) throw new ImportError("EMPTY", "O arquivo está vazio.");
   if (file.size > MAX_IMPORT_BYTES) {
     throw new ImportError("TOO_LARGE", "Arquivo muito grande (limite de 12 MB). Exporte um período menor no seu banco.");
   }
   try {
+    if (typeof isPdfStatementFile === "function" && isPdfStatementFile(file)) {
+      return await readPdfStatementFile(file, options && options.password);
+    }
     return await readFileAsText(file);
   } catch (err) {
+    if (err instanceof ImportError) throw err;
     throw new ImportError("READ_FAIL", "Não foi possível ler o arquivo. Tente selecioná-lo novamente.", String(err));
   }
 }
@@ -273,7 +277,7 @@ function parseStatementFile(text, filename) {
   if (!text || !text.trim()) throw new ImportError("EMPTY", "O arquivo está vazio.");
   const format = detectFormat(text, filename);
   if (!format) {
-    throw new ImportError("UNKNOWN_FORMAT", "Formato não reconhecido. Envie um extrato .OFX ou .CSV exportado do seu banco.");
+    throw new ImportError("UNKNOWN_FORMAT", "Formato não reconhecido. Envie um arquivo .OFX, .CSV ou .PDF exportado do seu banco.");
   }
   const parsed = format === "ofx" ? parseOfxStatement(text) : parseCsvStatement(text);
   if (parsed.rows.length === 0) {
@@ -307,8 +311,11 @@ function markDuplicates(rows, existingTx) {
 
 // Monta as linhas prontas para a tela de revisão (com categoria já sugerida).
 
-function prepareImportRows(rawText, filename, data) {
-  const { rows, format, skipped } = parseStatementFile(rawText, filename);
+function prepareImportRows(rawFile, filename, data) {
+  const parsed = rawFile && typeof rawFile === "object" && rawFile.format === "pdf"
+    ? rawFile
+    : parseStatementFile(rawFile, filename);
+  const { rows, format, skipped } = parsed;
   const withDup = markDuplicates(rows, data.transactions);
   const prepared = withDup.map((r) => {
     // O papel da linha vem antes da categoria: não adianta perguntar em que
@@ -327,9 +334,16 @@ function prepareImportRows(rawText, filename, data) {
       categoryReason: suggestion ? suggestion.reason : null,
     };
   }).sort((a, b) => (a.date < b.date ? 1 : -1));
+  const roleCounts = prepared.reduce((count, r) => (r.role ? { ...count, [r.role]: (count[r.role] || 0) + 1 } : count), {});
+  const filenameLooksLikeCard = /\b(fatura|cartao|card)\b/.test(normalizeForMatch(filename || ""));
+  const documentKind = parsed.documentKind || (filenameLooksLikeCard || roleCounts.carryover ? "card" : "account");
   prepared.meta = {
-    format, skipped, total: rows.length,
-    roles: prepared.reduce((count, r) => (r.role ? { ...count, [r.role]: (count[r.role] || 0) + 1 } : count), {}),
+    format, skipped, total: rows.length, documentKind,
+    bank: parsed.bank || null,
+    profile: parsed.profile || null,
+    confidence: parsed.confidence || "alta",
+    pageCount: parsed.pageCount || null,
+    roles: roleCounts,
   };
   return prepared;
 }
@@ -337,19 +351,27 @@ function prepareImportRows(rawText, filename, data) {
 // ------------------------------------------------------------------------------
 // GRAVAÇÃO; transforma as linhas revisadas em transações e persiste no IndexedDB
 // ------------------------------------------------------------------------------
-function buildTransactionsFromRows(rows, format, accountId, filename) {
-  const source = format === "ofx" ? "import-ofx" : "import-csv";
+function buildTransactionsFromRows(rows, format, destination, filename) {
+  const settings = destination && typeof destination === "object"
+    ? destination
+    : { documentKind: "account", destinationId: destination || null };
+  const documentKind = settings.documentKind === "card" ? "card" : "account";
+  const destinationId = settings.destinationId || null;
+  const source = format === "ofx" ? "import-ofx" : (format === "pdf" ? "import-pdf" : "import-csv");
+  const label = source === "import-ofx" ? "Extrato OFX" : (source === "import-pdf" ? "PDF bancário" : "Extrato CSV");
   return rows.map((r) => {
     const tx = makeTransaction({
       type: r.type,
       amount: r.amount,
       categoryId: r.type === "expense" ? (r.categoryId || "outros") : "outros",
       date: r.date,
-      payment: r.type === "expense" ? "Débito" : "Outro",
+      payment: documentKind === "card" ? "Crédito" : (r.type === "expense" ? "Débito" : "Outro"),
       description: r.description,
       source,
-      origin: { channel: source, label: source === "import-ofx" ? "Extrato OFX" : "Extrato CSV", reference: filename || null, importedAt: new Date().toISOString() },
-      accountId: accountId || null,
+      origin: { channel: source, label, reference: filename || null, importedAt: new Date().toISOString() },
+      accountId: documentKind === "account" ? destinationId : null,
+      creditCardId: documentKind === "card" ? destinationId : null,
+      nature: r.nature || (documentKind === "card" && r.type === "income" ? "estorno" : null),
     });
     // A linha veio desmarcada e a pessoa marcou de volta. Foi decisão dela, e
     // a caixa de revisão não pode recebê-la de novo perguntando a mesma coisa

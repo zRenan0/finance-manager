@@ -5,6 +5,7 @@ const MOVEMENT_SOURCE_META = Object.freeze({
   manual: { label: "Manual", icon: "pencil" },
   "import-ofx": { label: "Extrato OFX", icon: "upload" },
   "import-csv": { label: "Extrato CSV", icon: "upload" },
+  "import-pdf": { label: "PDF bancário", icon: "file" },
   nlp: { label: "Lançamento inteligente", icon: "sparkles" },
   "goal-upfront": { label: "Meta", icon: "target" },
   "qrcode-pix": { label: "QR Pix", icon: "scan" },

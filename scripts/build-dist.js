@@ -55,7 +55,7 @@ const DIST = path.join(ROOT, "dist");
 // dentro da pasta `dist/`.
 const ARQUIVOS = ["landing.html", "manifest.webmanifest", "service-worker.js"];
 const RENOMEADOS = { "index.html": "app.html" };
-const PASTAS = ["css", "icons", "fonts"];
+const PASTAS = ["css", "icons", "fonts", "vendor"];
 // De `js/`, só o que o `index.html` carrega. O resto são as fontes que o build
 // concatena em `app.generated.js`.
 const JS_PUBLICADOS = ["js/boot.js", "js/landing-boot.js", "js/landing.js", "js/modules"];

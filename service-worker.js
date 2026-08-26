@@ -33,10 +33,10 @@
 // deformada, valor solto na lista, ações de avisos sem estilo e a grade do
 // cartão de exclusão que o Safari ignorava.
 // v57: o importador aprendeu a ler fatura de cartão (o "Pagamento recebido"
-// que entrava como receita), o dicionário de categorias cresceu e o extrato
-// passou a sair em PDF. É tudo lógica dentro do app.generated.js, que só chega
-// ao aparelho instalado quando o balde do cache é trocado.
-const VERSION = "v57";
+// que entrava como receita), o extrato passou a sair em PDF e agora faturas e
+// extratos em PDF com texto também podem entrar. A leitura depende dos arquivos
+// locais do PDF.js, incluídos no mesmo balde de cache.
+const VERSION = "v58";
 const BUILD_ID = VERSION;
 const CACHE_NAME = "financas-cache-" + VERSION;
 // A PÁGINA COMERCIAL TEM CACHE PRÓPRIO.
@@ -85,6 +85,9 @@ const APP_SHELL = [
   "js/modules/dynamic-styles.js",
   "js/modules/test-bridge.js",
   "js/modules/app.generated.js",
+  "vendor/pdfjs/pdf.min.mjs",
+  "vendor/pdfjs/pdf.worker.min.mjs",
+  "vendor/pdfjs/LICENSE",
   "icons/icon-192.png",
   "icons/icon-512.png",
 ];

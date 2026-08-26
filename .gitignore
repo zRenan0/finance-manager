@@ -4,6 +4,7 @@ node_modules/
 .netlify/
 coverage/
 dist/
+vendor/
 *.log
 .env
 .env.*

@@ -2,6 +2,20 @@
 
 ## Não publicado
 
+### Faturas e extratos em PDF agora entram no app
+
+- **A importação aceita PDF com texto selecionável.** A leitura usa PDF.js do
+  próprio site e acontece somente no navegador. Arquivos escaneados recebem uma
+  mensagem específica, sem envio para OCR ou qualquer serviço externo.
+- **Santander é reconhecido desde a primeira versão.** O leitor identifica
+  fatura ou extrato, encontra linhas por data e valor e também possui uma leitura
+  por estrutura para PDFs digitais de outros bancos.
+- **A revisão exige o destino correto.** Fatura vai para um cartão escolhido e
+  extrato vai para uma conta escolhida. Compras, entradas e estornos conservam
+  seus efeitos corretos nos saldos, nas faturas e nas análises.
+- **PDF protegido pode ser aberto com senha.** A senha permanece apenas na
+  memória até a leitura terminar ou ser cancelada.
+
 ### A fatura do cartão parava de virar receita
 
 - **"Pagamento recebido" não é dinheiro entrando.** Na fatura do Nubank (e de

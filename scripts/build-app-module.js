@@ -25,6 +25,7 @@ const SOURCES = Object.freeze([
   "js/charts.js",
   "js/pdf.js",
   "js/import.js",
+  "js/pdf-import.js",
   "js/nlp.js",
   "js/score.js",
   "js/metrics.js",

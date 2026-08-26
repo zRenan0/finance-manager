@@ -1736,14 +1736,33 @@ function onClick(e) {
       render();
       break;
     }
-    case "import-cancel": state.importRows = null; state.importFilename = null; state.importError = null; render(); break;
-    case "dismiss-import-error": state.importError = null; render(); break;
+    case "import-cancel":
+      state.importRows = null; state.importFilename = null; state.importError = null;
+      state.importPendingFile = null; state.importPassword = ""; state.importDestinationId = "";
+      render();
+      break;
+    case "dismiss-import-error":
+      state.importError = null; state.importPendingFile = null; state.importPassword = ""; render(); break;
+    case "import-password-retry":
+      if (state.importPendingFile) handleStatementFile(state.importPendingFile, state.importPassword);
+      break;
     case "import-confirm": {
       const included = (state.importRows || []).filter((r) => r.include);
       const meta = (state.importRows && state.importRows.meta) || {};
-      const newTx = buildTransactionsFromRows(included, meta.format, defaultCashAccountId(), state.importFilename);
+      const documentKind = state.importDocumentKind === "card" ? "card" : "account";
+      const destinations = documentKind === "card"
+        ? (state.data.creditCards || []).filter((card) => !card.archived)
+        : (state.data.accounts || []).filter((account) => !account.archived);
+      const destinationId = destinations.some((item) => item.id === state.importDestinationId)
+        ? state.importDestinationId
+        : (destinations[0] ? destinations[0].id : "");
+      if (!destinationId) {
+        notify(documentKind === "card" ? "Cadastre ou escolha um cartão" : "Cadastre ou escolha uma conta", "warn");
+        break;
+      }
+      const newTx = buildTransactionsFromRows(included, meta.format, { documentKind, destinationId }, state.importFilename);
       setData((d) => ({ ...d, transactions: [...d.transactions, ...newTx] }));
-      state.importRows = null; state.importFilename = null;
+      state.importRows = null; state.importFilename = null; state.importDestinationId = "";
       notify(plural(newTx.length, "lançamento importado", "lançamentos importados"));
       setState({ tab: "dashboard" });
       break;
