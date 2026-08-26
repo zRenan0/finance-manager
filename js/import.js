@@ -329,6 +329,10 @@ function prepareImportRows(rawFile, filename, data) {
       roleLabel: role ? role.label : null,
       roleDetail: role ? role.detail : null,
       include: !r.duplicate && !(role && role.skip),
+      defaultInclude: !r.duplicate && !(role && role.skip),
+      includeTouched: false,
+      importAs: "transaction",
+      otherAccountId: "",
       categoryId: suggestion ? suggestion.categoryId : null,
       confidence: suggestion ? suggestion.confidence : "alta",
       categoryReason: suggestion ? suggestion.reason : null,
@@ -381,6 +385,89 @@ function buildTransactionsFromRows(rows, format, destination, filename) {
     }
     return tx;
   });
+}
+
+// Marca a ponta que já está representada por uma transferência criada na
+// importação da outra conta. `defaultInclude` guarda a decisão original de
+// duplicidade/papel da linha; assim trocar a conta de destino não transforma
+// silenciosamente uma duplicata antiga em lançamento selecionado.
+function applyRecordedTransferMatches(rows, data, destinationId) {
+  const source = Array.isArray(rows) ? rows : [];
+  const prepared = source.map((row) => {
+    const defaultInclude = Object.prototype.hasOwnProperty.call(row, "defaultInclude")
+      ? !!row.defaultInclude
+      : !!row.include;
+    const result = destinationId
+      ? resolveRecordedAccountTransfer(row, destinationId, (data && data.accountTransfers) || [])
+      : { status: "none", matches: [], transfer: null };
+    const next = {
+      ...row,
+      defaultInclude,
+      recordedTransferStatus: result.status,
+      recordedTransferId: result.transfer ? result.transfer.id : null,
+      recordedTransferMatches: result.matches.map((item) => item.id),
+    };
+    if (!row.includeTouched) next.include = result.status === "unique" ? false : defaultInclude;
+    return next;
+  });
+  if (rows && rows.meta) prepared.meta = rows.meta;
+  return prepared;
+}
+
+function importOriginMeta(format, filename, transfer) {
+  const source = format === "ofx" ? "import-ofx" : (format === "pdf" ? "import-pdf" : "import-csv");
+  const fileLabel = source === "import-ofx" ? "Extrato OFX" : (source === "import-pdf" ? "PDF bancário" : "Extrato CSV");
+  return transfer
+    ? { channel: "transfer", label: `Transferência importada de ${fileLabel}`, reference: filename || null, importedAt: new Date().toISOString() }
+    : { channel: source, label: fileLabel, reference: filename || null, importedAt: new Date().toISOString() };
+}
+
+function importTransferAccounts(row, statementAccountId) {
+  if (!row || !statementAccountId || !row.otherAccountId) return null;
+  if (row.type === "expense") return { fromAccountId: statementAccountId, toAccountId: row.otherAccountId };
+  if (row.type === "income") return { fromAccountId: row.otherAccountId, toAccountId: statementAccountId };
+  return null;
+}
+
+// Constrói os dois tipos de registro sem misturá-los. O chamador grava o
+// resultado numa única mutação, evitando um intervalo em que uma transação já
+// sumiu mas a transferência ainda não existe.
+function buildImportRecordsFromRows(rows, format, destination, filename, accounts) {
+  const settings = destination && typeof destination === "object"
+    ? destination
+    : { documentKind: "account", destinationId: destination || null };
+  const included = (rows || []).filter((row) => row && row.include !== false);
+  const transferRows = included.filter((row) => row.importAs === "transfer");
+  const transactionRows = included.filter((row) => row.importAs !== "transfer");
+  const transactions = buildTransactionsFromRows(transactionRows, format, settings, filename);
+  if (!transferRows.length) return { transactions, accountTransfers: [] };
+  if (settings.documentKind !== "account") {
+    throw new ImportError("IMPORT_TRANSFER_DOCUMENT", "Transferências entre contas só podem vir de um extrato bancário.");
+  }
+
+  const activeAccounts = (accounts || []).filter((account) => account && !account.archived);
+  const activeIds = new Set(activeAccounts.map((account) => account.id));
+  if (!activeIds.has(settings.destinationId) || activeIds.size < 2) {
+    throw new ImportError("IMPORT_TRANSFER_ACCOUNT", "Cadastre e escolha duas contas ativas para registrar a transferência.");
+  }
+
+  const accountTransfers = transferRows.map((row) => {
+    const pair = importTransferAccounts(row, settings.destinationId);
+    if (!pair || pair.fromAccountId === pair.toAccountId || !activeIds.has(pair.fromAccountId) || !activeIds.has(pair.toAccountId)) {
+      throw new ImportError("IMPORT_TRANSFER_ACCOUNT", "Escolha outra conta ativa para a transferência.");
+    }
+    const transfer = makeAccountTransfer({
+      ...pair,
+      amount: row.amount,
+      date: row.date,
+      description: row.description || "Transferência",
+      origin: importOriginMeta(format, filename, true),
+      sourceTransactionIds: Array.isArray(row.sourceTransactionIds) ? row.sourceTransactionIds : [],
+    }, activeAccounts);
+    if (!transfer) throw new ImportError("IMPORT_TRANSFER_ACCOUNT", "Não foi possível montar a transferência com as contas escolhidas.");
+    return transfer;
+  });
+  return { transactions, accountTransfers };
 }
 
 // ------------------------------------------------------------------------------

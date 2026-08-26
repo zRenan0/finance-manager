@@ -18,6 +18,81 @@ function removeTransactionsWithIntegrity(data, ids) {
   };
 }
 
+function transferConversionError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+// Substitui uma ou duas transações comuns por um único movimento interno. Esta
+// é a fronteira que garante que marcar "transferência" nunca produza só uma
+// etiqueta em cima de gasto ou renda.
+function convertTransactionToAccountTransfer(data, transactionId, draft) {
+  const source = data || {};
+  const input = draft || {};
+  const transaction = (source.transactions || []).find((item) => item.id === transactionId);
+  if (!transaction) throw transferConversionError("TRANSFER_TRANSACTION_MISSING", "O lançamento não existe mais.");
+
+  const activeAccounts = (source.accounts || []).filter((account) => account && !account.archived);
+  const activeIds = new Set(activeAccounts.map((account) => account.id));
+  const fromAccountId = input.fromAccountId || "";
+  const toAccountId = input.toAccountId || "";
+  if (!activeIds.has(fromAccountId) || !activeIds.has(toAccountId) || fromAccountId === toAccountId) {
+    throw transferConversionError("TRANSFER_ACCOUNT_INVALID", "Escolha duas contas ativas e diferentes.");
+  }
+
+  const amount = input.amount == null ? transaction.amount : roundMoney(input.amount);
+  if (!(amount > 0) || !moneyWithinMax(amount)) {
+    throw transferConversionError("TRANSFER_AMOUNT_INVALID", "Informe um valor válido para a transferência.");
+  }
+  const date = isRealIsoDate(String(input.date || "")) ? input.date : transaction.date;
+  const anchor = { ...transaction, amount, date, description: input.description == null ? transaction.description : input.description };
+  const linkedSideMatches = transaction.type === "expense"
+    ? fromAccountId === transaction.accountId
+    : toAccountId === transaction.accountId;
+  const otherAccountId = fromAccountId === transaction.accountId ? toAccountId
+    : (toAccountId === transaction.accountId ? fromAccountId : "");
+  const resolution = linkedSideMatches && otherAccountId
+    ? resolveOppositeTransferTransaction(anchor, source.transactions, { otherAccountId })
+    : { status: "none", matches: [], transaction: null };
+
+  let counterpart = null;
+  if (input.counterpartId && input.counterpartId !== "none") {
+    counterpart = resolution.matches.find((item) => item.id === input.counterpartId) || null;
+    if (!counterpart) throw transferConversionError("TRANSFER_COUNTERPART_INVALID", "A outra ponta escolhida não corresponde mais ao lançamento.");
+  } else if (input.counterpartId !== "none" && resolution.status === "unique") {
+    counterpart = resolution.transaction;
+  } else if (input.counterpartId !== "none" && resolution.status === "ambiguous") {
+    throw transferConversionError("TRANSFER_COUNTERPART_AMBIGUOUS", "Escolha qual lançamento representa a outra ponta da transferência.");
+  }
+
+  const removedIds = [transaction.id, counterpart && counterpart.id].filter(Boolean);
+  const primaryOrigin = transaction.origin || (counterpart && counterpart.origin) || null;
+  const transfer = makeAccountTransfer({
+    fromAccountId,
+    toAccountId,
+    amount,
+    date,
+    description: anchor.description || "Transferência",
+    sourceTransactionIds: removedIds,
+    origin: {
+      channel: "transfer",
+      label: primaryOrigin && primaryOrigin.label ? `Conversão de ${primaryOrigin.label}` : "Conversão de lançamento",
+      reference: primaryOrigin && primaryOrigin.reference ? primaryOrigin.reference : null,
+      importedAt: primaryOrigin && primaryOrigin.importedAt ? primaryOrigin.importedAt : new Date().toISOString(),
+    },
+  }, activeAccounts);
+  if (!transfer) throw transferConversionError("TRANSFER_ACCOUNT_INVALID", "Não foi possível montar a transferência com essas contas.");
+
+  const cleaned = removeTransactionsWithIntegrity(source, removedIds);
+  return {
+    data: { ...cleaned, accountTransfers: [...(cleaned.accountTransfers || []), transfer] },
+    transfer,
+    removedIds,
+    counterpartStatus: resolution.status,
+  };
+}
+
 // actions.js: traduz cliques da interface em mudanças de estado e comandos.
 // Carregado antes de app.js; as dependências são consultadas somente no clique.
 function commitDebtPayment(p) {
@@ -1740,7 +1815,10 @@ function onClick(e) {
     case "statement-dropzone-click": document.getElementById("statement-file-input").click(); break;
     case "import-toggle": {
       const idx = Number(id);
-      if (state.importRows && state.importRows[idx]) state.importRows[idx].include = !state.importRows[idx].include;
+      if (state.importRows && state.importRows[idx]) {
+        state.importRows[idx].include = !state.importRows[idx].include;
+        state.importRows[idx].includeTouched = true;
+      }
       render();
       break;
     }
@@ -1768,10 +1846,29 @@ function onClick(e) {
         notify(documentKind === "card" ? "Cadastre ou escolha um cartão" : "Cadastre ou escolha uma conta", "warn");
         break;
       }
-      const newTx = buildTransactionsFromRows(included, meta.format, { documentKind, destinationId }, state.importFilename);
-      setData((d) => ({ ...d, transactions: [...d.transactions, ...newTx] }));
+      let records = null;
+      try {
+        records = buildImportRecordsFromRows(included, meta.format, { documentKind, destinationId }, state.importFilename, state.data.accounts);
+      } catch (error) {
+        if (error && error.code === "IMPORT_TRANSFER_ACCOUNT") {
+          notify(error.message || "Escolha a outra conta da transferência", "warn");
+          render();
+          break;
+        }
+        throw error;
+      }
+      const newTx = records.transactions;
+      const newTransfers = records.accountTransfers;
+      setData((d) => ({
+        ...d,
+        transactions: [...d.transactions, ...newTx],
+        accountTransfers: [...(d.accountTransfers || []), ...newTransfers],
+      }));
       state.importRows = null; state.importFilename = null; state.importDestinationId = "";
-      notify(plural(newTx.length, "lançamento importado", "lançamentos importados"));
+      const importedParts = [];
+      if (newTx.length) importedParts.push(plural(newTx.length, "lançamento importado", "lançamentos importados"));
+      if (newTransfers.length) importedParts.push(plural(newTransfers.length, "transferência registrada", "transferências registradas"));
+      notify(importedParts.join(" e "));
       setState({ tab: "dashboard" });
       break;
     }

@@ -919,10 +919,12 @@ async function handleStatementFile(file, password) {
     const content = await readStatementFile(file, { password: password || "" });
     const rows = prepareImportRows(content, file.name, state.data);
     const meta = rows.meta || {};
-    state.importRows = rows;
     state.importFilename = file.name;
     state.importDocumentKind = meta.documentKind === "card" ? "card" : "account";
     state.importDestinationId = defaultImportDestinationId(state.importDocumentKind);
+    state.importRows = state.importDocumentKind === "account"
+      ? applyRecordedTransferMatches(rows, state.data, state.importDestinationId)
+      : rows;
     state.importPendingFile = null;
     state.importPassword = "";
     state.importLoading = false;
@@ -1543,13 +1545,57 @@ function onChange(e) {
     if (state.importRows && state.importRows[idx]) state.importRows[idx].categoryId = e.target.value;
     return;
   }
-  if (actionSelect === "import-document-kind") {
-    state.importDocumentKind = e.target.value === "card" ? "card" : "account";
-    state.importDestinationId = defaultImportDestinationId(state.importDocumentKind);
+  if (actionSelect === "import-record-type") {
+    const idx = Number(e.target.dataset.id);
+    const row = state.importRows && state.importRows[idx];
+    const activeAccounts = (state.data.accounts || []).filter((account) => !account.archived);
+    if (!row) return;
+    const canTransfer = state.importDocumentKind === "account" && activeAccounts.length > 1;
+    row.importAs = e.target.value === "transfer" && canTransfer ? "transfer" : "transaction";
+    row.otherAccountId = row.importAs === "transfer" && activeAccounts.some((account) => account.id === row.otherAccountId && account.id !== state.importDestinationId)
+      ? row.otherAccountId
+      : "";
+    if (row.importAs === "transfer") {
+      row.include = true;
+      row.includeTouched = true;
+    }
     render();
     return;
   }
-  if (actionSelect === "import-destination") { state.importDestinationId = e.target.value; render(); return; }
+  if (actionSelect === "import-transfer-account") {
+    const idx = Number(e.target.dataset.id);
+    const row = state.importRows && state.importRows[idx];
+    if (row) row.otherAccountId = e.target.value;
+    render();
+    return;
+  }
+  if (actionSelect === "import-document-kind") {
+    state.importDocumentKind = e.target.value === "card" ? "card" : "account";
+    state.importDestinationId = defaultImportDestinationId(state.importDocumentKind);
+    if (state.importRows) {
+      state.importRows.forEach((row) => {
+        row.importAs = "transaction";
+        row.otherAccountId = "";
+      });
+      state.importRows = state.importDocumentKind === "account"
+        ? applyRecordedTransferMatches(state.importRows, state.data, state.importDestinationId)
+        : applyRecordedTransferMatches(state.importRows, state.data, "");
+    }
+    render();
+    return;
+  }
+  if (actionSelect === "import-destination") {
+    state.importDestinationId = e.target.value;
+    if (state.importRows) {
+      state.importRows.forEach((row) => {
+        if (row.importAs === "transfer" && row.otherAccountId === state.importDestinationId) row.otherAccountId = "";
+      });
+      state.importRows = state.importDocumentKind === "account"
+        ? applyRecordedTransferMatches(state.importRows, state.data, state.importDestinationId)
+        : state.importRows;
+    }
+    render(); return;
+  }
   if (actionSelect === "movement-type") { state.movementFilters.type = e.target.value; state.analyticsLimit = 30; render(); return; }
   if (actionSelect === "movement-category") { state.movementFilters.categoryId = e.target.value; state.analyticsLimit = 30; render(); return; }
   if (actionSelect === "movement-account") { state.movementFilters.accountId = e.target.value; state.analyticsLimit = 30; render(); return; }

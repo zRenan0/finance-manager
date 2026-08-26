@@ -115,6 +115,66 @@ function reviewDescriptionKey(value) {
   return normalizeText(value).replace(/[^a-z0-9 ]/g, "").replace(/\b(transferencia|pix|ted|doc|pagamento|recebido|enviado)\b/g, "").replace(/\s+/g, " ").trim();
 }
 
+// A mesma janela usada pela Caixa de revisão também protege a importação da
+// segunda conta e a conversão pelo editor. Um Pix pode aparecer num banco no
+// dia seguinte, mas uma janela grande demais passa a juntar pagamentos iguais
+// que não têm relação entre si.
+const TRANSFER_MATCH_WINDOW_DAYS = 2;
+
+function hasTransferHint(value) {
+  return /\b(pix|ted|doc|transf)/.test(normalizeText(value));
+}
+
+function transferDatesMatch(left, right) {
+  return daysBetweenIso(left, right) <= TRANSFER_MATCH_WINDOW_DAYS;
+}
+
+// Procura a outra transação comum que representa a ponta oposta de uma
+// transferência. A função não escolhe em caso de empate: quem chama decide se
+// mostra uma sugestão ou pede a escolha da pessoa.
+function resolveOppositeTransferTransaction(transaction, transactions, options) {
+  const anchor = transaction || {};
+  const opts = options || {};
+  const matches = (transactions || []).filter((candidate) => {
+    if (!candidate || candidate.id === anchor.id) return false;
+    if (!anchor.accountId || !candidate.accountId || candidate.accountId === anchor.accountId) return false;
+    if (opts.otherAccountId && candidate.accountId !== opts.otherAccountId) return false;
+    if (candidate.type === anchor.type) return false;
+    if (moneyToCents(candidate.amount) !== moneyToCents(anchor.amount)) return false;
+    if (!transferDatesMatch(candidate.date, anchor.date)) return false;
+    if (!hasTransferHint(anchor.description) && !hasTransferHint(candidate.description)) return false;
+    if (candidate.creditCardId || candidate.goalId || candidate.debtId || candidate.installmentGroupId) return false;
+    return true;
+  });
+  return {
+    status: matches.length === 0 ? "none" : (matches.length === 1 ? "unique" : "ambiguous"),
+    matches,
+    transaction: matches.length === 1 ? matches[0] : null,
+  };
+}
+
+// A segunda importação não procura outra transação: procura um registro de
+// transferência que já representa justamente aquela ponta. O sinal da linha
+// informa de que lado a conta do extrato deve aparecer.
+function resolveRecordedAccountTransfer(row, statementAccountId, transfers) {
+  const item = row || {};
+  const matches = (transfers || []).filter((transfer) => {
+    if (!transfer || !statementAccountId) return false;
+    const accountMatches = item.type === "expense"
+      ? transfer.fromAccountId === statementAccountId
+      : (item.type === "income" && transfer.toAccountId === statementAccountId);
+    if (!accountMatches) return false;
+    if (moneyToCents(transfer.amount) !== moneyToCents(item.amount)) return false;
+    if (!transferDatesMatch(transfer.date, item.date)) return false;
+    return hasTransferHint(item.description) || hasTransferHint(transfer.description);
+  });
+  return {
+    status: matches.length === 0 ? "none" : (matches.length === 1 ? "unique" : "ambiguous"),
+    matches,
+    transfer: matches.length === 1 ? matches[0] : null,
+  };
+}
+
 function buildTransactionReviewModel(data) {
   const txs = [...(data.transactions || [])].sort((a, b) => a.date.localeCompare(b.date) || String(a.createdAt).localeCompare(String(b.createdAt)));
   const issues = [];

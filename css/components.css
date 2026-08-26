@@ -829,6 +829,10 @@
 }
 .import-row:last-child { border-bottom: none; }
 .import-row--off { opacity: 0.42; }
+.import-row--transfer {
+  margin-inline: -8px; padding-inline: 8px; border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--brand) 7%, transparent);
+}
 .import-row__info { flex: 1 1 150px; min-width: 0; }
 .import-row__desc { font-size: 13.5px; font-weight: 600; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .import-row__meta { font-size: 11.5px; color: var(--ink-faint); margin: 3px 0 0; }
@@ -843,6 +847,20 @@
   color: var(--brand); background: var(--brand-soft); padding: 2px 7px; border-radius: 999px; margin-left: 7px;
 }
 .import-row__amount { font-size: 13.5px; font-weight: 650; flex-shrink: 0; }
+.import-row__controls {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px;
+  flex: 1 0 100%; padding-left: 35px;
+}
+.import-kind-select, .import-transfer-select {
+  min-width: 0; width: 100%; font-size: 12px; border: 1px solid var(--border);
+  border-radius: 9px; background: var(--paper); color: var(--ink); padding: 8px;
+}
+.import-row__controls .import-cat-select { max-width: none; width: 100%; }
+.import-row__error {
+  flex: 1 0 100%; margin: -2px 0 0; padding-left: 35px;
+  color: var(--negative); font-size: 11.5px; font-weight: 650;
+}
+.import-transfer-select.input--error { border-color: var(--negative); }
 .import-cat-select {
   font-size: 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--paper);
   color: var(--ink); padding: 7px; max-width: 128px; flex: 0 1 116px; min-width: 88px;
@@ -853,6 +871,7 @@
   .import-password .btn { width: 100%; }
   .import-destination-error { flex-wrap: wrap; }
   .import-destination-error .btn { width: 100%; }
+  .import-row__controls { grid-template-columns: minmax(0, 1fr); }
 }
 .checkbox {
   width: 24px; height: 24px; border-radius: 8px; border: 2px solid var(--border); flex-shrink: 0;
