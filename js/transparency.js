@@ -35,7 +35,12 @@ function calculationExplanation(data, id, context) {
       summary: accounts ? `O saldo calculado agora é ${fmtBRL(accounts.cash)}.` : "O saldo usa as movimentações registradas.",
       formula: "Saldos iniciais + receitas − despesas − transferências enviadas + transferências recebidas − pagamentos de fatura + ajustes.",
       premises: [
-        "Cada conta considera apenas movimentos a partir da data de abertura informada.",
+        // A premissa genérica não bastava: ela dizia a REGRA sem dizer o
+        // EFEITO. Quando existe algo de fora, a frase passa a trazer o número,
+        // que é o que permite conferir em vez de acreditar.
+        accounts && accounts.preOpening && accounts.preOpening.count
+          ? `Cada conta considera apenas movimentos a partir da data de abertura informada. Hoje ${accounts.preOpening.count === 1 ? "há 1 lançamento anterior" : `há ${accounts.preOpening.count} lançamentos anteriores`} a essas datas, somando ${fmtBRL(accounts.preOpening.amount)}, fora deste saldo: o saldo inicial informado já deveria contê-los.`
+          : "Cada conta considera apenas movimentos a partir da data de abertura informada.",
         "Compras ligadas a um cartão reduzem o caixa somente quando a fatura é paga.",
         "Lançamentos antigos sem conta permanecem no histórico para não apagar dinheiro já registrado.",
       ],

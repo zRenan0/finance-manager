@@ -236,6 +236,16 @@ function renderHeroCard(m) {
     ${rendaAReceber > 0
       ? `<p class="hero-reserved">${svgIcon("calendar", 14)} ${fmtBRL(rendaAReceber)} de renda declarada ainda não lançada neste mês</p>`
       : ""}
+    ${/* O NÚMERO PRECISA CONFESSAR O QUE NÃO CONTA.
+          Lançamento anterior à abertura da conta fica fora do saldo de
+          propósito: o saldo inicial já embute o que veio antes dele. Só que ele
+          continua entrando em "Despesas do mês", logo acima, e o painel passava
+          a se contradizer em silêncio — a despesa aparecia e o saldo não se
+          mexia. Dizer aqui, ao lado do número, é o que transforma isso de
+          suspeita de erro em informação. */
+      accounts.preOpening && accounts.preOpening.count
+      ? `<p class="hero-reserved">${svgIcon("info", 14)} ${plural(accounts.preOpening.count, "lançamento anterior", "lançamentos anteriores")} à abertura das contas ${accounts.preOpening.count === 1 ? "está" : "estão"} fora deste saldo (${fmtBRL(accounts.preOpening.amount)})</p>`
+      : ""}
     <div class="hero-chips">
       <div class="hero-chip hero-chip--in">${svgIcon("arrowUpRight", 17)}<div><span class="hero-chip__label">Receitas do mês</span><span class="hero-chip__value">${fmtBRL(rendaLancada)}</span></div></div>
       <div class="hero-chip hero-chip--out">${svgIcon("arrowDownRight", 17)}<div><span class="hero-chip__label">Despesas do mês</span><span class="hero-chip__value">${fmtBRL(m.month.expense)}</span></div></div>

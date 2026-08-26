@@ -2,6 +2,30 @@
 
 ## Não publicado
 
+### O painel dizia quantos lançamentos ficavam de fora do saldo, nunca quanto
+
+- **O saldo em contas e as despesas do mês não fechavam entre si, e nada
+  explicava.** Lançamento anterior à data de abertura da conta fica FORA do
+  saldo de propósito — o saldo inicial informado já embute o que veio antes
+  dele, e somar de novo contaria duas vezes. Mas ele continua entrando em
+  "Despesas do mês", logo ali do lado. Quem somava de cabeça concluía, com
+  razão, que o aplicativo estava errado. No caso que originou isto eram
+  R$ 1.180,45 invisíveis.
+- **A regra não mudou; o silêncio, sim.** A tela de Contas já avisava QUANTOS
+  ficaram de fora. Faltava o que permite julgar: QUANTO. Com a contagem sozinha
+  ninguém sabe se são R$ 5 ou R$ 1.180.
+- **`accountPreOpeningEffect` espelha `accountBalance` regra por regra, ao
+  contrário**, e as duas moram lado a lado de propósito: se um dia a regra do
+  saldo mudar e esta não, o aviso passa a mentir — e aviso que mente é pior que
+  aviso nenhum.
+- **O aviso agora aparece nos três lugares**: no painel, junto do número que
+  causa a dúvida; na linha da conta, com o valor e o que fazer a respeito
+  (corrigir a data de abertura ou o saldo inicial); e na explicação do cálculo,
+  que deixa de ser uma premissa genérica e passa a trazer o número do dia.
+- **Compra no cartão não entra na contagem**: ela nunca reduziu o saldo da
+  conta, então anunciá-la como "fora do saldo" seria explicar errado.
+- Regressão travada no bloco F-05 de `tests/test-beta-fixes.js`.
+
 ### A causa de verdade: a normalização apagava o vínculo do lançamento com a conta
 
 - **O relato era "a mesma conta mostra saldos diferentes em cada navegador".** Os

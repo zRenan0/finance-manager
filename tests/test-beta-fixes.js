@@ -281,6 +281,27 @@ function blocoF05() {
   check("o aviso mostra a data de abertura", /20\/08\/2026/.test(tela));
   check("o aviso usa singular com um lançamento só", /1 lançamento é anterior/.test(tela));
 
+  // A CONTAGEM SOZINHA NÃO DECIDE NADA. "1 lançamento ficou de fora" não diz
+  // se é R$ 5 ou R$ 1.180, e sem o valor ninguém consegue julgar se o saldo
+  // está certo — o painel se contradizia em silêncio, porque a despesa
+  // aparecia em "Despesas do mês" e o saldo não se mexia.
+  const fora2 = run(`accountPreOpeningEffect(state.data, "acc-1", "2026-08-26")`);
+  check("o efeito no saldo é quantificado", fora2.count === 1 && fora2.amount.toFixed(2) === "-89.90", JSON.stringify(fora2));
+  check("saldo mais o que ficou de fora reconstroem a conta inteira",
+    (run(`accountsSummary(state.data, "2026-08-26").cash`) + fora2.amount).toFixed(2) === "2895.70",
+    run(`accountsSummary(state.data, "2026-08-26").cash`) + fora2.amount);
+  check("o aviso da tela traz o valor", /89,90/.test(tela), tela.slice(tela.indexOf("anterior à abertura") - 40, tela.indexOf("anterior à abertura") + 240));
+  check("e diz o que fazer a respeito", /corrija a data de abertura ou o valor inicial/.test(tela));
+
+  // O painel é onde a contradição aparecia; o aviso precisa estar lá também.
+  const painel = run(`renderDashboardScreen()`);
+  check("o painel anuncia o que está fora do saldo", /está fora deste saldo/.test(painel));
+  check("o painel traz o valor", /89,90/.test(painel));
+
+  // A explicação do cálculo deixa de ser genérica quando há algo de fora.
+  const premissas = run(`calculationExplanation(state.data, "accounts-balance", {}).premises`);
+  check("a explicação do cálculo traz o número", premissas.some((t) => /89,90/.test(t)), JSON.stringify(premissas));
+
   // A importação é onde o extrato traz o mês inteiro para trás da abertura.
   run(`state.importRows = Object.assign([
     { include: true, type: "expense", amount: 1450, categoryId: "moradia", date: "2026-08-05", description: "ALUGUEL" },
@@ -303,6 +324,10 @@ function blocoF05() {
   run(`state.data = { ...state.data, transactions: state.data.transactions.filter((t) => t.id !== "t-antes") };`);
   check("sem lançamento anterior, a tela não inventa aviso",
     !/não entra neste saldo/.test(run(`renderAccountsScreen()`)));
+  check("nem o painel", !/fora deste saldo/.test(run(`renderDashboardScreen()`)));
+  check("e a explicação volta à frase genérica",
+    run(`calculationExplanation(state.data, "accounts-balance", {}).premises`)
+      .includes("Cada conta considera apenas movimentos a partir da data de abertura informada."));
 }
 
 /* ------------------------------------------------------------------ F-07 */

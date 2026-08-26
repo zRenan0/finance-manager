@@ -10381,6 +10381,49 @@ function accountBalance(data, accountId, asOf) {
 // lançamento pode chegar antes da conta dele. Contar pelo que EXISTE, e não
 // pela ausência do campo, mantém o saldo correto no intervalo e faz o número
 // se corrigir sozinho quando a conta chega.
+// QUANTO ficou de fora do saldo por ser anterior à abertura da conta.
+//
+// A exclusão é correta e proposital: o saldo inicial informado já embute tudo
+// que veio antes dele, e somar de novo contaria duas vezes. O que estava errado
+// era a tela dizer QUANTOS lançamentos ficaram de fora sem dizer QUANTO. Com a
+// contagem sozinha ninguém consegue julgar se são R$ 5 ou R$ 1.180 — e sem
+// isso o painel se contradiz em silêncio: a despesa entra em "Despesas do mês"
+// e o saldo não se mexe.
+//
+// Espelha `accountBalance` regra por regra, só que ao contrário. As duas moram
+// juntas de propósito: se um dia a regra do saldo mudar e esta não, o aviso
+// passa a mentir, e um aviso que mente é pior que aviso nenhum.
+function accountPreOpeningEffect(data, accountId, asOf) {
+  const account = accountById(data, accountId);
+  if (!account || !account.openingDate) return { count: 0, amount: 0 };
+  const limit = asOf || "9999-12-31";
+  const abertura = account.openingDate;
+  // `date > limit` também entra aqui: um movimento futuro já está fora do saldo
+  // por outro motivo, e atribuí-lo à data de abertura seria explicar errado.
+  const fora = (date) => String(date) < abertura && String(date) <= limit;
+  let cents = 0;
+  let count = 0;
+  (data.transactions || []).forEach((t) => {
+    if (t.accountId !== account.id || t.creditCardId || !fora(t.date)) return;
+    cents += t.type === "income" ? moneyToCents(t.amount) : -moneyToCents(t.amount);
+    count++;
+  });
+  (data.accountTransfers || []).forEach((t) => {
+    if (!fora(t.date)) return;
+    if (t.fromAccountId === account.id) { cents -= moneyToCents(t.amount); count++; }
+    else if (t.toAccountId === account.id) { cents += moneyToCents(t.amount); count++; }
+  });
+  (data.cardPayments || []).forEach((p) => {
+    if (p.accountId !== account.id || !fora(p.date)) return;
+    cents -= moneyToCents(p.amount); count++;
+  });
+  (data.accountAdjustments || []).forEach((a) => {
+    if (a.accountId !== account.id || !fora(a.date)) return;
+    cents += moneyToCents(a.amount); count++;
+  });
+  return { count, amount: moneyFromCents(cents) };
+}
+
 function legacyCashBalance(data, asOf) {
   const limit = asOf || "9999-12-31";
   const conhecidas = new Set((data.accounts || []).map((a) => a.id));
@@ -10547,7 +10590,11 @@ function cardLiabilitySummary(data, asOf, days) {
 function accountsSummary(data, asOf) {
   const today = asOf || todayIso();
   const currentKey = monthKeyOf(today);
-  const accounts = (data.accounts || []).map((a) => ({ ...a, balance: accountBalance(data, a.id, today) }));
+  const accounts = (data.accounts || []).map((a) => ({
+    ...a,
+    balance: accountBalance(data, a.id, today),
+    preOpening: accountPreOpeningEffect(data, a.id, today),
+  }));
   const legacy = legacyCashBalance(data, today);
   const cards = (data.creditCards || []).map((c) => {
     const statements = cardStatements(data, c.id);
@@ -10558,8 +10605,14 @@ function accountsSummary(data, asOf) {
   });
   const cash = addMoney(sumMoney(accounts, (a) => a.balance), legacy);
   const cardDue = sumMoney(cards, (c) => c.due);
+  // Somado aqui porque quem mostra o total (o painel) precisa poder anunciar o
+  // que ficou de fora dele sem recalcular conta por conta.
+  const preOpening = accounts.reduce((acc, a) => ({
+    count: acc.count + a.preOpening.count,
+    amount: addMoney(acc.amount, a.preOpening.amount),
+  }), { count: 0, amount: 0 });
   return {
-    accounts, cards, legacy, cash, cardDue,
+    accounts, cards, legacy, cash, cardDue, preOpening,
     futureCard: sumMoney(cards, (c) => c.future),
     availableAfterCards: subMoney(cash, cardDue),
     hasAccounts: accounts.length > 0,
@@ -10685,7 +10738,7 @@ if (typeof module !== "undefined" && module.exports) {
     ACCOUNT_TYPE_LABELS, accountById, creditCardById, transactionAffectsCash, accountBalance, legacyCashBalance,
     accountsCashBalance, cardStatementKeyForDate, cardStatementDueDate, cardStatements,
     cardLiabilityStatements, cardLiabilitySummary,
-    accountsSummary, makeAccount, makeCreditCard, makeAccountTransfer, makeCardPayment,
+    accountsSummary, accountPreOpeningEffect, makeAccount, makeCreditCard, makeAccountTransfer, makeCardPayment,
     reconcileAccount, accountDeletionImpact, removeAccountWithIntegrity,
     cardDeletionImpact, removeCreditCardWithIntegrity,
   };
@@ -16494,7 +16547,12 @@ function calculationExplanation(data, id, context) {
       summary: accounts ? `O saldo calculado agora é ${fmtBRL(accounts.cash)}.` : "O saldo usa as movimentações registradas.",
       formula: "Saldos iniciais + receitas − despesas − transferências enviadas + transferências recebidas − pagamentos de fatura + ajustes.",
       premises: [
-        "Cada conta considera apenas movimentos a partir da data de abertura informada.",
+        // A premissa genérica não bastava: ela dizia a REGRA sem dizer o
+        // EFEITO. Quando existe algo de fora, a frase passa a trazer o número,
+        // que é o que permite conferir em vez de acreditar.
+        accounts && accounts.preOpening && accounts.preOpening.count
+          ? `Cada conta considera apenas movimentos a partir da data de abertura informada. Hoje ${accounts.preOpening.count === 1 ? "há 1 lançamento anterior" : `há ${accounts.preOpening.count} lançamentos anteriores`} a essas datas, somando ${fmtBRL(accounts.preOpening.amount)}, fora deste saldo: o saldo inicial informado já deveria contê-los.`
+          : "Cada conta considera apenas movimentos a partir da data de abertura informada.",
         "Compras ligadas a um cartão reduzem o caixa somente quando a fatura é paga.",
         "Lançamentos antigos sem conta permanecem no histórico para não apagar dinheiro já registrado.",
       ],
@@ -23350,6 +23408,16 @@ function renderHeroCard(m) {
     ${rendaAReceber > 0
       ? `<p class="hero-reserved">${svgIcon("calendar", 14)} ${fmtBRL(rendaAReceber)} de renda declarada ainda não lançada neste mês</p>`
       : ""}
+    ${/* O NÚMERO PRECISA CONFESSAR O QUE NÃO CONTA.
+          Lançamento anterior à abertura da conta fica fora do saldo de
+          propósito: o saldo inicial já embute o que veio antes dele. Só que ele
+          continua entrando em "Despesas do mês", logo acima, e o painel passava
+          a se contradizer em silêncio — a despesa aparecia e o saldo não se
+          mexia. Dizer aqui, ao lado do número, é o que transforma isso de
+          suspeita de erro em informação. */
+      accounts.preOpening && accounts.preOpening.count
+      ? `<p class="hero-reserved">${svgIcon("info", 14)} ${plural(accounts.preOpening.count, "lançamento anterior", "lançamentos anteriores")} à abertura das contas ${accounts.preOpening.count === 1 ? "está" : "estão"} fora deste saldo (${fmtBRL(accounts.preOpening.amount)})</p>`
+      : ""}
     <div class="hero-chips">
       <div class="hero-chip hero-chip--in">${svgIcon("arrowUpRight", 17)}<div><span class="hero-chip__label">Receitas do mês</span><span class="hero-chip__value">${fmtBRL(rendaLancada)}</span></div></div>
       <div class="hero-chip hero-chip--out">${svgIcon("arrowDownRight", 17)}<div><span class="hero-chip__label">Despesas do mês</span><span class="hero-chip__value">${fmtBRL(m.month.expense)}</span></div></div>
@@ -23964,10 +24032,16 @@ function renderTransferForm() {
 function renderAccountRow(a, sourceStats) {
   const reconciling = state.accountsUi.reconcileId === a.id;
   const stats = sourceStats || { movementCount:0, lastMovementAt:null, reconciledAt:a.reconciledAt, pendingCount:0, beforeOpeningCount:0 };
-  const foraDoSaldo = stats.beforeOpeningCount || 0;
+  // A CONTAGEM SOZINHA NÃO DECIDE NADA. "2 lançamentos ficaram de fora" não
+  // diz se são R$ 5 ou R$ 1.180: quem lê não consegue julgar se o saldo está
+  // certo. O valor vem do mesmo cálculo do saldo, ao contrário (ver
+  // `accountPreOpeningEffect`), e é ele que permite reconhecer o próprio erro
+  // de data de abertura em vez de desconfiar do aplicativo.
+  const fora = a.preOpening || { count: stats.beforeOpeningCount || 0, amount: 0 };
+  const foraDoSaldo = fora.count || 0;
   return `<div class="account-row ${a.archived ? "is-archived" : ""}">
     <span class="account-mark" data-ui-css="--account-color:${a.color}">${svgIcon(a.type === "dinheiro" ? "wallet" : "bank",18)}</span>
-    <div class="account-row__info"><b>${escapeHtml(a.name)}</b><span>${ACCOUNT_TYPE_LABELS[a.type] || "Conta"}${a.archived ? ", arquivada" : ""}</span><small>${stats.movementCount} ${stats.movementCount === 1 ? "movimentação" : "movimentações"} · última ${stats.lastMovementAt ? formatMovementTimestamp(stats.lastMovementAt) : "não registrada"}</small><small>Conferida: ${stats.reconciledAt ? formatMovementTimestamp(stats.reconciledAt) : "nunca"}${stats.pendingCount ? ` · ${stats.pendingCount} ${stats.pendingCount === 1 ? "pendência" : "pendências"}` : ""}</small>${foraDoSaldo ? `<small class="account-row__note">${svgIcon("info",12)} ${foraDoSaldo} ${foraDoSaldo === 1 ? "lançamento é anterior" : "lançamentos são anteriores"} à abertura em ${fmtDateFull(a.openingDate)} e ${foraDoSaldo === 1 ? "não entra" : "não entram"} neste saldo</small>` : ""}</div>
+    <div class="account-row__info"><b>${escapeHtml(a.name)}</b><span>${ACCOUNT_TYPE_LABELS[a.type] || "Conta"}${a.archived ? ", arquivada" : ""}</span><small>${stats.movementCount} ${stats.movementCount === 1 ? "movimentação" : "movimentações"} · última ${stats.lastMovementAt ? formatMovementTimestamp(stats.lastMovementAt) : "não registrada"}</small><small>Conferida: ${stats.reconciledAt ? formatMovementTimestamp(stats.reconciledAt) : "nunca"}${stats.pendingCount ? ` · ${stats.pendingCount} ${stats.pendingCount === 1 ? "pendência" : "pendências"}` : ""}</small>${foraDoSaldo ? `<small class="account-row__note">${svgIcon("info",12)} ${foraDoSaldo} ${foraDoSaldo === 1 ? "lançamento é anterior" : "lançamentos são anteriores"} à abertura em ${fmtDateFull(a.openingDate)} e ${foraDoSaldo === 1 ? "não entra" : "não entram"} neste saldo${moneyToCents(fora.amount) ? ` (${fmtBRL(fora.amount)}). O saldo inicial informado já deveria contê-${foraDoSaldo === 1 ? "lo" : "los"}; se não contém, corrija a data de abertura ou o valor inicial` : ""}</small>` : ""}</div>
     <strong class="account-row__value">${fmtBRL(a.balance)}</strong>
     <div class="account-row__actions"><button class="icon-btn" data-action="account-reconcile-open" data-id="${a.id}" aria-label="Conciliar ${escapeHtml(a.name)}">${svgIcon("refresh",15)}</button><button class="icon-btn" data-action="account-edit" data-id="${a.id}" aria-label="Editar ${escapeHtml(a.name)}">${svgIcon("pencil",15)}</button><button class="icon-btn" data-action="account-archive" data-id="${a.id}" aria-label="${a.archived ? "Reativar" : "Arquivar"} ${escapeHtml(a.name)}">${svgIcon(a.archived ? "checkCircle" : "archive",15)}</button><button class="icon-btn icon-btn--danger" data-action="account-delete" data-id="${a.id}" aria-label="Excluir ${escapeHtml(a.name)}">${svgIcon("trash",15)}</button></div>
     ${reconciling ? `<div class="account-reconcile"><label class="field__label" for="reconcile-balance-input">Saldo visto no banco hoje</label><div class="account-reconcile__line"><input id="reconcile-balance-input" class="input" data-field="reconcile-value" value="${escapeHtml(state.accountsUi.reconcileValue)}" inputmode="decimal" placeholder="0,00" /><button class="btn btn--primary btn--sm" data-action="account-reconcile-save" data-id="${a.id}">Conciliar</button><button class="btn btn--ghost btn--sm" data-action="account-reconcile-cancel">Cancelar</button></div></div>` : ""}

@@ -65,6 +65,49 @@ function accountBalance(data, accountId, asOf) {
 // lançamento pode chegar antes da conta dele. Contar pelo que EXISTE, e não
 // pela ausência do campo, mantém o saldo correto no intervalo e faz o número
 // se corrigir sozinho quando a conta chega.
+// QUANTO ficou de fora do saldo por ser anterior à abertura da conta.
+//
+// A exclusão é correta e proposital: o saldo inicial informado já embute tudo
+// que veio antes dele, e somar de novo contaria duas vezes. O que estava errado
+// era a tela dizer QUANTOS lançamentos ficaram de fora sem dizer QUANTO. Com a
+// contagem sozinha ninguém consegue julgar se são R$ 5 ou R$ 1.180 — e sem
+// isso o painel se contradiz em silêncio: a despesa entra em "Despesas do mês"
+// e o saldo não se mexe.
+//
+// Espelha `accountBalance` regra por regra, só que ao contrário. As duas moram
+// juntas de propósito: se um dia a regra do saldo mudar e esta não, o aviso
+// passa a mentir, e um aviso que mente é pior que aviso nenhum.
+function accountPreOpeningEffect(data, accountId, asOf) {
+  const account = accountById(data, accountId);
+  if (!account || !account.openingDate) return { count: 0, amount: 0 };
+  const limit = asOf || "9999-12-31";
+  const abertura = account.openingDate;
+  // `date > limit` também entra aqui: um movimento futuro já está fora do saldo
+  // por outro motivo, e atribuí-lo à data de abertura seria explicar errado.
+  const fora = (date) => String(date) < abertura && String(date) <= limit;
+  let cents = 0;
+  let count = 0;
+  (data.transactions || []).forEach((t) => {
+    if (t.accountId !== account.id || t.creditCardId || !fora(t.date)) return;
+    cents += t.type === "income" ? moneyToCents(t.amount) : -moneyToCents(t.amount);
+    count++;
+  });
+  (data.accountTransfers || []).forEach((t) => {
+    if (!fora(t.date)) return;
+    if (t.fromAccountId === account.id) { cents -= moneyToCents(t.amount); count++; }
+    else if (t.toAccountId === account.id) { cents += moneyToCents(t.amount); count++; }
+  });
+  (data.cardPayments || []).forEach((p) => {
+    if (p.accountId !== account.id || !fora(p.date)) return;
+    cents -= moneyToCents(p.amount); count++;
+  });
+  (data.accountAdjustments || []).forEach((a) => {
+    if (a.accountId !== account.id || !fora(a.date)) return;
+    cents += moneyToCents(a.amount); count++;
+  });
+  return { count, amount: moneyFromCents(cents) };
+}
+
 function legacyCashBalance(data, asOf) {
   const limit = asOf || "9999-12-31";
   const conhecidas = new Set((data.accounts || []).map((a) => a.id));
@@ -231,7 +274,11 @@ function cardLiabilitySummary(data, asOf, days) {
 function accountsSummary(data, asOf) {
   const today = asOf || todayIso();
   const currentKey = monthKeyOf(today);
-  const accounts = (data.accounts || []).map((a) => ({ ...a, balance: accountBalance(data, a.id, today) }));
+  const accounts = (data.accounts || []).map((a) => ({
+    ...a,
+    balance: accountBalance(data, a.id, today),
+    preOpening: accountPreOpeningEffect(data, a.id, today),
+  }));
   const legacy = legacyCashBalance(data, today);
   const cards = (data.creditCards || []).map((c) => {
     const statements = cardStatements(data, c.id);
@@ -242,8 +289,14 @@ function accountsSummary(data, asOf) {
   });
   const cash = addMoney(sumMoney(accounts, (a) => a.balance), legacy);
   const cardDue = sumMoney(cards, (c) => c.due);
+  // Somado aqui porque quem mostra o total (o painel) precisa poder anunciar o
+  // que ficou de fora dele sem recalcular conta por conta.
+  const preOpening = accounts.reduce((acc, a) => ({
+    count: acc.count + a.preOpening.count,
+    amount: addMoney(acc.amount, a.preOpening.amount),
+  }), { count: 0, amount: 0 });
   return {
-    accounts, cards, legacy, cash, cardDue,
+    accounts, cards, legacy, cash, cardDue, preOpening,
     futureCard: sumMoney(cards, (c) => c.future),
     availableAfterCards: subMoney(cash, cardDue),
     hasAccounts: accounts.length > 0,
@@ -369,7 +422,7 @@ if (typeof module !== "undefined" && module.exports) {
     ACCOUNT_TYPE_LABELS, accountById, creditCardById, transactionAffectsCash, accountBalance, legacyCashBalance,
     accountsCashBalance, cardStatementKeyForDate, cardStatementDueDate, cardStatements,
     cardLiabilityStatements, cardLiabilitySummary,
-    accountsSummary, makeAccount, makeCreditCard, makeAccountTransfer, makeCardPayment,
+    accountsSummary, accountPreOpeningEffect, makeAccount, makeCreditCard, makeAccountTransfer, makeCardPayment,
     reconcileAccount, accountDeletionImpact, removeAccountWithIntegrity,
     cardDeletionImpact, removeCreditCardWithIntegrity,
   };
