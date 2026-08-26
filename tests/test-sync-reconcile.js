@@ -24,6 +24,13 @@
 //   4. Reconciliar não duplica, não apaga e não vira rotina de todo ciclo.
 //   5. O lote gravado na fila enquanto um ciclo já está em curso SOBE. Era o
 //      "juntei os valores e não atualizou em nenhum outro aparelho".
+//   6. O lançamento que desce ANTES da conta bancária dele não perde o
+//      vínculo. Era o defeito de verdade por trás de "a mesma conta mostra
+//      saldos diferentes": a normalização apagava a referência e o registro
+//      mutilado era gravado COM A MARCA DO SERVIDOR. Dois aparelhos passavam a
+//      ter a mesma marca com conteúdos diferentes, e a comparação de marcas —
+//      que é toda a defesa do protocolo — não enxerga: `>` é falso entre
+//      iguais. Ver o bloco v12 em js/storage.js.
 "use strict";
 
 const fs = require("fs");
@@ -32,6 +39,10 @@ const path = require("path");
 const ROOT = path.join(__dirname, "..");
 const read = (file) => fs.readFileSync(path.join(ROOT, file), "utf8");
 const TEST_ACCOUNT_ID = "00000000-0000-4000-8000-000000000001";
+// Subir `RECONCILE_VERSION` em js/cloud-sync.js é o gatilho de um reparo novo:
+// o teste falha de propósito se os dois números se separarem, porque um recibo
+// antigo deixaria de fora justamente o aparelho que precisa do conserto.
+const RECONCILE_VERSION_ESPERADA = 2;
 
 let ok = 0;
 let fail = 0;
@@ -41,7 +52,7 @@ function check(label, condition, detail) {
 }
 
 const FONTES = ["js/utils.js", "js/perf.js", "js/router.js", "js/icons.js", "js/rules.js",
-  "js/layout.js", "js/safe-errors.js", "js/storage.js", "js/cloud-sync.js"];
+  "js/layout.js", "js/safe-errors.js", "js/storage.js", "js/cloud-sync.js", "js/accounts.js"];
 
 function fakeLocalStorage(seed) {
   const map = new Map(Object.entries(seed || {}));
@@ -165,8 +176,9 @@ const espera = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     const a = await ligarAparelho(servidor, "device-aparelho-a01");
     check("o aparelho entrou sincronizado", a.run("CloudSync.status().phase") === "synced",
       a.run("CloudSync.status().phase"));
-    check("a reconciliação de reparo deixou recibo",
-      !!(await a.run("FinanceStore.localMetaGet(META_RECONCILE_RECEIPT)")));
+    check("a reconciliação de reparo deixou recibo da versão atual",
+      Number((await a.run("FinanceStore.localMetaGet(META_RECONCILE_RECEIPT)") || {}).version) === RECONCILE_VERSION_ESPERADA,
+      JSON.stringify(await a.run("FinanceStore.localMetaGet(META_RECONCILE_RECEIPT)")));
 
     // O outro aparelho grava. Este avança o cursor SEM aplicar: é exatamente o
     // estado que uma marca recusada, uma gravação desfeita pela cota ou uma aba
@@ -282,6 +294,92 @@ const espera = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     check("a fila local esvaziou", (await a.run("FinanceStore.outboxRead(0)")).length === 0);
     check("e o estado final é sincronizado", a.run("CloudSync.status().phase") === "synced",
       a.run("CloudSync.status().phase"));
+    a.run("CloudSync.disable()");
+  }
+
+  console.log("
+6. O lançamento que desce antes da conta não perde o vínculo");
+  {
+    const servidor = servidorFalso();
+    // O servidor já tem os lançamentos apontando para a conta do banco, mas a
+    // conta ainda não subiu: é a ordem GARANTIDA do vínculo do visitante, em
+    // que o ciclo desce primeiro e o "juntar dados" traz a conta depois.
+    servidor.aplicar([
+      { entity: "transactions", entityId: "tx-antes", op: "put", rev: "000001760000000.000001.device-aparelho-b02",
+        payload: { id: "tx-antes", type: "expense", amount: 142.68, date: "2026-08-16", categoryId: "lazer", accountId: "conta-banco", creditCardId: null } },
+      { entity: "transactions", entityId: "tx-depois", op: "put", rev: "000001760000000.000002.device-aparelho-b02",
+        payload: { id: "tx-depois", type: "expense", amount: 350, date: "2026-08-24", categoryId: "lazer", accountId: "conta-banco", creditCardId: null } },
+    ]);
+    const a = await ligarAparelho(servidor, "device-aparelho-a01");
+    const guardados = a.run("FinanceStore.snapshot().transactions");
+    check("a referência sobrevive à conta ausente, guardada como pendente",
+      guardados.length === 2 && guardados.every((t) => t.accountId === null && t.pendingAccountId === "conta-banco"),
+      JSON.stringify(guardados.map((t) => `${t.id}:${t.accountId}/${t.pendingAccountId}`)));
+    check("e o saldo conta os dois como movimento sem conta",
+      a.run("accountsCashBalance(FinanceStore.snapshot(), '2026-08-26')").toFixed(2) === "-492.68",
+      a.run("accountsCashBalance(FinanceStore.snapshot(), '2026-08-26')"));
+
+    // A conta chega. O vínculo volta sozinho, sem recarimbar nada.
+    servidor.aplicar([{ entity: "accounts", entityId: "conta-banco", op: "put", rev: "000001760000000.000003.device-aparelho-b02",
+      payload: { id: "conta-banco", name: "Santander", type: "corrente", openingBalance: 2500, openingDate: "2026-08-20", color: "#112233" } }]);
+    await a.run("CloudSync.syncNow()");
+    check("com a conta presente, o vínculo é restaurado",
+      a.run(`FinanceStore.snapshot().transactions.filter((t) => t.accountId === "conta-banco").length`) === 2,
+      JSON.stringify(a.run("FinanceStore.snapshot().transactions.map((t) => t.id + ':' + t.accountId)")));
+    // 2500 de abertura menos os 350 de 24/08. O de 16/08 é anterior à abertura
+    // da conta e continua fora do saldo dela, como sempre foi.
+    check("e o saldo passa a usar a conta",
+      a.run("accountsCashBalance(FinanceStore.snapshot(), '2026-08-26')").toFixed(2) === "2150.00",
+      a.run("accountsCashBalance(FinanceStore.snapshot(), '2026-08-26')"));
+
+    // O SEGUNDO APARELHO PRECISA MOSTRAR O MESMO NÚMERO. É o relato inteiro.
+    const b = await ligarAparelho(servidor, "device-aparelho-b02");
+    const sa = a.run("accountsCashBalance(FinanceStore.snapshot(), '2026-08-26')").toFixed(2);
+    const sb = b.run("accountsCashBalance(FinanceStore.snapshot(), '2026-08-26')").toFixed(2);
+    check("os dois aparelhos mostram o MESMO saldo", sa === sb, `${sa} vs ${sb}`);
+    a.run("CloudSync.disable()");
+    b.run("CloudSync.disable()");
+  }
+
+  console.log("
+7. Reparo de registro com marca empatada e conteúdo diferente");
+  {
+    const servidor = servidorFalso();
+    const REV = "000001760000000.000001.device-aparelho-b02";
+    servidor.aplicar([
+      { entity: "accounts", entityId: "conta-banco", op: "put", rev: "000001760000000.000009.device-aparelho-b02",
+        payload: { id: "conta-banco", name: "Santander", type: "corrente", openingBalance: 2500, openingDate: "2026-08-20", color: "#112233" } },
+      { entity: "transactions", entityId: "tx1", op: "put", rev: REV,
+        payload: { id: "tx1", type: "expense", amount: 350, date: "2026-08-24", categoryId: "lazer", accountId: "conta-banco", creditCardId: null } },
+    ]);
+    const a = await ligarAparelho(servidor, "device-aparelho-a01");
+
+    // Fabrica o dano que o defeito produzia: mesmo id, MESMA marca, sem o
+    // vínculo, gravado sem passar pela fila.
+    a.run("FinanceStore.setOutboxEnabled(false)");
+    a.ctx.__rev = REV;
+    await a.run("FinanceStore.persist({ ...FinanceStore.snapshot(), transactions: FinanceStore.snapshot().transactions.map((t) => (t.id === 'tx1' ? { ...t, accountId: null, pendingAccountId: null, syncRev: __rev } : t)) })");
+    await flush(a);
+    a.run("FinanceStore.setOutboxEnabled(true)");
+    check("o dano foi fabricado", a.run(`FinanceStore.snapshot().transactions.find((t) => t.id === "tx1").accountId`) === null);
+
+    await a.run("CloudSync.syncNow()");
+    check("o ciclo comum NÃO conserta, porque a marca empata",
+      a.run(`FinanceStore.snapshot().transactions.find((t) => t.id === "tx1").accountId`) === null);
+
+    await a.run("CloudSync.reconcile()");
+    check("a reconciliação repara o vínculo",
+      a.run(`FinanceStore.snapshot().transactions.find((t) => t.id === "tx1").accountId`) === "conta-banco",
+      a.run(`FinanceStore.snapshot().transactions.find((t) => t.id === "tx1").accountId`));
+
+    // Aceitar empate não pode virar eco: o registro reparado veio de fora.
+    const antes = servidor.recebidos.length;
+    await a.run("CloudSync.syncNow()");
+    const ultimo = servidor.recebidos[servidor.recebidos.length - 1];
+    check("reparar não gera eco na volta seguinte",
+      servidor.recebidos.length === antes || ((ultimo && ultimo.ops) || []).length === 0,
+      JSON.stringify(((ultimo && ultimo.ops) || []).map((o) => o.entityId)));
+    check("e a fila ficou vazia", (await a.run("FinanceStore.outboxRead(0)")).length === 0);
     a.run("CloudSync.disable()");
   }
 

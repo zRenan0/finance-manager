@@ -60,6 +60,14 @@ const CLOUD_SYNC_POLL_MS = 15000;         // volta periódica enquanto o app est
 // que é quem as grava.
 const CLOUD_CURSOR_KEY = "cofre_sync_cursor";
 
+// Versão do REPARO, não do formato do recibo. Subir este número faz a
+// reconciliação rodar sozinha mais uma vez em cada aparelho, e é o único jeito
+// de alcançar quem já tinha reconciliado antes de o conserto existir.
+//   1. releitura do zero, para o aparelho que ficou atrás do cursor.
+//   2. releitura aceitando empate de marca, para reparar o registro que ficou
+//      com a marca do servidor e o conteúdo mutilado pela normalização.
+const RECONCILE_VERSION = 2;
+
 const CloudSync = (() => {
   let adapter = null;
   let pendingTimer = null;
@@ -278,7 +286,7 @@ const CloudSync = (() => {
     // O recibo nasce DEPOIS das duas remoções. Se a sessão parar no meio, a
     // próxima volta refaz o preparo em vez de considerá-lo feito.
     await FinanceStore.localMetaPut(META_RECONCILE_RECEIPT, {
-      version: 1, at: new Date().toISOString(),
+      version: RECONCILE_VERSION, at: new Date().toISOString(),
     }, context.scope);
     assertCurrentCycle(context);
   }
@@ -294,7 +302,15 @@ const CloudSync = (() => {
       ? null
       : await FinanceStore.localMetaGet(META_RECONCILE_RECEIPT, context.scope);
     assertCurrentCycle(context);
-    if (pedido || !recibo) await prepareReconcile(context);
+    // Recibo de uma versão anterior NÃO conta. É assim que um reparo novo
+    // alcança quem já reconciliou uma vez: sem isto, o aparelho que rodou a
+    // versão 1 nunca mais rodaria sozinho, e justamente ele é o que precisa.
+    if (pedido || !recibo || Number(recibo.version) < RECONCILE_VERSION) {
+      await prepareReconcile(context);
+      // Marca só ESTE ciclo. A confiança no empate de marca não pode vazar para
+      // as voltas seguintes: fora da releitura do zero, empate é eco.
+      context.reconciling = true;
+    }
     reconcileScope = context.scope;
   }
 
@@ -379,7 +395,16 @@ const CloudSync = (() => {
     // `applyRemoteOps` agora GRAVA antes de devolver. É esta promessa que o
     // cursor espera: enquanto ela não resolve, o aparelho não pode declarar que
     // já leu aquele trecho do log.
-    const result = await FinanceStore.applyRemoteOps(ops, context.scope);
+    //
+    // `trustRemoteOnTie` vale SÓ dentro de uma reconciliação, e é o que a torna
+    // capaz de reparar. O defeito que ela conserta produz registros com a MESMA
+    // marca e conteúdos diferentes em dois aparelhos; entre marcas iguais o
+    // ciclo comum não tem como escolher, e não deve mesmo — ali um empate é o
+    // eco do que este aparelho acabou de enviar. Numa releitura explícita do
+    // zero a resposta é outra: para uma marca que este aparelho não autorou,
+    // quem tem a versão boa é o servidor.
+    const result = await FinanceStore.applyRemoteOps(ops, context.scope,
+      context.reconciling ? { trustRemoteOnTie: true } : undefined);
     assertCurrentCycle(context);
     if (!result.changed) return false;
     cicloMexeu = true;

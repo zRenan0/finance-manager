@@ -2,6 +2,43 @@
 
 ## Não publicado
 
+### A causa de verdade: a normalização apagava o vínculo do lançamento com a conta
+
+- **O relato era "a mesma conta mostra saldos diferentes em cada navegador".** Os
+  dois aparelhos tinham os MESMOS 21 lançamentos, o MESMO cursor e a fila vazia.
+  Não faltava registro nenhum: faltava o `accountId` deles num dos lados.
+- **`migrate()` zerava a referência para uma conta ausente**, em
+  `js/storage.js`. No disco, com a base completa, isso é saneamento correto.
+  Durante a sincronização é destruição — e não por acaso: no vínculo do
+  visitante a ordem é GARANTIDA. O ciclo desce primeiro (chegam os lançamentos,
+  apontando para a conta do banco) e só depois o "juntar dados" traz a conta.
+  Nesse intervalo todos eles perdiam o vínculo.
+- **O estrago não era perder o vínculo; era GRAVAR o registro mutilado COM A
+  MARCA DO SERVIDOR.** A partir daí dois aparelhos carregavam a mesma marca com
+  conteúdos diferentes, e a comparação de marcas — que é toda a defesa do
+  protocolo — não enxerga: `>` é falso entre iguais. Cada um mostrava um saldo,
+  os dois diziam "Tudo sincronizado", nenhum tinha o que enviar, e nada no
+  funcionamento normal desfazia isso.
+- **Agora o alvo ausente fica guardado em `pendingAccountId` e volta sozinho**
+  assim que a conta aparece. Para as cerca de sessenta leituras espalhadas pelo
+  app nada muda: `accountId` continua nulo enquanto a conta não existe, que é
+  exatamente o que elas já tratavam.
+- **`legacyCashBalance` passou a contar o que NENHUMA conta reivindica.** A
+  condição era `!t.accountId`, e isso deixava um buraco: um lançamento apontando
+  para conta que este aparelho ainda não tem não entrava em conta nenhuma e
+  também não entrava ali — sumia do saldo sem deixar rastro.
+- **A reconciliação passou a aceitar empate de marca.** Numa releitura explícita
+  do zero, para uma marca que este aparelho não autorou, quem tem a versão boa é
+  o servidor. É o que permite REPARAR quem já está corrompido; no ciclo comum o
+  empate continua sendo ignorado, porque ali ele é eco do próprio envio.
+- **Regressão travada em `tests/test-sync-reconcile.js`**, que reproduz a ordem
+  exata do vínculo (lançamento antes da conta) e confere que os dois aparelhos
+  chegam ao mesmo saldo.
+- **Limite conhecido:** transferência, conciliação e pagamento de fatura
+  continuam sendo descartados pelo normalizador quando a conta deles não existe.
+  Como o registro some por inteiro (em vez de ficar mutilado com a marca certa),
+  a releitura do zero o traz de volta — e o teste cobre esse caminho.
+
 ### A mesma conta mostrava saldos diferentes em cada navegador
 
 - **O ciclo incremental não tem como se corrigir sozinho, e essa era a causa.**

@@ -156,6 +156,37 @@ que começaram a gravar; se uma edição chegar durante a transação, ela é
 reaplicada sobre o resultado e confirmada em seguida. Enquanto um novo escopo
 ainda está abrindo, ações da tela anterior são recusadas e não escrevem mirror.
 
+### O registro gravado tem de ser o registro que o servidor tem
+
+A descida aplica operação por operação e monta o snapshot com `migrate()`, que
+entre outras coisas reconcilia REFERÊNCIAS: lançamento apontando para conta que
+não existe perde o `accountId`; transferência, conciliação e pagamento sem a
+conta que os originou são descartados por inteiro.
+
+No disco, com a base completa, isso é saneamento. Durante a descida a base é
+**parcial por construção**, e no vínculo do visitante a ordem é garantida: o
+ciclo desce primeiro (chegam os lançamentos, que apontam para a conta do banco)
+e só depois o "juntar dados" traz a conta. Naquele intervalo a normalização
+apagava o vínculo de todos eles.
+
+O problema não é perder o vínculo. É **gravar o registro mutilado com a marca do
+servidor**. A partir daí dois aparelhos carregam a mesma marca com conteúdos
+diferentes, e a comparação de marcas não enxerga a diferença: `>` é falso entre
+iguais. Cada aparelho mostra um saldo, os dois declaram "Tudo sincronizado",
+nenhum tem o que enviar, e nada no funcionamento normal desfaz isso. Foi o
+defeito por trás de "a mesma conta com números diferentes em cada navegador".
+
+A regra passou a ser: **a referência que chega é preservada**. Quando a conta
+ainda não desceu, o alvo fica em `pendingAccountId` e `accountId` continua nulo
+— que é o que as leituras do app já tratavam. Assim que a conta aparece,
+`migrate()` promove o valor de volta, sem recarimbar nada. `legacyCashBalance`
+conta o que NENHUMA conta reivindica, de modo que o saldo fica correto também no
+intervalo.
+
+Transferência, conciliação e pagamento continuam sendo descartados quando a
+conta deles não existe. Ali a perda é diferente: o registro SOME, em vez de
+ficar mutilado com a marca certa, então a releitura do zero o traz de volta.
+
 ### Reconciliação completa
 
 O ciclo é incremental, e o incremental se apoia em duas promessas que ele não
@@ -181,6 +212,13 @@ tempo, no começo do ciclo e dentro do mesmo bloqueio de aba:
 2. apaga o recibo de semeadura (`syncSeedReceipt`);
 3. grava `syncReconcileReceipt`, nessa ordem — se a sessão parar no meio, a
    volta seguinte refaz o preparo em vez de considerá-lo feito.
+
+Dentro dela, e **somente** dentro dela, um empate de marca é resolvido a favor
+do servidor. No ciclo comum um empate é eco do que este aparelho acabou de
+enviar, e reaplicá-lo seria trabalho perdido; numa releitura explícita do zero é
+o contrário — para uma marca que este aparelho não autorou, quem tem a versão
+boa é o servidor. É isso que torna a reconciliação capaz de REPARAR um registro
+que ficou com a marca certa e o conteúdo errado (ver a seção anterior).
 
 O ciclo seguinte então relê a conta inteira e reoferece a base inteira. **Nos
 dois sentidos quem decide continua sendo a marca do relógio lógico**, como em

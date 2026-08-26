@@ -79,7 +79,10 @@ function validateRecord(name, record) {
   if (name === "transactions") {
     if (!["income", "expense"].includes(record.type) || !validMoney(record.amount) || record.amount < 0 || !validDate(record.date)) invalid("Lançamento financeiro inválido");
     if (record.description != null && (typeof record.description !== "string" || record.description.length > 200)) invalid("Descrição de lançamento inválida");
-    ["categoryId", "accountId", "creditCardId", "goalId", "debtId"].forEach((key) => { if (!validRef(record[key])) invalid(`Referência inválida em ${key}`); });
+    // `pendingAccountId` é a conta que o lançamento declara e que o aparelho de
+    // origem ainda não tinha quando o gravou (ver o bloco v12 em js/storage.js).
+    // Viaja junto e passa pela mesma validação de referência das demais.
+    ["categoryId", "accountId", "pendingAccountId", "creditCardId", "goalId", "debtId"].forEach((key) => { if (!validRef(record[key])) invalid(`Referência inválida em ${key}`); });
   }
   if (name === "categories") {
     if (typeof record.name !== "string" || !record.name.trim() || record.name.length > 60 || !/^#[0-9A-F]{6}$/i.test(String(record.color || "")) || !validRef(record.parentId)) invalid("Categoria inválida");

@@ -1677,6 +1677,10 @@ function migrate(parsed) {
       changeLog: normalizeTransactionLog(t.changeLog, t.createdAt || date, transactionSourceOf(t.source)),
       reviewedIssues: normalizeReviewedIssues(t.reviewedIssues),
       accountId: normalizeRecordRef(t.accountId, "account"),
+      // Conta que o lançamento diz ter, mas que este aparelho ainda não
+      // conhece. Ver o bloco v12 mais abaixo: é o que impede a normalização de
+      // DESTRUIR o vínculo quando o lançamento desce antes da conta.
+      pendingAccountId: normalizeRecordRef(t.pendingAccountId, "account"),
       creditCardId: normalizeRecordRef(t.creditCardId, "card"),
       debtId: normalizeRecordRef(t.debtId, "asset"),
       monthKey: monthKeyOf(date),              // índice denormalizado (consulta rápida no IndexedDB)
@@ -1870,11 +1874,35 @@ function migrate(parsed) {
   {
     const accountIds = new Set(data.accounts.map((a) => a.id));
     const cardIds = new Set(data.creditCards.map((c) => c.id));
+    // REFERÊNCIA PARA UMA CONTA AUSENTE NÃO É LIXO.
+    //
+    // Zerar `accountId` quando a conta não está na base é saneamento correto
+    // para um backup adulterado. Durante a SINCRONIZAÇÃO é destruição, e não
+    // por acaso: no vínculo do visitante a ordem é garantida — o ciclo desce
+    // primeiro (chegam os lançamentos, apontando para a conta do banco) e só
+    // depois o "juntar dados" traz a conta. Nesse intervalo TODOS eles perdiam
+    // o vínculo.
+    //
+    // O estrago não era perder o vínculo; era o registro mutilado ser gravado
+    // COM A MARCA DO SERVIDOR. A partir daí dois aparelhos carregavam a mesma
+    // marca com conteúdos diferentes, e a comparação de marcas — que é toda a
+    // defesa do protocolo — não enxerga: `>` é falso entre iguais. Cada um
+    // mostrava um saldo, os dois diziam "Tudo sincronizado", nenhum tinha o que
+    // enviar, e nada no funcionamento normal desfazia isso.
+    //
+    // Agora o alvo ausente fica GUARDADO em `pendingAccountId` e volta sozinho
+    // assim que a conta aparece. Para as ~60 leituras espalhadas pelo app nada
+    // muda: `accountId` continua nulo enquanto a conta não existe, que é
+    // exatamente o que elas já tratavam. O saldo também não some no intervalo,
+    // porque `legacyCashBalance` conta o que nenhuma conta reivindica.
     data.transactions = data.transactions.map((t) => {
       const creditCardId = cardIds.has(t.creditCardId) ? t.creditCardId : null;
+      const pedido = creditCardId ? null : (t.accountId || t.pendingAccountId || null);
+      const accountId = pedido && accountIds.has(pedido) ? pedido : null;
       return {
         ...t,
-        accountId: creditCardId ? null : (accountIds.has(t.accountId) ? t.accountId : null),
+        accountId,
+        pendingAccountId: pedido && !accountId ? pedido : null,
         creditCardId,
       };
     });
@@ -3095,6 +3123,8 @@ const FinanceStore = (() => {
     if (!ready) throw storageCancelledError();
     const rawList = Array.isArray(ops) ? ops : [];
     const outboxAdds = Array.isArray(options && options.outboxAdds) ? options.outboxAdds : [];
+    // Só a reconciliação explícita liga isto. Ver a comparação de marcas abaixo.
+    const trustRemoteOnTie = !!(options && options.trustRemoteOnTie);
     const storageAttempt = Math.max(0, Number(options && options._storageAttempt) || 0);
     if (!rawList.length && !outboxAdds.length) return { changed: false, data: snapshot, applied: 0 };
     const targetScope = expectedScope || scope;
@@ -3158,7 +3188,12 @@ const FinanceStore = (() => {
 
       // Registro apagado depois desta versão não ressuscita.
       if (grave && !syncRevGreater(rev, grave.rev)) return;
-      if (existing && !syncRevGreater(rev, existing.syncRev)) return;
+      // EMPATE DE MARCA NÃO É "IGUAL". Ver `trustRemoteOnTie` acima: no ciclo
+      // comum um empate é eco do que este aparelho mesmo mandou, e reaplicá-lo
+      // seria trabalho perdido. Numa releitura explícita do zero é o contrário:
+      // é a única chance de consertar um registro que ficou com a marca do
+      // servidor e o conteúdo mutilado.
+      if (existing && !(trustRemoteOnTie ? !syncRevGreater(existing.syncRev, rev) : syncRevGreater(rev, existing.syncRev))) return;
       if (!op.payload || typeof op.payload !== "object") return;
       map.set(id, { ...op.payload, id, syncRev: rev });
       touched.add(`${op.entity} ${id}`);
@@ -5318,6 +5353,10 @@ function makeTransaction(partial) {
     changeLog: normalizeTransactionLog(partial.changeLog, createdAt, source),
     reviewedIssues: normalizeReviewedIssues(partial.reviewedIssues),
     accountId: normalizeRecordRef(partial.accountId, "account"),
+    // Nasce vazio e na mesma posição em que `migrate` o escreve: o registro
+    // criado aqui e o mesmo registro relido do disco precisam ter a mesma
+    // impressão, senão toda leitura pareceria uma alteração.
+    pendingAccountId: null,
     creditCardId: normalizeRecordRef(partial.creditCardId, "card"),
     debtId: normalizeRecordRef(partial.debtId, "asset"),
     // Resolvida por último: ela depende de tipo, meta e dívida já normalizados.

@@ -56,11 +56,22 @@ function accountBalance(data, accountId, asOf) {
   return moneyFromCents(cents);
 }
 
+// "Histórico sem conta" é todo lançamento que NENHUMA conta reivindica.
+//
+// A condição era `!t.accountId`, e isso deixava um buraco: um lançamento que
+// aponta para uma conta que este aparelho ainda não tem não entra em conta
+// nenhuma (nenhuma casa com o id) e também não entrava aqui — sumia do saldo
+// sem deixar rastro. A situação é normal e temporária durante uma descida: o
+// lançamento pode chegar antes da conta dele. Contar pelo que EXISTE, e não
+// pela ausência do campo, mantém o saldo correto no intervalo e faz o número
+// se corrigir sozinho quando a conta chega.
 function legacyCashBalance(data, asOf) {
   const limit = asOf || "9999-12-31";
+  const conhecidas = new Set((data.accounts || []).map((a) => a.id));
   let cents = 0;
   (data.transactions || []).forEach((t) => {
-    if (t.accountId || t.creditCardId || t.date > limit) return;
+    if (t.creditCardId || t.date > limit) return;
+    if (t.accountId && conhecidas.has(t.accountId)) return;
     cents += t.type === "income" ? moneyToCents(t.amount) : -moneyToCents(t.amount);
   });
   return moneyFromCents(cents);
