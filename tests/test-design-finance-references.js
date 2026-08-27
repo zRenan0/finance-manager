@@ -6,11 +6,11 @@ const path = require("path");
 const ROOT = path.join(__dirname, "..");
 const read = (file) => fs.readFileSync(path.join(ROOT, file), "utf8");
 
-const css = ["base.css", "layout.css", "components.css", "utilities.css",
-  "screens/dashboard.css", "screens/health.css", "screens/wealth.css",
-  "screens/planning.css", "screens/investments.css", "screens/intelligence.css",
-  "screens/notifications-onboarding.css", "screens/personalization.css"]
-  .map((file) => read(`css/${file}`)).join("\n");
+// A lista de telas é lida do diretório: uma folha de estilo nova entra na
+// conferência de contraste sozinha, sem depender de alguém lembrar de citá-la.
+const css = ["base.css", "layout.css", "components.css", "utilities.css"]
+  .concat(fs.readdirSync(path.join(ROOT, "css", "screens")).sort().map((nome) => "screens/" + nome))
+  .map((file) => read("css/" + file)).join("\n");
 const app = read("js/app.js");
 const actions = read("js/actions.js");
 const dashboard = read("js/screens/dashboard.js");
@@ -72,6 +72,33 @@ console.log("\n2. Contraste e toque");
   const darkMin = Math.min(contrast(darkFaint, darkPaper), contrast(darkFaint, darkCard));
   check("ink-faint claro passa de 4,5:1", lightMin >= 4.5, lightMin.toFixed(2));
   check("ink-faint escuro passa de 4,5:1", darkMin >= 4.5, darkMin.toFixed(2));
+  // O CONTORNO É O QUE DIZ ONDE SE PODE TOCAR.
+  //
+  // `--border` sozinho ficava em 1,24:1 (claro) e 1,32:1 (escuro) contra o fundo
+  // do próprio controle: campo, chip e botão de ícone se dissolviam no cartão, e
+  // no escuro a folha modal tinha quase a cor da página. A régua da WCAG 1.4.11
+  // para limite de componente é 3:1, e é ela que estes números seguram.
+  const lightStrong = token(rootBlock, "border-strong");
+  const darkStrong = token(darkBlock, "border-strong");
+  const lightRaised = token(rootBlock, "surface-raised");
+  const darkRaised = token(darkBlock, "surface-raised");
+  const menorContorno = (borda, card, paper, raised) =>
+    Math.min(contrast(borda, card), contrast(borda, paper), contrast(borda, raised));
+  const contornoClaro = menorContorno(lightStrong, lightCard, lightPaper, lightRaised);
+  const contornoEscuro = menorContorno(darkStrong, darkCard, darkPaper, darkRaised);
+  check("contorno de controle claro passa de 3:1", contornoClaro >= 3, contornoClaro.toFixed(2));
+  check("contorno de controle escuro passa de 3:1", contornoEscuro >= 3, contornoEscuro.toFixed(2));
+  // Token definido e não usado seria só uma promessa: estes são os controles em
+  // que a pessoa esbarra primeiro, um por família (campo, chip, folha).
+  const usaContornoForte = [".input", ".chip", ".payment-chip", ".cat-icon-option", ".cat-parent-option"];
+  const semContornoForte = usaContornoForte.filter((seletor) => {
+    const regra = css.slice(css.indexOf("\n" + seletor + " {"));
+    return !regra.slice(0, regra.indexOf("}")).includes("var(--border-strong)");
+  });
+  check("os controles usam o contorno forte", semContornoForte.length === 0, semContornoForte.join(","));
+  check("a folha modal usa a superfície elevada",
+    /\.modal-sheet \{[^}]*background: var\(--surface-raised\)/.test(css));
+
   check("controles de toque recebem 44 px", /@media \(pointer: coarse\)[\s\S]*min-height:\s*44px/.test(css));
   check("navegação móvel não volta a texto de 9 ou 10 px", !/bottom-nav__item[^}]*font-size:\s*(?:9|10)px/.test(css));
 }

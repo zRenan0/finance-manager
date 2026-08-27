@@ -394,7 +394,7 @@
 .chip {
   display: flex; flex-direction: column; align-items: center; gap: 7px;
   padding: 12px 5px; border-radius: var(--radius-sm);
-  border: 1px solid var(--border); background: var(--card);
+  border: 1px solid var(--border-strong); background: var(--card);
   box-shadow: var(--shadow-xs);
   transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease),
               transform var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
@@ -409,7 +409,7 @@
 .payment-chips { display: flex; flex-wrap: wrap; gap: 7px; }
 .payment-chip {
   height: 40px; padding: 0 15px; border-radius: 11px;
-  border: 1px solid var(--border); background: var(--card);
+  border: 1px solid var(--border-strong); background: var(--card);
   font-size: 12.5px; font-weight: 600; color: var(--ink-soft);
   box-shadow: var(--shadow-xs);
   transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease),
@@ -421,7 +421,7 @@
 
 .installments-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(56px, 1fr)); gap: 8px; margin: 0 0 4px; }
 .installment-chip {
-  height: 44px; border-radius: 12px; border: 1px solid var(--border); background: var(--card);
+  height: 44px; border-radius: 12px; border: 1px solid var(--border-strong); background: var(--card);
   font-family: var(--font-num); font-size: 13px; font-weight: 600; color: var(--ink-soft);
   box-shadow: var(--shadow-xs);
   transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease),
@@ -595,7 +595,7 @@
 .goal-suggestion b { color: var(--ink); font-variant-numeric: tabular-nums; }
 .icon-picker { display: flex; gap: 9px; }
 .icon-picker__btn {
-  width: 48px; height: 48px; border-radius: 14px; border: 1px solid var(--border); background: var(--card);
+  width: 48px; height: 48px; border-radius: 14px; border: 1px solid var(--border-strong); background: var(--card);
   color: var(--goal); display: flex; align-items: center; justify-content: center;
   box-shadow: var(--shadow-xs); transition: all var(--dur-fast) var(--ease);
 }
@@ -694,19 +694,22 @@
   display: flex; align-items: flex-end; justify-content: center; padding: 0;
 }
 .modal-sheet {
-  background: var(--card);
-  border: 1px solid var(--border);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
   border-radius: var(--radius-xl) var(--radius-xl) 0 0;
   padding: 22px 20px calc(22px + env(safe-area-inset-bottom));
   width: 100%; max-width: 540px; max-height: 88vh; overflow-y: auto;
   box-shadow: var(--shadow-lg);
-  /* A ÂNCORA DE ROLAGEM DO NAVEGADOR ATRAPALHA QUEM REFAZ O DOM INTEIRO.
-     render() troca todo o conteúdo da folha e repõe a posição na mesma linha;
-     o Chrome, sem saber disso, ainda tenta "segurar" um elemento antigo e
-     empurra a rolagem alguns pixels logo depois. Como a posição aqui é
-     restaurada de propósito, a âncora só tem o que atrapalhar. */
-  overflow-anchor: none;
 }
+
+/* A ÂNCORA DE ROLAGEM DO NAVEGADOR ATRAPALHA QUEM REFAZ O DOM INTEIRO.
+   render() troca todo o conteúdo e repõe a posição na mesma linha; o Chrome,
+   sem saber disso, ainda tenta "segurar" um elemento antigo e empurra a rolagem
+   alguns pixels logo depois. Esta lista é a mesma de SCROLL_CONTAINERS em
+   js/app.js: onde a posição é restaurada de propósito, a âncora só atrapalha. */
+.modal-sheet, .cat-icon-grid, .cat-picker-list, .import-list,
+.ai-preview__body, .ai-preview__json pre, .onb__body, .side-nav,
+[data-scroll-keep] { overflow-anchor: none; }
 .modal-sheet::before {
   content: ""; display: block; width: 38px; height: 4px; border-radius: 999px;
   background: var(--border); margin: -8px auto 16px;
@@ -858,7 +861,7 @@
   flex: 1 0 100%; padding-left: 35px;
 }
 .import-kind-select, .import-transfer-select {
-  min-width: 0; width: 100%; font-size: 12px; border: 1px solid var(--border);
+  min-width: 0; width: 100%; font-size: 12px; border: 1px solid var(--border-strong);
   border-radius: 9px; background: var(--paper); color: var(--ink); padding: 8px;
 }
 .import-row__controls .import-cat-select { max-width: none; width: 100%; }
@@ -868,7 +871,7 @@
 }
 .import-transfer-select.input--error { border-color: var(--negative); }
 .import-cat-select {
-  font-size: 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--paper);
+  font-size: 12px; border: 1px solid var(--border-strong); border-radius: 9px; background: var(--paper);
   color: var(--ink); padding: 7px; max-width: 128px; flex: 0 1 116px; min-width: 88px;
 }
 
@@ -981,7 +984,7 @@
 .cat-group-chips { display: flex; gap: 7px; margin-top: 10px; flex-wrap: wrap; }
 .cat-group-chip {
   display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 999px;
-  border: 1px solid var(--border); background: var(--card); font-size: 11.5px; font-weight: 600; color: var(--ink-soft);
+  border: 1px solid var(--border-strong); background: var(--card); font-size: 11.5px; font-weight: 600; color: var(--ink-soft);
   transition: all var(--dur-fast) var(--ease);
 }
 .cat-group-chip:active { transform: scale(0.95); }
@@ -1053,7 +1056,7 @@
 .quick-entry-row { display: flex; gap: 9px; margin-top: 12px; flex-wrap: wrap; }
 .quick-entry-input {
   flex: 1 1 200px; min-width: 0;
-  border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--paper);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--paper);
   padding: 0 15px; height: 48px; font-size: 15px; font-family: inherit; color: var(--ink);
   outline: none;
   transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);

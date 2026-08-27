@@ -44,7 +44,7 @@
   display: inline-flex; align-items: center; gap: 7px;
   font-family: inherit; font-size: 12.5px; font-weight: 600;
   color: var(--ink-soft); background: var(--card-alt);
-  border: 1px solid var(--border); border-radius: 999px;
+  border: 1px solid var(--border-strong); border-radius: 999px;
   padding: 8px 14px; cursor: pointer; min-height: 40px;
   transition: all var(--dur-fast) var(--ease);
 }

@@ -2,6 +2,39 @@
 
 ## Não publicado
 
+### O que rola por dentro também precisa ficar parado
+
+- **O conserto anterior cuidou da janela e da folha, e faltou o miolo.** A grade
+  de ícones do editor de categoria rola por conta própria: escolher um ícone da
+  última fila jogava a grade de volta ao topo, levando junto o ícone que a pessoa
+  acabou de escolher. Medido antes: 22 → 0 a cada clique.
+- **A preservação passou a valer para todo contêiner que rola**: folha modal,
+  grade de ícones, lista da revisão de extrato, seletor de subcategoria, corpo do
+  assistente inicial e da prévia de IA, barra lateral. A posição de cada um é
+  guardada antes da troca do HTML e reposta depois, com a posição na lista como
+  chave.
+- **A lista não pode envelhecer em silêncio**: um teste lê o CSS entregue,
+  encontra todo bloco com `overflow-y: auto` e exige que `SCROLL_CONTAINERS`
+  cubra cada um. Quem preferir marcar no HTML usa `data-scroll-keep`.
+
+### Contorno de controle deixou de sumir dentro do cartão
+
+- **A queixa era "está ruim de enxergar"; a medição deu razão a ela.** O contorno
+  de campo, chip e botão de ícone ficava em **1,24:1** no tema claro e **1,32:1**
+  no escuro contra o fundo do próprio controle, quando a régua da WCAG 1.4.11
+  para limite de componente é **3:1**. No escuro a folha modal ainda por cima
+  tinha quase a cor da página atrás dela: **1,09:1**.
+- **Dois tokens novos**: `--border-strong` para o limite de quem é clicável
+  (#7E8C88 no claro, #61716A no escuro) e `--surface-raised` para a folha que
+  precisa parecer estar por cima. A borda decorativa de cartão continua em
+  `--border`, que nunca teve a função de dizer onde se pode tocar.
+- **Aplicado nos 21 controles que dependiam do contorno**: campo e seletor de
+  todo o app, chips de categoria, pagamento, parcelas, grupo e horizonte,
+  seletores da importação, opções do editor de categoria, do foco do painel e do
+  assistente inicial. Medido depois: **3,24 a 3,50:1** nos dois temas.
+- Números travados em `tests/test-design-finance-references.js`, que agora lê
+  todas as folhas de estilo de tela em vez de uma lista escrita à mão.
+
 ### Um Pix entre contas próprias vira transferência de verdade, na importação ou depois
 
 - **O problema não era classificar errado: era não ter onde classificar.** Um Pix

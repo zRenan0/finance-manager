@@ -1051,22 +1051,32 @@ function blocoF21() {
   const documentoOriginal = ctx.document;
   const scrollToOriginal = ctx.scrollTo;
   const rolagens = [];
+  // Dois contêineres, porque preservar só o de fora era metade do defeito: a
+  // folha modal rola, e a grade de ícones dentro dela rola por conta própria.
   let folha = fakeEl("div");
+  let grade = fakeEl("div");
   folha.scrollTop = 220;
+  grade.scrollTop = 96;
   const raiz = fakeEl("div");
   let html = "";
-  // Trocar o `innerHTML` é o que destrói a folha antiga: a nova nasce no topo,
+  // Trocar o `innerHTML` é o que destrói os dois: os novos nascem no topo,
   // exatamente como no navegador.
   Object.defineProperty(raiz, "innerHTML", {
     get() { return html; },
-    set(valor) { html = valor; folha = fakeEl("div"); folha.scrollTop = 0; },
+    set(valor) {
+      html = valor;
+      folha = fakeEl("div"); folha.scrollTop = 0;
+      grade = fakeEl("div"); grade.scrollTop = 0;
+    },
   });
   const campo = fakeEl("input");
   campo.id = "cat-editor-name-input";
   ctx.document = Object.assign(Object.create(null), documentoOriginal, {
     getElementById: (id) => (id === "app" ? raiz : (id === campo.id ? campo : null)),
-    querySelector: (sel) => (sel === ".modal-sheet" ? folha : null),
-    querySelectorAll: () => [],
+    querySelector: () => null,
+    // A ordem é a chave usada por `restoreScrollSnapshot`; o DOM devolve os
+    // contêineres na ordem do documento, e a folha vem antes da grade.
+    querySelectorAll: (sel) => (sel === run("SCROLL_CONTAINERS") ? [folha, grade] : []),
     activeElement: campo,
   });
   ctx.scrollTo = (x, y) => rolagens.push([x, y]);
@@ -1079,6 +1089,7 @@ function blocoF21() {
 
   ctx.scrollY = 380;
   folha.scrollTop = 220;
+  grade.scrollTop = 96;
   run(`state.categoriesUi.editor.name = "Mercado";`);
   run(`render()`);
   // A posição é reposta duas vezes de propósito: depois do HTML novo e outra vez
@@ -1087,6 +1098,8 @@ function blocoF21() {
     rolagens.length > 0 && rolagens.every(([x, y]) => x === 0 && y === 380), rolagens);
   check("a folha modal recriada também volta para onde estava",
     folha.scrollTop === 220, folha.scrollTop);
+  check("a grade de ícones, que rola por dentro, também volta",
+    grade.scrollTop === 96, grade.scrollTop);
 
   // Navegar é outra coisa: a tela nova começa onde o navegador quiser.
   const antesDaNavegacao = rolagens.length;
@@ -1103,6 +1116,26 @@ function blocoF21() {
   check("revealTarget não herda a rolagem antiga",
     rolagens.length === antesDoReveal, rolagens.slice(antesDoReveal));
   run(`state.revealTarget = null;`);
+
+  // A LISTA DE CONTÊINERES TEM DE ACOMPANHAR O CSS.
+  //
+  // Quem criar amanhã um bloco com rolagem própria não vai lembrar de avisar o
+  // `render()`. Este teste lê o CSS entregue, encontra todo mundo que rola e
+  // exige que a lista de `SCROLL_CONTAINERS` cubra cada um; a saída de emergência
+  // é marcar o elemento com `data-scroll-keep` no HTML.
+  const lista = run("SCROLL_CONTAINERS");
+  const cssDoApp = ["css/components.css", "css/base.css", "css/layout.css", "css/utilities.css"]
+    .concat(fs.readdirSync(path.join(ROOT, "css", "screens")).map((nome) => `css/screens/${nome}`))
+    .map((arquivo) => readSrc(arquivo)).join("\n");
+  const roláveis = Array.from(cssDoApp.matchAll(/([^{}]+)\{([^}]*overflow(?:-y)?:\s*(?:auto|scroll)[^}]*)\}/g))
+    .map((achado) => achado[1].split(",").map((parte) => parte.trim()).filter(Boolean))
+    .reduce((todos, parte) => todos.concat(parte), [])
+    .filter((seletor) => seletor.startsWith(".") && !seletor.includes(":"));
+  const descobertos = Array.from(new Set(roláveis));
+  const faltando = descobertos.filter((seletor) => !lista.includes(seletor));
+  check("todo bloco com rolagem própria está na lista preservada",
+    faltando.length === 0, faltando);
+  check("a lista encontrou blocos de verdade no CSS", descobertos.length >= 5, descobertos);
 
   ctx.document = documentoOriginal;
   ctx.scrollTo = scrollToOriginal;

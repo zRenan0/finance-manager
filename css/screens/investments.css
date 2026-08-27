@@ -118,7 +118,7 @@
 .sim-chip {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 8px 12px; border-radius: 999px;
-  border: 1px solid var(--border); background: var(--card);
+  border: 1px solid var(--border-strong); background: var(--card);
   color: var(--ink-soft); font-size: 0.8rem; font-weight: 550;
   cursor: pointer; transition: all 160ms ease;
 }

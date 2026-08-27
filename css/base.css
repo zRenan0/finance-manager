@@ -68,6 +68,15 @@
   --card-alt:    #FAFBFA;
   --border:      #E2E8E5;
   --border-soft: #EDF1EF;
+  /* CONTORNO DE CONTROLE NÃO É ENFEITE: É O QUE DIZ ONDE SE PODE TOCAR.
+     `--border` sozinho dava 1,24:1 no claro e 1,32:1 no escuro contra o próprio
+     fundo do controle, quando a régua para limite de componente é 3:1 (WCAG
+     1.4.11). Na prática, campo, chip e botão de ícone se dissolviam no cartão, e
+     no escuro a folha modal tinha quase a cor da página atrás dela. Estes dois
+     tokens existem para os controles e para a superfície elevada; a borda
+     decorativa de cartão continua em `--border`. */
+  --border-strong: #7E8C88;
+  --surface-raised: #FFFFFF;
 
   /* --- Marca (esmeralda de cofre) --- */
   --brand:       #0B6B5C;
@@ -224,6 +233,11 @@
   --card-alt:    #16201D;
   --border:      #253028;
   --border-soft: #1B2421;
+  /* 3,60:1 sobre `--card`, 3,23:1 sobre `--surface-raised` e 3,83:1 sobre
+     `--paper`; a superfície elevada é o que separa a folha modal da página, que
+     no escuro estavam em 1,09:1. */
+  --border-strong: #61716A;
+  --surface-raised: #16201D;
 
   --brand:       #1FB394;
   --brand-dark:  #0E7A66;

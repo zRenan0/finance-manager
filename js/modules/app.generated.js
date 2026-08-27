@@ -33926,30 +33926,56 @@ function renderSurfaceKey() {
 // estado com ele mesmo diria sempre "é a mesma tela".
 let __superficieDesenhada = null;
 
-function scrollSheetElement() {
-  return typeof document.querySelector === "function" ? document.querySelector(".modal-sheet") : null;
+// NÃO É SÓ A JANELA QUE ROLA.
+//
+// Preservar só a rolagem da página deixava o defeito de pé onde ele mais
+// incomoda: a grade de ícones do editor de categoria rola por conta própria, e
+// escolher um ícone da última fila a jogava de volta para o topo, levando junto
+// o ícone que a pessoa acabou de escolher. O mesmo vale para a folha modal, a
+// lista da revisão de extrato e o seletor de subcategoria.
+//
+// A lista é explícita porque a alternativa (ler o estilo calculado de cada
+// elemento a cada quadro) custaria um cálculo de layout por render. Um teste
+// confere esta lista contra o CSS, então um contêiner rolável novo não passa
+// despercebido; `[data-scroll-keep]` cobre quem preferir marcar no HTML.
+const SCROLL_CONTAINERS = ".modal-sheet, .cat-icon-grid, .cat-picker-list, .import-list, .ai-preview__body, .ai-preview__json pre, .onb__body, .side-nav, [data-scroll-keep]";
+
+function scrollContainerNodes() {
+  if (typeof document.querySelectorAll !== "function") return [];
+  try { return document.querySelectorAll(SCROLL_CONTAINERS); } catch (e) { return []; }
 }
 
 function captureScrollSnapshot() {
-  const sheet = scrollSheetElement();
+  const nodes = scrollContainerNodes();
+  const containers = [];
+  for (let i = 0; i < nodes.length; i += 1) {
+    const node = nodes[i];
+    const top = node && typeof node.scrollTop === "number" ? node.scrollTop : 0;
+    // Só o que está fora do topo precisa voltar; guardar zeros faria a reposição
+    // brigar com quem nasce no lugar certo.
+    if (top) containers.push([i, top]);
+  }
   return {
     x: typeof window.scrollX === "number" ? window.scrollX : 0,
     y: typeof window.scrollY === "number" ? window.scrollY : 0,
-    // A folha modal é rolável por si; recriada, ela nasce no topo mesmo que a
-    // janela atrás dela não tenha se mexido.
-    sheetTop: sheet && typeof sheet.scrollTop === "number" ? sheet.scrollTop : null,
+    containers,
   };
 }
 
+// A posição na lista serve de chave: com a mesma tela desenhada, o mesmo
+// conjunto de contêineres aparece na mesma ordem. É o que evita depender de um
+// id que a maioria deles não tem.
 function restoreScrollSnapshot(snapshot) {
   if (!snapshot) return;
   if ((snapshot.x || snapshot.y) && typeof window.scrollTo === "function") {
     try { window.scrollTo(snapshot.x, snapshot.y); } catch (e) { /* navegador sem scrollTo programático */ }
   }
-  if (snapshot.sheetTop) {
-    const sheet = scrollSheetElement();
-    if (sheet && typeof sheet.scrollTop === "number") sheet.scrollTop = snapshot.sheetTop;
-  }
+  if (!snapshot.containers.length) return;
+  const nodes = scrollContainerNodes();
+  snapshot.containers.forEach((item) => {
+    const node = nodes[item[0]];
+    if (node && typeof node.scrollTop === "number") node.scrollTop = item[1];
+  });
 }
 
 function render() {

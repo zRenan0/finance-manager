@@ -134,7 +134,7 @@
   max-height: calc(100vh - var(--onb-inset-top) - var(--onb-inset-bottom));
   max-height: calc(100dvh - var(--onb-inset-top) - var(--onb-inset-bottom));
   display: flex; flex-direction: column; gap: 18px;
-  background: var(--card); border: 1px solid var(--border);
+  background: var(--surface-raised); border: 1px solid var(--border-strong);
   border-radius: var(--radius-lg); box-shadow: var(--shadow-lg), var(--sheen);
   padding: 20px 20px 18px;
   animation: onb-in var(--dur-slow, 420ms) var(--ease) both;
@@ -193,7 +193,7 @@
 .onb-focus__option {
   min-height: 66px; padding: 10px; display: grid; grid-template-columns: 32px minmax(0, 1fr);
   gap: 9px; align-items: center; text-align: left; color: var(--ink-soft);
-  border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--card-alt);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--card-alt);
 }
 .onb-focus__option.active { color: var(--ink); border-color: var(--brand); background: var(--brand-soft); }
 .onb-focus__icon { width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center; color: var(--brand); background: var(--card); }
