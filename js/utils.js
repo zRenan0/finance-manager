@@ -329,9 +329,19 @@ function fmtBRLShort(n) {
   if (abs >= 10000) return `${v < 0 ? "-" : ""}R$ ${fmtNum(Math.round(abs / 100) / 10)} mil`;
   return fmtBRL(v);
 }
-function fmtPct(n, decimals = 0) {
+// `toFixed` devolve separador decimal do INGLÊS. Num app inteiro em português,
+// que fala de dinheiro, "0.0 de 6 meses" e "+100.0%" ao lado de "R$ 1.250,50"
+// não são detalhe de estilo: o ponto ali é separador de milhar, e o número
+// passa a ler errado. Toda casa decimal que vai para a tela sai por aqui.
+function fmtDec(n, decimals = 1) {
   const v = Number(n);
-  return `${(Number.isFinite(v) ? v : 0).toFixed(decimals)}%`;
+  return (Number.isFinite(v) ? v : 0).toLocaleString("pt-BR", {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+}
+function fmtPct(n, decimals = 0) {
+  return `${fmtDec(n, decimals)}%`;
 }
 // Plural de verdade no lugar do "(s)". Duas razões para virar função em vez de
 // ternário repetido em cada tela: o português conta o ZERO como plural ("0
@@ -352,7 +362,18 @@ function plural(n, um, muitos) {
 function pluralWord(n, um, muitos) {
   return (Number(n) || 0) === 1 ? um : muitos;
 }
-function fmtDateShort(iso) { if(!iso) return ""; const [, m, d] = iso.split("-"); return `${d}/${m}`; }
+// Data curta, mas nunca ambígua. Omitir o ano só é seguro DENTRO do ano
+// corrente. Uma compra em 10x joga parcelas para 2027, e a lista mostrava
+// "27/05" tanto para maio deste ano quanto para maio do ano que vem: o usuário
+// não tinha como saber qual era qual em "Últimos lançamentos", na caixa de
+// revisão ou no calendário. Fora do ano corrente entram os dois dígitos do ano,
+// que cabem no mesmo espaço.
+function fmtDateShort(iso) {
+  if (!iso) return "";
+  const [y, m, d] = String(iso).split("-");
+  const anoAtual = String(new Date().getFullYear());
+  return y === anoAtual ? `${d}/${m}` : `${d}/${m}/${String(y).slice(2)}`;
+}
 function fmtDateFull(iso) { if(!iso) return ""; const [y, m, d] = iso.split("-"); return `${d}/${m}/${y}`; }
 
 function escapeHtml(str) {
@@ -451,6 +472,20 @@ function csvCell(value) {
   let s = String(value == null ? "" : value);
   if (CSV_FORMULA_START.test(s)) s = `'${s}`;
   return /[";,\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+// O CSV é exportado para o Excel do usuário, não para um parser genérico, e a
+// tela promete "abrir no Excel ou no Google Sheets". Num Windows em português o
+// separador de lista é `;` e o decimal é `,`: um arquivo com vírgula separando
+// campos e ponto decimal abre com tudo empilhado na coluna A, e os valores que
+// escapam viram data ou texto. O separador vive aqui para exportação e
+// importação lerem o mesmo dialeto (`detectSeparator` já aceita `;`, `,` e tab,
+// então CSV de banco continua entrando igual).
+const CSV_SEP = ";";
+
+function csvNumber(value, decimals) {
+  const n = Number(value);
+  return (Number.isFinite(n) ? n : 0).toFixed(decimals == null ? 2 : decimals).replace(".", ",");
 }
 
 // Desfaz a neutralização acima, na importação.

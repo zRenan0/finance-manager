@@ -105,6 +105,24 @@ function renderAccountsScreen() {
   </div>`;
 }
 
+// Duas causas diferentes caem no mesmo total e precisavam de duas frases.
+// Chamar uma compra no crédito de "lançamento antigo sem conta" não descrevia
+// o que aconteceu nem dizia o que fazer; agora a linha nomeia a causa e leva
+// para o cadastro do cartão, que é o que tira o gasto do caixa e o põe na
+// fatura, onde ele deveria estar.
+function renderLegacyBalance(summary) {
+  const parts = summary.legacyParts || { orphan: summary.legacy, cardless: 0, cardlessCount: 0 };
+  const linhas = [];
+  if (parts.orphan !== 0) {
+    linhas.push(`<span><b>Histórico anterior: ${fmtBRL(parts.orphan)}</b><small>Lançamentos antigos sem conta continuam preservados e entram no total.</small></span>`);
+  }
+  if (parts.cardless !== 0) {
+    linhas.push(`<span><b>Crédito sem cartão: ${fmtBRL(parts.cardless)}</b><small>${plural(parts.cardlessCount, "compra no crédito não está ligada", "compras no crédito não estão ligadas")} a nenhum cartão, então ${parts.cardlessCount === 1 ? "reduz" : "reduzem"} o caixa em vez de entrar numa fatura. Cadastre o cartão e reaponte ${parts.cardlessCount === 1 ? "o lançamento" : "os lançamentos"}.</small></span>`);
+  }
+  if (!linhas.length) return "";
+  return `<div class="legacy-balance">${svgIcon("alertTriangle", 15)}<div class="legacy-balance__lines">${linhas.join("")}</div></div>`;
+}
+
 function renderAccountsAndCards(summary, sources, activeAccounts) {
   const accountStats = new Map(sources.accountStats.map((item) => [item.accountId, item]));
   const cardStats = new Map(sources.cardStats.map((item) => [item.cardId, item]));
@@ -112,7 +130,7 @@ function renderAccountsAndCards(summary, sources, activeAccounts) {
     <div class="account-toolbar"><button class="btn btn--primary btn--sm" data-action="account-new">${svgIcon("plus",15)} Conta</button><button class="btn btn--secondary btn--sm" data-action="card-new" ${activeAccounts.length ? "" : "disabled"}>${svgIcon("creditCard",15)} Cartão</button><button class="btn btn--secondary btn--sm" data-action="transfer-new" ${activeAccounts.length > 1 ? "" : "disabled"}>${svgIcon("arrowRight",15)} Transferir</button></div>
     <div class="card card--hero account-hero"><div class="hero-label-row"><p class="hero-label">Saldo em contas</p>${renderCalculationButton("accounts-balance")}</div><p class="hero-value">${fmtBRL(summary.cash)}</p><div class="hero-chips"><div class="hero-chip"><div><span class="hero-chip__label">Faturas abertas</span><span class="hero-chip__value">${fmtBRL(summary.cardDue)}</span></div></div><div class="hero-chip ${summary.availableAfterCards >= 0 ? "hero-chip--save" : "hero-chip--warn"}"><div><span class="hero-chip__label">Após faturas</span><span class="hero-chip__value">${fmtBRL(summary.availableAfterCards)}</span></div></div><div class="hero-chip"><div><span class="hero-chip__label">Parcelas futuras</span><span class="hero-chip__value">${fmtBRL(summary.futureCard)}</span></div></div></div></div>
     ${renderAccountForm()}${renderCardForm()}${renderTransferForm()}${renderCardPaymentForm(summary)}
-    <div class="grid-2 accounts-grid"><div class="card"><div class="screen-header"><p class="card-title" data-ui-css="margin:0">Contas</p><span class="badge">${summary.accounts.length}</span></div>${summary.accounts.length ? `<div class="account-list">${summary.accounts.map((account) => renderAccountRow(account, accountStats.get(account.id))).join("")}</div>` : renderEmptyState("wallet","Nenhuma conta cadastrada.","Cadastre uma conta e informe o saldo visto no banco para o aplicativo começar com uma base confiável.")}${summary.legacy !== 0 ? `<div class="legacy-balance">${svgIcon("alertTriangle",15)}<span><b>Histórico anterior: ${fmtBRL(summary.legacy)}</b><small>Lançamentos antigos sem conta continuam preservados e entram no total.</small></span></div>` : ""}</div>
+    <div class="grid-2 accounts-grid"><div class="card"><div class="screen-header"><p class="card-title" data-ui-css="margin:0">Contas</p><span class="badge">${summary.accounts.length}</span></div>${summary.accounts.length ? `<div class="account-list">${summary.accounts.map((account) => renderAccountRow(account, accountStats.get(account.id))).join("")}</div>` : renderEmptyState("wallet","Nenhuma conta cadastrada.","Cadastre uma conta e informe o saldo visto no banco para o aplicativo começar com uma base confiável.")}${renderLegacyBalance(summary)}</div>
       <div><p class="section-title">Cartões</p>${summary.cards.length ? summary.cards.map((card) => renderCardRow(card, cardStats.get(card.id))).join("") : `<div class="card">${renderEmptyState("creditCard","Nenhum cartão cadastrado.","Compras no crédito só deixam de reduzir o caixa quando estão ligadas a um cartão.")}</div>`}</div></div>`;
 }
 

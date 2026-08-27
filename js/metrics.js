@@ -245,6 +245,21 @@ function emergencyGoalOf(data) {
 // Gasto mensal médio dos últimos meses fechados; a base honesta para dizer
 // "quantos meses a sua reserva cobre". Ignora meses sem nenhum gasto para não
 // diluir a média de quem começou a usar o app agora.
+// Quantos meses JÁ FECHADOS têm gasto lançado. Zero significa que
+// `avgMonthlyExpense` caiu no mês corrente, que ainda está pela metade: no dia
+// 27, um único lançamento de R$ 214,90 vira "R$ 214,90/mês" e daí saem frases
+// como "114 dias de despesa cobertos" e "0,0 de 6 meses de reserva". O número
+// continua sendo o melhor disponível; o que as telas ganham aqui é como dizer
+// que ele ainda é provisório em vez de apresentá-lo como padrão de consumo.
+function closedMonthsWithExpense(data, months = 3) {
+  const now = new Date();
+  let counted = 0;
+  for (let i = 1; i <= months; i++) {
+    if (realizedMonthTotals(data, keyOfDate(addMonths(now, -i))).expense > 0) counted++;
+  }
+  return counted;
+}
+
 function avgMonthlyExpense(data, months = 3) {
   const now = new Date();
   let cents = 0;

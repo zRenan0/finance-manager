@@ -116,9 +116,14 @@ function importReviewSummary(rows, context) {
 
   const contaDestino = ctx.documentKind === "account" ? accountById(state.data, ctx.destinationId) : null;
   const aberturaConta = contaDestino ? String(contaDestino.openingDate || "") : "";
-  const anterioresAoSaldo = aberturaConta
-    ? includedTransactions.filter((row) => String(row.date || "") < aberturaConta).length
-    : 0;
+  const linhasAntesDaAbertura = aberturaConta
+    ? includedTransactions.filter((row) => String(row.date || "") < aberturaConta)
+    : [];
+  const anterioresAoSaldo = linhasAntesDaAbertura.length;
+  // A data mais antiga do arquivo é o único valor que faz essas linhas passarem
+  // a contar. Calculada aqui para o botão do aviso já sair com ela pronta.
+  const primeiraDataDoArquivo = linhasAntesDaAbertura.reduce(
+    (menor, row) => (!menor || String(row.date || "") < menor ? String(row.date || "") : menor), "");
   const transferenciasAntesDaAbertura = includedTransfers.filter((row) => {
     const other = accountById(state.data, row.otherAccountId);
     return (aberturaConta && String(row.date || "") < aberturaConta)
@@ -151,7 +156,7 @@ function importReviewSummary(rows, context) {
     avisoPapeis.length
       ? `<div class="import-notice">${svgIcon("creditCard", 16)}<div><b>Isto parece a fatura de um cartão.</b><span>${escapeHtml(avisoPapeis.join(". "))}. As compras continuam marcadas normalmente; se você quiser importar alguma dessas linhas mesmo assim, é só marcar a caixa.</span></div></div>` : "",
     anterioresAoSaldo
-      ? `<div class="import-notice">${svgIcon("info", 16)}<div><b>${anterioresAoSaldo} ${anterioresAoSaldo === 1 ? "lançamento é anterior" : "lançamentos são anteriores"} à abertura de ${escapeHtml(contaDestino.name)} em ${fmtDateFull(aberturaConta)}.</b><span>${anterioresAoSaldo === 1 ? "Ele entra" : "Eles entram"} nas despesas, categorias e gráficos, mas não ${anterioresAoSaldo === 1 ? "altera" : "alteram"} o saldo da conta: o saldo inicial que você informou já inclui esse período. Para que ${anterioresAoSaldo === 1 ? "ele conte" : "eles contem"} no saldo, edite a conta e recue a data de abertura.</span></div></div>` : "",
+      ? `<div class="import-notice">${svgIcon("info", 16)}<div><b>${anterioresAoSaldo} ${anterioresAoSaldo === 1 ? "lançamento é anterior" : "lançamentos são anteriores"} à abertura de ${escapeHtml(contaDestino.name)} em ${fmtDateFull(aberturaConta)}.</b><span>${anterioresAoSaldo === 1 ? "Ele entra" : "Eles entram"} nas despesas, categorias e gráficos, mas não ${anterioresAoSaldo === 1 ? "altera" : "alteram"} o saldo da conta: o saldo inicial que você informou já inclui esse período. Se aquele saldo era o do dia ${fmtDateFull(aberturaConta)} e não o de antes do extrato, recue a abertura para que ${anterioresAoSaldo === 1 ? "ele conte" : "eles contem"} no saldo.</span>${primeiraDataDoArquivo ? `<button class="btn btn--ghost btn--sm" data-action="import-backdate-account" data-id="${escapeHtml(primeiraDataDoArquivo)}">Recuar abertura para ${fmtDateFull(primeiraDataDoArquivo)}</button>` : ""}</div></div>` : "",
     transferenciasAntesDaAbertura
       ? `<div class="import-notice">${svgIcon("info", 16)}<div><b>${transferenciasAntesDaAbertura === 1 ? "Uma transferência está" : `${transferenciasAntesDaAbertura} transferências estão`} fora do período acompanhado por uma das contas.</b><span>O saldo inicial dessa conta já inclui o movimento, então somente a ponta dentro do período será recalculada.</span></div></div>` : "",
   ].join("");
@@ -206,6 +211,8 @@ function renderImportReview(rows) {
   const ctx = importReviewContext();
   const modelo = importReviewSummary(rows, ctx);
   const meta = rows.meta || {};
+  const visiveis = Math.min(rows.length, Math.max(IMPORT_PAGE_SIZE, state.importVisible || IMPORT_PAGE_SIZE));
+  const restantes = rows.length - visiveis;
 
   return `<div class="card">
     <div class="settings-row-header">
@@ -233,8 +240,10 @@ function renderImportReview(rows) {
     ${!ctx.destinations.length ? `<div class="inline-error import-destination-error">${svgIcon("alertTriangle", 16)}<div><p class="inline-error__title">Cadastre ${ctx.documentKind === "card" ? "um cartão" : "uma conta"} antes de importar.</p><p class="inline-error__detail">O destino é obrigatório para manter saldos e faturas corretos.</p></div><button class="btn btn--secondary btn--sm" data-action="nav" data-tab="accounts">Cadastrar</button></div>` : ""}
     <div id="import-notices">${modelo.notices}</div>
     <div class="import-list">
-      ${rows.map((row, idx) => renderImportReviewRow(row, idx, ctx)).join("")}
+      ${rows.slice(0, visiveis).map((row, idx) => renderImportReviewRow(row, idx, ctx)).join("")}
     </div>
+    ${restantes > 0 ? `<button class="btn btn--secondary btn--block btn--sm" data-ui-css="margin-top:10px" data-action="import-show-more">Mostrar mais ${Math.min(restantes, IMPORT_PAGE_SIZE)} de ${plural(restantes, "linha restante", "linhas restantes")}</button>
+    <p class="field-hint" data-ui-css="margin-top:6px">As linhas ainda não exibidas continuam marcadas e entram na importação; mostrar mais serve para conferir ou desmarcar.</p>` : ""}
     <button id="import-confirm-btn" class="btn btn--primary btn--block" data-ui-css="margin-top:14px" data-action="import-confirm" ${modelo.blocked ? "disabled" : ""}>${modelo.buttonLabel}</button>
     <button class="btn btn--ghost btn--block btn--sm" data-ui-css="margin-top:8px" data-action="nav" data-tab="rules">${svgIcon("tag", 14)} Corrigindo a mesma categoria várias vezes? Crie uma regra</button>
   </div>`;

@@ -134,7 +134,7 @@ function wealthInsights(data, model) {
     out.push({
       icon: delta.year.up ? "arrowUpRight" : "arrowDownRight",
       tone: delta.year.up ? "positive" : "danger",
-      text: `Em 12 meses seu patrimônio ${delta.year.up ? "cresceu" : "recuou"} ${fmtBRL(Math.abs(delta.year.value))} (${delta.year.up ? "+" : "−"}${Math.abs(delta.year.pct).toFixed(1)}%).`,
+      text: `Em 12 meses seu patrimônio ${delta.year.up ? "cresceu" : "recuou"} ${fmtBRL(Math.abs(delta.year.value))} (${delta.year.up ? "+" : "−"}${fmtDec(Math.abs(delta.year.pct), 1)}%).`,
     });
   }
 

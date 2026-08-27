@@ -5434,13 +5434,20 @@ function makeInstallmentTransactions(base, installments) {
   const n = Math.max(1, Math.min(48, Math.round(Number(installments) || 1)));
   const parts = splitMoney(base.amount, n);
   const groupId = base.installmentGroupId || uid();
-  const label = (base.description || "").trim() || "Compra parcelada";
+  const described = (base.description || "").trim();
+  // "Compra parcelada" existe só para dar um nome às N parcelas quando a compra
+  // não foi descrita. Numa transação única ele não nomeia nada: como TODO
+  // lançamento manual passa por aqui com n = 1 e a descrição é opcional, o
+  // rótulo virava o título (e o dado gravado) de qualquer gasto salvo sem
+  // descrição. Sem parcelamento, descrição vazia segue vazia e as telas caem no
+  // nome da categoria, que é o comportamento que elas já sabem tratar.
+  const label = described || "Compra parcelada";
   return parts.map((value, i) => makeTransaction({
     ...base,
     id: undefined,
     amount: value,
     date: addMonthsToIso(base.date || todayIso(), i),
-    description: n > 1 ? `${label} (${i + 1}/${n})` : label,
+    description: n > 1 ? `${label} (${i + 1}/${n})` : described,
     recurring: false,
     installmentGroupId: n > 1 ? groupId : null,
     installmentIndex: n > 1 ? i + 1 : null,
@@ -5786,7 +5793,7 @@ function backupFilename(ext) {
 
 function buildTransactionsCsv(data) {
   const header = ["Tipo", "Categoria", "Subcategoria", "Valor", "Data", "Pagamento", "Descrição", "Recorrente", "Parcela", "Origem"];
-  const lines = [header.join(",")];
+  const lines = [header.join(CSV_SEP)];
   const sorted = [...(data.transactions || [])].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
   sorted.forEach((t) => {
     const cat = categoryById(data, t.categoryId);
@@ -5798,27 +5805,27 @@ function buildTransactionsCsv(data) {
       t.type === "income" ? "Receita" : "Gasto",
       csvCell(parent ? parent.name : cat.name),
       csvCell(parent ? cat.name : ""),
-      signed.toFixed(2),
+      csvNumber(signed),
       t.date,
       csvCell(t.payment),
       csvCell(t.description || ""),
       t.recurring ? "Sim" : "Não",
       t.installmentTotal ? `${t.installmentIndex}/${t.installmentTotal}` : "",
       csvCell(t.source || "manual"),
-    ].join(","));
+    ].join(CSV_SEP));
   });
   return "\uFEFF" + lines.join("\n");   // BOM: o Excel pt-BR abre com acentos corretos
 }
 
 function buildBudgetsCsv(data, monthKey) {
   const status = computeBudgetStatus(data, monthKey);
-  const lines = ["Categoria,Grupo,Limite,Gasto,Restante,% do limite,Situação"];
+  const lines = [["Categoria", "Grupo", "Limite", "Gasto", "Restante", "% do limite", "Situação"].join(CSV_SEP)];
   status.items.forEach((b) => {
     lines.push([
       csvCell(b.fullName), csvCell(GROUP_LABELS[b.group] || ""),
-      b.budget.toFixed(2), b.spent.toFixed(2), b.remaining.toFixed(2),
-      b.pct.toFixed(1), b.level === "over" ? "Estourado" : b.level === "warn" ? "Atenção" : "Dentro do limite",
-    ].join(","));
+      csvNumber(b.budget), csvNumber(b.spent), csvNumber(b.remaining),
+      csvNumber(b.pct, 1), b.level === "over" ? "Estourado" : b.level === "warn" ? "Atenção" : "Dentro do limite",
+    ].join(CSV_SEP));
   });
   return "\uFEFF" + lines.join("\n");
 }

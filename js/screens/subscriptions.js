@@ -170,6 +170,7 @@ function renderSubItem(s, ignored) {
       </div>
       ${s.sinceFirstPct > 3 ? `<p class="sub-item__note">Desde a primeira cobrança o valor subiu ${s.sinceFirstPct.toFixed(0)}%; de ${fmtBRL(s.firstAmount)} para ${fmtBRL(s.lastAmount)}.</p>` : ""}
       ${s.kind === "recorrente" ? `<p class="sub-item__note">O valor varia entre as cobranças, então este é um gasto recorrente e não uma assinatura de preço fixo. O total usa a última cobrança como referência.</p>` : ""}
+      ${s.declaredOnly ? `<p class="sub-item__note">Este compromisso vem da marcação "gasto fixo mensal" no lançamento, não de um histórico de cobranças. A partir da segunda cobrança o app passa a usar as datas e os valores reais.</p>` : ""}
       <div class="sub-item__actions">
         ${ignored
           ? `<button class="btn btn--primary btn--sm" data-action="sub-track" data-id="${escapeHtml(s.key)}">Voltar a acompanhar</button>`

@@ -47,7 +47,7 @@ function renderWealthHero(m) {
     <div class="hero-glow"></div>
     <div class="hero-label-row"><p class="hero-label">Patrimônio líquido</p>${renderCalculationButton("net-worth")}</div>
     <p class="hero-value">${fmtBRL(m.worth.total)}</p>
-    ${d.comparable ? `<p class="hero-reserved">${svgIcon(d.up ? "arrowUpRight" : "arrowDownRight", 14)} ${d.up ? "+" : "−"}${fmtBRL(Math.abs(d.value))} (${d.up ? "+" : "−"}${Math.abs(d.pct).toFixed(1)}%) em ${m.months} meses</p>` : ""}
+    ${d.comparable ? `<p class="hero-reserved">${svgIcon(d.up ? "arrowUpRight" : "arrowDownRight", 14)} ${d.up ? "+" : "−"}${fmtBRL(Math.abs(d.value))} (${d.up ? "+" : "−"}${fmtDec(Math.abs(d.pct), 1)}%) em ${m.months} meses</p>` : ""}
 
     ${c.gross > 0 ? `<div class="wealth-bar">
       ${c.positive.map((b) => `<div class="wealth-bar__seg" data-ui-css="flex:${Math.max(b.value, 1)}; background:${b.color}" title="${escapeHtml(b.label)}"></div>`).join("")}
@@ -228,7 +228,7 @@ function renderWealthAnnualCard(m) {
       <div class="wealth-delta">
         <span class="wealth-delta__label">Contra 12 meses atrás</span>
         <b class="wealth-delta__value" data-ui-css="color:${a.yoy.comparable ? (a.yoy.up ? "var(--positive)" : "var(--negative)") : "var(--ink-faint)"}">
-          ${a.yoy.comparable ? `${a.yoy.up ? "+" : "−"}${Math.abs(a.yoy.pct).toFixed(1)}%` : "Sem dados"}
+          ${a.yoy.comparable ? `${a.yoy.up ? "+" : "−"}${fmtDec(Math.abs(a.yoy.pct), 1)}%` : "Sem dados"}
         </b>
       </div>
     </div>

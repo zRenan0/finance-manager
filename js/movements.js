@@ -27,7 +27,14 @@ function movementEntries(data) {
     return {
       id: t.id, kind: "transaction", type: t.type, amount: t.amount, date: t.date,
       description: t.description || (t.type === "income" ? "Receita" : category.name),
-      categoryId: t.categoryId, categoryName: category.name,
+      // As categorias do app descrevem GASTO (Moradia, Alimentação, Transporte).
+      // Receita não tem categoria própria e cai no "outros" por ser o padrão do
+      // armazenamento, o que fazia o salário aparecer listado como "Outros" -
+      // uma classificação errada, não uma ausência. Na leitura, receita é
+      // receita; a caixa de revisão também ignora income, então nada aqui pede
+      // correção que o usuário não tem como fazer.
+      categoryId: t.categoryId,
+      categoryName: t.type === "income" ? "Receita" : category.name,
       accountId: t.accountId || "", accountName: account ? account.name : "",
       creditCardId: t.creditCardId || "", cardName: card ? card.name : "",
       relatedAccountIds: [t.accountId, t.creditCardId].filter(Boolean),
@@ -206,11 +213,39 @@ function resolveRecordedAccountTransfer(row, statementAccountId, transfers) {
 function buildTransactionReviewModel(data) {
   const txs = [...(data.transactions || [])].sort((a, b) => a.date.localeCompare(b.date) || String(a.createdAt).localeCompare(String(b.createdAt)));
   const issues = [];
+  // UMA COMPRA PARCELADA É UMA DECISÃO, NÃO N DECISÕES.
+  //
+  // As N parcelas nascem juntas, com a mesma categoria e o mesmo destino: uma
+  // compra em 10x virava dez itens idênticos de "categoria precisa de revisão",
+  // e o usuário precisava escolher a mesma categoria dez vezes. Com 1.500
+  // lançamentos importados a caixa passava de 300 pendências, quase todas
+  // repetição da mesma escolha. `installmentGroupId` já existe no dado; aqui
+  // ele passa a ser a unidade de revisão, e a decisão vale para o grupo inteiro.
+  const categoryGroups = new Map();
   txs.forEach((t) => {
-    if (t.type === "expense" && t.categoryId === "outros" && t.source !== "manual") {
-      const key = `category:${t.id}`;
-      if (!transactionReviewIgnored(t, key)) issues.push({ key, type: "category", txId: t.id, txIds: [t.id], title: "Categoria precisa de revisão", detail: `${t.description || "Lançamento"} está em Outros.`, date: t.date, amount: t.amount });
-    }
+    if (t.type !== "expense" || t.categoryId !== "outros" || t.source === "manual") return;
+    const groupId = t.installmentGroupId ? `group:${t.installmentGroupId}` : `tx:${t.id}`;
+    const bucket = categoryGroups.get(groupId);
+    if (bucket) bucket.push(t);
+    else categoryGroups.set(groupId, [t]);
+  });
+  categoryGroups.forEach((list) => {
+    const primary = list[0];
+    const key = `category:${primary.id}`;
+    if (transactionReviewIgnored(primary, key)) return;
+    const total = list.length;
+    // O rótulo da parcela ("(1/10)") só faz sentido linha a linha. No grupo, o
+    // que identifica a compra é a descrição sem o contador.
+    const label = String(primary.description || "Lançamento").replace(/\s*\(\d+\/\d+\)\s*$/, "").trim() || "Lançamento";
+    issues.push({
+      key, type: "category", txId: primary.id, txIds: list.map((t) => t.id),
+      title: "Categoria precisa de revisão",
+      detail: total > 1
+        ? `${label} está em Outros. A escolha vale para as ${total} parcelas.`
+        : `${label} está em Outros.`,
+      date: primary.date,
+      amount: total > 1 ? sumMoney(list, (t) => t.amount) : primary.amount,
+    });
   });
 
   const duplicateBySignature = new Map();

@@ -109,15 +109,34 @@ function accountPreOpeningEffect(data, accountId, asOf) {
 }
 
 function legacyCashBalance(data, asOf) {
+  const parts = legacyCashBreakdown(data, asOf);
+  return addMoney(parts.orphan, parts.cardless);
+}
+
+// O "Histórico anterior" nasceu para uma coisa só: lançamento que perdeu o
+// vínculo com a conta (conta excluída). Só que compra no crédito sem cartão
+// cadastrado cai no mesmo balde, e a tela então explicava um gasto de cartão
+// como "lançamento antigo sem conta" - que não é o que é, e não diz ao usuário
+// o que fazer a respeito. Continuam somando igual (o dinheiro saiu mesmo e não
+// há fatura onde pendurá-lo); o que muda é poder dizer de onde cada parte vem.
+function legacyCashBreakdown(data, asOf) {
   const limit = asOf || "9999-12-31";
   const conhecidas = new Set((data.accounts || []).map((a) => a.id));
-  let cents = 0;
+  let orphanCents = 0;
+  let cardlessCents = 0;
+  let cardlessCount = 0;
   (data.transactions || []).forEach((t) => {
     if (t.creditCardId || t.date > limit) return;
     if (t.accountId && conhecidas.has(t.accountId)) return;
-    cents += t.type === "income" ? moneyToCents(t.amount) : -moneyToCents(t.amount);
+    const cents = t.type === "income" ? moneyToCents(t.amount) : -moneyToCents(t.amount);
+    if (t.payment === "Crédito") { cardlessCents += cents; cardlessCount += 1; return; }
+    orphanCents += cents;
   });
-  return moneyFromCents(cents);
+  return {
+    orphan: moneyFromCents(orphanCents),
+    cardless: moneyFromCents(cardlessCents),
+    cardlessCount,
+  };
 }
 
 function accountsCashBalance(data, asOf) {
@@ -261,11 +280,48 @@ function cardLiabilitySummary(data, asOf, days) {
     const card = cardMap.get(t.creditCardId);
     if (card && openStatementKeys.has(`${card.id}:${cardStatementKeyForDate(card, t.date)}`)) groupIds.add(groupKey);
   });
+  // PARCELA SEM CARTÃO TAMBÉM É DÍVIDA.
+  //
+  // Tudo acima percorre `data.creditCards`, então uma compra no crédito feita
+  // antes de cadastrar o cartão ficava invisível como passivo: as parcelas
+  // ainda por vencer não entravam nem em "Parcelas futuras", nem em Dívidas,
+  // nem no patrimônio líquido - que passava a dizer que a pessoa tem mais do
+  // que tem. Só entram as FUTURAS: a parcela cujo dia já passou saiu do caixa
+  // (ver legacyCashBreakdown), e contá-la de novo aqui cobraria duas vezes.
+  // A COMPRA PRECISA JÁ TER ACONTECIDO NA DATA CONSULTADA.
+  //
+  // `netWorthAtMonthEnd` chama esta função com o fim de CADA mês da série de
+  // patrimônio. Sem esta trava, uma compra parcelada feita em agosto de 2026
+  // aparecia como dívida em setembro de 2025: naquela data todas as parcelas
+  // eram "futuras". O caminho com cartão já usa a data de início do grupo pelo
+  // mesmo motivo (`groupStarts` acima); aqui faltava o equivalente.
+  const cardlessStarts = new Map();
+  (data.transactions || []).forEach((t) => {
+    if (t.type !== "expense" || t.creditCardId || t.payment !== "Crédito" || !t.installmentGroupId) return;
+    const first = cardlessStarts.get(t.installmentGroupId);
+    if (!first || t.date < first) cardlessStarts.set(t.installmentGroupId, t.date);
+  });
+  const cardlessComecou = (t) => {
+    const inicio = t.installmentGroupId ? cardlessStarts.get(t.installmentGroupId) : t.date;
+    return !!inicio && inicio <= today;
+  };
+  const cardlessFuture = (data.transactions || []).filter((t) => t.type === "expense"
+    && !t.creditCardId
+    && t.payment === "Crédito"
+    && t.date > today
+    && cardlessComecou(t));
+  const cardless = {
+    total: sumMoney(cardlessFuture, (t) => t.amount),
+    count: cardlessFuture.length,
+    dueWithin30: sumMoney(cardlessFuture.filter((t) => t.date <= limit), (t) => t.amount),
+  };
   return {
     cards,
-    total: sumMoney(cards, (card) => card.total),
+    total: addMoney(sumMoney(cards, (card) => card.total), cardless.total),
+    cardsTotal: sumMoney(cards, (card) => card.total),
+    cardless,
     overdue: sumMoney(cards, (card) => card.overdue),
-    dueWithin30: sumMoney(cards, (card) => card.dueWithin30),
+    dueWithin30: addMoney(sumMoney(cards, (card) => card.dueWithin30), cardless.dueWithin30),
     lastDueIso: cards.reduce((last, card) => (card.lastDueIso > last ? card.lastDueIso : last), ""),
     openPurchases: groupIds.size,
   };
@@ -279,7 +335,8 @@ function accountsSummary(data, asOf) {
     balance: accountBalance(data, a.id, today),
     preOpening: accountPreOpeningEffect(data, a.id, today),
   }));
-  const legacy = legacyCashBalance(data, today);
+  const legacyParts = legacyCashBreakdown(data, today);
+  const legacy = addMoney(legacyParts.orphan, legacyParts.cardless);
   const cards = (data.creditCards || []).map((c) => {
     const statements = cardStatements(data, c.id);
     const due = sumMoney(statements.filter((s) => s.key <= currentKey), (s) => s.outstanding);
@@ -295,9 +352,15 @@ function accountsSummary(data, asOf) {
     count: acc.count + a.preOpening.count,
     amount: addMoney(acc.amount, a.preOpening.amount),
   }), { count: 0, amount: 0 });
+  // Mesmo motivo de `cardLiabilitySummary`: parcela futura sem cartão é
+  // compromisso assumido, e "Parcelas futuras: R$ 0,00" com nove parcelas a
+  // vencer é a leitura errada do próprio dado que o app já guarda.
+  // Mesma trava de `cardLiabilitySummary`: só conta parcela de compra que já
+  // aconteceu até a data consultada.
+  const futureCardless = cardLiabilitySummary(data, today).cardless.total;
   return {
-    accounts, cards, legacy, cash, cardDue, preOpening,
-    futureCard: sumMoney(cards, (c) => c.future),
+    accounts, cards, legacy, legacyParts, cash, cardDue, preOpening, futureCardless,
+    futureCard: addMoney(sumMoney(cards, (c) => c.future), futureCardless),
     availableAfterCards: subMoney(cash, cardDue),
     hasAccounts: accounts.length > 0,
   };
@@ -419,7 +482,7 @@ function reconcileAccount(data, accountId, actualBalance, date) {
 
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
-    ACCOUNT_TYPE_LABELS, accountById, creditCardById, transactionAffectsCash, accountBalance, legacyCashBalance,
+    ACCOUNT_TYPE_LABELS, accountById, creditCardById, transactionAffectsCash, accountBalance, legacyCashBalance, legacyCashBreakdown,
     accountsCashBalance, cardStatementKeyForDate, cardStatementDueDate, cardStatements,
     cardLiabilityStatements, cardLiabilitySummary,
     accountsSummary, accountPreOpeningEffect, makeAccount, makeCreditCard, makeAccountTransfer, makeCardPayment,

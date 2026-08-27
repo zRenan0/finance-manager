@@ -17,6 +17,36 @@ function renderHealthScreen() {
   const h = model.headline;
   const toneColor = { positive: "var(--positive)", warn: "var(--goal)", danger: "var(--negative)", neutral: "var(--ink-soft)" };
 
+  // NOTA SEM DADOS É CHUTE COM CARA DE DIAGNÓSTICO.
+  //
+  // Sem nenhum lançamento, meta ou bem, os indicadores caem todos em valores
+  // neutros e a média sai perto de 79 - "Bom". Quem abria a tela no primeiro
+  // minuto de uso recebia um atestado de saúde financeira calculado sobre o
+  // vazio, e é justamente esse número que a tela pede para levar a sério. O
+  // Início já espera o primeiro lançamento para mostrar análise (ver
+  // `isDashboardStarting`); aqui a espera faltava.
+  if (typeof isDashboardStarting === "function" && isDashboardStarting(state.data)) {
+    return `<div class="screen">
+      ${renderBackHeader("Saúde financeira")}
+      <div class="grid-dashboard">
+        <div class="card card--dashed span-3 banner-inline">
+          ${svgIcon("shieldCheck", 34, "banner-inline__icon")}
+          <div class="banner-inline__text">
+            <strong>O diagnóstico começa no primeiro lançamento</strong>
+            <span>Reserva, liquidez, dívida e patrimônio são calculados a partir do que você registra. Sem nenhum lançamento não há nota a dar: qualquer número aqui seria chute.</span>
+          </div>
+          <button class="btn btn--primary btn--sm" data-action="nav" data-tab="add">Registrar</button>
+        </div>
+        <div class="card span-3">
+          <p class="card-title">O que a nota vai olhar</p>
+          <ul class="plain-list">
+            ${HEALTH_INDICATORS.map((i) => `<li><b>${escapeHtml(i.label)}</b><span>${escapeHtml(i.what)}</span></li>`).join("")}
+          </ul>
+        </div>
+      </div>
+    </div>`;
+  }
+
   return `<div class="screen">
     ${renderBackHeader("Saúde financeira")}
     <div class="grid-dashboard">

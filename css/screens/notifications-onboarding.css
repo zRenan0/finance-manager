@@ -265,6 +265,11 @@
   margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--ink-soft);
 }
 .onb__block-hint[hidden] { display: none; }
+.onb__block-hint > span { min-width: 0; }
+.onb__block-jump { flex: 0 0 auto; white-space: nowrap; }
+@media (max-width: 520px) {
+  .onb__block-hint { flex-wrap: wrap; }
+}
 
 .onb__foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex: 0 0 auto; }
 .onb__foot .btn { min-width: 118px; }

@@ -229,7 +229,7 @@ function renderQrResult(d) {
     <div class="field">
       <p class="field__label">Categoria ${d.categorySource === "historico" ? `<span class="field__label-tag">sugerida pelo seu histórico</span>` : d.categorySource === "dicionario" ? `<span class="field__label-tag">sugerida pelo recebedor</span>` : ""}</p>
       <div class="chip-grid chip-grid--compact">
-        ${topLevelCategories(state.data).map((c) => `<button class="chip ${d.categoryId === c.id ? "active" : ""}" data-ui-css="${d.categoryId === c.id ? `border-color:${c.color}; background:color-mix(in srgb, ${c.color} 10%, transparent)` : ""}" data-action="qr-select-category" data-id="${c.id}">
+        ${topLevelCategories(state.data).map((c) => `<button class="chip ${d.categoryId === c.id ? "active" : ""}" ${d.categoryId === c.id ? `data-ui-css="border-color:${c.color}; background:color-mix(in srgb, ${c.color} 10%, transparent)"` : ""} data-action="qr-select-category" data-id="${c.id}">
           <span class="icon-bubble" data-ui-css="background:color-mix(in srgb, ${c.color} 14%, transparent); color:${c.color}">${svgIcon(c.icon, 16)}</span>
           <span class="chip__label">${escapeHtml(c.name)}</span>
         </button>`).join("")}

@@ -359,7 +359,7 @@ function renderAdvisorCard(mKey) {
 
 // Quanto o pacote ocupa, em palavra de gente.
 function aiPreviewSize(bytes) {
-  return bytes >= 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${bytes} bytes`;
+  return bytes >= 1024 ? `${fmtDec((bytes / 1024), 1)} KB` : `${bytes} bytes`;
 }
 
 function renderAiPreviewFields(preview, hide) {

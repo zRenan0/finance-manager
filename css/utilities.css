@@ -72,7 +72,10 @@
 
 /* Região de anúncio para leitores de tela. O toast é decorativo
    (`aria-hidden`); a mensagem real vive aqui, fora do fluxo visual. */
-.sr-live {
+/* `.sr-live` é a região de anúncio; `.sr-only` é rótulo que existe só para
+   quem usa leitor de tela, quando o texto visível já está no cabeçalho do
+   cartão e repeti-lo ao lado do campo seria ruído para quem enxerga. */
+.sr-live, .sr-only {
   position: absolute; width: 1px; height: 1px;
   margin: -1px; padding: 0; overflow: hidden;
   clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0;
@@ -471,6 +474,13 @@
 .legacy-balance { display: flex; gap: 9px; margin-top: 12px; padding: 11px; border-radius: var(--radius-xs); color: var(--goal); background: var(--goal-soft); }
 .legacy-balance span { display: grid; gap: 2px; }
 .legacy-balance small { color: var(--ink-soft); font-size: 11px; }
+.legacy-balance__lines { display: grid; gap: 9px; min-width: 0; }
+
+/* Lista de "o que esta tela vai calcular", usada nos estados de espera. */
+.plain-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.plain-list li { display: grid; gap: 2px; }
+.plain-list b { font-size: 13px; }
+.plain-list span { font-size: 12px; color: var(--ink-soft); line-height: 1.5; }
 
 @media (max-width: 519px) {
   .account-row { grid-template-columns: auto minmax(0,1fr) auto; }

@@ -332,9 +332,19 @@ function fmtBRLShort(n) {
   if (abs >= 10000) return `${v < 0 ? "-" : ""}R$ ${fmtNum(Math.round(abs / 100) / 10)} mil`;
   return fmtBRL(v);
 }
-function fmtPct(n, decimals = 0) {
+// `toFixed` devolve separador decimal do INGLÊS. Num app inteiro em português,
+// que fala de dinheiro, "0.0 de 6 meses" e "+100.0%" ao lado de "R$ 1.250,50"
+// não são detalhe de estilo: o ponto ali é separador de milhar, e o número
+// passa a ler errado. Toda casa decimal que vai para a tela sai por aqui.
+function fmtDec(n, decimals = 1) {
   const v = Number(n);
-  return `${(Number.isFinite(v) ? v : 0).toFixed(decimals)}%`;
+  return (Number.isFinite(v) ? v : 0).toLocaleString("pt-BR", {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+}
+function fmtPct(n, decimals = 0) {
+  return `${fmtDec(n, decimals)}%`;
 }
 // Plural de verdade no lugar do "(s)". Duas razões para virar função em vez de
 // ternário repetido em cada tela: o português conta o ZERO como plural ("0
@@ -355,7 +365,18 @@ function plural(n, um, muitos) {
 function pluralWord(n, um, muitos) {
   return (Number(n) || 0) === 1 ? um : muitos;
 }
-function fmtDateShort(iso) { if(!iso) return ""; const [, m, d] = iso.split("-"); return `${d}/${m}`; }
+// Data curta, mas nunca ambígua. Omitir o ano só é seguro DENTRO do ano
+// corrente. Uma compra em 10x joga parcelas para 2027, e a lista mostrava
+// "27/05" tanto para maio deste ano quanto para maio do ano que vem: o usuário
+// não tinha como saber qual era qual em "Últimos lançamentos", na caixa de
+// revisão ou no calendário. Fora do ano corrente entram os dois dígitos do ano,
+// que cabem no mesmo espaço.
+function fmtDateShort(iso) {
+  if (!iso) return "";
+  const [y, m, d] = String(iso).split("-");
+  const anoAtual = String(new Date().getFullYear());
+  return y === anoAtual ? `${d}/${m}` : `${d}/${m}/${String(y).slice(2)}`;
+}
 function fmtDateFull(iso) { if(!iso) return ""; const [y, m, d] = iso.split("-"); return `${d}/${m}/${y}`; }
 
 function escapeHtml(str) {
@@ -454,6 +475,20 @@ function csvCell(value) {
   let s = String(value == null ? "" : value);
   if (CSV_FORMULA_START.test(s)) s = `'${s}`;
   return /[";,\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+// O CSV é exportado para o Excel do usuário, não para um parser genérico, e a
+// tela promete "abrir no Excel ou no Google Sheets". Num Windows em português o
+// separador de lista é `;` e o decimal é `,`: um arquivo com vírgula separando
+// campos e ponto decimal abre com tudo empilhado na coluna A, e os valores que
+// escapam viram data ou texto. O separador vive aqui para exportação e
+// importação lerem o mesmo dialeto (`detectSeparator` já aceita `;`, `,` e tab,
+// então CSV de banco continua entrando igual).
+const CSV_SEP = ";";
+
+function csvNumber(value, decimals) {
+  const n = Number(value);
+  return (Number.isFinite(n) ? n : 0).toFixed(decimals == null ? 2 : decimals).replace(".", ",");
 }
 
 // Desfaz a neutralização acima, na importação.
@@ -7203,13 +7238,20 @@ function makeInstallmentTransactions(base, installments) {
   const n = Math.max(1, Math.min(48, Math.round(Number(installments) || 1)));
   const parts = splitMoney(base.amount, n);
   const groupId = base.installmentGroupId || uid();
-  const label = (base.description || "").trim() || "Compra parcelada";
+  const described = (base.description || "").trim();
+  // "Compra parcelada" existe só para dar um nome às N parcelas quando a compra
+  // não foi descrita. Numa transação única ele não nomeia nada: como TODO
+  // lançamento manual passa por aqui com n = 1 e a descrição é opcional, o
+  // rótulo virava o título (e o dado gravado) de qualquer gasto salvo sem
+  // descrição. Sem parcelamento, descrição vazia segue vazia e as telas caem no
+  // nome da categoria, que é o comportamento que elas já sabem tratar.
+  const label = described || "Compra parcelada";
   return parts.map((value, i) => makeTransaction({
     ...base,
     id: undefined,
     amount: value,
     date: addMonthsToIso(base.date || todayIso(), i),
-    description: n > 1 ? `${label} (${i + 1}/${n})` : label,
+    description: n > 1 ? `${label} (${i + 1}/${n})` : described,
     recurring: false,
     installmentGroupId: n > 1 ? groupId : null,
     installmentIndex: n > 1 ? i + 1 : null,
@@ -7555,7 +7597,7 @@ function backupFilename(ext) {
 
 function buildTransactionsCsv(data) {
   const header = ["Tipo", "Categoria", "Subcategoria", "Valor", "Data", "Pagamento", "Descrição", "Recorrente", "Parcela", "Origem"];
-  const lines = [header.join(",")];
+  const lines = [header.join(CSV_SEP)];
   const sorted = [...(data.transactions || [])].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
   sorted.forEach((t) => {
     const cat = categoryById(data, t.categoryId);
@@ -7567,27 +7609,27 @@ function buildTransactionsCsv(data) {
       t.type === "income" ? "Receita" : "Gasto",
       csvCell(parent ? parent.name : cat.name),
       csvCell(parent ? cat.name : ""),
-      signed.toFixed(2),
+      csvNumber(signed),
       t.date,
       csvCell(t.payment),
       csvCell(t.description || ""),
       t.recurring ? "Sim" : "Não",
       t.installmentTotal ? `${t.installmentIndex}/${t.installmentTotal}` : "",
       csvCell(t.source || "manual"),
-    ].join(","));
+    ].join(CSV_SEP));
   });
   return "\uFEFF" + lines.join("\n");   // BOM: o Excel pt-BR abre com acentos corretos
 }
 
 function buildBudgetsCsv(data, monthKey) {
   const status = computeBudgetStatus(data, monthKey);
-  const lines = ["Categoria,Grupo,Limite,Gasto,Restante,% do limite,Situação"];
+  const lines = [["Categoria", "Grupo", "Limite", "Gasto", "Restante", "% do limite", "Situação"].join(CSV_SEP)];
   status.items.forEach((b) => {
     lines.push([
       csvCell(b.fullName), csvCell(GROUP_LABELS[b.group] || ""),
-      b.budget.toFixed(2), b.spent.toFixed(2), b.remaining.toFixed(2),
-      b.pct.toFixed(1), b.level === "over" ? "Estourado" : b.level === "warn" ? "Atenção" : "Dentro do limite",
-    ].join(","));
+      csvNumber(b.budget), csvNumber(b.spent), csvNumber(b.remaining),
+      csvNumber(b.pct, 1), b.level === "over" ? "Estourado" : b.level === "warn" ? "Atenção" : "Dentro do limite",
+    ].join(CSV_SEP));
   });
   return "\uFEFF" + lines.join("\n");
 }
@@ -10425,15 +10467,34 @@ function accountPreOpeningEffect(data, accountId, asOf) {
 }
 
 function legacyCashBalance(data, asOf) {
+  const parts = legacyCashBreakdown(data, asOf);
+  return addMoney(parts.orphan, parts.cardless);
+}
+
+// O "Histórico anterior" nasceu para uma coisa só: lançamento que perdeu o
+// vínculo com a conta (conta excluída). Só que compra no crédito sem cartão
+// cadastrado cai no mesmo balde, e a tela então explicava um gasto de cartão
+// como "lançamento antigo sem conta" - que não é o que é, e não diz ao usuário
+// o que fazer a respeito. Continuam somando igual (o dinheiro saiu mesmo e não
+// há fatura onde pendurá-lo); o que muda é poder dizer de onde cada parte vem.
+function legacyCashBreakdown(data, asOf) {
   const limit = asOf || "9999-12-31";
   const conhecidas = new Set((data.accounts || []).map((a) => a.id));
-  let cents = 0;
+  let orphanCents = 0;
+  let cardlessCents = 0;
+  let cardlessCount = 0;
   (data.transactions || []).forEach((t) => {
     if (t.creditCardId || t.date > limit) return;
     if (t.accountId && conhecidas.has(t.accountId)) return;
-    cents += t.type === "income" ? moneyToCents(t.amount) : -moneyToCents(t.amount);
+    const cents = t.type === "income" ? moneyToCents(t.amount) : -moneyToCents(t.amount);
+    if (t.payment === "Crédito") { cardlessCents += cents; cardlessCount += 1; return; }
+    orphanCents += cents;
   });
-  return moneyFromCents(cents);
+  return {
+    orphan: moneyFromCents(orphanCents),
+    cardless: moneyFromCents(cardlessCents),
+    cardlessCount,
+  };
 }
 
 function accountsCashBalance(data, asOf) {
@@ -10577,11 +10638,48 @@ function cardLiabilitySummary(data, asOf, days) {
     const card = cardMap.get(t.creditCardId);
     if (card && openStatementKeys.has(`${card.id}:${cardStatementKeyForDate(card, t.date)}`)) groupIds.add(groupKey);
   });
+  // PARCELA SEM CARTÃO TAMBÉM É DÍVIDA.
+  //
+  // Tudo acima percorre `data.creditCards`, então uma compra no crédito feita
+  // antes de cadastrar o cartão ficava invisível como passivo: as parcelas
+  // ainda por vencer não entravam nem em "Parcelas futuras", nem em Dívidas,
+  // nem no patrimônio líquido - que passava a dizer que a pessoa tem mais do
+  // que tem. Só entram as FUTURAS: a parcela cujo dia já passou saiu do caixa
+  // (ver legacyCashBreakdown), e contá-la de novo aqui cobraria duas vezes.
+  // A COMPRA PRECISA JÁ TER ACONTECIDO NA DATA CONSULTADA.
+  //
+  // `netWorthAtMonthEnd` chama esta função com o fim de CADA mês da série de
+  // patrimônio. Sem esta trava, uma compra parcelada feita em agosto de 2026
+  // aparecia como dívida em setembro de 2025: naquela data todas as parcelas
+  // eram "futuras". O caminho com cartão já usa a data de início do grupo pelo
+  // mesmo motivo (`groupStarts` acima); aqui faltava o equivalente.
+  const cardlessStarts = new Map();
+  (data.transactions || []).forEach((t) => {
+    if (t.type !== "expense" || t.creditCardId || t.payment !== "Crédito" || !t.installmentGroupId) return;
+    const first = cardlessStarts.get(t.installmentGroupId);
+    if (!first || t.date < first) cardlessStarts.set(t.installmentGroupId, t.date);
+  });
+  const cardlessComecou = (t) => {
+    const inicio = t.installmentGroupId ? cardlessStarts.get(t.installmentGroupId) : t.date;
+    return !!inicio && inicio <= today;
+  };
+  const cardlessFuture = (data.transactions || []).filter((t) => t.type === "expense"
+    && !t.creditCardId
+    && t.payment === "Crédito"
+    && t.date > today
+    && cardlessComecou(t));
+  const cardless = {
+    total: sumMoney(cardlessFuture, (t) => t.amount),
+    count: cardlessFuture.length,
+    dueWithin30: sumMoney(cardlessFuture.filter((t) => t.date <= limit), (t) => t.amount),
+  };
   return {
     cards,
-    total: sumMoney(cards, (card) => card.total),
+    total: addMoney(sumMoney(cards, (card) => card.total), cardless.total),
+    cardsTotal: sumMoney(cards, (card) => card.total),
+    cardless,
     overdue: sumMoney(cards, (card) => card.overdue),
-    dueWithin30: sumMoney(cards, (card) => card.dueWithin30),
+    dueWithin30: addMoney(sumMoney(cards, (card) => card.dueWithin30), cardless.dueWithin30),
     lastDueIso: cards.reduce((last, card) => (card.lastDueIso > last ? card.lastDueIso : last), ""),
     openPurchases: groupIds.size,
   };
@@ -10595,7 +10693,8 @@ function accountsSummary(data, asOf) {
     balance: accountBalance(data, a.id, today),
     preOpening: accountPreOpeningEffect(data, a.id, today),
   }));
-  const legacy = legacyCashBalance(data, today);
+  const legacyParts = legacyCashBreakdown(data, today);
+  const legacy = addMoney(legacyParts.orphan, legacyParts.cardless);
   const cards = (data.creditCards || []).map((c) => {
     const statements = cardStatements(data, c.id);
     const due = sumMoney(statements.filter((s) => s.key <= currentKey), (s) => s.outstanding);
@@ -10611,9 +10710,15 @@ function accountsSummary(data, asOf) {
     count: acc.count + a.preOpening.count,
     amount: addMoney(acc.amount, a.preOpening.amount),
   }), { count: 0, amount: 0 });
+  // Mesmo motivo de `cardLiabilitySummary`: parcela futura sem cartão é
+  // compromisso assumido, e "Parcelas futuras: R$ 0,00" com nove parcelas a
+  // vencer é a leitura errada do próprio dado que o app já guarda.
+  // Mesma trava de `cardLiabilitySummary`: só conta parcela de compra que já
+  // aconteceu até a data consultada.
+  const futureCardless = cardLiabilitySummary(data, today).cardless.total;
   return {
-    accounts, cards, legacy, cash, cardDue, preOpening,
-    futureCard: sumMoney(cards, (c) => c.future),
+    accounts, cards, legacy, legacyParts, cash, cardDue, preOpening, futureCardless,
+    futureCard: addMoney(sumMoney(cards, (c) => c.future), futureCardless),
     availableAfterCards: subMoney(cash, cardDue),
     hasAccounts: accounts.length > 0,
   };
@@ -10735,7 +10840,7 @@ function reconcileAccount(data, accountId, actualBalance, date) {
 
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
-    ACCOUNT_TYPE_LABELS, accountById, creditCardById, transactionAffectsCash, accountBalance, legacyCashBalance,
+    ACCOUNT_TYPE_LABELS, accountById, creditCardById, transactionAffectsCash, accountBalance, legacyCashBalance, legacyCashBreakdown,
     accountsCashBalance, cardStatementKeyForDate, cardStatementDueDate, cardStatements,
     cardLiabilityStatements, cardLiabilitySummary,
     accountsSummary, accountPreOpeningEffect, makeAccount, makeCreditCard, makeAccountTransfer, makeCardPayment,
@@ -10774,7 +10879,14 @@ function movementEntries(data) {
     return {
       id: t.id, kind: "transaction", type: t.type, amount: t.amount, date: t.date,
       description: t.description || (t.type === "income" ? "Receita" : category.name),
-      categoryId: t.categoryId, categoryName: category.name,
+      // As categorias do app descrevem GASTO (Moradia, Alimentação, Transporte).
+      // Receita não tem categoria própria e cai no "outros" por ser o padrão do
+      // armazenamento, o que fazia o salário aparecer listado como "Outros" -
+      // uma classificação errada, não uma ausência. Na leitura, receita é
+      // receita; a caixa de revisão também ignora income, então nada aqui pede
+      // correção que o usuário não tem como fazer.
+      categoryId: t.categoryId,
+      categoryName: t.type === "income" ? "Receita" : category.name,
       accountId: t.accountId || "", accountName: account ? account.name : "",
       creditCardId: t.creditCardId || "", cardName: card ? card.name : "",
       relatedAccountIds: [t.accountId, t.creditCardId].filter(Boolean),
@@ -10953,11 +11065,39 @@ function resolveRecordedAccountTransfer(row, statementAccountId, transfers) {
 function buildTransactionReviewModel(data) {
   const txs = [...(data.transactions || [])].sort((a, b) => a.date.localeCompare(b.date) || String(a.createdAt).localeCompare(String(b.createdAt)));
   const issues = [];
+  // UMA COMPRA PARCELADA É UMA DECISÃO, NÃO N DECISÕES.
+  //
+  // As N parcelas nascem juntas, com a mesma categoria e o mesmo destino: uma
+  // compra em 10x virava dez itens idênticos de "categoria precisa de revisão",
+  // e o usuário precisava escolher a mesma categoria dez vezes. Com 1.500
+  // lançamentos importados a caixa passava de 300 pendências, quase todas
+  // repetição da mesma escolha. `installmentGroupId` já existe no dado; aqui
+  // ele passa a ser a unidade de revisão, e a decisão vale para o grupo inteiro.
+  const categoryGroups = new Map();
   txs.forEach((t) => {
-    if (t.type === "expense" && t.categoryId === "outros" && t.source !== "manual") {
-      const key = `category:${t.id}`;
-      if (!transactionReviewIgnored(t, key)) issues.push({ key, type: "category", txId: t.id, txIds: [t.id], title: "Categoria precisa de revisão", detail: `${t.description || "Lançamento"} está em Outros.`, date: t.date, amount: t.amount });
-    }
+    if (t.type !== "expense" || t.categoryId !== "outros" || t.source === "manual") return;
+    const groupId = t.installmentGroupId ? `group:${t.installmentGroupId}` : `tx:${t.id}`;
+    const bucket = categoryGroups.get(groupId);
+    if (bucket) bucket.push(t);
+    else categoryGroups.set(groupId, [t]);
+  });
+  categoryGroups.forEach((list) => {
+    const primary = list[0];
+    const key = `category:${primary.id}`;
+    if (transactionReviewIgnored(primary, key)) return;
+    const total = list.length;
+    // O rótulo da parcela ("(1/10)") só faz sentido linha a linha. No grupo, o
+    // que identifica a compra é a descrição sem o contador.
+    const label = String(primary.description || "Lançamento").replace(/\s*\(\d+\/\d+\)\s*$/, "").trim() || "Lançamento";
+    issues.push({
+      key, type: "category", txId: primary.id, txIds: list.map((t) => t.id),
+      title: "Categoria precisa de revisão",
+      detail: total > 1
+        ? `${label} está em Outros. A escolha vale para as ${total} parcelas.`
+        : `${label} está em Outros.`,
+      date: primary.date,
+      amount: total > 1 ? sumMoney(list, (t) => t.amount) : primary.amount,
+    });
   });
 
   const duplicateBySignature = new Map();
@@ -11611,7 +11751,14 @@ function monthProgress(monthKey) {
   const dim = daysInMonthOf(y, m - 1);
   if (monthKey < currentKey) return { elapsed: dim, ratio: 1, daysInMonth: dim, daysLeft: 0, isCurrent: false, isFuture: false };
   const day = now.getDate();
-  return { elapsed: day, ratio: day / dim, daysInMonth: dim, daysLeft: Math.max(0, dim - day), isCurrent: true, isFuture: false };
+  // HOJE CONTA. `daysLeft` alimenta a frase "restam R$ X; cerca de R$ Y por
+  // dia", que é conselho para um período que INCLUI o dia de hoje: são 8h da
+  // manhã do dia 27 e o almoço ainda não aconteceu. Com `dim - day` o dia 27
+  // sumia da divisão, o valor diário saía inflado e, no último dia do mês,
+  // `daysLeft` virava 0 e a frase desaparecia justo quando ainda havia um dia
+  // inteiro para gastar. `insights.js` já contava assim; era esta linha que
+  // fazia a mesma tela dizer "4 dias" num cartão e "5 dias" no outro.
+  return { elapsed: day, ratio: day / dim, daysInMonth: dim, daysLeft: Math.max(1, dim - day + 1), isCurrent: true, isFuture: false };
 }
 
 // ------------------------------------------------------------------------------
@@ -12999,6 +13146,26 @@ function parseCsvStatement(text) {
 // ------------------------------------------------------------------------------
 // PARSER OFX. SGML simplificado usado pelos bancos brasileiros
 // ------------------------------------------------------------------------------
+// OFX é SGML: o banco ESCAPA os caracteres reservados no MEMO. "TED JOAO &
+// MARIA" chega no arquivo como "TED JOAO &amp; MARIA", e sem desfazer isso o
+// `&amp;` era gravado no banco de dados e mostrado assim em toda tela que
+// exibisse o lançamento. Fica limitado às cinco entidades do SGML mais as
+// numéricas; nada de interpretar HTML, que aqui só abriria porta para conteúdo
+// que não é texto.
+function decodeSgmlEntities(value) {
+  const s = String(value == null ? "" : value);
+  if (s.indexOf("&") === -1) return s;
+  return s
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(Number(dec)))
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&apos;/gi, "'")
+    // `&amp;` por último: antes dos outros, "&amp;lt;" viraria "<".
+    .replace(/&amp;/gi, "&");
+}
+
 function parseOfxStatement(text) {
   const blocks = text.split(/<STMTTRN>/i).slice(1);
   if (blocks.length === 0) throw new ImportError("NO_ROWS", "Nenhuma transação encontrada no OFX. O arquivo pode estar incompleto.");
@@ -13009,7 +13176,7 @@ function parseOfxStatement(text) {
     const block = raw.split(/<\/STMTTRN>/i)[0];
     const get = (tag) => {
       const m = block.match(new RegExp(`<${tag}>([^<\r\n]+)`, "i"));
-      return m ? m[1].trim() : null;
+      return m ? decodeSgmlEntities(m[1].trim()) : null;
     };
     const dtRaw = get("DTPOSTED");
     const amtRaw = get("TRNAMT");
@@ -14272,7 +14439,7 @@ const SCORE_PILLARS = [
         ratio,
         good: months >= r.targetMonths,
         detail: r.current > 0
-          ? `Sua reserva cobre ${months.toFixed(1)} ${months < 2 ? "mês" : "meses"} de despesas (alvo: ${r.targetMonths}).`
+          ? `Sua reserva cobre ${fmtDec(months, 1)} ${months < 2 ? "mês" : "meses"} de despesas (alvo: ${r.targetMonths}).`
           : "Você ainda não tem reserva de emergência formada.",
         advice: months >= r.targetMonths ? null : `Faltam ${fmtBRL(Math.max(0, subMoney(r.target, r.current)))} para chegar aos ${r.targetMonths} meses de segurança.`,
       };
@@ -14318,8 +14485,8 @@ const SCORE_PILLARS = [
         good: growth >= 0,
         growth,
         detail: growth >= 0
-          ? `Seu patrimônio cresceu ${growth.toFixed(1)}% nos últimos meses, até ${fmtBRL(last)}.`
-          : `Seu patrimônio recuou ${Math.abs(growth).toFixed(1)}% nos últimos meses.`,
+          ? `Seu patrimônio cresceu ${fmtDec(growth, 1)}% nos últimos meses, até ${fmtBRL(last)}.`
+          : `Seu patrimônio recuou ${fmtDec(Math.abs(growth), 1)}% nos últimos meses.`,
         advice: growth >= 0 ? null : "Patrimônio caindo com renda estável costuma significar consumo do que já foi guardado.",
       };
     },
@@ -14676,6 +14843,21 @@ function emergencyGoalOf(data) {
 // Gasto mensal médio dos últimos meses fechados; a base honesta para dizer
 // "quantos meses a sua reserva cobre". Ignora meses sem nenhum gasto para não
 // diluir a média de quem começou a usar o app agora.
+// Quantos meses JÁ FECHADOS têm gasto lançado. Zero significa que
+// `avgMonthlyExpense` caiu no mês corrente, que ainda está pela metade: no dia
+// 27, um único lançamento de R$ 214,90 vira "R$ 214,90/mês" e daí saem frases
+// como "114 dias de despesa cobertos" e "0,0 de 6 meses de reserva". O número
+// continua sendo o melhor disponível; o que as telas ganham aqui é como dizer
+// que ele ainda é provisório em vez de apresentá-lo como padrão de consumo.
+function closedMonthsWithExpense(data, months = 3) {
+  const now = new Date();
+  let counted = 0;
+  for (let i = 1; i <= months; i++) {
+    if (realizedMonthTotals(data, keyOfDate(addMonths(now, -i))).expense > 0) counted++;
+  }
+  return counted;
+}
+
 function avgMonthlyExpense(data, months = 3) {
   const now = new Date();
   let cents = 0;
@@ -15234,13 +15416,17 @@ const HEALTH_INDICATORS = [
 
       const base = commitments > 0 ? commitments : monthlyNeed;
       const index = base > 0 ? cash / base : null;
-      const daysCovered = monthlyNeed > 0 ? Math.max(0, (cash / monthlyNeed) * 30) : null;
+      // "N dias de despesa" divide o caixa por uma média mensal. Se essa média
+      // veio do mês corrente ainda pela metade (nenhum mês fechado com gasto),
+      // um único lançamento de R$ 214,90 vira "R$ 214,90/mês" e o app anuncia
+      // 114 dias de folga para quem começou a usar ontem. Sem base, a frase sai.
+      const daysCovered = monthlyNeed > 0 && ctx.closedMonths > 0 ? Math.max(0, (cash / monthlyNeed) * 30) : null;
       const ratio = cash <= 0 ? 0 : (index == null ? 0.6 : healthRamp(index, 0.4, 2));
 
       return {
         applicable: true,
         ratio,
-        display: index == null ? fmtBRL(cash) : `${index.toFixed(1)}x`,
+        display: index == null ? fmtBRL(cash) : `${fmtDec(index, 1)}x`,
         caption: index == null ? "disponível em caixa" : "o que vence em 30 dias",
         description: cash <= 0
           ? `Seu caixa está negativo em ${fmtBRL(Math.abs(cash))}; qualquer despesa nova entra como dívida.`
@@ -15271,10 +15457,10 @@ const HEALTH_INDICATORS = [
       return {
         applicable: true,
         ratio,
-        display: `${r.monthsCovered.toFixed(1)}`,
+        display: `${fmtDec(r.monthsCovered, 1)}`,
         caption: `de ${r.targetMonths} meses de despesa`,
         description: r.current > 0
-          ? `Você tem ${fmtBRL(r.current)} reservados, o que sustenta ${r.monthsCovered.toFixed(1)} ${r.monthsCovered < 2 ? "mês" : "meses"} no seu padrão atual de ${fmtBRL(r.monthlyNeed)}/mês.`
+          ? `Você tem ${fmtBRL(r.current)} reservados, o que sustenta ${fmtDec(r.monthsCovered, 1)} ${r.monthsCovered < 2 ? "mês" : "meses"} no seu padrão atual de ${fmtBRL(r.monthlyNeed)}/mês.`
           : "Você ainda não tem reserva de emergência formada; hoje um imprevisto vira dívida.",
         recommendation: ratio >= 1
           ? null
@@ -15298,18 +15484,38 @@ const HEALTH_INDICATORS = [
       const last = series[series.length - 1].value;
       if (Math.abs(total) < 1 && Math.abs(first) < 1) return { applicable: false };
 
-      const growth = first !== 0 ? ((last - first) / Math.abs(first)) * 100 : (last > 0 ? 100 : 0);
+      // SEM PONTO DE PARTIDA NÃO EXISTE CRESCIMENTO.
+      //
+      // `first === 0` quase nunca quer dizer "seis meses atrás eu não tinha
+      // nada": quer dizer que o app não existia para essa pessoa naquele mês.
+      // Forçar 100% transformava o primeiro dia de uso em "+100,0% em 6 meses"
+      // e "seu patrimônio saiu de R$ 0,00 para R$ 6.940,20 nos últimos seis
+      // meses", que é uma história inventada sobre a vida financeira de alguém.
+      const semBase = Math.abs(first) < 1;
+      const growth = semBase ? 0 : ((last - first) / Math.abs(first)) * 100;
       const monthsOfExpense = ctx.monthlyNeed > 0 ? total / ctx.monthlyNeed : 0;
-      const ratio = 0.6 * healthRamp(growth, -10, 12) + 0.4 * healthRamp(monthsOfExpense, 0, 6);
+      // Com média mensal tirada de um mês pela metade, "N meses de despesa
+      // acumulados" também não se sustenta.
+      const mediaConfiavel = ctx.closedMonths > 0;
+      const ratio = semBase
+        ? healthRamp(monthsOfExpense, 0, 6)
+        : 0.6 * healthRamp(growth, -10, 12) + 0.4 * healthRamp(monthsOfExpense, 0, 6);
+
+      const trechoMeses = ctx.monthlyNeed > 0 && mediaConfiavel
+        ? `, o equivalente a ${fmtDec(monthsOfExpense, 1)} meses de despesa acumulados` : "";
 
       return {
         applicable: true,
         ratio,
         display: fmtBRLShort(total),
-        caption: growth >= 0 ? `+${growth.toFixed(1)}% em 6 meses` : `${growth.toFixed(1)}% em 6 meses`,
-        description: growth >= 0
-          ? `Seu patrimônio saiu de ${fmtBRLShort(first)} para ${fmtBRLShort(last)} nos últimos seis meses${ctx.monthlyNeed > 0 ? `, o equivalente a ${monthsOfExpense.toFixed(1)} meses de despesa acumulados` : ""}.`
-          : `Seu patrimônio recuou de ${fmtBRLShort(first)} para ${fmtBRLShort(last)} nos últimos seis meses; você está consumindo o que já tinha guardado.`,
+        caption: semBase
+          ? "sem histórico para comparar"
+          : (growth >= 0 ? `+${fmtDec(growth, 1)}% em 6 meses` : `${fmtDec(growth, 1)}% em 6 meses`),
+        description: semBase
+          ? `Você acumulou ${fmtBRLShort(total)} até aqui. Ainda não há seis meses de histórico para dizer se a curva sobe ou desce; a comparação aparece conforme os meses passam.`
+          : (growth >= 0
+            ? `Seu patrimônio saiu de ${fmtBRLShort(first)} para ${fmtBRLShort(last)} nos últimos seis meses${trechoMeses}.`
+            : `Seu patrimônio recuou de ${fmtBRLShort(first)} para ${fmtBRLShort(last)} nos últimos seis meses; você está consumindo o que já tinha guardado.`),
         recommendation: ratio >= 0.8
           ? null
           : growth < 0
@@ -15493,6 +15699,8 @@ function buildHealthContext(data, mKey, ctx) {
     bills: c.bills || upcomingBills(data),
     series: c.series || netWorthSeries(data, 6),
     monthlyNeed: avgMonthlyExpense(data),
+    // Zero = a média mensal saiu do mês corrente, ainda incompleto.
+    closedMonths: closedMonthsWithExpense(data),
     debt: debtProfile(data, mKey),
     flow: cashFlowHistory(data, 6),
     capacity: savingsCapacity(data, mKey, month),
@@ -15756,7 +15964,7 @@ function wealthInsights(data, model) {
     out.push({
       icon: delta.year.up ? "arrowUpRight" : "arrowDownRight",
       tone: delta.year.up ? "positive" : "danger",
-      text: `Em 12 meses seu patrimônio ${delta.year.up ? "cresceu" : "recuou"} ${fmtBRL(Math.abs(delta.year.value))} (${delta.year.up ? "+" : "−"}${Math.abs(delta.year.pct).toFixed(1)}%).`,
+      text: `Em 12 meses seu patrimônio ${delta.year.up ? "cresceu" : "recuou"} ${fmtBRL(Math.abs(delta.year.value))} (${delta.year.up ? "+" : "−"}${fmtDec(Math.abs(delta.year.pct), 1)}%).`,
     });
   }
 
@@ -17202,8 +17410,75 @@ function recPrefsOf(data) {
 // ------------------------------------------------------------------------------
 // Núcleo: um grupo de lançamentos → um compromisso recorrente (ou nada)
 // ------------------------------------------------------------------------------
+// UM LANÇAMENTO MARCADO COMO FIXO JÁ É UMA DECLARAÇÃO.
+//
+// O motor inteiro abaixo INFERE recorrência a partir de repetição: precisa de
+// dois lançamentos para medir intervalo, cadência e regularidade. Isso deixava
+// de fora o caso em que não há nada para inferir porque o usuário já disse:
+// marcar "Gasto fixo mensal (recorrente)" no formulário não produzia nada em
+// Assinaturas até o gasto se repetir sozinho no mês seguinte. O Início já
+// contava esse valor em "Gastos fixos", então as duas telas discordavam sobre
+// o mesmo lançamento.
+//
+// Aqui a cadência não é medida, é lida do que foi declarado: mensal, no dia do
+// próprio lançamento. Assim que a segunda ocorrência aparecer, o caminho normal
+// assume e passa a valer a evidência em vez da declaração.
+function recDeclaredCommitment(data, tx, todayKey) {
+  const cadence = recCadenceById("mensal");
+  const cat = categoryById(data, tx.categoryId);
+  const amount = roundMoney(tx.amount);
+  const day = Number(String(tx.date).slice(8, 10)) || 1;
+  const today = todayIso();
+  let next = tx.date;
+  let guard = 0;
+  while (next <= today && guard++ < 400) next = recSameDayNextMonths(next, 1, day);
+
+  return {
+    key: recGroupKey(tx),
+    name: tx.description || cat.name,
+    categoryId: tx.categoryId,
+    categoryName: cat.name,
+    categoryColor: cat.color,
+    categoryIcon: cat.icon,
+    kind: "assinatura",
+    cadenceId: cadence.id,
+    cadenceLabel: cadence.label,
+    cadenceDays: cadence.days,
+    perYear: cadence.perYear,
+    occurrences: 1,
+    firstDate: tx.date,
+    lastDate: tx.date,
+    lastAmount: amount,
+    prevAmount: amount,
+    firstAmount: amount,
+    medianAmount: amount,
+    monthlyEquivalent: amount,
+    annualCost: mulMoney(amount, cadence.perYear),
+    increasePct: 0,
+    sinceFirstPct: 0,
+    increaseAnnualImpact: 0,
+    amountSpread: 0,
+    dayOfMonth: day,
+    dayConsistency: 1,
+    regularity: 1,
+    nextDate: next,
+    daysToNext: daysBetweenIso(today, next),
+    daysSinceLast: daysBetweenIso(tx.date, today),
+    status: "ativa",
+    // O que sustenta este compromisso é a marcação, não o histórico. Quem lê
+    // precisa poder dizer isso na tela em vez de prometer uma média que não
+    // existe.
+    flaggedRecurring: true,
+    declaredOnly: true,
+    payment: tx.payment || "Outro",
+    monthKeys: [monthKeyOf(tx.date)],
+    isCurrentMonth: monthKeyOf(tx.date) === todayKey,
+  };
+}
+
 function recAnalyzeGroup(data, list, todayKey) {
   const sorted = [...list].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  if (sorted.length === 1 && sorted[0].recurring) return recDeclaredCommitment(data, sorted[0], todayKey);
   if (sorted.length < 2) return null;
 
   const intervals = [];
@@ -18962,8 +19237,8 @@ const ADVISOR_RULES = [
           id: "reserva",
           tone: "positive",
           icon: "shieldCheck",
-          title: `Sua reserva cobre ${e.monthsCovered.toFixed(1)} meses`,
-          message: `Com ${fmtBRL(e.current)} guardados, você aguenta ${e.monthsCovered.toFixed(1)} meses sem renda no seu padrão de gastos atual.`,
+          title: `Sua reserva cobre ${fmtDec(e.monthsCovered, 1)} meses`,
+          message: `Com ${fmtBRL(e.current)} guardados, você aguenta ${fmtDec(e.monthsCovered, 1)} meses sem renda no seu padrão de gastos atual.`,
           value: e.current,
           impact: e.current,
         });
@@ -18987,7 +19262,7 @@ const ADVISOR_RULES = [
         tone: "info",
         icon: "shieldCheck",
         title: `Faltam ${fmtBRL(missing)} para sua reserva ficar completa`,
-        message: `Hoje ela cobre ${e.monthsCovered.toFixed(1)} dos ${e.targetMonths} meses que você definiu.`,
+        message: `Hoje ela cobre ${fmtDec(e.monthsCovered, 1)} dos ${e.targetMonths} meses que você definiu.`,
         value: missing,
         impact: missing,
         action: { label: "Ver metas", tab: "goals" },
@@ -22906,7 +23181,7 @@ function freshOnboarding() {
     step: 1,
     name: "",
     income: "",
-    account: { name: "", type: "corrente", balance: "" },
+    account: { name: "", type: "corrente", balance: "", openingDate: todayIso() },
     skipAccount: false,
     legalAccepted: false,
     focus: "month",
@@ -22984,6 +23259,16 @@ function onbIncome() {
   return Number.isFinite(n) && n > 0 ? roundMoney(n) : 0;
 }
 
+// A data a que o saldo informado se refere. Um valor digitado à mão pode estar
+// pela metade ("2026-08-") enquanto a pessoa preenche, e um futuro deixaria a
+// conta nascer fora do próprio período; nos dois casos hoje é o fallback certo.
+function onbOpeningDate() {
+  const raw = String(state.onboarding.account.openingDate || "").trim();
+  const hoje = todayIso();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return hoje;
+  return raw > hoje ? hoje : raw;
+}
+
 function onbSplitPresetId() {
   const s = state.onboarding.split;
   const found = ONB_SPLIT_PRESETS.find((p) => p.necessidade === s.necessidade && p.desejo === s.desejo && p.futuro === s.futuro);
@@ -22998,7 +23283,9 @@ function onbCanAdvance(step) {
   if (step === 3) {
     if (state.onboarding.skipAccount) return true;
     const a = state.onboarding.account;
-    return !!String(a.name).trim() && Number.isFinite(parseMoneyInput(a.balance || "0"));
+    return !!String(a.name).trim()
+      && Number.isFinite(parseMoneyInput(a.balance || "0"))
+      && /^\d{4}-\d{2}-\d{2}$/.test(String(a.openingDate || ""));
   }
   return true;
 }
@@ -23041,7 +23328,7 @@ function renderOnboardingLayer() {
       </div>
       ${renderOnbProgress(o.step)}
       <div class="onb__body">${body}</div>
-      ${motivo ? `<p class="onb__block-hint" id="onb-block-reason" ${travado ? "" : "hidden"}>${svgIcon("info", 14)}<span>${motivo}</span></p>` : ""}
+      ${motivo ? `<p class="onb__block-hint" id="onb-block-reason" ${travado ? "" : "hidden"}>${svgIcon("info", 14)}<span>${motivo}</span>${o.step === 1 && !o.legalAccepted ? `<button type="button" class="link-btn onb__block-jump" data-action="onb-goto-legal">Ir para o aceite</button>` : ""}</p>` : ""}
       <div class="onb__foot">
         ${o.step > 1 ? `<button class="btn btn--secondary" data-action="onb-back">${svgIcon("chevronLeft", 16)} Voltar</button>` : `<span></span>`}
         <button id="onb-advance" class="btn btn--primary" data-action="${last ? "onb-finish" : "onb-next"}" ${travado ? `disabled aria-describedby="onb-block-reason"` : ""}>
@@ -23088,10 +23375,10 @@ function renderOnbWelcome() {
     <h1 class="onb__title">Vamos deixar o app com a sua cara</h1>
     <p class="onb__lead">São quatro perguntas rápidas. Dá para mudar tudo depois em Ajustes.</p>
   </div>
-  <label class="field">
-    <span class="field__label" for="onb-name">Como você quer ser chamado?</span>
+  <div class="field">
+    <label class="field__label" for="onb-name">Como você quer ser chamado?</label>
     <input id="onb-name" class="input" data-field="onb-name" value="${escapeHtml(state.onboarding.name)}" maxlength="40" placeholder="Seu primeiro nome" autocomplete="given-name" />
-  </label>
+  </div>
   <p class="field-hint">Opcional. Serve só para a saudação da tela inicial.</p>
   <fieldset class="onb-focus">
     <legend class="field__label">Qual é seu objetivo principal agora?</legend>
@@ -23111,7 +23398,7 @@ function renderOnbWelcome() {
     <p>O app organiza dados e produz estimativas educativas. Ele não substitui proposta, contrato, consultoria de investimentos ou análise do INSS. Sem conta, os dados ficam no navegador até você exportar ou apagar; com conta ligada, eles também são sincronizados com o servidor. IA e consulta de nota fiscal usam rede apenas quando você aciona esses recursos.</p>
     <p>A tela Privacidade traz a política inteira: controlador, prazos de retenção, seus direitos e o canal para incidentes.</p>
   </details>
-  <label class="legal-consent"><input type="checkbox" data-action-select="onb-legal" ${state.onboarding.legalAccepted ? "checked" : ""} /><span>Li e aceito a política de privacidade e os termos de uso da versão ${LEGAL_TEXT_VERSION}.</span></label>`;
+  <label class="legal-consent"><input id="onb-legal-check" type="checkbox" data-action-select="onb-legal" ${state.onboarding.legalAccepted ? "checked" : ""} /><span>Li e aceito a política de privacidade e os termos de uso da versão ${LEGAL_TEXT_VERSION}.</span></label>`;
 }
 
 /* --------------------------------------------------------------- passo 2 */
@@ -23122,10 +23409,10 @@ function renderOnbIncome() {
     <h1 class="onb__title">Quanto entra por mês?</h1>
     <p class="onb__lead">Some salário, pró-labore e o que for recorrente. Um valor aproximado já resolve.</p>
   </div>
-  <label class="field">
-    <span class="field__label" for="onb-income">Renda mensal</span>
+  <div class="field">
+    <label class="field__label" for="onb-income">Renda mensal</label>
     <input id="onb-income" class="input" data-field="onb-income" value="${escapeHtml(state.onboarding.income)}" inputmode="decimal" placeholder="0,00" />
-  </label>
+  </div>
   ${income > 0
     ? `<p class="field-hint">Cerca de <b>${fmtBRL(mulMoney(income, 12))}</b> por ano, ou <b>${fmtBRL(mulMoney(income, 1 / 30))}</b> por dia.</p>`
     : `<p class="field-hint">É a base do orçamento, do score e da previsão. Sem ela, essas telas ficam sem referência.</p>`}
@@ -23145,21 +23432,26 @@ function renderOnbAccount() {
     <p class="onb__lead">Com o saldo real cadastrado, o app mostra quanto você tem hoje, não só o que gastou.</p>
   </div>
   <div class="onb__fields ${skipped ? "onb__fields--off" : ""}">
-    <label class="field">
-      <span class="field__label" for="onb-acc-name">Nome da conta</span>
+    <div class="field">
+      <label class="field__label" for="onb-acc-name">Nome da conta</label>
       <input id="onb-acc-name" class="input" data-field="onb-acc-name" value="${escapeHtml(a.name)}" maxlength="40" placeholder="Nubank, Itaú, carteira..." ${skipped ? "disabled" : ""} />
-    </label>
+    </div>
     <div class="field-row">
-      <label class="field">
-        <span class="field__label" for="onb-acc-type">Tipo</span>
+      <div class="field">
+        <label class="field__label" for="onb-acc-type">Tipo</label>
         <select id="onb-acc-type" class="input" data-action-select="onb-acc-type" ${skipped ? "disabled" : ""}>
           ${Object.keys(ACCOUNT_TYPE_LABELS).map((k) => `<option value="${k}" ${a.type === k ? "selected" : ""}>${escapeHtml(ACCOUNT_TYPE_LABELS[k])}</option>`).join("")}
         </select>
-      </label>
-      <label class="field">
-        <span class="field__label" for="onb-acc-balance">Saldo de hoje</span>
+      </div>
+      <div class="field">
+        <label class="field__label" for="onb-acc-balance">Saldo nessa data</label>
         <input id="onb-acc-balance" class="input" data-field="onb-acc-balance" value="${escapeHtml(a.balance)}" inputmode="decimal" placeholder="0,00" ${skipped ? "disabled" : ""} />
-      </label>
+      </div>
+    </div>
+    <div class="field">
+      <label class="field__label" for="onb-acc-date">Saldo válido desde</label>
+      <input id="onb-acc-date" type="date" class="input" data-field="onb-acc-date" value="${escapeHtml(a.openingDate || todayIso())}" max="${todayIso()}" ${skipped ? "disabled" : ""} />
+      <p class="field-hint">Movimentos anteriores a essa data não alteram esta conta. Se você vai importar o extrato do mês, recue para o primeiro dia dele.</p>
     </div>
   </div>
   <button class="onb__toggle ${skipped ? "active" : ""}" data-action="onb-skip-account" aria-pressed="${skipped ? "true" : "false"}">
@@ -23271,7 +23563,12 @@ function finishOnboarding() {
         name: String(o.account.name).trim(),
         type: o.account.type,
         openingBalance: Number.isFinite(balance) ? balance : 0,
-        openingDate: todayIso(),
+        // Antes isto era `todayIso()` fixo. O efeito era silencioso e grave:
+        // a primeira coisa que o usuário faz é importar o extrato do mês, e
+        // TODAS as linhas caíam antes da abertura, então o saldo não se mexia
+        // um centavo enquanto "Despesas do mês" já contava tudo. O passo 3
+        // agora pergunta a data a que o saldo se refere.
+        openingDate: onbOpeningDate(),
         color: "#0B6B5C",
       })];
     }
@@ -23334,8 +23631,8 @@ function startOnboarding() {
     name: d.userName || "",
     income: d.monthlyIncome ? moneyDraft(d.monthlyIncome) : "",
     account: first
-      ? { name: first.name, type: first.type, balance: moneyDraft(accountBalance(d, first.id, todayIso())) }
-      : { name: "", type: "corrente", balance: "" },
+      ? { name: first.name, type: first.type, balance: moneyDraft(accountBalance(d, first.id, todayIso())), openingDate: first.openingDate || todayIso() }
+      : { name: "", type: "corrente", balance: "", openingDate: todayIso() },
     skipAccount: !!first,
     split: { ...d.budgetSplit },
     focus: normalizeDashboardFocus(d.dashboardFocus),
@@ -23403,7 +23700,14 @@ function renderDashboardScreen() {
   const isCurrentMonth = model.isCurrentMonth;
   const { fixed: fixedSpent, variable: variableSpent } = realizedMonthTotals(state.data, mKey);
 
-  const recent = [...state.data.transactions]
+  // "Últimos lançamentos" é histórico, não agenda. Sem o corte no dia de hoje a
+  // ordenação por data decrescente colocava as parcelas futuras no topo: uma
+  // compra em 10x enchia o cartão inteiro com datas de 2027 e empurrava para
+  // fora da tela o que a pessoa acabou de gastar. O que ainda vai vencer tem
+  // cartão próprio ("Próximas contas") e o calendário.
+  const hoje = todayIso();
+  const recent = state.data.transactions
+    .filter((t) => t.date <= hoje)
     .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : (a.createdAt < b.createdAt ? 1 : -1)))
     .slice(0, 6);
 
@@ -23700,7 +24004,7 @@ function renderNetWorthCard(m) {
         <p class="networth-value">${fmtBRL(w.total)}</p>
       </div>
       ${series.length > 1 ? `<span class="status-badge" data-ui-css="background:color-mix(in srgb, ${trendColor} 13%, transparent); color:${trendColor}">
-        ${svgIcon(up ? "arrowUpRight" : "arrowDownRight", 12)} ${deltaPct == null ? fmtBRLShort(delta) : `${up ? "+" : ""}${deltaPct.toFixed(1)}%`}
+        ${svgIcon(up ? "arrowUpRight" : "arrowDownRight", 12)} ${deltaPct == null ? fmtBRLShort(delta) : `${up ? "+" : ""}${fmtDec(deltaPct, 1)}%`}
       </span>` : ""}
     </div>
 
@@ -23748,7 +24052,7 @@ function renderReserveCard(m) {
     <div class="progress progress--sm"><div class="progress__fill" data-ui-css="width:${clamp(r.pct, 0, 100)}%; background:${meta.color}"></div></div>
     <p class="mini-card__note">
       ${r.monthlyNeed > 0
-        ? `Cobre <b>${r.monthsCovered.toFixed(1)}</b> de ${r.targetMonths} meses de despesa (${fmtBRL(r.monthlyNeed)}/mês).`
+        ? `Cobre <b>${fmtDec(r.monthsCovered, 1)}</b> de ${r.targetMonths} meses de despesa (${fmtBRL(r.monthlyNeed)}/mês).`
         : "Registre alguns gastos para calcular quantos meses sua reserva cobre."}
     </p>
     ${!r.configured
@@ -23795,9 +24099,21 @@ function renderFeaturedGoalCard(m) {
 function renderUpcomingBillsCard(m) {
   const b = m.bills;
   if (b.items.length === 0) {
+    // A janela é de 30 dias e parcela repete no MESMO dia do mês, ou seja, cai
+    // quase sempre no dia 31. Quem tinha uma compra em 10x lia "nada previsto"
+    // logo abaixo da promessa de que parcelas aparecem aqui sozinhas, e concluía
+    // que o cartão não estava funcionando. Quando existe algo logo depois da
+    // janela, o vazio passa a dizer quando é.
+    const hoje = todayIso();
+    const proxima = state.data.transactions
+      .filter((t) => t.date > hoje)
+      .reduce((menor, t) => (!menor || t.date < menor ? t.date : menor), "");
+    const dica = proxima
+      ? `O próximo compromisso já registrado é em ${fmtDateFull(proxima)}.`
+      : "Parcelas e gastos fixos aparecem aqui automaticamente.";
     return `<div class="card card--upcoming span-1">
       <p class="card-title">Próximas contas</p>
-      ${renderEmptyState("bell", "Nada previsto para os próximos 30 dias.", "Parcelas e gastos fixos aparecem aqui automaticamente.")}
+      ${renderEmptyState("bell", "Nada previsto para os próximos 30 dias.", dica)}
       <button class="btn btn--ghost btn--block btn--sm" data-action="nav" data-tab="calendar">${svgIcon("calendar", 14)} Ver no calendário</button>
     </div>`;
   }
@@ -23936,6 +24252,28 @@ function renderBudgetHealth(refDate, isCurrentMonth, monthExpense, fixedSpent, v
   const rotuloSobra = rendaPrevista ? "Sobra prevista" : "Sobra";
 
   if (income <= 0) {
+    // Mês fechado sem receita lançada NÃO é o mesmo que app sem renda
+    // configurada. Para um mês passado `effectiveIncome` devolve o REALIZADO,
+    // então bastava navegar um mês para trás para o app mandar "definir sua
+    // renda mensal em Ajustes" - uma renda que já estava definida - com um
+    // botão que levava a uma tela onde não havia nada a fazer. Quando existe
+    // renda declarada, o que falta é lançamento, e é isso que a frase diz.
+    // A renda declarada NÃO vale para mês encerrado, e isso é proposital
+    // (`plannedIncome`): editar a renda hoje não pode reescrever indicadores
+    // antigos. Por isso a pergunta aqui não é "existe plano para este mês", e
+    // sim "existe renda configurada no app" - se existe, mandar configurar é
+    // mandar fazer o que já foi feito, e o botão levava a uma tela sem nada a
+    // resolver. O que falta num mês fechado é lançamento, não configuração.
+    if (roundMoney(state.data.monthlyIncome || 0) > 0) {
+      return `<div class="card card--dashed span-3 banner-inline">
+        ${svgIcon("info", 34, "banner-inline__icon")}
+        <div class="banner-inline__text">
+          <strong>Nenhuma receita lançada em ${MONTH_NAMES[refDate.getMonth()]}</strong>
+          <span>Sua renda declarada (${fmtBRL(state.data.monthlyIncome)} por mês) não é aplicada a meses já encerrados, para não reescrever o passado. Sem nenhuma entrada registrada aqui, não há base para calcular a sobra deste mês.</span>
+        </div>
+        <button class="btn btn--secondary btn--sm" data-action="nav" data-tab="import">Importar extrato</button>
+      </div>`;
+    }
     return `<div class="card card--dashed span-3 banner-inline">
       ${svgIcon("shieldCheck", 34, "banner-inline__icon")}
       <div class="banner-inline__text">
@@ -23969,7 +24307,13 @@ function renderBudgetHealth(refDate, isCurrentMonth, monthExpense, fixedSpent, v
 
   const note = isCurrentMonth
     ? (remaining > 0
-      ? `No ritmo atual, você fecha o mês em <b>${fmtBRL(projected)}</b> de gastos. Ainda pode gastar cerca de <b data-ui-css="color:${status.color}">${fmtBRL(dailyBudget)} por dia</b> nos próximos ${daysLeft} dias.`
+      // As duas metades respondem perguntas diferentes: a primeira é PREVISÃO
+      // (seu ritmo de gastos extrapolado até o fim do mês), a segunda é TETO
+      // (quanto da renda ainda cabe por dia). Sem dizer isso, a frase se
+      // contradizia sozinha - "você fecha em R$ 246" ao lado de "pode gastar
+      // R$ 957 por dia durante 5 dias" - e a leitura natural era que um dos
+      // dois números estava errado.
+      ? `No ritmo atual, o mês fecha em <b>${fmtBRL(projected)}</b> de gastos. O teto que ainda cabe na renda é de <b data-ui-css="color:${status.color}">${fmtBRL(dailyBudget)} por dia</b> nos próximos ${plural(daysLeft, "dia", "dias")}; é limite, não meta.`
       : `Você já ultrapassou sua renda em <b data-ui-css="color:var(--negative)">${fmtBRL(Math.abs(remaining))}</b> este mês. Vale segurar os gastos esporádicos até o próximo salário.`)
     : (remaining >= 0
       ? `Sobraram <b data-ui-css="color:var(--positive)">${fmtBRL(remaining)}</b> depois de todos os gastos do mês.`
@@ -24067,11 +24411,15 @@ function renderCategoryBreakdown(catRows, monthExpense) {
       </div>
       <div class="progress progress--sm"><div class="progress__fill" data-ui-css="width:${clamp(ratio * 100, 0, 100)}%; background:${color}"></div></div>`;
     }
+    // Sem teto definido a linha mostrava SÓ o percentual, e o cartão ficava com
+    // duas gramáticas misturadas: "Moradia R$ 1.250,50 / R$ 1.000,00" ao lado de
+    // "Mercado 12%". Num cartão chamado "Para onde foi o dinheiro", o dinheiro é
+    // o dado que não pode faltar; a fatia do mês entra como complemento.
     const pct = safePct(c.value, monthExpense);
     return `<div class="cat-row">
       <span class="cat-dot" data-ui-css="background:${c.color}"></span>
       <span class="cat-name">${escapeHtml(c.name)}</span>
-      <span class="cat-pct">${pct.toFixed(0)}%</span>
+      <span class="cat-value">${fmtBRL(c.value)} <span class="cat-value-muted">· ${pct.toFixed(0)}% do mês</span></span>
     </div>`;
   }).join("");
   return `<div class="segment-bar">${segHtml}</div><div class="cat-list">${rows}</div>`;
@@ -24257,6 +24605,24 @@ function renderAccountsScreen() {
   </div>`;
 }
 
+// Duas causas diferentes caem no mesmo total e precisavam de duas frases.
+// Chamar uma compra no crédito de "lançamento antigo sem conta" não descrevia
+// o que aconteceu nem dizia o que fazer; agora a linha nomeia a causa e leva
+// para o cadastro do cartão, que é o que tira o gasto do caixa e o põe na
+// fatura, onde ele deveria estar.
+function renderLegacyBalance(summary) {
+  const parts = summary.legacyParts || { orphan: summary.legacy, cardless: 0, cardlessCount: 0 };
+  const linhas = [];
+  if (parts.orphan !== 0) {
+    linhas.push(`<span><b>Histórico anterior: ${fmtBRL(parts.orphan)}</b><small>Lançamentos antigos sem conta continuam preservados e entram no total.</small></span>`);
+  }
+  if (parts.cardless !== 0) {
+    linhas.push(`<span><b>Crédito sem cartão: ${fmtBRL(parts.cardless)}</b><small>${plural(parts.cardlessCount, "compra no crédito não está ligada", "compras no crédito não estão ligadas")} a nenhum cartão, então ${parts.cardlessCount === 1 ? "reduz" : "reduzem"} o caixa em vez de entrar numa fatura. Cadastre o cartão e reaponte ${parts.cardlessCount === 1 ? "o lançamento" : "os lançamentos"}.</small></span>`);
+  }
+  if (!linhas.length) return "";
+  return `<div class="legacy-balance">${svgIcon("alertTriangle", 15)}<div class="legacy-balance__lines">${linhas.join("")}</div></div>`;
+}
+
 function renderAccountsAndCards(summary, sources, activeAccounts) {
   const accountStats = new Map(sources.accountStats.map((item) => [item.accountId, item]));
   const cardStats = new Map(sources.cardStats.map((item) => [item.cardId, item]));
@@ -24264,7 +24630,7 @@ function renderAccountsAndCards(summary, sources, activeAccounts) {
     <div class="account-toolbar"><button class="btn btn--primary btn--sm" data-action="account-new">${svgIcon("plus",15)} Conta</button><button class="btn btn--secondary btn--sm" data-action="card-new" ${activeAccounts.length ? "" : "disabled"}>${svgIcon("creditCard",15)} Cartão</button><button class="btn btn--secondary btn--sm" data-action="transfer-new" ${activeAccounts.length > 1 ? "" : "disabled"}>${svgIcon("arrowRight",15)} Transferir</button></div>
     <div class="card card--hero account-hero"><div class="hero-label-row"><p class="hero-label">Saldo em contas</p>${renderCalculationButton("accounts-balance")}</div><p class="hero-value">${fmtBRL(summary.cash)}</p><div class="hero-chips"><div class="hero-chip"><div><span class="hero-chip__label">Faturas abertas</span><span class="hero-chip__value">${fmtBRL(summary.cardDue)}</span></div></div><div class="hero-chip ${summary.availableAfterCards >= 0 ? "hero-chip--save" : "hero-chip--warn"}"><div><span class="hero-chip__label">Após faturas</span><span class="hero-chip__value">${fmtBRL(summary.availableAfterCards)}</span></div></div><div class="hero-chip"><div><span class="hero-chip__label">Parcelas futuras</span><span class="hero-chip__value">${fmtBRL(summary.futureCard)}</span></div></div></div></div>
     ${renderAccountForm()}${renderCardForm()}${renderTransferForm()}${renderCardPaymentForm(summary)}
-    <div class="grid-2 accounts-grid"><div class="card"><div class="screen-header"><p class="card-title" data-ui-css="margin:0">Contas</p><span class="badge">${summary.accounts.length}</span></div>${summary.accounts.length ? `<div class="account-list">${summary.accounts.map((account) => renderAccountRow(account, accountStats.get(account.id))).join("")}</div>` : renderEmptyState("wallet","Nenhuma conta cadastrada.","Cadastre uma conta e informe o saldo visto no banco para o aplicativo começar com uma base confiável.")}${summary.legacy !== 0 ? `<div class="legacy-balance">${svgIcon("alertTriangle",15)}<span><b>Histórico anterior: ${fmtBRL(summary.legacy)}</b><small>Lançamentos antigos sem conta continuam preservados e entram no total.</small></span></div>` : ""}</div>
+    <div class="grid-2 accounts-grid"><div class="card"><div class="screen-header"><p class="card-title" data-ui-css="margin:0">Contas</p><span class="badge">${summary.accounts.length}</span></div>${summary.accounts.length ? `<div class="account-list">${summary.accounts.map((account) => renderAccountRow(account, accountStats.get(account.id))).join("")}</div>` : renderEmptyState("wallet","Nenhuma conta cadastrada.","Cadastre uma conta e informe o saldo visto no banco para o aplicativo começar com uma base confiável.")}${renderLegacyBalance(summary)}</div>
       <div><p class="section-title">Cartões</p>${summary.cards.length ? summary.cards.map((card) => renderCardRow(card, cardStats.get(card.id))).join("") : `<div class="card">${renderEmptyState("creditCard","Nenhum cartão cadastrado.","Compras no crédito só deixam de reduzir o caixa quando estão ligadas a um cartão.")}</div>`}</div></div>`;
 }
 
@@ -24343,7 +24709,7 @@ function renderDebtList(model) {
     const due = nextDueDateForDebt(d);
     const expanded = state.debtsUi.expandedId === d.id;
     const paid = model.payments.filter((p) => p.debtId === d.id).sort((a,b) => b.date.localeCompare(a.date));
-    return `<div class="debt-row ${expanded ? "is-open" : ""}"><button class="debt-row__main" data-action="debt-toggle" data-id="${d.id}" aria-expanded="${expanded}"><span class="debt-rank">${index + 1}</span><span class="debt-row__text"><b>${escapeHtml(d.name)}</b><small>${escapeHtml(d.creditor || DEBT_TYPE_LABELS[d.debtType] || "Dívida")} · ${rate.known ? `${rate.annualPct.toFixed(2)}% a.a. ${rate.source === "cet" ? "CET" : "efetivos"}` : "custo não informado"}</small></span><span class="debt-row__values"><b>${fmtBRL(d.value)}</b><small>${d.monthlyPayment > 0 ? `${fmtBRL(d.monthlyPayment)}/mês` : "sem parcela mínima"}</small></span>${svgIcon(expanded ? "chevronUp" : "chevronDown",15)}</button>
+    return `<div class="debt-row ${expanded ? "is-open" : ""}"><button class="debt-row__main" data-action="debt-toggle" data-id="${d.id}" aria-expanded="${expanded}"><span class="debt-rank">${index + 1}</span><span class="debt-row__text"><b>${escapeHtml(d.name)}</b><small>${escapeHtml(d.creditor || DEBT_TYPE_LABELS[d.debtType] || "Dívida")} · ${rate.known ? `${fmtDec(rate.annualPct, 2)}% a.a. ${rate.source === "cet" ? "CET" : "efetivos"}` : "custo não informado"}</small></span><span class="debt-row__values"><b>${fmtBRL(d.value)}</b><small>${d.monthlyPayment > 0 ? `${fmtBRL(d.monthlyPayment)}/mês` : "sem parcela mínima"}</small></span>${svgIcon(expanded ? "chevronUp" : "chevronDown",15)}</button>
       ${expanded ? `<div class="debt-row__detail"><div class="debt-facts"><div><span>Próximo vencimento</span><b>${due ? fmtDateFull(due) : "Não informado"}</b></div><div><span>Saldo conferido</span><b>${d.balanceCheckedAt ? fmtDateFull(d.balanceCheckedAt) : "Nunca"}</b></div><div><span>Situação</span><b>${d.debtStatus === "negotiating" ? "Em negociação" : "Ativa"}</b></div></div>
         ${model.staleIds.includes(d.id) ? `<div class="inline-alert inline-alert--warn">Saldo sem conferência há mais de 60 dias. Atualize ao registrar o próximo pagamento.</div>` : ""}
         ${model.simulation.negativeAmortizationIds.includes(d.id) ? `<div class="inline-alert inline-alert--danger">A parcela pode ser menor ou igual aos juros do mês. O saldo pode não cair.</div>` : ""}
@@ -24358,8 +24724,11 @@ function renderDebtsScreen() {
   const s = model.simulation;
   const warningCount = s.unknownRateIds.length + s.missingPaymentIds.length + s.negativeAmortizationIds.length + model.staleIds.length;
   return `<div class="screen"><div class="screen-header"><div class="back-header"><button class="icon-btn" data-action="back" data-tab="dashboard" aria-label="Voltar">${svgIcon("chevronLeft",19)}</button><div><h1 class="page-title">Central de Dívidas</h1><p class="card-subtitle">Um plano baseado nos mesmos saldos do Patrimônio</p></div></div><button class="btn btn--primary btn--sm" data-action="debt-new">${svgIcon("plus",15)} Dívida</button></div>
-    <div class="grid-dashboard"><div class="card card--hero span-3 debt-hero"><div class="hero-glow"></div><div class="hero-label-row"><p class="hero-label">Saldo devedor total</p>${renderCalculationButton("debts")}</div><p class="hero-value">${fmtBRL(model.totalBalance)}</p>${model.estimatedDebtFreeAt ? `<p class="hero-reserved">${svgIcon("calendar",14)} Quitação estimada em ${fmtDateFull(model.estimatedDebtFreeAt)}</p>` : ""}<div class="hero-chips"><div class="hero-chip"><div><span class="hero-chip__label">Parcelas mínimas</span><span class="hero-chip__value">${fmtBRL(model.monthlyPayment)}</span></div></div><div class="hero-chip"><div><span class="hero-chip__label">Comprometimento da renda</span><span class="hero-chip__value">${model.burdenPct == null ? "Sem renda" : `${model.burdenPct.toFixed(1)}%`}</span></div></div><div class="hero-chip ${warningCount ? "hero-chip--warn" : "hero-chip--save"}"><div><span class="hero-chip__label">Pontos a revisar</span><span class="hero-chip__value">${warningCount}</span></div></div></div></div>
+    <div class="grid-dashboard"><div class="card card--hero span-3 debt-hero"><div class="hero-glow"></div><div class="hero-label-row"><p class="hero-label">Saldo devedor total</p>${renderCalculationButton("debts")}</div><p class="hero-value">${fmtBRL(model.totalBalance)}</p>${model.estimatedDebtFreeAt ? `<p class="hero-reserved">${svgIcon("calendar",14)} Quitação estimada em ${fmtDateFull(model.estimatedDebtFreeAt)}</p>` : ""}<div class="hero-chips"><div class="hero-chip"><div><span class="hero-chip__label">Parcelas mínimas</span><span class="hero-chip__value">${fmtBRL(model.monthlyPayment)}</span></div></div><div class="hero-chip"><div><span class="hero-chip__label">Comprometimento da renda</span><span class="hero-chip__value">${model.burdenPct == null ? "Sem renda" : `${fmtDec(model.burdenPct, 1)}%`}</span></div></div><div class="hero-chip ${warningCount ? "hero-chip--warn" : "hero-chip--save"}"><div><span class="hero-chip__label">Pontos a revisar</span><span class="hero-chip__value">${warningCount}</span></div></div></div></div>
       ${renderDebtForm()}${renderDebtPaymentForm(model)}
+      ${!model.debts.length && (model.shortTermCards.due > 0 || model.shortTermCards.future > 0)
+        ? `<div class="card span-3"><div class="inline-alert">Você ainda não cadastrou nenhuma dívida, mas tem ${fmtBRL(model.shortTermCards.due)} em faturas abertas e ${fmtBRL(model.shortTermCards.future)} em parcelas futuras. Elas já contam no Patrimônio; aqui só entram se a fatura virou rotativo ou parcelamento com juros.</div></div>`
+        : ""}
       ${model.debts.length ? renderDebtProjection(model) : ""}
       ${model.debts.length ? `<div class="card span-1"><p class="card-title">Comparação</p><div class="debt-compare"><div><span>Avalanche</span><b>${model.avalanche.months == null ? "Sem prazo" : `${model.avalanche.months} meses`}</b><small>Prioriza o maior custo</small></div><div><span>Bola de neve</span><b>${model.snowball.months == null ? "Sem prazo" : `${model.snowball.months} meses`}</b><small>Prioriza o menor saldo</small></div></div>${model.shortTermCards.due > 0 || model.shortTermCards.future > 0 ? `<div class="inline-alert">Cartões à parte: ${fmtBRL(model.shortTermCards.due)} em faturas abertas e ${fmtBRL(model.shortTermCards.future)} futuras. Só cadastre aqui se a fatura virou rotativo ou parcelamento.</div>` : ""}</div>` : ""}
       ${renderDebtList(model)}
@@ -24576,6 +24945,20 @@ function isTxFormValid() {
   return Number.isFinite(amt) && amt > 0 && (f.type === "income" || !!f.categoryId) && destinationOk;
 }
 
+// A origem chega em dois formatos: string (rascunho da frase em linguagem
+// natural, que nunca passou por normalizeTransactionOrigin) e objeto
+// `{channel,label,reference}` (lançamento já gravado, vindo de extrato ou QR).
+// Interpolar o objeto direto imprimia "[object Object]" na tela de edição de
+// TODO lançamento importado; a leitura tem de sair do `label`.
+function txOriginChipText(origin) {
+  if (!origin) return "";
+  if (typeof origin === "string") return origin.trim();
+  const label = String(origin.label || "").trim();
+  const reference = String(origin.reference || "").trim();
+  if (!label) return reference;
+  return reference ? `${label} · ${reference}` : label;
+}
+
 function renderAddScreen() {
   const f = state.form;
   // A conversão tem outras regras, outros campos e outro botão. Tentar
@@ -24593,7 +24976,7 @@ function renderAddScreen() {
       <button class="icon-btn icon-btn--muted" data-action="cancel-edit" aria-label="Fechar">${svgIcon("x", 18)}</button>
     </div>
 
-    ${f.origin ? `<div class="origin-chip">${svgIcon("scan", 14)}<span>${escapeHtml(f.origin)}; confira os dados antes de salvar</span></div>` : ""}
+    ${txOriginChipText(f.origin) ? `<div class="origin-chip">${svgIcon("scan", 14)}<span>${escapeHtml(txOriginChipText(f.origin))}; confira os dados antes de salvar</span></div>` : ""}
 
     <div class="add-form__badge">
       <span class="add-form__badge-icon">${svgIcon(isIncome ? "trendUp" : "arrowDownRight", 22)}</span>
@@ -24640,7 +25023,7 @@ function renderAddScreen() {
             // rascunho do lançamento. O ícone continua sendo o do filho, que é o que
             // confirma a escolha de dentro do seletor.
             return `
-            <button class="chip ${isSelected ? "active" : ""}" data-ui-css="${isSelected ? `border-color:${c.color}; background:color-mix(in srgb, ${c.color} 10%, transparent)` : ""}" data-action="${hasChildren ? "open-category-picker" : "select-category"}" data-id="${c.id}">
+            <button class="chip ${isSelected ? "active" : ""}" ${isSelected ? `data-ui-css="border-color:${c.color}; background:color-mix(in srgb, ${c.color} 10%, transparent)"` : ""} data-action="${hasChildren ? "open-category-picker" : "select-category"}" data-id="${c.id}">
               <span class="icon-bubble" data-ui-css="background:color-mix(in srgb, ${c.color} 14%, transparent); color:${c.color}">${svgIcon(selectedChild ? selectedChild.icon : c.icon, 17)}</span>
               <span class="chip__label">${escapeHtml(selectedChild ? categoryFullName(state.data, selectedChild.id) : c.name)}</span>
               ${hasChildren ? `<span class="chip__caret">${svgIcon("chevronDown", 11)}</span>` : ""}
@@ -24816,6 +25199,7 @@ function renderQuickEntryCard() {
     </div>
 
     <div class="quick-entry-row">
+      <label class="sr-only" for="nlp-input">Descreva o lançamento em uma frase</label>
       <input id="nlp-input" class="input quick-entry-input" data-field="nlp-text"
         value="${escapeHtml(n.text)}" placeholder="Ex: gastei 30 no ifood"
         autocomplete="off" enterkeyhint="done" />
@@ -25132,7 +25516,10 @@ function renderReviewIssue(issue) {
   const tx = issue.txId ? state.data.transactions.find((item) => item.id === issue.txId) : null;
   const icon = { category: "tag", duplicate: "file", transfer: "arrowRight", "card-payment": "creditCard", "invoice-income": "creditCard", account: "bank" }[issue.type] || "alertTriangle";
   let action = "";
-  if (issue.type === "category" && tx) action = `<select class="input review-category" data-action-select="review-category" data-id="${tx.id}" data-key="${issue.key}"><option value="">Escolher categoria</option>${state.data.categories.filter((c) => c.id !== "outros").map((c) => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join("")}</select>`;
+  // `data-ids` carrega o grupo inteiro (as N parcelas de uma compra). O
+  // `data-id` continua sendo a linha que representa o item na lista.
+  const issueIds = (issue.txIds && issue.txIds.length ? issue.txIds : [issue.txId]).filter(Boolean).join(" ");
+  if (issue.type === "category" && tx) action = `<select class="input review-category" data-action-select="review-category" data-id="${tx.id}" data-ids="${issueIds}" data-key="${issue.key}"><option value="">Escolher categoria</option>${state.data.categories.filter((c) => c.id !== "outros").map((c) => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join("")}</select>`;
   if (issue.type === "duplicate") action = `<button class="btn btn--secondary" data-action="review-delete-duplicate" data-id="${issue.txId}" data-key="${issue.key}">Revisar e excluir cópia</button>`;
   if (issue.type === "transfer") action = `<button class="btn btn--secondary" data-action="review-convert-transfer" data-id="${issue.txId}" data-key="${issue.key}">Converter em transferência</button>`;
   if (issue.type === "card-payment") action = `<button class="btn btn--secondary" data-action="review-card-payment-open" data-id="${issue.txId}" data-key="${issue.key}">Converter em pagamento</button>`;
@@ -25141,7 +25528,7 @@ function renderReviewIssue(issue) {
   return `<article class="review-issue">
     <span class="review-issue__icon">${svgIcon(icon, 18)}</span>
     <div class="review-issue__copy"><b>${escapeHtml(issue.title)}</b><span>${escapeHtml(issue.detail)}</span><small>${fmtDateShort(issue.date)}, ${fmtBRL(issue.amount)}</small></div>
-    <div class="review-issue__actions">${action}${issue.txId ? `<button class="btn btn--ghost" data-action="review-ignore" data-id="${issue.txId}" data-key="${issue.key}">Marcar como revisado</button>` : ""}</div>
+    <div class="review-issue__actions">${action}${issue.txId ? `<button class="btn btn--ghost" data-action="review-ignore" data-id="${issue.txId}" data-ids="${issueIds}" data-key="${issue.key}">Marcar como revisado</button>` : ""}</div>
   </article>`;
 }
 
@@ -25590,7 +25977,7 @@ function renderGoalForm(gf, editing) {
 
     <div class="field-row">
       <div class="field"><label class="field__label" for="goal-deadline-input">Prazo (opcional)</label>
-        <input id="goal-deadline-input" type="date" class="input" data-field="goal-deadline" value="${gf.deadline}" /></div>
+        <input id="goal-deadline-input" type="date" class="input" data-field="goal-deadline" min="${todayIso()}" value="${gf.deadline}" /></div>
       <div class="field"><label class="field__label" for="goal-plan-input">Aporte mensal planejado</label>
         <input id="goal-plan-input" class="input" data-field="goal-monthly-plan" value="${escapeHtml(gf.monthlyPlan)}" inputmode="decimal" placeholder="0,00" /></div>
     </div>
@@ -25881,10 +26268,27 @@ function renderCalendarDayPanel(cal, iso) {
 // ---- Previsão financeira ----
 // `full = true` mostra gráfico, premissas e alerta de saldo negativo (tela do
 // calendário). `full = false` é a versão compacta do Dashboard.
+// UMA JANELA VAZIA PRECISA DIZER QUE ESTÁ VAZIA.
+//
+// A aba padrão são 30 dias, e ela mostrava "+R$ 0,00" com o gráfico reto sempre
+// que o próximo evento caía no dia 31 - o caso mais comum de todos, porque
+// salário, assinatura e parcela repetem no MESMO dia do mês. Quem declarou
+// R$ 5.000 de renda lia o cartão como quebrado. O número está certo: o que
+// faltava era dizer que não há nada agendado nessa janela e quando é o próximo.
+function forecastNextMoveNote(f, active) {
+  if (active.income !== 0 || active.expense !== 0) return "";
+  const proximo = (f.days || []).find((d) => d.income !== 0 || d.expense !== 0);
+  if (!proximo) {
+    return `<p class="forecast-note forecast-note--empty">Nada agendado nos próximos ${active.label}. Lançamentos fixos, parcelas e contas futuras aparecem aqui assim que existirem.</p>`;
+  }
+  return `<p class="forecast-note forecast-note--empty">Nada agendado nos próximos ${active.label}: o próximo movimento previsto é em <b>${fmtDateFull(proximo.iso)}</b>. Escolha um prazo maior para vê-lo.</p>`;
+}
+
 function renderForecastCard(forecast, full) {
   const f = forecast || forecastModel();
   const active = f.horizons.find((h) => h.id === state.forecastHorizon) || f.horizons[1];
   const tone = { positive: "var(--positive)", warn: "var(--goal)", danger: "var(--negative)" }[active.tone];
+  const emptyNote = forecastNextMoveNote(f, active);
 
   const chips = `<div class="horizon-chips">
       ${f.horizons.map((h) => `<button class="horizon-chip ${h.id === active.id ? "active" : ""}" data-action="set-forecast-horizon" data-value="${h.id}">${h.label}</button>`).join("")}
@@ -25912,7 +26316,7 @@ function renderForecastCard(forecast, full) {
           <button class="btn btn--secondary btn--sm" data-action="nav" data-tab="calendar">${svgIcon("calendar", 14)} Calendário</button>
         </div>
       </div>
-      ${alert}
+      ${emptyNote}${alert}
     </div>`;
   }
 
@@ -25934,7 +26338,7 @@ function renderForecastCard(forecast, full) {
     </p>
 
     ${renderForecastChart(f, active)}
-    ${alert}
+    ${emptyNote}${alert}
 
     <div class="forecast-assumptions">
       <p class="card-subtitle" data-ui-css="margin:0 0 8px">De onde vêm estes números</p>
@@ -26037,6 +26441,36 @@ function renderHealthScreen() {
   const model = healthModel(keyOfCurrentMonth());
   const h = model.headline;
   const toneColor = { positive: "var(--positive)", warn: "var(--goal)", danger: "var(--negative)", neutral: "var(--ink-soft)" };
+
+  // NOTA SEM DADOS É CHUTE COM CARA DE DIAGNÓSTICO.
+  //
+  // Sem nenhum lançamento, meta ou bem, os indicadores caem todos em valores
+  // neutros e a média sai perto de 79 - "Bom". Quem abria a tela no primeiro
+  // minuto de uso recebia um atestado de saúde financeira calculado sobre o
+  // vazio, e é justamente esse número que a tela pede para levar a sério. O
+  // Início já espera o primeiro lançamento para mostrar análise (ver
+  // `isDashboardStarting`); aqui a espera faltava.
+  if (typeof isDashboardStarting === "function" && isDashboardStarting(state.data)) {
+    return `<div class="screen">
+      ${renderBackHeader("Saúde financeira")}
+      <div class="grid-dashboard">
+        <div class="card card--dashed span-3 banner-inline">
+          ${svgIcon("shieldCheck", 34, "banner-inline__icon")}
+          <div class="banner-inline__text">
+            <strong>O diagnóstico começa no primeiro lançamento</strong>
+            <span>Reserva, liquidez, dívida e patrimônio são calculados a partir do que você registra. Sem nenhum lançamento não há nota a dar: qualquer número aqui seria chute.</span>
+          </div>
+          <button class="btn btn--primary btn--sm" data-action="nav" data-tab="add">Registrar</button>
+        </div>
+        <div class="card span-3">
+          <p class="card-title">O que a nota vai olhar</p>
+          <ul class="plain-list">
+            ${HEALTH_INDICATORS.map((i) => `<li><b>${escapeHtml(i.label)}</b><span>${escapeHtml(i.what)}</span></li>`).join("")}
+          </ul>
+        </div>
+      </div>
+    </div>`;
+  }
 
   return `<div class="screen">
     ${renderBackHeader("Saúde financeira")}
@@ -26202,7 +26636,7 @@ function renderWealthHero(m) {
     <div class="hero-glow"></div>
     <div class="hero-label-row"><p class="hero-label">Patrimônio líquido</p>${renderCalculationButton("net-worth")}</div>
     <p class="hero-value">${fmtBRL(m.worth.total)}</p>
-    ${d.comparable ? `<p class="hero-reserved">${svgIcon(d.up ? "arrowUpRight" : "arrowDownRight", 14)} ${d.up ? "+" : "−"}${fmtBRL(Math.abs(d.value))} (${d.up ? "+" : "−"}${Math.abs(d.pct).toFixed(1)}%) em ${m.months} meses</p>` : ""}
+    ${d.comparable ? `<p class="hero-reserved">${svgIcon(d.up ? "arrowUpRight" : "arrowDownRight", 14)} ${d.up ? "+" : "−"}${fmtBRL(Math.abs(d.value))} (${d.up ? "+" : "−"}${fmtDec(Math.abs(d.pct), 1)}%) em ${m.months} meses</p>` : ""}
 
     ${c.gross > 0 ? `<div class="wealth-bar">
       ${c.positive.map((b) => `<div class="wealth-bar__seg" data-ui-css="flex:${Math.max(b.value, 1)}; background:${b.color}" title="${escapeHtml(b.label)}"></div>`).join("")}
@@ -26383,7 +26817,7 @@ function renderWealthAnnualCard(m) {
       <div class="wealth-delta">
         <span class="wealth-delta__label">Contra 12 meses atrás</span>
         <b class="wealth-delta__value" data-ui-css="color:${a.yoy.comparable ? (a.yoy.up ? "var(--positive)" : "var(--negative)") : "var(--ink-faint)"}">
-          ${a.yoy.comparable ? `${a.yoy.up ? "+" : "−"}${Math.abs(a.yoy.pct).toFixed(1)}%` : "Sem dados"}
+          ${a.yoy.comparable ? `${a.yoy.up ? "+" : "−"}${fmtDec(Math.abs(a.yoy.pct), 1)}%` : "Sem dados"}
         </b>
       </div>
     </div>
@@ -28184,7 +28618,7 @@ function renderAdvisorCard(mKey) {
 
 // Quanto o pacote ocupa, em palavra de gente.
 function aiPreviewSize(bytes) {
-  return bytes >= 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${bytes} bytes`;
+  return bytes >= 1024 ? `${fmtDec((bytes / 1024), 1)} KB` : `${bytes} bytes`;
 }
 
 function renderAiPreviewFields(preview, hide) {
@@ -28424,6 +28858,7 @@ function renderSubItem(s, ignored) {
       </div>
       ${s.sinceFirstPct > 3 ? `<p class="sub-item__note">Desde a primeira cobrança o valor subiu ${s.sinceFirstPct.toFixed(0)}%; de ${fmtBRL(s.firstAmount)} para ${fmtBRL(s.lastAmount)}.</p>` : ""}
       ${s.kind === "recorrente" ? `<p class="sub-item__note">O valor varia entre as cobranças, então este é um gasto recorrente e não uma assinatura de preço fixo. O total usa a última cobrança como referência.</p>` : ""}
+      ${s.declaredOnly ? `<p class="sub-item__note">Este compromisso vem da marcação "gasto fixo mensal" no lançamento, não de um histórico de cobranças. A partir da segunda cobrança o app passa a usar as datas e os valores reais.</p>` : ""}
       <div class="sub-item__actions">
         ${ignored
           ? `<button class="btn btn--primary btn--sm" data-action="sub-track" data-id="${escapeHtml(s.key)}">Voltar a acompanhar</button>`
@@ -28918,9 +29353,14 @@ function importReviewSummary(rows, context) {
 
   const contaDestino = ctx.documentKind === "account" ? accountById(state.data, ctx.destinationId) : null;
   const aberturaConta = contaDestino ? String(contaDestino.openingDate || "") : "";
-  const anterioresAoSaldo = aberturaConta
-    ? includedTransactions.filter((row) => String(row.date || "") < aberturaConta).length
-    : 0;
+  const linhasAntesDaAbertura = aberturaConta
+    ? includedTransactions.filter((row) => String(row.date || "") < aberturaConta)
+    : [];
+  const anterioresAoSaldo = linhasAntesDaAbertura.length;
+  // A data mais antiga do arquivo é o único valor que faz essas linhas passarem
+  // a contar. Calculada aqui para o botão do aviso já sair com ela pronta.
+  const primeiraDataDoArquivo = linhasAntesDaAbertura.reduce(
+    (menor, row) => (!menor || String(row.date || "") < menor ? String(row.date || "") : menor), "");
   const transferenciasAntesDaAbertura = includedTransfers.filter((row) => {
     const other = accountById(state.data, row.otherAccountId);
     return (aberturaConta && String(row.date || "") < aberturaConta)
@@ -28953,7 +29393,7 @@ function importReviewSummary(rows, context) {
     avisoPapeis.length
       ? `<div class="import-notice">${svgIcon("creditCard", 16)}<div><b>Isto parece a fatura de um cartão.</b><span>${escapeHtml(avisoPapeis.join(". "))}. As compras continuam marcadas normalmente; se você quiser importar alguma dessas linhas mesmo assim, é só marcar a caixa.</span></div></div>` : "",
     anterioresAoSaldo
-      ? `<div class="import-notice">${svgIcon("info", 16)}<div><b>${anterioresAoSaldo} ${anterioresAoSaldo === 1 ? "lançamento é anterior" : "lançamentos são anteriores"} à abertura de ${escapeHtml(contaDestino.name)} em ${fmtDateFull(aberturaConta)}.</b><span>${anterioresAoSaldo === 1 ? "Ele entra" : "Eles entram"} nas despesas, categorias e gráficos, mas não ${anterioresAoSaldo === 1 ? "altera" : "alteram"} o saldo da conta: o saldo inicial que você informou já inclui esse período. Para que ${anterioresAoSaldo === 1 ? "ele conte" : "eles contem"} no saldo, edite a conta e recue a data de abertura.</span></div></div>` : "",
+      ? `<div class="import-notice">${svgIcon("info", 16)}<div><b>${anterioresAoSaldo} ${anterioresAoSaldo === 1 ? "lançamento é anterior" : "lançamentos são anteriores"} à abertura de ${escapeHtml(contaDestino.name)} em ${fmtDateFull(aberturaConta)}.</b><span>${anterioresAoSaldo === 1 ? "Ele entra" : "Eles entram"} nas despesas, categorias e gráficos, mas não ${anterioresAoSaldo === 1 ? "altera" : "alteram"} o saldo da conta: o saldo inicial que você informou já inclui esse período. Se aquele saldo era o do dia ${fmtDateFull(aberturaConta)} e não o de antes do extrato, recue a abertura para que ${anterioresAoSaldo === 1 ? "ele conte" : "eles contem"} no saldo.</span>${primeiraDataDoArquivo ? `<button class="btn btn--ghost btn--sm" data-action="import-backdate-account" data-id="${escapeHtml(primeiraDataDoArquivo)}">Recuar abertura para ${fmtDateFull(primeiraDataDoArquivo)}</button>` : ""}</div></div>` : "",
     transferenciasAntesDaAbertura
       ? `<div class="import-notice">${svgIcon("info", 16)}<div><b>${transferenciasAntesDaAbertura === 1 ? "Uma transferência está" : `${transferenciasAntesDaAbertura} transferências estão`} fora do período acompanhado por uma das contas.</b><span>O saldo inicial dessa conta já inclui o movimento, então somente a ponta dentro do período será recalculada.</span></div></div>` : "",
   ].join("");
@@ -29008,6 +29448,8 @@ function renderImportReview(rows) {
   const ctx = importReviewContext();
   const modelo = importReviewSummary(rows, ctx);
   const meta = rows.meta || {};
+  const visiveis = Math.min(rows.length, Math.max(IMPORT_PAGE_SIZE, state.importVisible || IMPORT_PAGE_SIZE));
+  const restantes = rows.length - visiveis;
 
   return `<div class="card">
     <div class="settings-row-header">
@@ -29035,8 +29477,10 @@ function renderImportReview(rows) {
     ${!ctx.destinations.length ? `<div class="inline-error import-destination-error">${svgIcon("alertTriangle", 16)}<div><p class="inline-error__title">Cadastre ${ctx.documentKind === "card" ? "um cartão" : "uma conta"} antes de importar.</p><p class="inline-error__detail">O destino é obrigatório para manter saldos e faturas corretos.</p></div><button class="btn btn--secondary btn--sm" data-action="nav" data-tab="accounts">Cadastrar</button></div>` : ""}
     <div id="import-notices">${modelo.notices}</div>
     <div class="import-list">
-      ${rows.map((row, idx) => renderImportReviewRow(row, idx, ctx)).join("")}
+      ${rows.slice(0, visiveis).map((row, idx) => renderImportReviewRow(row, idx, ctx)).join("")}
     </div>
+    ${restantes > 0 ? `<button class="btn btn--secondary btn--block btn--sm" data-ui-css="margin-top:10px" data-action="import-show-more">Mostrar mais ${Math.min(restantes, IMPORT_PAGE_SIZE)} de ${plural(restantes, "linha restante", "linhas restantes")}</button>
+    <p class="field-hint" data-ui-css="margin-top:6px">As linhas ainda não exibidas continuam marcadas e entram na importação; mostrar mais serve para conferir ou desmarcar.</p>` : ""}
     <button id="import-confirm-btn" class="btn btn--primary btn--block" data-ui-css="margin-top:14px" data-action="import-confirm" ${modelo.blocked ? "disabled" : ""}>${modelo.buttonLabel}</button>
     <button class="btn btn--ghost btn--block btn--sm" data-ui-css="margin-top:8px" data-action="nav" data-tab="rules">${svgIcon("tag", 14)} Corrigindo a mesma categoria várias vezes? Crie uma regra</button>
   </div>`;
@@ -30584,17 +31028,26 @@ function accountGuestForm() {
   const a = state.account;
   const register = a.mode === "register";
   const recover = a.mode === "recover";
-  return `<div class="card account-auth-card">
+  // ESTA TELA PRECISA SER UM `<form>` DE VERDADE.
+  //
+  // O resto do app monta formulário com `div` + botão delegado, e para os
+  // cadastros internos isso só custava o Enter (resolvido no `onKeydown`). No
+  // login custa mais: gerenciador de senha e o autofill do navegador se
+  // orientam pela estrutura do formulário - um par email/senha solto dentro de
+  // `div` não é reconhecido como credencial, e salvar ou preencher a senha
+  // deixa de ser oferecido. `data-action` continua fazendo o envio; o `submit`
+  // é interceptado só para o Enter não recarregar a página.
+  return `<form class="card account-auth-card" data-action-submit="account-auth" novalidate>
     <p class="eyebrow">Conta opcional</p>
     <h2 class="card-title">${recover ? "Recuperar acesso" : register ? "Criar conta" : "Entrar"}</h2>
     <p class="card-subtitle">${recover ? "Enviaremos um link para o email informado." : "A conta prepara o acesso em outros dispositivos. O uso local continua disponível sem cadastro."}</p>
-    <div class="field"><label class="field__label" for="account-email">Email</label><input id="account-email" class="input" type="email" data-field="auth-email" data-validate="email" maxlength="254" value="${escapeHtml(a.form.email)}" autocomplete="email" inputmode="email" /></div>
-    ${recover ? "" : `<div class="field"><label class="field__label" for="account-password">Senha</label><input id="account-password" class="input" type="password" data-field="auth-password" minlength="10" maxlength="128" value="${escapeHtml(a.form.password)}" autocomplete="${register ? "new-password" : "current-password"}" /><p class="field-hint">Mínimo de 10 caracteres.</p></div>`}
-    <button class="btn btn--primary btn--block" data-action="account-submit" data-value="${recover ? "recover" : (register ? "register" : "login")}" ${a.busy ? "disabled" : ""}>${a.busy ? svgIcon("loader", 16) : svgIcon(register ? "plus" : (recover ? "refresh" : "shieldCheck"), 16)} ${recover ? "Enviar link" : (register ? "Criar conta" : "Entrar")}</button>
+    <div class="field"><label class="field__label" for="account-email">Email</label><input id="account-email" class="input" type="email" name="email" data-field="auth-email" data-validate="email" maxlength="254" value="${escapeHtml(a.form.email)}" autocomplete="email" inputmode="email" /></div>
+    ${recover ? "" : `<div class="field"><label class="field__label" for="account-password">Senha</label><input id="account-password" class="input" type="password" name="password" data-field="auth-password" minlength="10" maxlength="128" value="${escapeHtml(a.form.password)}" autocomplete="${register ? "new-password" : "current-password"}" /><p class="field-hint">Mínimo de 10 caracteres.</p></div>`}
+    <button type="submit" class="btn btn--primary btn--block" data-action="account-submit" data-value="${recover ? "recover" : (register ? "register" : "login")}" ${a.busy ? "disabled" : ""}>${a.busy ? svgIcon("loader", 16) : svgIcon(register ? "plus" : (recover ? "refresh" : "shieldCheck"), 16)} ${recover ? "Enviar link" : (register ? "Criar conta" : "Entrar")}</button>
     <div class="account-auth-links">
-      ${recover ? `<button class="link-btn" data-action="account-mode" data-value="login">Voltar para entrar</button>` : `<button class="link-btn" data-action="account-mode" data-value="${register ? "login" : "register"}">${register ? "Já tenho uma conta" : "Criar uma conta"}</button><button class="link-btn" data-action="account-mode" data-value="recover">Esqueci minha senha</button>`}
+      ${recover ? `<button type="button" class="link-btn" data-action="account-mode" data-value="login">Voltar para entrar</button>` : `<button type="button" class="link-btn" data-action="account-mode" data-value="${register ? "login" : "register"}">${register ? "Já tenho uma conta" : "Criar uma conta"}</button><button type="button" class="link-btn" data-action="account-mode" data-value="recover">Esqueci minha senha</button>`}
     </div>
-  </div>`;
+  </form>`;
 }
 
 // Cartão de confirmação pendente.
@@ -31134,7 +31587,7 @@ function renderQrResult(d) {
     <div class="field">
       <p class="field__label">Categoria ${d.categorySource === "historico" ? `<span class="field__label-tag">sugerida pelo seu histórico</span>` : d.categorySource === "dicionario" ? `<span class="field__label-tag">sugerida pelo recebedor</span>` : ""}</p>
       <div class="chip-grid chip-grid--compact">
-        ${topLevelCategories(state.data).map((c) => `<button class="chip ${d.categoryId === c.id ? "active" : ""}" data-ui-css="${d.categoryId === c.id ? `border-color:${c.color}; background:color-mix(in srgb, ${c.color} 10%, transparent)` : ""}" data-action="qr-select-category" data-id="${c.id}">
+        ${topLevelCategories(state.data).map((c) => `<button class="chip ${d.categoryId === c.id ? "active" : ""}" ${d.categoryId === c.id ? `data-ui-css="border-color:${c.color}; background:color-mix(in srgb, ${c.color} 10%, transparent)"` : ""} data-action="qr-select-category" data-id="${c.id}">
           <span class="icon-bubble" data-ui-css="background:color-mix(in srgb, ${c.color} 14%, transparent); color:${c.color}">${svgIcon(c.icon, 16)}</span>
           <span class="chip__label">${escapeHtml(c.name)}</span>
         </button>`).join("")}
@@ -31438,6 +31891,17 @@ function onClick(e) {
     case "dismiss-storage-warning": setState({ storageWarningDismissed: true }); break;
     // ---- Configuração inicial (4 passos) ----
     case "onb-next": if (onbCanAdvance(state.onboarding.step)) { state.onboarding.step = Math.min(4, state.onboarding.step + 1); render(); } break;
+    // O "Continuar" nasce desabilitado até o aceite, e o aceite fica no fim de
+    // uma área que rola: numa janela de 720px de altura o checkbox cai fora da
+    // tela enquanto o botão morto continua visível no rodapé fixo. A frase que
+    // explica o bloqueio existia; faltava o caminho até o que ela pede.
+    case "onb-goto-legal": {
+      const alvo = document.getElementById("onb-legal-check");
+      if (!alvo) break;
+      if (typeof alvo.scrollIntoView === "function") alvo.scrollIntoView({ block: "center", behavior: "smooth" });
+      alvo.focus({ preventScroll: true });
+      break;
+    }
     case "onb-back": state.onboarding.step = Math.max(1, state.onboarding.step - 1); render(); break;
     case "onb-skip-account": state.onboarding.skipAccount = !state.onboarding.skipAccount; render(); break;
     case "onb-split": {
@@ -31679,10 +32143,14 @@ function onClick(e) {
       });
       break;
     }
-    case "review-ignore":
-      setData((d) => ({ ...d, transactions: d.transactions.map((tx) => tx.id === id ? markTransactionIssueReviewed(tx, btn.dataset.key) : tx) }));
+    case "review-ignore": {
+      // Mesma regra do seletor de categoria: a sugestão pode representar um
+      // grupo de parcelas, e dispensá-la tem de dispensar o grupo inteiro.
+      const alvos = reviewIssueIds(btn);
+      setData((d) => ({ ...d, transactions: d.transactions.map((tx) => alvos.has(tx.id) ? markTransactionIssueReviewed(tx, btn.dataset.key) : tx) }));
       notify("Sugestão marcada como revisada");
       break;
+    }
     case "review-delete-duplicate": {
       const tx = state.data.transactions.find((item) => item.id === id);
       if (!tx) break;
@@ -31983,11 +32451,21 @@ function onClick(e) {
     case "card-save": {
       const f = state.accountsUi.cardForm; if (!f) break;
       const limit = parseMoneyInput(f.limit || "0");
-      if (!String(f.name).trim() || !f.accountId || !Number.isFinite(limit) || limit < 0) {
+      // Dia fora de 1..31 era aceito e depois AJUSTADO em silêncio na
+      // normalização: quem digitava 35 saía com 31 e quem digitava 0 saía com
+      // 28, sem nenhum aviso, e o cartão passava a fechar num dia que a pessoa
+      // nunca escolheu. (Vencimento antes do fechamento continua válido: é a
+      // fatura que vence no mês seguinte, e `cardStatementKeyForDate` já trata.)
+      const diaValido = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) && n >= 1 && n <= 31; };
+      const fechaOk = diaValido(f.closingDay);
+      const venceOk = diaValido(f.dueDay);
+      if (!String(f.name).trim() || !f.accountId || !Number.isFinite(limit) || limit < 0 || !fechaOk || !venceOk) {
         showFormErrors({
           ...(String(f.name).trim() ? {} : { "card-name-input": "Informe o nome do cartão." }),
           ...(f.accountId ? {} : { "card-account-select": "Escolha a conta usada para pagar." }),
           ...(Number.isFinite(limit) && limit >= 0 ? {} : { "card-limit-input": "Informe um limite válido." }),
+          ...(fechaOk ? {} : { "card-closing-input": "Informe um dia entre 1 e 31." }),
+          ...(venceOk ? {} : { "card-due-input": "Informe um dia entre 1 e 31." }),
         }, "Revise os dados do cartão"); break;
       }
       setData((d) => {
@@ -32817,12 +33295,18 @@ function onClick(e) {
       const target = parseMoneyInput(gf.target);
       const savedUpfront = moneyOrZero(gf.savedUpfront);
       const monthlyPlan = moneyOrZero(gf.monthlyPlan);
-      if (!gf.name.trim() || !(target > 0) || !moneyWithinMax(target) || savedUpfront < 0 || monthlyPlan < 0) {
+      // Prazo é opcional, mas prazo NO PASSADO não é um prazo: a meta nascia
+      // "atrasada", o cálculo de quanto guardar por mês ficava sem divisor e a
+      // tela mostrava "prazo encerrado" num objetivo criado agora. Quase sempre
+      // é o ano digitado errado, e avisar no momento custa uma linha.
+      const prazoNoPassado = !!gf.deadline && gf.deadline < todayIso();
+      if (!gf.name.trim() || !(target > 0) || !moneyWithinMax(target) || savedUpfront < 0 || monthlyPlan < 0 || prazoNoPassado) {
         showFormErrors({
           ...(gf.name.trim() ? {} : { "goal-name-input": "Informe o nome da meta." }),
           ...(target > 0 && moneyWithinMax(target) ? {} : { "goal-target-input": target > 0 ? moneyMaxMessage("Valor alvo") : "Informe um valor alvo maior que zero." }),
           ...(savedUpfront >= 0 ? {} : { "goal-saved-input": "O valor inicial não pode ser negativo." }),
           ...(monthlyPlan >= 0 ? {} : { "goal-plan-input": "O aporte mensal não pode ser negativo." }),
+          ...(prazoNoPassado ? { "goal-deadline-input": "O prazo precisa ser hoje ou uma data futura." } : {}),
         }, "Revise os dados da meta"); break;
       }
       const editingId = state.editingGoalId;
@@ -33105,9 +33589,14 @@ function onClick(e) {
       patchImportSummary();
       break;
     }
+    case "import-show-more":
+      state.importVisible = (state.importVisible || IMPORT_PAGE_SIZE) + IMPORT_PAGE_SIZE;
+      render();
+      break;
     case "import-cancel":
       state.importRows = null; state.importFilename = null; state.importError = null;
       state.importPendingFile = null; state.importPassword = ""; state.importDestinationId = "";
+      state.importVisible = IMPORT_PAGE_SIZE;
       render();
       break;
     case "dismiss-import-error":
@@ -33115,6 +33604,31 @@ function onClick(e) {
     case "import-password-retry":
       if (state.importPendingFile) handleStatementFile(state.importPendingFile, state.importPassword);
       break;
+    // O aviso "estas linhas são anteriores à abertura da conta" mandava o
+    // usuário sair da importação, achar a conta e editar a data à mão; na
+    // prática ninguém fazia isso e o extrato inteiro entrava sem mexer no
+    // saldo. O conserto é de um clique, aqui, com a data mais antiga do
+    // próprio arquivo. O saldo inicial não é tocado: quem informou "saldo de
+    // hoje" e recua a abertura está dizendo que aquele número era o do começo
+    // do período; é exatamente a conta que a tela de conferência já explica.
+    case "import-backdate-account": {
+      const novaAbertura = String(id || "");
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(novaAbertura)) break;
+      // Pelo mesmo contexto que desenhou o aviso: `state.importDestinationId`
+      // fica vazio enquanto o usuário não mexe no seletor, e é justamente esse
+      // o caso comum (uma conta só, escolhida por padrão).
+      const ctxImport = importReviewContext();
+      const conta = ctxImport.documentKind === "account" ? accountById(state.data, ctxImport.destinationId) : null;
+      if (!conta || String(conta.openingDate || "") <= novaAbertura) break;
+      setData((d) => ({
+        ...d,
+        accounts: d.accounts.map((a) => a.id === conta.id
+          ? makeAccount({ ...a, openingDate: novaAbertura, createdAt: a.createdAt })
+          : a),
+      }));
+      notify(`Abertura de ${conta.name} recuada para ${fmtDateFull(novaAbertura)}`);
+      break;
+    }
     case "import-confirm": {
       const included = (state.importRows || []).filter((r) => r.include);
       const meta = (state.importRows && state.importRows.meta) || {};
@@ -33147,7 +33661,7 @@ function onClick(e) {
         transactions: [...d.transactions, ...newTx],
         accountTransfers: [...(d.accountTransfers || []), ...newTransfers],
       }));
-      state.importRows = null; state.importFilename = null; state.importDestinationId = "";
+      state.importRows = null; state.importFilename = null; state.importDestinationId = ""; state.importVisible = IMPORT_PAGE_SIZE;
       const importedParts = [];
       if (newTx.length) importedParts.push(plural(newTx.length, "lançamento importado", "lançamentos importados"));
       if (newTransfers.length) importedParts.push(plural(newTransfers.length, "transferência registrada", "transferências registradas"));
@@ -33290,6 +33804,9 @@ function computeSplitWarning(categoryId, amount) {
   return { groupLabel: GROUP_LABELS[group], pct, allocated, newSpent, over: subMoney(newSpent, allocated) };
 }
 
+// Tamanho do lote da revisão de importação. Ver `importVisible` abaixo.
+const IMPORT_PAGE_SIZE = 60;
+
 let state = {
   data: loadData(),
   storageOk: isStorageAvailable(),
@@ -33353,6 +33870,12 @@ let state = {
   accountDangerOpen: false,
   // ---- novos recursos ----
   importRows: null,        // linhas parseadas de OFX/CSV/PDF aguardando revisão
+  // Quantas linhas da revisão estão desenhadas. Um extrato de doze meses tem
+  // ~1.500 linhas, e cada uma traz onze botões de categoria: desenhar tudo de
+  // uma vez passava de 30 mil nós no DOM, o que num Android mediano trava a
+  // tela antes de a pessoa conseguir conferir a primeira linha. A conferência é
+  // sequencial de qualquer jeito; o resto entra sob demanda.
+  importVisible: IMPORT_PAGE_SIZE,
   importFilename: null,
   importDocumentKind: "account",
   importDestinationId: "",
@@ -33603,6 +34126,15 @@ function openOverlay(name) {
   NavHistory.push(state.tab, state.overlayStack);
 }
 
+// Ids alcançados por uma sugestão da caixa de revisão. `data-ids` traz o grupo
+// (as parcelas de uma compra); `data-id` é o fallback de item único.
+function reviewIssueIds(el) {
+  const brutos = String((el && el.dataset && el.dataset.ids) || "").split(/\s+/).filter(Boolean);
+  if (brutos.length) return new Set(brutos);
+  const unico = el && el.dataset ? el.dataset.id : null;
+  return new Set(unico ? [unico] : []);
+}
+
 function requestConfirmation(options) {
   const o = options && typeof options === "object" ? options : {};
   state.confirmation = {
@@ -33650,12 +34182,22 @@ function closeOverlayState(name) {
       const callback = pending && pending.choice === "alternate"
         ? pending.onAlternate
         : (pending && pending.accepted ? pending.onConfirm : null);
+      // O callback NÃO pode rodar dentro da reconciliação do histórico.
+      // `dismissOverlay` chega aqui por `applyHistoryRoute`, que logo em
+      // seguida compara `route.tab` com `state.tab` para restaurar a rota. Quem
+      // confirma quase sempre navega (excluir um lançamento tem de voltar para
+      // a tela de onde ele foi aberto), e essa navegação era desfeita na mesma
+      // passada: o usuário confirmava a exclusão em Movimentações e caía no
+      // formulário "Novo gasto" em branco. Uma volta ao laço de eventos separa
+      // "fechar a camada" de "reagir à confirmação".
       if (callback) {
-        try {
-          Promise.resolve(callback()).catch(() => notify("Não foi possível concluir esta ação", "danger"));
-        } catch (err) {
-          notify("Não foi possível concluir esta ação", "danger");
-        }
+        setTimeout(() => {
+          try {
+            Promise.resolve(callback()).catch(() => notify("Não foi possível concluir esta ação", "danger"));
+          } catch (err) {
+            notify("Não foi possível concluir esta ação", "danger");
+          }
+        }, 0);
       }
       break;
     }
@@ -34224,6 +34766,8 @@ async function handleStatementFile(file, password) {
   state.importError = null;
   state.importLoading = true;
   state.importRows = null;
+  // Arquivo novo, conferência do zero: a janela volta ao primeiro lote.
+  state.importVisible = IMPORT_PAGE_SIZE;
   state.importPendingFile = typeof isPdfStatementFile === "function" && isPdfStatementFile(file) ? file : null;
   render();
 
@@ -34289,7 +34833,11 @@ const MOBILE_NAV = [
   { id: "dashboard", label: "Início", icon: "layout" },
   { id: "analytics", label: "Movimentos", ariaLabel: "Movimentos, abrir Movimentações", icon: "pie" },
   { id: "add", label: "Adicionar", icon: "plus" },
-  { id: "calendar", label: "Planejar", ariaLabel: "Planejar, abrir Planejamento", icon: "calendar" },
+  // O nome anunciado tem de ser o da tela em que a pessoa cai. "Planejamento"
+  // não é o título de tela nenhuma: o destino é o Calendário, e quem navega por
+  // leitor de tela ouvia um nome que não existe do outro lado. O rótulo visível
+  // segue curto por causa da largura da barra (cinco itens em 375px).
+  { id: "calendar", label: "Planejar", ariaLabel: "Planejar, abrir Calendário", icon: "calendar" },
   { id: "all", label: "Recursos", icon: "search" },
 ];
 
@@ -34722,6 +35270,7 @@ function onInput(e) {
     case "onb-income": state.onboarding.income = val; patchOnboardingFooter(); break;
     case "onb-acc-name": state.onboarding.account.name = val; patchOnboardingFooter(); break;
     case "onb-acc-balance": state.onboarding.account.balance = val; patchOnboardingFooter(); break;
+    case "onb-acc-date": state.onboarding.account.openingDate = val; patchOnboardingFooter(); break;
     case "tx-amount": state.form.amount = val; patchSubmitButton(); patchFormWarnings(); break;
     case "tx-description": state.form.description = val; break;
     case "tx-date": state.form.date = val; break;
@@ -34926,11 +35475,16 @@ function onChange(e) {
   }
   if (actionSelect === "movement-bulk-category") { state.movementBulkCategoryId = e.target.value; render(); return; }
   if (actionSelect === "review-category") {
-    const txId = e.target.dataset.id;
     const categoryId = e.target.value;
     if (!categoryId) return;
-    setData((d) => ({ ...d, transactions:d.transactions.map((tx) => tx.id === txId ? markTransactionIssueReviewed(updateTransaction(tx, { categoryId }), e.target.dataset.key) : tx) }));
-    notify("Categoria atualizada"); return;
+    // Uma compra parcelada chega aqui como um item só, com as N parcelas em
+    // `data-ids`. Escolher a categoria uma vez tem de valer para todas.
+    const alvos = reviewIssueIds(e.target);
+    const chave = e.target.dataset.key;
+    setData((d) => ({ ...d, transactions:d.transactions.map((tx) => alvos.has(tx.id)
+      ? markTransactionIssueReviewed(updateTransaction(tx, { categoryId }), chave)
+      : tx) }));
+    notify(alvos.size > 1 ? `Categoria atualizada em ${alvos.size} parcelas` : "Categoria atualizada"); return;
   }
   if (actionSelect === "review-payment-account") { state.movementReviewCard.accountId = e.target.value; return; }
   if (actionSelect === "review-payment-card") { state.movementReviewCard.creditCardId = e.target.value; return; }
@@ -35103,6 +35657,44 @@ function onFocusOut(e) {
       notify("Percentuais da Regra x/x/x atualizados");
     }
   }
+  formatarDinheiroAoSair(e.target);
+}
+
+// VALOR CONFIRMADO É VALOR FORMATADO.
+//
+// Digitar "5000" e sair do campo deixava "5000" na tela enquanto o resto do
+// app fala "R$ 5.000,00". Num app de dinheiro isso é ambíguo na hora de
+// conferir: "5000" pode ser lido como cinco mil ou como cinquenta reais mal
+// digitados. Ao sair, o campo passa a mostrar as duas casas decimais.
+//
+// A grafia é a de `moneyDraft` (sem separador de milhar) porque é a que o
+// próprio app já usa nos campos de Ajustes e Categorias, e porque
+// `sanitizeDecimalInput` remove o ponto de milhar na próxima digitação: exibir
+// "5.000,00" faria o valor mudar sozinho ao voltar ao campo.
+//
+// Taxa não é dinheiro, e controle deslizante não é campo de digitação: os dois
+// ficam de fora para "15" de juros não virar "15,00" nem o passo do slider ser
+// reescrito no meio do arraste.
+const CAMPO_NAO_MONETARIO = /(taxa|rate|cet|juros|-range$)/;
+
+function formatarDinheiroAoSair(el) {
+  if (!el || !el.dataset || typeof el.value !== "string") return;
+  const field = String(el.dataset.field || "");
+  if (!field || CAMPO_NAO_MONETARIO.test(field)) return;
+  const inputMode = String((el.getAttribute && el.getAttribute("inputmode")) || el.inputMode || "").toLowerCase();
+  if (inputMode !== "decimal") return;
+  const bruto = el.value.trim();
+  if (!bruto) return;
+  const n = parseMoneyInput(bruto);
+  // Zero fica como está: `moneyDraft(0)` devolve string vazia, e apagar o que a
+  // pessoa digitou seria pior do que não formatar.
+  if (!Number.isFinite(n) || n === 0) return;
+  const formatado = moneyDraft(n);
+  if (!formatado || formatado === bruto) return;
+  el.value = formatado;
+  // O estado guarda o rascunho digitado; sem avisar o `onInput` a tela voltaria
+  // ao texto antigo no próximo desenho.
+  el.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
 function onKeydown(e) {
@@ -35148,8 +35740,53 @@ function onKeydown(e) {
       field === "split-necessidade" || field === "split-desejo" || field === "split-futuro")) {
     e.preventDefault();
     e.target.blur();
+    return;
+  }
+
+  // ENTER PRECISA ENVIAR O FORMULÁRIO.
+  //
+  // O app não tem nenhum elemento `<form>`: as telas são montadas como HTML
+  // solto e o envio mora sempre num botão com `data-action`. Isso custa o
+  // comportamento que todo mundo espera de um formulário; apertar Enter depois
+  // de digitar a senha, o valor da meta ou o nome da conta não fazia nada, e no
+  // celular a tecla "Ir" do teclado ficava inerte. Os casos acima foram sendo
+  // resolvidos um a um, por nome de campo, e a lista nunca alcançou o login nem
+  // os cadastros.
+  //
+  // Aqui a regra passa a ser geral: Enter num campo de uma linha aciona o botão
+  // de enviar da MESMA camada em que o campo está (a de cima, se houver camada
+  // aberta; senão a tela). A lista de ações é explícita de propósito - clicar
+  // no primeiro `.btn--primary` que aparecesse acertaria "Excluir" com a mesma
+  // facilidade com que acertaria "Salvar".
+  // Campo dentro de `<form>` fica de fora: o navegador já faz o envio implícito
+  // e o listener de `submit` cuida dele. Entrar aqui também dispararia o botão
+  // duas vezes.
+  if (e.key === "Enter" && !e.shiftKey && e.target.tagName === "INPUT" && !e.target.form
+      && !ENTER_EXEMPT_TYPES.has(e.target.type)) {
+    const escopo = e.target.closest("[role=dialog], [role=alertdialog], .modal-sheet") || document.querySelector("main");
+    const enviar = escopo && escopo.querySelector(SUBMIT_ACTION_SELECTOR);
+    if (enviar && !enviar.disabled) {
+      e.preventDefault();
+      // O `blur` primeiro: campos com máscara gravam no `change`, e enviar com
+      // o cursor ainda dentro perderia o que acabou de ser digitado.
+      e.target.blur();
+      enviar.click();
+    }
   }
 }
+
+// Tipos em que Enter tem significado próprio (ou nenhum) e não deve enviar.
+const ENTER_EXEMPT_TYPES = new Set(["checkbox", "radio", "button", "submit", "reset", "file", "range"]);
+
+// Ações que representam "enviar este formulário". Explícitas para que Enter
+// nunca caia num botão destrutivo que por acaso esteja na mesma camada.
+const SUBMIT_ACTIONS = [
+  "submit-tx", "submit-goal", "submit-goal-action", "account-save", "account-submit",
+  "account-reconcile-save", "card-save", "card-pay-save", "cat-editor-save", "debt-save",
+  "debt-extra-save", "debt-payment-save", "pf-save", "pf-update-save", "pf-dividend-save",
+  "qr-save", "rule-save", "transfer-save", "wealth-save", "wealth-update-save",
+];
+const SUBMIT_ACTION_SELECTOR = SUBMIT_ACTIONS.map((a) => `[data-action="${a}"]`).join(",");
 
 // ---------------- AI insight ----------------
 // O envio passa pela tela de prévia: antes, a confirmação descrevia o pacote
@@ -35308,6 +35945,17 @@ async function init() {
   root.addEventListener("change", onChange);
   root.addEventListener("focusout", onFocusOut);
   root.addEventListener("keydown", onKeydown);
+  // Um `<form>` de verdade (hoje só o de login) envia sozinho no Enter e
+  // recarregaria a página, que num app local-first significa perder a tela e
+  // reabrir do zero. O envio continua sendo o `data-action` do botão; aqui só
+  // trocamos a navegação nativa por um clique nele.
+  root.addEventListener("submit", (e) => {
+    const form = e.target.closest("form");
+    if (!form) return;
+    e.preventDefault();
+    const enviar = form.querySelector('button[type="submit"][data-action]');
+    if (enviar && !enviar.disabled) enviar.click();
+  });
 
   root.addEventListener("dragover", (e) => {
     if (e.target.closest("#statement-dropzone")) { e.preventDefault(); if (!state.importDragOver) { state.importDragOver = true; render(); } }

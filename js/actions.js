@@ -268,6 +268,17 @@ function onClick(e) {
     case "dismiss-storage-warning": setState({ storageWarningDismissed: true }); break;
     // ---- Configuração inicial (4 passos) ----
     case "onb-next": if (onbCanAdvance(state.onboarding.step)) { state.onboarding.step = Math.min(4, state.onboarding.step + 1); render(); } break;
+    // O "Continuar" nasce desabilitado até o aceite, e o aceite fica no fim de
+    // uma área que rola: numa janela de 720px de altura o checkbox cai fora da
+    // tela enquanto o botão morto continua visível no rodapé fixo. A frase que
+    // explica o bloqueio existia; faltava o caminho até o que ela pede.
+    case "onb-goto-legal": {
+      const alvo = document.getElementById("onb-legal-check");
+      if (!alvo) break;
+      if (typeof alvo.scrollIntoView === "function") alvo.scrollIntoView({ block: "center", behavior: "smooth" });
+      alvo.focus({ preventScroll: true });
+      break;
+    }
     case "onb-back": state.onboarding.step = Math.max(1, state.onboarding.step - 1); render(); break;
     case "onb-skip-account": state.onboarding.skipAccount = !state.onboarding.skipAccount; render(); break;
     case "onb-split": {
@@ -509,10 +520,14 @@ function onClick(e) {
       });
       break;
     }
-    case "review-ignore":
-      setData((d) => ({ ...d, transactions: d.transactions.map((tx) => tx.id === id ? markTransactionIssueReviewed(tx, btn.dataset.key) : tx) }));
+    case "review-ignore": {
+      // Mesma regra do seletor de categoria: a sugestão pode representar um
+      // grupo de parcelas, e dispensá-la tem de dispensar o grupo inteiro.
+      const alvos = reviewIssueIds(btn);
+      setData((d) => ({ ...d, transactions: d.transactions.map((tx) => alvos.has(tx.id) ? markTransactionIssueReviewed(tx, btn.dataset.key) : tx) }));
       notify("Sugestão marcada como revisada");
       break;
+    }
     case "review-delete-duplicate": {
       const tx = state.data.transactions.find((item) => item.id === id);
       if (!tx) break;
@@ -813,11 +828,21 @@ function onClick(e) {
     case "card-save": {
       const f = state.accountsUi.cardForm; if (!f) break;
       const limit = parseMoneyInput(f.limit || "0");
-      if (!String(f.name).trim() || !f.accountId || !Number.isFinite(limit) || limit < 0) {
+      // Dia fora de 1..31 era aceito e depois AJUSTADO em silêncio na
+      // normalização: quem digitava 35 saía com 31 e quem digitava 0 saía com
+      // 28, sem nenhum aviso, e o cartão passava a fechar num dia que a pessoa
+      // nunca escolheu. (Vencimento antes do fechamento continua válido: é a
+      // fatura que vence no mês seguinte, e `cardStatementKeyForDate` já trata.)
+      const diaValido = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) && n >= 1 && n <= 31; };
+      const fechaOk = diaValido(f.closingDay);
+      const venceOk = diaValido(f.dueDay);
+      if (!String(f.name).trim() || !f.accountId || !Number.isFinite(limit) || limit < 0 || !fechaOk || !venceOk) {
         showFormErrors({
           ...(String(f.name).trim() ? {} : { "card-name-input": "Informe o nome do cartão." }),
           ...(f.accountId ? {} : { "card-account-select": "Escolha a conta usada para pagar." }),
           ...(Number.isFinite(limit) && limit >= 0 ? {} : { "card-limit-input": "Informe um limite válido." }),
+          ...(fechaOk ? {} : { "card-closing-input": "Informe um dia entre 1 e 31." }),
+          ...(venceOk ? {} : { "card-due-input": "Informe um dia entre 1 e 31." }),
         }, "Revise os dados do cartão"); break;
       }
       setData((d) => {
@@ -1647,12 +1672,18 @@ function onClick(e) {
       const target = parseMoneyInput(gf.target);
       const savedUpfront = moneyOrZero(gf.savedUpfront);
       const monthlyPlan = moneyOrZero(gf.monthlyPlan);
-      if (!gf.name.trim() || !(target > 0) || !moneyWithinMax(target) || savedUpfront < 0 || monthlyPlan < 0) {
+      // Prazo é opcional, mas prazo NO PASSADO não é um prazo: a meta nascia
+      // "atrasada", o cálculo de quanto guardar por mês ficava sem divisor e a
+      // tela mostrava "prazo encerrado" num objetivo criado agora. Quase sempre
+      // é o ano digitado errado, e avisar no momento custa uma linha.
+      const prazoNoPassado = !!gf.deadline && gf.deadline < todayIso();
+      if (!gf.name.trim() || !(target > 0) || !moneyWithinMax(target) || savedUpfront < 0 || monthlyPlan < 0 || prazoNoPassado) {
         showFormErrors({
           ...(gf.name.trim() ? {} : { "goal-name-input": "Informe o nome da meta." }),
           ...(target > 0 && moneyWithinMax(target) ? {} : { "goal-target-input": target > 0 ? moneyMaxMessage("Valor alvo") : "Informe um valor alvo maior que zero." }),
           ...(savedUpfront >= 0 ? {} : { "goal-saved-input": "O valor inicial não pode ser negativo." }),
           ...(monthlyPlan >= 0 ? {} : { "goal-plan-input": "O aporte mensal não pode ser negativo." }),
+          ...(prazoNoPassado ? { "goal-deadline-input": "O prazo precisa ser hoje ou uma data futura." } : {}),
         }, "Revise os dados da meta"); break;
       }
       const editingId = state.editingGoalId;
@@ -1935,9 +1966,14 @@ function onClick(e) {
       patchImportSummary();
       break;
     }
+    case "import-show-more":
+      state.importVisible = (state.importVisible || IMPORT_PAGE_SIZE) + IMPORT_PAGE_SIZE;
+      render();
+      break;
     case "import-cancel":
       state.importRows = null; state.importFilename = null; state.importError = null;
       state.importPendingFile = null; state.importPassword = ""; state.importDestinationId = "";
+      state.importVisible = IMPORT_PAGE_SIZE;
       render();
       break;
     case "dismiss-import-error":
@@ -1945,6 +1981,31 @@ function onClick(e) {
     case "import-password-retry":
       if (state.importPendingFile) handleStatementFile(state.importPendingFile, state.importPassword);
       break;
+    // O aviso "estas linhas são anteriores à abertura da conta" mandava o
+    // usuário sair da importação, achar a conta e editar a data à mão; na
+    // prática ninguém fazia isso e o extrato inteiro entrava sem mexer no
+    // saldo. O conserto é de um clique, aqui, com a data mais antiga do
+    // próprio arquivo. O saldo inicial não é tocado: quem informou "saldo de
+    // hoje" e recua a abertura está dizendo que aquele número era o do começo
+    // do período; é exatamente a conta que a tela de conferência já explica.
+    case "import-backdate-account": {
+      const novaAbertura = String(id || "");
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(novaAbertura)) break;
+      // Pelo mesmo contexto que desenhou o aviso: `state.importDestinationId`
+      // fica vazio enquanto o usuário não mexe no seletor, e é justamente esse
+      // o caso comum (uma conta só, escolhida por padrão).
+      const ctxImport = importReviewContext();
+      const conta = ctxImport.documentKind === "account" ? accountById(state.data, ctxImport.destinationId) : null;
+      if (!conta || String(conta.openingDate || "") <= novaAbertura) break;
+      setData((d) => ({
+        ...d,
+        accounts: d.accounts.map((a) => a.id === conta.id
+          ? makeAccount({ ...a, openingDate: novaAbertura, createdAt: a.createdAt })
+          : a),
+      }));
+      notify(`Abertura de ${conta.name} recuada para ${fmtDateFull(novaAbertura)}`);
+      break;
+    }
     case "import-confirm": {
       const included = (state.importRows || []).filter((r) => r.include);
       const meta = (state.importRows && state.importRows.meta) || {};
@@ -1977,7 +2038,7 @@ function onClick(e) {
         transactions: [...d.transactions, ...newTx],
         accountTransfers: [...(d.accountTransfers || []), ...newTransfers],
       }));
-      state.importRows = null; state.importFilename = null; state.importDestinationId = "";
+      state.importRows = null; state.importFilename = null; state.importDestinationId = ""; state.importVisible = IMPORT_PAGE_SIZE;
       const importedParts = [];
       if (newTx.length) importedParts.push(plural(newTx.length, "lançamento importado", "lançamentos importados"));
       if (newTransfers.length) importedParts.push(plural(newTransfers.length, "transferência registrada", "transferências registradas"));

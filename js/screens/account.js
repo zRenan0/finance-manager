@@ -10,17 +10,26 @@ function accountGuestForm() {
   const a = state.account;
   const register = a.mode === "register";
   const recover = a.mode === "recover";
-  return `<div class="card account-auth-card">
+  // ESTA TELA PRECISA SER UM `<form>` DE VERDADE.
+  //
+  // O resto do app monta formulário com `div` + botão delegado, e para os
+  // cadastros internos isso só custava o Enter (resolvido no `onKeydown`). No
+  // login custa mais: gerenciador de senha e o autofill do navegador se
+  // orientam pela estrutura do formulário - um par email/senha solto dentro de
+  // `div` não é reconhecido como credencial, e salvar ou preencher a senha
+  // deixa de ser oferecido. `data-action` continua fazendo o envio; o `submit`
+  // é interceptado só para o Enter não recarregar a página.
+  return `<form class="card account-auth-card" data-action-submit="account-auth" novalidate>
     <p class="eyebrow">Conta opcional</p>
     <h2 class="card-title">${recover ? "Recuperar acesso" : register ? "Criar conta" : "Entrar"}</h2>
     <p class="card-subtitle">${recover ? "Enviaremos um link para o email informado." : "A conta prepara o acesso em outros dispositivos. O uso local continua disponível sem cadastro."}</p>
-    <div class="field"><label class="field__label" for="account-email">Email</label><input id="account-email" class="input" type="email" data-field="auth-email" data-validate="email" maxlength="254" value="${escapeHtml(a.form.email)}" autocomplete="email" inputmode="email" /></div>
-    ${recover ? "" : `<div class="field"><label class="field__label" for="account-password">Senha</label><input id="account-password" class="input" type="password" data-field="auth-password" minlength="10" maxlength="128" value="${escapeHtml(a.form.password)}" autocomplete="${register ? "new-password" : "current-password"}" /><p class="field-hint">Mínimo de 10 caracteres.</p></div>`}
-    <button class="btn btn--primary btn--block" data-action="account-submit" data-value="${recover ? "recover" : (register ? "register" : "login")}" ${a.busy ? "disabled" : ""}>${a.busy ? svgIcon("loader", 16) : svgIcon(register ? "plus" : (recover ? "refresh" : "shieldCheck"), 16)} ${recover ? "Enviar link" : (register ? "Criar conta" : "Entrar")}</button>
+    <div class="field"><label class="field__label" for="account-email">Email</label><input id="account-email" class="input" type="email" name="email" data-field="auth-email" data-validate="email" maxlength="254" value="${escapeHtml(a.form.email)}" autocomplete="email" inputmode="email" /></div>
+    ${recover ? "" : `<div class="field"><label class="field__label" for="account-password">Senha</label><input id="account-password" class="input" type="password" name="password" data-field="auth-password" minlength="10" maxlength="128" value="${escapeHtml(a.form.password)}" autocomplete="${register ? "new-password" : "current-password"}" /><p class="field-hint">Mínimo de 10 caracteres.</p></div>`}
+    <button type="submit" class="btn btn--primary btn--block" data-action="account-submit" data-value="${recover ? "recover" : (register ? "register" : "login")}" ${a.busy ? "disabled" : ""}>${a.busy ? svgIcon("loader", 16) : svgIcon(register ? "plus" : (recover ? "refresh" : "shieldCheck"), 16)} ${recover ? "Enviar link" : (register ? "Criar conta" : "Entrar")}</button>
     <div class="account-auth-links">
-      ${recover ? `<button class="link-btn" data-action="account-mode" data-value="login">Voltar para entrar</button>` : `<button class="link-btn" data-action="account-mode" data-value="${register ? "login" : "register"}">${register ? "Já tenho uma conta" : "Criar uma conta"}</button><button class="link-btn" data-action="account-mode" data-value="recover">Esqueci minha senha</button>`}
+      ${recover ? `<button type="button" class="link-btn" data-action="account-mode" data-value="login">Voltar para entrar</button>` : `<button type="button" class="link-btn" data-action="account-mode" data-value="${register ? "login" : "register"}">${register ? "Já tenho uma conta" : "Criar uma conta"}</button><button type="button" class="link-btn" data-action="account-mode" data-value="recover">Esqueci minha senha</button>`}
     </div>
-  </div>`;
+  </form>`;
 }
 
 // Cartão de confirmação pendente.

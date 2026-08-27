@@ -184,10 +184,27 @@ function renderCalendarDayPanel(cal, iso) {
 // ---- Previsão financeira ----
 // `full = true` mostra gráfico, premissas e alerta de saldo negativo (tela do
 // calendário). `full = false` é a versão compacta do Dashboard.
+// UMA JANELA VAZIA PRECISA DIZER QUE ESTÁ VAZIA.
+//
+// A aba padrão são 30 dias, e ela mostrava "+R$ 0,00" com o gráfico reto sempre
+// que o próximo evento caía no dia 31 - o caso mais comum de todos, porque
+// salário, assinatura e parcela repetem no MESMO dia do mês. Quem declarou
+// R$ 5.000 de renda lia o cartão como quebrado. O número está certo: o que
+// faltava era dizer que não há nada agendado nessa janela e quando é o próximo.
+function forecastNextMoveNote(f, active) {
+  if (active.income !== 0 || active.expense !== 0) return "";
+  const proximo = (f.days || []).find((d) => d.income !== 0 || d.expense !== 0);
+  if (!proximo) {
+    return `<p class="forecast-note forecast-note--empty">Nada agendado nos próximos ${active.label}. Lançamentos fixos, parcelas e contas futuras aparecem aqui assim que existirem.</p>`;
+  }
+  return `<p class="forecast-note forecast-note--empty">Nada agendado nos próximos ${active.label}: o próximo movimento previsto é em <b>${fmtDateFull(proximo.iso)}</b>. Escolha um prazo maior para vê-lo.</p>`;
+}
+
 function renderForecastCard(forecast, full) {
   const f = forecast || forecastModel();
   const active = f.horizons.find((h) => h.id === state.forecastHorizon) || f.horizons[1];
   const tone = { positive: "var(--positive)", warn: "var(--goal)", danger: "var(--negative)" }[active.tone];
+  const emptyNote = forecastNextMoveNote(f, active);
 
   const chips = `<div class="horizon-chips">
       ${f.horizons.map((h) => `<button class="horizon-chip ${h.id === active.id ? "active" : ""}" data-action="set-forecast-horizon" data-value="${h.id}">${h.label}</button>`).join("")}
@@ -215,7 +232,7 @@ function renderForecastCard(forecast, full) {
           <button class="btn btn--secondary btn--sm" data-action="nav" data-tab="calendar">${svgIcon("calendar", 14)} Calendário</button>
         </div>
       </div>
-      ${alert}
+      ${emptyNote}${alert}
     </div>`;
   }
 
@@ -237,7 +254,7 @@ function renderForecastCard(forecast, full) {
     </p>
 
     ${renderForecastChart(f, active)}
-    ${alert}
+    ${emptyNote}${alert}
 
     <div class="forecast-assumptions">
       <p class="card-subtitle" data-ui-css="margin:0 0 8px">De onde vêm estes números</p>

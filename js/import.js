@@ -228,6 +228,26 @@ function parseCsvStatement(text) {
 // ------------------------------------------------------------------------------
 // PARSER OFX. SGML simplificado usado pelos bancos brasileiros
 // ------------------------------------------------------------------------------
+// OFX é SGML: o banco ESCAPA os caracteres reservados no MEMO. "TED JOAO &
+// MARIA" chega no arquivo como "TED JOAO &amp; MARIA", e sem desfazer isso o
+// `&amp;` era gravado no banco de dados e mostrado assim em toda tela que
+// exibisse o lançamento. Fica limitado às cinco entidades do SGML mais as
+// numéricas; nada de interpretar HTML, que aqui só abriria porta para conteúdo
+// que não é texto.
+function decodeSgmlEntities(value) {
+  const s = String(value == null ? "" : value);
+  if (s.indexOf("&") === -1) return s;
+  return s
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(Number(dec)))
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&apos;/gi, "'")
+    // `&amp;` por último: antes dos outros, "&amp;lt;" viraria "<".
+    .replace(/&amp;/gi, "&");
+}
+
 function parseOfxStatement(text) {
   const blocks = text.split(/<STMTTRN>/i).slice(1);
   if (blocks.length === 0) throw new ImportError("NO_ROWS", "Nenhuma transação encontrada no OFX. O arquivo pode estar incompleto.");
@@ -238,7 +258,7 @@ function parseOfxStatement(text) {
     const block = raw.split(/<\/STMTTRN>/i)[0];
     const get = (tag) => {
       const m = block.match(new RegExp(`<${tag}>([^<\r\n]+)`, "i"));
-      return m ? m[1].trim() : null;
+      return m ? decodeSgmlEntities(m[1].trim()) : null;
     };
     const dtRaw = get("DTPOSTED");
     const amtRaw = get("TRNAMT");

@@ -207,6 +207,20 @@ function isTxFormValid() {
   return Number.isFinite(amt) && amt > 0 && (f.type === "income" || !!f.categoryId) && destinationOk;
 }
 
+// A origem chega em dois formatos: string (rascunho da frase em linguagem
+// natural, que nunca passou por normalizeTransactionOrigin) e objeto
+// `{channel,label,reference}` (lançamento já gravado, vindo de extrato ou QR).
+// Interpolar o objeto direto imprimia "[object Object]" na tela de edição de
+// TODO lançamento importado; a leitura tem de sair do `label`.
+function txOriginChipText(origin) {
+  if (!origin) return "";
+  if (typeof origin === "string") return origin.trim();
+  const label = String(origin.label || "").trim();
+  const reference = String(origin.reference || "").trim();
+  if (!label) return reference;
+  return reference ? `${label} · ${reference}` : label;
+}
+
 function renderAddScreen() {
   const f = state.form;
   // A conversão tem outras regras, outros campos e outro botão. Tentar
@@ -224,7 +238,7 @@ function renderAddScreen() {
       <button class="icon-btn icon-btn--muted" data-action="cancel-edit" aria-label="Fechar">${svgIcon("x", 18)}</button>
     </div>
 
-    ${f.origin ? `<div class="origin-chip">${svgIcon("scan", 14)}<span>${escapeHtml(f.origin)}; confira os dados antes de salvar</span></div>` : ""}
+    ${txOriginChipText(f.origin) ? `<div class="origin-chip">${svgIcon("scan", 14)}<span>${escapeHtml(txOriginChipText(f.origin))}; confira os dados antes de salvar</span></div>` : ""}
 
     <div class="add-form__badge">
       <span class="add-form__badge-icon">${svgIcon(isIncome ? "trendUp" : "arrowDownRight", 22)}</span>
@@ -271,7 +285,7 @@ function renderAddScreen() {
             // rascunho do lançamento. O ícone continua sendo o do filho, que é o que
             // confirma a escolha de dentro do seletor.
             return `
-            <button class="chip ${isSelected ? "active" : ""}" data-ui-css="${isSelected ? `border-color:${c.color}; background:color-mix(in srgb, ${c.color} 10%, transparent)` : ""}" data-action="${hasChildren ? "open-category-picker" : "select-category"}" data-id="${c.id}">
+            <button class="chip ${isSelected ? "active" : ""}" ${isSelected ? `data-ui-css="border-color:${c.color}; background:color-mix(in srgb, ${c.color} 10%, transparent)"` : ""} data-action="${hasChildren ? "open-category-picker" : "select-category"}" data-id="${c.id}">
               <span class="icon-bubble" data-ui-css="background:color-mix(in srgb, ${c.color} 14%, transparent); color:${c.color}">${svgIcon(selectedChild ? selectedChild.icon : c.icon, 17)}</span>
               <span class="chip__label">${escapeHtml(selectedChild ? categoryFullName(state.data, selectedChild.id) : c.name)}</span>
               ${hasChildren ? `<span class="chip__caret">${svgIcon("chevronDown", 11)}</span>` : ""}
@@ -447,6 +461,7 @@ function renderQuickEntryCard() {
     </div>
 
     <div class="quick-entry-row">
+      <label class="sr-only" for="nlp-input">Descreva o lançamento em uma frase</label>
       <input id="nlp-input" class="input quick-entry-input" data-field="nlp-text"
         value="${escapeHtml(n.text)}" placeholder="Ex: gastei 30 no ifood"
         autocomplete="off" enterkeyhint="done" />

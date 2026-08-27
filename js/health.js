@@ -233,13 +233,17 @@ const HEALTH_INDICATORS = [
 
       const base = commitments > 0 ? commitments : monthlyNeed;
       const index = base > 0 ? cash / base : null;
-      const daysCovered = monthlyNeed > 0 ? Math.max(0, (cash / monthlyNeed) * 30) : null;
+      // "N dias de despesa" divide o caixa por uma média mensal. Se essa média
+      // veio do mês corrente ainda pela metade (nenhum mês fechado com gasto),
+      // um único lançamento de R$ 214,90 vira "R$ 214,90/mês" e o app anuncia
+      // 114 dias de folga para quem começou a usar ontem. Sem base, a frase sai.
+      const daysCovered = monthlyNeed > 0 && ctx.closedMonths > 0 ? Math.max(0, (cash / monthlyNeed) * 30) : null;
       const ratio = cash <= 0 ? 0 : (index == null ? 0.6 : healthRamp(index, 0.4, 2));
 
       return {
         applicable: true,
         ratio,
-        display: index == null ? fmtBRL(cash) : `${index.toFixed(1)}x`,
+        display: index == null ? fmtBRL(cash) : `${fmtDec(index, 1)}x`,
         caption: index == null ? "disponível em caixa" : "o que vence em 30 dias",
         description: cash <= 0
           ? `Seu caixa está negativo em ${fmtBRL(Math.abs(cash))}; qualquer despesa nova entra como dívida.`
@@ -270,10 +274,10 @@ const HEALTH_INDICATORS = [
       return {
         applicable: true,
         ratio,
-        display: `${r.monthsCovered.toFixed(1)}`,
+        display: `${fmtDec(r.monthsCovered, 1)}`,
         caption: `de ${r.targetMonths} meses de despesa`,
         description: r.current > 0
-          ? `Você tem ${fmtBRL(r.current)} reservados, o que sustenta ${r.monthsCovered.toFixed(1)} ${r.monthsCovered < 2 ? "mês" : "meses"} no seu padrão atual de ${fmtBRL(r.monthlyNeed)}/mês.`
+          ? `Você tem ${fmtBRL(r.current)} reservados, o que sustenta ${fmtDec(r.monthsCovered, 1)} ${r.monthsCovered < 2 ? "mês" : "meses"} no seu padrão atual de ${fmtBRL(r.monthlyNeed)}/mês.`
           : "Você ainda não tem reserva de emergência formada; hoje um imprevisto vira dívida.",
         recommendation: ratio >= 1
           ? null
@@ -297,18 +301,38 @@ const HEALTH_INDICATORS = [
       const last = series[series.length - 1].value;
       if (Math.abs(total) < 1 && Math.abs(first) < 1) return { applicable: false };
 
-      const growth = first !== 0 ? ((last - first) / Math.abs(first)) * 100 : (last > 0 ? 100 : 0);
+      // SEM PONTO DE PARTIDA NÃO EXISTE CRESCIMENTO.
+      //
+      // `first === 0` quase nunca quer dizer "seis meses atrás eu não tinha
+      // nada": quer dizer que o app não existia para essa pessoa naquele mês.
+      // Forçar 100% transformava o primeiro dia de uso em "+100,0% em 6 meses"
+      // e "seu patrimônio saiu de R$ 0,00 para R$ 6.940,20 nos últimos seis
+      // meses", que é uma história inventada sobre a vida financeira de alguém.
+      const semBase = Math.abs(first) < 1;
+      const growth = semBase ? 0 : ((last - first) / Math.abs(first)) * 100;
       const monthsOfExpense = ctx.monthlyNeed > 0 ? total / ctx.monthlyNeed : 0;
-      const ratio = 0.6 * healthRamp(growth, -10, 12) + 0.4 * healthRamp(monthsOfExpense, 0, 6);
+      // Com média mensal tirada de um mês pela metade, "N meses de despesa
+      // acumulados" também não se sustenta.
+      const mediaConfiavel = ctx.closedMonths > 0;
+      const ratio = semBase
+        ? healthRamp(monthsOfExpense, 0, 6)
+        : 0.6 * healthRamp(growth, -10, 12) + 0.4 * healthRamp(monthsOfExpense, 0, 6);
+
+      const trechoMeses = ctx.monthlyNeed > 0 && mediaConfiavel
+        ? `, o equivalente a ${fmtDec(monthsOfExpense, 1)} meses de despesa acumulados` : "";
 
       return {
         applicable: true,
         ratio,
         display: fmtBRLShort(total),
-        caption: growth >= 0 ? `+${growth.toFixed(1)}% em 6 meses` : `${growth.toFixed(1)}% em 6 meses`,
-        description: growth >= 0
-          ? `Seu patrimônio saiu de ${fmtBRLShort(first)} para ${fmtBRLShort(last)} nos últimos seis meses${ctx.monthlyNeed > 0 ? `, o equivalente a ${monthsOfExpense.toFixed(1)} meses de despesa acumulados` : ""}.`
-          : `Seu patrimônio recuou de ${fmtBRLShort(first)} para ${fmtBRLShort(last)} nos últimos seis meses; você está consumindo o que já tinha guardado.`,
+        caption: semBase
+          ? "sem histórico para comparar"
+          : (growth >= 0 ? `+${fmtDec(growth, 1)}% em 6 meses` : `${fmtDec(growth, 1)}% em 6 meses`),
+        description: semBase
+          ? `Você acumulou ${fmtBRLShort(total)} até aqui. Ainda não há seis meses de histórico para dizer se a curva sobe ou desce; a comparação aparece conforme os meses passam.`
+          : (growth >= 0
+            ? `Seu patrimônio saiu de ${fmtBRLShort(first)} para ${fmtBRLShort(last)} nos últimos seis meses${trechoMeses}.`
+            : `Seu patrimônio recuou de ${fmtBRLShort(first)} para ${fmtBRLShort(last)} nos últimos seis meses; você está consumindo o que já tinha guardado.`),
         recommendation: ratio >= 0.8
           ? null
           : growth < 0
@@ -492,6 +516,8 @@ function buildHealthContext(data, mKey, ctx) {
     bills: c.bills || upcomingBills(data),
     series: c.series || netWorthSeries(data, 6),
     monthlyNeed: avgMonthlyExpense(data),
+    // Zero = a média mensal saiu do mês corrente, ainda incompleto.
+    closedMonths: closedMonthsWithExpense(data),
     debt: debtProfile(data, mKey),
     flow: cashFlowHistory(data, 6),
     capacity: savingsCapacity(data, mKey, month),

@@ -82,6 +82,9 @@ function computeSplitWarning(categoryId, amount) {
   return { groupLabel: GROUP_LABELS[group], pct, allocated, newSpent, over: subMoney(newSpent, allocated) };
 }
 
+// Tamanho do lote da revisão de importação. Ver `importVisible` abaixo.
+const IMPORT_PAGE_SIZE = 60;
+
 let state = {
   data: loadData(),
   storageOk: isStorageAvailable(),
@@ -145,6 +148,12 @@ let state = {
   accountDangerOpen: false,
   // ---- novos recursos ----
   importRows: null,        // linhas parseadas de OFX/CSV/PDF aguardando revisão
+  // Quantas linhas da revisão estão desenhadas. Um extrato de doze meses tem
+  // ~1.500 linhas, e cada uma traz onze botões de categoria: desenhar tudo de
+  // uma vez passava de 30 mil nós no DOM, o que num Android mediano trava a
+  // tela antes de a pessoa conseguir conferir a primeira linha. A conferência é
+  // sequencial de qualquer jeito; o resto entra sob demanda.
+  importVisible: IMPORT_PAGE_SIZE,
   importFilename: null,
   importDocumentKind: "account",
   importDestinationId: "",
@@ -395,6 +404,15 @@ function openOverlay(name) {
   NavHistory.push(state.tab, state.overlayStack);
 }
 
+// Ids alcançados por uma sugestão da caixa de revisão. `data-ids` traz o grupo
+// (as parcelas de uma compra); `data-id` é o fallback de item único.
+function reviewIssueIds(el) {
+  const brutos = String((el && el.dataset && el.dataset.ids) || "").split(/\s+/).filter(Boolean);
+  if (brutos.length) return new Set(brutos);
+  const unico = el && el.dataset ? el.dataset.id : null;
+  return new Set(unico ? [unico] : []);
+}
+
 function requestConfirmation(options) {
   const o = options && typeof options === "object" ? options : {};
   state.confirmation = {
@@ -442,12 +460,22 @@ function closeOverlayState(name) {
       const callback = pending && pending.choice === "alternate"
         ? pending.onAlternate
         : (pending && pending.accepted ? pending.onConfirm : null);
+      // O callback NÃO pode rodar dentro da reconciliação do histórico.
+      // `dismissOverlay` chega aqui por `applyHistoryRoute`, que logo em
+      // seguida compara `route.tab` com `state.tab` para restaurar a rota. Quem
+      // confirma quase sempre navega (excluir um lançamento tem de voltar para
+      // a tela de onde ele foi aberto), e essa navegação era desfeita na mesma
+      // passada: o usuário confirmava a exclusão em Movimentações e caía no
+      // formulário "Novo gasto" em branco. Uma volta ao laço de eventos separa
+      // "fechar a camada" de "reagir à confirmação".
       if (callback) {
-        try {
-          Promise.resolve(callback()).catch(() => notify("Não foi possível concluir esta ação", "danger"));
-        } catch (err) {
-          notify("Não foi possível concluir esta ação", "danger");
-        }
+        setTimeout(() => {
+          try {
+            Promise.resolve(callback()).catch(() => notify("Não foi possível concluir esta ação", "danger"));
+          } catch (err) {
+            notify("Não foi possível concluir esta ação", "danger");
+          }
+        }, 0);
       }
       break;
     }
@@ -1016,6 +1044,8 @@ async function handleStatementFile(file, password) {
   state.importError = null;
   state.importLoading = true;
   state.importRows = null;
+  // Arquivo novo, conferência do zero: a janela volta ao primeiro lote.
+  state.importVisible = IMPORT_PAGE_SIZE;
   state.importPendingFile = typeof isPdfStatementFile === "function" && isPdfStatementFile(file) ? file : null;
   render();
 
@@ -1081,7 +1111,11 @@ const MOBILE_NAV = [
   { id: "dashboard", label: "Início", icon: "layout" },
   { id: "analytics", label: "Movimentos", ariaLabel: "Movimentos, abrir Movimentações", icon: "pie" },
   { id: "add", label: "Adicionar", icon: "plus" },
-  { id: "calendar", label: "Planejar", ariaLabel: "Planejar, abrir Planejamento", icon: "calendar" },
+  // O nome anunciado tem de ser o da tela em que a pessoa cai. "Planejamento"
+  // não é o título de tela nenhuma: o destino é o Calendário, e quem navega por
+  // leitor de tela ouvia um nome que não existe do outro lado. O rótulo visível
+  // segue curto por causa da largura da barra (cinco itens em 375px).
+  { id: "calendar", label: "Planejar", ariaLabel: "Planejar, abrir Calendário", icon: "calendar" },
   { id: "all", label: "Recursos", icon: "search" },
 ];
 
@@ -1514,6 +1548,7 @@ function onInput(e) {
     case "onb-income": state.onboarding.income = val; patchOnboardingFooter(); break;
     case "onb-acc-name": state.onboarding.account.name = val; patchOnboardingFooter(); break;
     case "onb-acc-balance": state.onboarding.account.balance = val; patchOnboardingFooter(); break;
+    case "onb-acc-date": state.onboarding.account.openingDate = val; patchOnboardingFooter(); break;
     case "tx-amount": state.form.amount = val; patchSubmitButton(); patchFormWarnings(); break;
     case "tx-description": state.form.description = val; break;
     case "tx-date": state.form.date = val; break;
@@ -1718,11 +1753,16 @@ function onChange(e) {
   }
   if (actionSelect === "movement-bulk-category") { state.movementBulkCategoryId = e.target.value; render(); return; }
   if (actionSelect === "review-category") {
-    const txId = e.target.dataset.id;
     const categoryId = e.target.value;
     if (!categoryId) return;
-    setData((d) => ({ ...d, transactions:d.transactions.map((tx) => tx.id === txId ? markTransactionIssueReviewed(updateTransaction(tx, { categoryId }), e.target.dataset.key) : tx) }));
-    notify("Categoria atualizada"); return;
+    // Uma compra parcelada chega aqui como um item só, com as N parcelas em
+    // `data-ids`. Escolher a categoria uma vez tem de valer para todas.
+    const alvos = reviewIssueIds(e.target);
+    const chave = e.target.dataset.key;
+    setData((d) => ({ ...d, transactions:d.transactions.map((tx) => alvos.has(tx.id)
+      ? markTransactionIssueReviewed(updateTransaction(tx, { categoryId }), chave)
+      : tx) }));
+    notify(alvos.size > 1 ? `Categoria atualizada em ${alvos.size} parcelas` : "Categoria atualizada"); return;
   }
   if (actionSelect === "review-payment-account") { state.movementReviewCard.accountId = e.target.value; return; }
   if (actionSelect === "review-payment-card") { state.movementReviewCard.creditCardId = e.target.value; return; }
@@ -1895,6 +1935,44 @@ function onFocusOut(e) {
       notify("Percentuais da Regra x/x/x atualizados");
     }
   }
+  formatarDinheiroAoSair(e.target);
+}
+
+// VALOR CONFIRMADO É VALOR FORMATADO.
+//
+// Digitar "5000" e sair do campo deixava "5000" na tela enquanto o resto do
+// app fala "R$ 5.000,00". Num app de dinheiro isso é ambíguo na hora de
+// conferir: "5000" pode ser lido como cinco mil ou como cinquenta reais mal
+// digitados. Ao sair, o campo passa a mostrar as duas casas decimais.
+//
+// A grafia é a de `moneyDraft` (sem separador de milhar) porque é a que o
+// próprio app já usa nos campos de Ajustes e Categorias, e porque
+// `sanitizeDecimalInput` remove o ponto de milhar na próxima digitação: exibir
+// "5.000,00" faria o valor mudar sozinho ao voltar ao campo.
+//
+// Taxa não é dinheiro, e controle deslizante não é campo de digitação: os dois
+// ficam de fora para "15" de juros não virar "15,00" nem o passo do slider ser
+// reescrito no meio do arraste.
+const CAMPO_NAO_MONETARIO = /(taxa|rate|cet|juros|-range$)/;
+
+function formatarDinheiroAoSair(el) {
+  if (!el || !el.dataset || typeof el.value !== "string") return;
+  const field = String(el.dataset.field || "");
+  if (!field || CAMPO_NAO_MONETARIO.test(field)) return;
+  const inputMode = String((el.getAttribute && el.getAttribute("inputmode")) || el.inputMode || "").toLowerCase();
+  if (inputMode !== "decimal") return;
+  const bruto = el.value.trim();
+  if (!bruto) return;
+  const n = parseMoneyInput(bruto);
+  // Zero fica como está: `moneyDraft(0)` devolve string vazia, e apagar o que a
+  // pessoa digitou seria pior do que não formatar.
+  if (!Number.isFinite(n) || n === 0) return;
+  const formatado = moneyDraft(n);
+  if (!formatado || formatado === bruto) return;
+  el.value = formatado;
+  // O estado guarda o rascunho digitado; sem avisar o `onInput` a tela voltaria
+  // ao texto antigo no próximo desenho.
+  el.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
 function onKeydown(e) {
@@ -1940,8 +2018,53 @@ function onKeydown(e) {
       field === "split-necessidade" || field === "split-desejo" || field === "split-futuro")) {
     e.preventDefault();
     e.target.blur();
+    return;
+  }
+
+  // ENTER PRECISA ENVIAR O FORMULÁRIO.
+  //
+  // O app não tem nenhum elemento `<form>`: as telas são montadas como HTML
+  // solto e o envio mora sempre num botão com `data-action`. Isso custa o
+  // comportamento que todo mundo espera de um formulário; apertar Enter depois
+  // de digitar a senha, o valor da meta ou o nome da conta não fazia nada, e no
+  // celular a tecla "Ir" do teclado ficava inerte. Os casos acima foram sendo
+  // resolvidos um a um, por nome de campo, e a lista nunca alcançou o login nem
+  // os cadastros.
+  //
+  // Aqui a regra passa a ser geral: Enter num campo de uma linha aciona o botão
+  // de enviar da MESMA camada em que o campo está (a de cima, se houver camada
+  // aberta; senão a tela). A lista de ações é explícita de propósito - clicar
+  // no primeiro `.btn--primary` que aparecesse acertaria "Excluir" com a mesma
+  // facilidade com que acertaria "Salvar".
+  // Campo dentro de `<form>` fica de fora: o navegador já faz o envio implícito
+  // e o listener de `submit` cuida dele. Entrar aqui também dispararia o botão
+  // duas vezes.
+  if (e.key === "Enter" && !e.shiftKey && e.target.tagName === "INPUT" && !e.target.form
+      && !ENTER_EXEMPT_TYPES.has(e.target.type)) {
+    const escopo = e.target.closest("[role=dialog], [role=alertdialog], .modal-sheet") || document.querySelector("main");
+    const enviar = escopo && escopo.querySelector(SUBMIT_ACTION_SELECTOR);
+    if (enviar && !enviar.disabled) {
+      e.preventDefault();
+      // O `blur` primeiro: campos com máscara gravam no `change`, e enviar com
+      // o cursor ainda dentro perderia o que acabou de ser digitado.
+      e.target.blur();
+      enviar.click();
+    }
   }
 }
+
+// Tipos em que Enter tem significado próprio (ou nenhum) e não deve enviar.
+const ENTER_EXEMPT_TYPES = new Set(["checkbox", "radio", "button", "submit", "reset", "file", "range"]);
+
+// Ações que representam "enviar este formulário". Explícitas para que Enter
+// nunca caia num botão destrutivo que por acaso esteja na mesma camada.
+const SUBMIT_ACTIONS = [
+  "submit-tx", "submit-goal", "submit-goal-action", "account-save", "account-submit",
+  "account-reconcile-save", "card-save", "card-pay-save", "cat-editor-save", "debt-save",
+  "debt-extra-save", "debt-payment-save", "pf-save", "pf-update-save", "pf-dividend-save",
+  "qr-save", "rule-save", "transfer-save", "wealth-save", "wealth-update-save",
+];
+const SUBMIT_ACTION_SELECTOR = SUBMIT_ACTIONS.map((a) => `[data-action="${a}"]`).join(",");
 
 // ---------------- AI insight ----------------
 // O envio passa pela tela de prévia: antes, a confirmação descrevia o pacote
@@ -2100,6 +2223,17 @@ async function init() {
   root.addEventListener("change", onChange);
   root.addEventListener("focusout", onFocusOut);
   root.addEventListener("keydown", onKeydown);
+  // Um `<form>` de verdade (hoje só o de login) envia sozinho no Enter e
+  // recarregaria a página, que num app local-first significa perder a tela e
+  // reabrir do zero. O envio continua sendo o `data-action` do botão; aqui só
+  // trocamos a navegação nativa por um clique nele.
+  root.addEventListener("submit", (e) => {
+    const form = e.target.closest("form");
+    if (!form) return;
+    e.preventDefault();
+    const enviar = form.querySelector('button[type="submit"][data-action]');
+    if (enviar && !enviar.disabled) enviar.click();
+  });
 
   root.addEventListener("dragover", (e) => {
     if (e.target.closest("#statement-dropzone")) { e.preventDefault(); if (!state.importDragOver) { state.importDragOver = true; render(); } }

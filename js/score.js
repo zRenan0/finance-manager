@@ -137,7 +137,7 @@ const SCORE_PILLARS = [
         ratio,
         good: months >= r.targetMonths,
         detail: r.current > 0
-          ? `Sua reserva cobre ${months.toFixed(1)} ${months < 2 ? "mês" : "meses"} de despesas (alvo: ${r.targetMonths}).`
+          ? `Sua reserva cobre ${fmtDec(months, 1)} ${months < 2 ? "mês" : "meses"} de despesas (alvo: ${r.targetMonths}).`
           : "Você ainda não tem reserva de emergência formada.",
         advice: months >= r.targetMonths ? null : `Faltam ${fmtBRL(Math.max(0, subMoney(r.target, r.current)))} para chegar aos ${r.targetMonths} meses de segurança.`,
       };
@@ -183,8 +183,8 @@ const SCORE_PILLARS = [
         good: growth >= 0,
         growth,
         detail: growth >= 0
-          ? `Seu patrimônio cresceu ${growth.toFixed(1)}% nos últimos meses, até ${fmtBRL(last)}.`
-          : `Seu patrimônio recuou ${Math.abs(growth).toFixed(1)}% nos últimos meses.`,
+          ? `Seu patrimônio cresceu ${fmtDec(growth, 1)}% nos últimos meses, até ${fmtBRL(last)}.`
+          : `Seu patrimônio recuou ${fmtDec(Math.abs(growth), 1)}% nos últimos meses.`,
         advice: growth >= 0 ? null : "Patrimônio caindo com renda estável costuma significar consumo do que já foi guardado.",
       };
     },

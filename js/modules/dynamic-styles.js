@@ -79,8 +79,20 @@ export function createDynamicStyleController(doc = document) {
     if (typeof root.querySelectorAll === "function") nodes.push(...root.querySelectorAll("[data-ui-css]"));
 
     nodes.forEach((node) => {
+      const declarations = node.getAttribute("data-ui-css");
+      // Atributo vazio não é declaração recusada, é ausência de declaração. Um
+      // ternário do tipo `${ativo ? "cor..." : ""}` escreve string vazia em toda
+      // linha inativa, e marcá-las como "rejeitadas" enchia o HTML de produção
+      // de `data-ui-style-rejected` em elementos que nunca pediram estilo algum
+      // (os chips de categoria não selecionados, por exemplo). A marca existe
+      // para diagnosticar declaração recusada de verdade; sem esta saída ela
+      // não distinguia mais uma coisa da outra.
+      if (!declarations || !declarations.trim()) {
+        node.removeAttribute("data-ui-css");
+        return;
+      }
       try {
-        node.classList.add(className(node.getAttribute("data-ui-css")));
+        node.classList.add(className(declarations));
       } catch (_) {
         node.setAttribute("data-ui-style-rejected", "");
       } finally {

@@ -105,7 +105,10 @@ function renderReviewIssue(issue) {
   const tx = issue.txId ? state.data.transactions.find((item) => item.id === issue.txId) : null;
   const icon = { category: "tag", duplicate: "file", transfer: "arrowRight", "card-payment": "creditCard", "invoice-income": "creditCard", account: "bank" }[issue.type] || "alertTriangle";
   let action = "";
-  if (issue.type === "category" && tx) action = `<select class="input review-category" data-action-select="review-category" data-id="${tx.id}" data-key="${issue.key}"><option value="">Escolher categoria</option>${state.data.categories.filter((c) => c.id !== "outros").map((c) => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join("")}</select>`;
+  // `data-ids` carrega o grupo inteiro (as N parcelas de uma compra). O
+  // `data-id` continua sendo a linha que representa o item na lista.
+  const issueIds = (issue.txIds && issue.txIds.length ? issue.txIds : [issue.txId]).filter(Boolean).join(" ");
+  if (issue.type === "category" && tx) action = `<select class="input review-category" data-action-select="review-category" data-id="${tx.id}" data-ids="${issueIds}" data-key="${issue.key}"><option value="">Escolher categoria</option>${state.data.categories.filter((c) => c.id !== "outros").map((c) => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join("")}</select>`;
   if (issue.type === "duplicate") action = `<button class="btn btn--secondary" data-action="review-delete-duplicate" data-id="${issue.txId}" data-key="${issue.key}">Revisar e excluir cópia</button>`;
   if (issue.type === "transfer") action = `<button class="btn btn--secondary" data-action="review-convert-transfer" data-id="${issue.txId}" data-key="${issue.key}">Converter em transferência</button>`;
   if (issue.type === "card-payment") action = `<button class="btn btn--secondary" data-action="review-card-payment-open" data-id="${issue.txId}" data-key="${issue.key}">Converter em pagamento</button>`;
@@ -114,7 +117,7 @@ function renderReviewIssue(issue) {
   return `<article class="review-issue">
     <span class="review-issue__icon">${svgIcon(icon, 18)}</span>
     <div class="review-issue__copy"><b>${escapeHtml(issue.title)}</b><span>${escapeHtml(issue.detail)}</span><small>${fmtDateShort(issue.date)}, ${fmtBRL(issue.amount)}</small></div>
-    <div class="review-issue__actions">${action}${issue.txId ? `<button class="btn btn--ghost" data-action="review-ignore" data-id="${issue.txId}" data-key="${issue.key}">Marcar como revisado</button>` : ""}</div>
+    <div class="review-issue__actions">${action}${issue.txId ? `<button class="btn btn--ghost" data-action="review-ignore" data-id="${issue.txId}" data-ids="${issueIds}" data-key="${issue.key}">Marcar como revisado</button>` : ""}</div>
   </article>`;
 }
 

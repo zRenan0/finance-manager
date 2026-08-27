@@ -110,8 +110,75 @@ function recPrefsOf(data) {
 // ------------------------------------------------------------------------------
 // Núcleo: um grupo de lançamentos → um compromisso recorrente (ou nada)
 // ------------------------------------------------------------------------------
+// UM LANÇAMENTO MARCADO COMO FIXO JÁ É UMA DECLARAÇÃO.
+//
+// O motor inteiro abaixo INFERE recorrência a partir de repetição: precisa de
+// dois lançamentos para medir intervalo, cadência e regularidade. Isso deixava
+// de fora o caso em que não há nada para inferir porque o usuário já disse:
+// marcar "Gasto fixo mensal (recorrente)" no formulário não produzia nada em
+// Assinaturas até o gasto se repetir sozinho no mês seguinte. O Início já
+// contava esse valor em "Gastos fixos", então as duas telas discordavam sobre
+// o mesmo lançamento.
+//
+// Aqui a cadência não é medida, é lida do que foi declarado: mensal, no dia do
+// próprio lançamento. Assim que a segunda ocorrência aparecer, o caminho normal
+// assume e passa a valer a evidência em vez da declaração.
+function recDeclaredCommitment(data, tx, todayKey) {
+  const cadence = recCadenceById("mensal");
+  const cat = categoryById(data, tx.categoryId);
+  const amount = roundMoney(tx.amount);
+  const day = Number(String(tx.date).slice(8, 10)) || 1;
+  const today = todayIso();
+  let next = tx.date;
+  let guard = 0;
+  while (next <= today && guard++ < 400) next = recSameDayNextMonths(next, 1, day);
+
+  return {
+    key: recGroupKey(tx),
+    name: tx.description || cat.name,
+    categoryId: tx.categoryId,
+    categoryName: cat.name,
+    categoryColor: cat.color,
+    categoryIcon: cat.icon,
+    kind: "assinatura",
+    cadenceId: cadence.id,
+    cadenceLabel: cadence.label,
+    cadenceDays: cadence.days,
+    perYear: cadence.perYear,
+    occurrences: 1,
+    firstDate: tx.date,
+    lastDate: tx.date,
+    lastAmount: amount,
+    prevAmount: amount,
+    firstAmount: amount,
+    medianAmount: amount,
+    monthlyEquivalent: amount,
+    annualCost: mulMoney(amount, cadence.perYear),
+    increasePct: 0,
+    sinceFirstPct: 0,
+    increaseAnnualImpact: 0,
+    amountSpread: 0,
+    dayOfMonth: day,
+    dayConsistency: 1,
+    regularity: 1,
+    nextDate: next,
+    daysToNext: daysBetweenIso(today, next),
+    daysSinceLast: daysBetweenIso(tx.date, today),
+    status: "ativa",
+    // O que sustenta este compromisso é a marcação, não o histórico. Quem lê
+    // precisa poder dizer isso na tela em vez de prometer uma média que não
+    // existe.
+    flaggedRecurring: true,
+    declaredOnly: true,
+    payment: tx.payment || "Outro",
+    monthKeys: [monthKeyOf(tx.date)],
+    isCurrentMonth: monthKeyOf(tx.date) === todayKey,
+  };
+}
+
 function recAnalyzeGroup(data, list, todayKey) {
   const sorted = [...list].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  if (sorted.length === 1 && sorted[0].recurring) return recDeclaredCommitment(data, sorted[0], todayKey);
   if (sorted.length < 2) return null;
 
   const intervals = [];

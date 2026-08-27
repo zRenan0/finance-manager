@@ -31,7 +31,7 @@ function freshOnboarding() {
     step: 1,
     name: "",
     income: "",
-    account: { name: "", type: "corrente", balance: "" },
+    account: { name: "", type: "corrente", balance: "", openingDate: todayIso() },
     skipAccount: false,
     legalAccepted: false,
     focus: "month",
@@ -109,6 +109,16 @@ function onbIncome() {
   return Number.isFinite(n) && n > 0 ? roundMoney(n) : 0;
 }
 
+// A data a que o saldo informado se refere. Um valor digitado à mão pode estar
+// pela metade ("2026-08-") enquanto a pessoa preenche, e um futuro deixaria a
+// conta nascer fora do próprio período; nos dois casos hoje é o fallback certo.
+function onbOpeningDate() {
+  const raw = String(state.onboarding.account.openingDate || "").trim();
+  const hoje = todayIso();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return hoje;
+  return raw > hoje ? hoje : raw;
+}
+
 function onbSplitPresetId() {
   const s = state.onboarding.split;
   const found = ONB_SPLIT_PRESETS.find((p) => p.necessidade === s.necessidade && p.desejo === s.desejo && p.futuro === s.futuro);
@@ -123,7 +133,9 @@ function onbCanAdvance(step) {
   if (step === 3) {
     if (state.onboarding.skipAccount) return true;
     const a = state.onboarding.account;
-    return !!String(a.name).trim() && Number.isFinite(parseMoneyInput(a.balance || "0"));
+    return !!String(a.name).trim()
+      && Number.isFinite(parseMoneyInput(a.balance || "0"))
+      && /^\d{4}-\d{2}-\d{2}$/.test(String(a.openingDate || ""));
   }
   return true;
 }
@@ -166,7 +178,7 @@ function renderOnboardingLayer() {
       </div>
       ${renderOnbProgress(o.step)}
       <div class="onb__body">${body}</div>
-      ${motivo ? `<p class="onb__block-hint" id="onb-block-reason" ${travado ? "" : "hidden"}>${svgIcon("info", 14)}<span>${motivo}</span></p>` : ""}
+      ${motivo ? `<p class="onb__block-hint" id="onb-block-reason" ${travado ? "" : "hidden"}>${svgIcon("info", 14)}<span>${motivo}</span>${o.step === 1 && !o.legalAccepted ? `<button type="button" class="link-btn onb__block-jump" data-action="onb-goto-legal">Ir para o aceite</button>` : ""}</p>` : ""}
       <div class="onb__foot">
         ${o.step > 1 ? `<button class="btn btn--secondary" data-action="onb-back">${svgIcon("chevronLeft", 16)} Voltar</button>` : `<span></span>`}
         <button id="onb-advance" class="btn btn--primary" data-action="${last ? "onb-finish" : "onb-next"}" ${travado ? `disabled aria-describedby="onb-block-reason"` : ""}>
@@ -213,10 +225,10 @@ function renderOnbWelcome() {
     <h1 class="onb__title">Vamos deixar o app com a sua cara</h1>
     <p class="onb__lead">São quatro perguntas rápidas. Dá para mudar tudo depois em Ajustes.</p>
   </div>
-  <label class="field">
-    <span class="field__label" for="onb-name">Como você quer ser chamado?</span>
+  <div class="field">
+    <label class="field__label" for="onb-name">Como você quer ser chamado?</label>
     <input id="onb-name" class="input" data-field="onb-name" value="${escapeHtml(state.onboarding.name)}" maxlength="40" placeholder="Seu primeiro nome" autocomplete="given-name" />
-  </label>
+  </div>
   <p class="field-hint">Opcional. Serve só para a saudação da tela inicial.</p>
   <fieldset class="onb-focus">
     <legend class="field__label">Qual é seu objetivo principal agora?</legend>
@@ -236,7 +248,7 @@ function renderOnbWelcome() {
     <p>O app organiza dados e produz estimativas educativas. Ele não substitui proposta, contrato, consultoria de investimentos ou análise do INSS. Sem conta, os dados ficam no navegador até você exportar ou apagar; com conta ligada, eles também são sincronizados com o servidor. IA e consulta de nota fiscal usam rede apenas quando você aciona esses recursos.</p>
     <p>A tela Privacidade traz a política inteira: controlador, prazos de retenção, seus direitos e o canal para incidentes.</p>
   </details>
-  <label class="legal-consent"><input type="checkbox" data-action-select="onb-legal" ${state.onboarding.legalAccepted ? "checked" : ""} /><span>Li e aceito a política de privacidade e os termos de uso da versão ${LEGAL_TEXT_VERSION}.</span></label>`;
+  <label class="legal-consent"><input id="onb-legal-check" type="checkbox" data-action-select="onb-legal" ${state.onboarding.legalAccepted ? "checked" : ""} /><span>Li e aceito a política de privacidade e os termos de uso da versão ${LEGAL_TEXT_VERSION}.</span></label>`;
 }
 
 /* --------------------------------------------------------------- passo 2 */
@@ -247,10 +259,10 @@ function renderOnbIncome() {
     <h1 class="onb__title">Quanto entra por mês?</h1>
     <p class="onb__lead">Some salário, pró-labore e o que for recorrente. Um valor aproximado já resolve.</p>
   </div>
-  <label class="field">
-    <span class="field__label" for="onb-income">Renda mensal</span>
+  <div class="field">
+    <label class="field__label" for="onb-income">Renda mensal</label>
     <input id="onb-income" class="input" data-field="onb-income" value="${escapeHtml(state.onboarding.income)}" inputmode="decimal" placeholder="0,00" />
-  </label>
+  </div>
   ${income > 0
     ? `<p class="field-hint">Cerca de <b>${fmtBRL(mulMoney(income, 12))}</b> por ano, ou <b>${fmtBRL(mulMoney(income, 1 / 30))}</b> por dia.</p>`
     : `<p class="field-hint">É a base do orçamento, do score e da previsão. Sem ela, essas telas ficam sem referência.</p>`}
@@ -270,21 +282,26 @@ function renderOnbAccount() {
     <p class="onb__lead">Com o saldo real cadastrado, o app mostra quanto você tem hoje, não só o que gastou.</p>
   </div>
   <div class="onb__fields ${skipped ? "onb__fields--off" : ""}">
-    <label class="field">
-      <span class="field__label" for="onb-acc-name">Nome da conta</span>
+    <div class="field">
+      <label class="field__label" for="onb-acc-name">Nome da conta</label>
       <input id="onb-acc-name" class="input" data-field="onb-acc-name" value="${escapeHtml(a.name)}" maxlength="40" placeholder="Nubank, Itaú, carteira..." ${skipped ? "disabled" : ""} />
-    </label>
+    </div>
     <div class="field-row">
-      <label class="field">
-        <span class="field__label" for="onb-acc-type">Tipo</span>
+      <div class="field">
+        <label class="field__label" for="onb-acc-type">Tipo</label>
         <select id="onb-acc-type" class="input" data-action-select="onb-acc-type" ${skipped ? "disabled" : ""}>
           ${Object.keys(ACCOUNT_TYPE_LABELS).map((k) => `<option value="${k}" ${a.type === k ? "selected" : ""}>${escapeHtml(ACCOUNT_TYPE_LABELS[k])}</option>`).join("")}
         </select>
-      </label>
-      <label class="field">
-        <span class="field__label" for="onb-acc-balance">Saldo de hoje</span>
+      </div>
+      <div class="field">
+        <label class="field__label" for="onb-acc-balance">Saldo nessa data</label>
         <input id="onb-acc-balance" class="input" data-field="onb-acc-balance" value="${escapeHtml(a.balance)}" inputmode="decimal" placeholder="0,00" ${skipped ? "disabled" : ""} />
-      </label>
+      </div>
+    </div>
+    <div class="field">
+      <label class="field__label" for="onb-acc-date">Saldo válido desde</label>
+      <input id="onb-acc-date" type="date" class="input" data-field="onb-acc-date" value="${escapeHtml(a.openingDate || todayIso())}" max="${todayIso()}" ${skipped ? "disabled" : ""} />
+      <p class="field-hint">Movimentos anteriores a essa data não alteram esta conta. Se você vai importar o extrato do mês, recue para o primeiro dia dele.</p>
     </div>
   </div>
   <button class="onb__toggle ${skipped ? "active" : ""}" data-action="onb-skip-account" aria-pressed="${skipped ? "true" : "false"}">
@@ -396,7 +413,12 @@ function finishOnboarding() {
         name: String(o.account.name).trim(),
         type: o.account.type,
         openingBalance: Number.isFinite(balance) ? balance : 0,
-        openingDate: todayIso(),
+        // Antes isto era `todayIso()` fixo. O efeito era silencioso e grave:
+        // a primeira coisa que o usuário faz é importar o extrato do mês, e
+        // TODAS as linhas caíam antes da abertura, então o saldo não se mexia
+        // um centavo enquanto "Despesas do mês" já contava tudo. O passo 3
+        // agora pergunta a data a que o saldo se refere.
+        openingDate: onbOpeningDate(),
         color: "#0B6B5C",
       })];
     }
@@ -459,8 +481,8 @@ function startOnboarding() {
     name: d.userName || "",
     income: d.monthlyIncome ? moneyDraft(d.monthlyIncome) : "",
     account: first
-      ? { name: first.name, type: first.type, balance: moneyDraft(accountBalance(d, first.id, todayIso())) }
-      : { name: "", type: "corrente", balance: "" },
+      ? { name: first.name, type: first.type, balance: moneyDraft(accountBalance(d, first.id, todayIso())), openingDate: first.openingDate || todayIso() }
+      : { name: "", type: "corrente", balance: "", openingDate: todayIso() },
     skipAccount: !!first,
     split: { ...d.budgetSplit },
     focus: normalizeDashboardFocus(d.dashboardFocus),

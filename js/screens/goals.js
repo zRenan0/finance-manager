@@ -143,7 +143,7 @@ function renderGoalForm(gf, editing) {
 
     <div class="field-row">
       <div class="field"><label class="field__label" for="goal-deadline-input">Prazo (opcional)</label>
-        <input id="goal-deadline-input" type="date" class="input" data-field="goal-deadline" value="${gf.deadline}" /></div>
+        <input id="goal-deadline-input" type="date" class="input" data-field="goal-deadline" min="${todayIso()}" value="${gf.deadline}" /></div>
       <div class="field"><label class="field__label" for="goal-plan-input">Aporte mensal planejado</label>
         <input id="goal-plan-input" class="input" data-field="goal-monthly-plan" value="${escapeHtml(gf.monthlyPlan)}" inputmode="decimal" placeholder="0,00" /></div>
     </div>

@@ -56,7 +56,14 @@ function renderDashboardScreen() {
   const isCurrentMonth = model.isCurrentMonth;
   const { fixed: fixedSpent, variable: variableSpent } = realizedMonthTotals(state.data, mKey);
 
-  const recent = [...state.data.transactions]
+  // "Últimos lançamentos" é histórico, não agenda. Sem o corte no dia de hoje a
+  // ordenação por data decrescente colocava as parcelas futuras no topo: uma
+  // compra em 10x enchia o cartão inteiro com datas de 2027 e empurrava para
+  // fora da tela o que a pessoa acabou de gastar. O que ainda vai vencer tem
+  // cartão próprio ("Próximas contas") e o calendário.
+  const hoje = todayIso();
+  const recent = state.data.transactions
+    .filter((t) => t.date <= hoje)
     .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : (a.createdAt < b.createdAt ? 1 : -1)))
     .slice(0, 6);
 
@@ -353,7 +360,7 @@ function renderNetWorthCard(m) {
         <p class="networth-value">${fmtBRL(w.total)}</p>
       </div>
       ${series.length > 1 ? `<span class="status-badge" data-ui-css="background:color-mix(in srgb, ${trendColor} 13%, transparent); color:${trendColor}">
-        ${svgIcon(up ? "arrowUpRight" : "arrowDownRight", 12)} ${deltaPct == null ? fmtBRLShort(delta) : `${up ? "+" : ""}${deltaPct.toFixed(1)}%`}
+        ${svgIcon(up ? "arrowUpRight" : "arrowDownRight", 12)} ${deltaPct == null ? fmtBRLShort(delta) : `${up ? "+" : ""}${fmtDec(deltaPct, 1)}%`}
       </span>` : ""}
     </div>
 
@@ -401,7 +408,7 @@ function renderReserveCard(m) {
     <div class="progress progress--sm"><div class="progress__fill" data-ui-css="width:${clamp(r.pct, 0, 100)}%; background:${meta.color}"></div></div>
     <p class="mini-card__note">
       ${r.monthlyNeed > 0
-        ? `Cobre <b>${r.monthsCovered.toFixed(1)}</b> de ${r.targetMonths} meses de despesa (${fmtBRL(r.monthlyNeed)}/mês).`
+        ? `Cobre <b>${fmtDec(r.monthsCovered, 1)}</b> de ${r.targetMonths} meses de despesa (${fmtBRL(r.monthlyNeed)}/mês).`
         : "Registre alguns gastos para calcular quantos meses sua reserva cobre."}
     </p>
     ${!r.configured
@@ -448,9 +455,21 @@ function renderFeaturedGoalCard(m) {
 function renderUpcomingBillsCard(m) {
   const b = m.bills;
   if (b.items.length === 0) {
+    // A janela é de 30 dias e parcela repete no MESMO dia do mês, ou seja, cai
+    // quase sempre no dia 31. Quem tinha uma compra em 10x lia "nada previsto"
+    // logo abaixo da promessa de que parcelas aparecem aqui sozinhas, e concluía
+    // que o cartão não estava funcionando. Quando existe algo logo depois da
+    // janela, o vazio passa a dizer quando é.
+    const hoje = todayIso();
+    const proxima = state.data.transactions
+      .filter((t) => t.date > hoje)
+      .reduce((menor, t) => (!menor || t.date < menor ? t.date : menor), "");
+    const dica = proxima
+      ? `O próximo compromisso já registrado é em ${fmtDateFull(proxima)}.`
+      : "Parcelas e gastos fixos aparecem aqui automaticamente.";
     return `<div class="card card--upcoming span-1">
       <p class="card-title">Próximas contas</p>
-      ${renderEmptyState("bell", "Nada previsto para os próximos 30 dias.", "Parcelas e gastos fixos aparecem aqui automaticamente.")}
+      ${renderEmptyState("bell", "Nada previsto para os próximos 30 dias.", dica)}
       <button class="btn btn--ghost btn--block btn--sm" data-action="nav" data-tab="calendar">${svgIcon("calendar", 14)} Ver no calendário</button>
     </div>`;
   }
@@ -589,6 +608,28 @@ function renderBudgetHealth(refDate, isCurrentMonth, monthExpense, fixedSpent, v
   const rotuloSobra = rendaPrevista ? "Sobra prevista" : "Sobra";
 
   if (income <= 0) {
+    // Mês fechado sem receita lançada NÃO é o mesmo que app sem renda
+    // configurada. Para um mês passado `effectiveIncome` devolve o REALIZADO,
+    // então bastava navegar um mês para trás para o app mandar "definir sua
+    // renda mensal em Ajustes" - uma renda que já estava definida - com um
+    // botão que levava a uma tela onde não havia nada a fazer. Quando existe
+    // renda declarada, o que falta é lançamento, e é isso que a frase diz.
+    // A renda declarada NÃO vale para mês encerrado, e isso é proposital
+    // (`plannedIncome`): editar a renda hoje não pode reescrever indicadores
+    // antigos. Por isso a pergunta aqui não é "existe plano para este mês", e
+    // sim "existe renda configurada no app" - se existe, mandar configurar é
+    // mandar fazer o que já foi feito, e o botão levava a uma tela sem nada a
+    // resolver. O que falta num mês fechado é lançamento, não configuração.
+    if (roundMoney(state.data.monthlyIncome || 0) > 0) {
+      return `<div class="card card--dashed span-3 banner-inline">
+        ${svgIcon("info", 34, "banner-inline__icon")}
+        <div class="banner-inline__text">
+          <strong>Nenhuma receita lançada em ${MONTH_NAMES[refDate.getMonth()]}</strong>
+          <span>Sua renda declarada (${fmtBRL(state.data.monthlyIncome)} por mês) não é aplicada a meses já encerrados, para não reescrever o passado. Sem nenhuma entrada registrada aqui, não há base para calcular a sobra deste mês.</span>
+        </div>
+        <button class="btn btn--secondary btn--sm" data-action="nav" data-tab="import">Importar extrato</button>
+      </div>`;
+    }
     return `<div class="card card--dashed span-3 banner-inline">
       ${svgIcon("shieldCheck", 34, "banner-inline__icon")}
       <div class="banner-inline__text">
@@ -622,7 +663,13 @@ function renderBudgetHealth(refDate, isCurrentMonth, monthExpense, fixedSpent, v
 
   const note = isCurrentMonth
     ? (remaining > 0
-      ? `No ritmo atual, você fecha o mês em <b>${fmtBRL(projected)}</b> de gastos. Ainda pode gastar cerca de <b data-ui-css="color:${status.color}">${fmtBRL(dailyBudget)} por dia</b> nos próximos ${daysLeft} dias.`
+      // As duas metades respondem perguntas diferentes: a primeira é PREVISÃO
+      // (seu ritmo de gastos extrapolado até o fim do mês), a segunda é TETO
+      // (quanto da renda ainda cabe por dia). Sem dizer isso, a frase se
+      // contradizia sozinha - "você fecha em R$ 246" ao lado de "pode gastar
+      // R$ 957 por dia durante 5 dias" - e a leitura natural era que um dos
+      // dois números estava errado.
+      ? `No ritmo atual, o mês fecha em <b>${fmtBRL(projected)}</b> de gastos. O teto que ainda cabe na renda é de <b data-ui-css="color:${status.color}">${fmtBRL(dailyBudget)} por dia</b> nos próximos ${plural(daysLeft, "dia", "dias")}; é limite, não meta.`
       : `Você já ultrapassou sua renda em <b data-ui-css="color:var(--negative)">${fmtBRL(Math.abs(remaining))}</b> este mês. Vale segurar os gastos esporádicos até o próximo salário.`)
     : (remaining >= 0
       ? `Sobraram <b data-ui-css="color:var(--positive)">${fmtBRL(remaining)}</b> depois de todos os gastos do mês.`
@@ -720,11 +767,15 @@ function renderCategoryBreakdown(catRows, monthExpense) {
       </div>
       <div class="progress progress--sm"><div class="progress__fill" data-ui-css="width:${clamp(ratio * 100, 0, 100)}%; background:${color}"></div></div>`;
     }
+    // Sem teto definido a linha mostrava SÓ o percentual, e o cartão ficava com
+    // duas gramáticas misturadas: "Moradia R$ 1.250,50 / R$ 1.000,00" ao lado de
+    // "Mercado 12%". Num cartão chamado "Para onde foi o dinheiro", o dinheiro é
+    // o dado que não pode faltar; a fatia do mês entra como complemento.
     const pct = safePct(c.value, monthExpense);
     return `<div class="cat-row">
       <span class="cat-dot" data-ui-css="background:${c.color}"></span>
       <span class="cat-name">${escapeHtml(c.name)}</span>
-      <span class="cat-pct">${pct.toFixed(0)}%</span>
+      <span class="cat-value">${fmtBRL(c.value)} <span class="cat-value-muted">· ${pct.toFixed(0)}% do mês</span></span>
     </div>`;
   }).join("");
   return `<div class="segment-bar">${segHtml}</div><div class="cat-list">${rows}</div>`;

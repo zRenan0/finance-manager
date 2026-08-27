@@ -1336,6 +1336,19 @@
   .segmented::-webkit-scrollbar { display: none; }
   .segmented__btn { white-space: nowrap; flex: 0 0 auto; padding: 0 16px; }
 
+  /* Em telas de 320px (iPhone SE, Androids de entrada) dois botões longos não
+     cabem, e a barra rolava sem nenhum sinal de que rolava: o segundo item
+     ficava cortado na borda parecendo defeito de layout. Abaixo desse limite os
+     botões passam a dividir a largura e o texto quebra em vez de sumir; o
+     alcance do toque continua o mesmo. */
+  @media (max-width: 359px) {
+    .segmented { overflow-x: visible; }
+    .segmented__btn {
+      white-space: normal; flex: 1 1 0; min-width: 0; padding: 6px 8px;
+      font-size: .72rem; line-height: 1.25; height: auto; min-height: 38px;
+    }
+  }
+
   .goal-action-row { flex-wrap: wrap; }
   .goal-action-row .btn { flex: 1 1 130px; }
   .hero-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }

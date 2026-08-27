@@ -80,7 +80,14 @@ function monthProgress(monthKey) {
   const dim = daysInMonthOf(y, m - 1);
   if (monthKey < currentKey) return { elapsed: dim, ratio: 1, daysInMonth: dim, daysLeft: 0, isCurrent: false, isFuture: false };
   const day = now.getDate();
-  return { elapsed: day, ratio: day / dim, daysInMonth: dim, daysLeft: Math.max(0, dim - day), isCurrent: true, isFuture: false };
+  // HOJE CONTA. `daysLeft` alimenta a frase "restam R$ X; cerca de R$ Y por
+  // dia", que é conselho para um período que INCLUI o dia de hoje: são 8h da
+  // manhã do dia 27 e o almoço ainda não aconteceu. Com `dim - day` o dia 27
+  // sumia da divisão, o valor diário saía inflado e, no último dia do mês,
+  // `daysLeft` virava 0 e a frase desaparecia justo quando ainda havia um dia
+  // inteiro para gastar. `insights.js` já contava assim; era esta linha que
+  // fazia a mesma tela dizer "4 dias" num cartão e "5 dias" no outro.
+  return { elapsed: day, ratio: day / dim, daysInMonth: dim, daysLeft: Math.max(1, dim - day + 1), isCurrent: true, isFuture: false };
 }
 
 // ------------------------------------------------------------------------------
