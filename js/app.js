@@ -1647,6 +1647,9 @@ function onChange(e) {
   if (actionSelect === "import-category") {
     const idx = Number(e.target.dataset.id);
     if (state.importRows && state.importRows[idx]) state.importRows[idx].categoryId = e.target.value;
+    // Nada mais na tela depende da categoria de uma linha: o `<select>` já
+    // mostra a escolha, e redesenhar aqui só tiraria o foco de quem está
+    // corrigindo várias linhas seguidas.
     return;
   }
   if (actionSelect === "import-record-type") {
@@ -1663,14 +1666,18 @@ function onChange(e) {
       row.include = true;
       row.includeTouched = true;
     }
-    render();
+    // Só esta linha muda de forma (a categoria dá lugar à outra conta), e é
+    // nela que está o seletor que a pessoa acabou de usar.
+    patchImportRow(idx);
+    patchImportSummary();
     return;
   }
   if (actionSelect === "import-transfer-account") {
     const idx = Number(e.target.dataset.id);
     const row = state.importRows && state.importRows[idx];
     if (row) row.otherAccountId = e.target.value;
-    render();
+    patchImportRow(idx);
+    patchImportSummary();
     return;
   }
   if (actionSelect === "import-document-kind") {

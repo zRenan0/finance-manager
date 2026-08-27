@@ -28856,7 +28856,7 @@ function renderImportReviewRow(row, idx, context) {
     : (row.roleDetail || row.categoryReason || "");
   const typeLabel = transfer ? "Transferência" : (row.nature === "estorno" ? "Estorno" : (row.type === "income" ? "Receita" : "Gasto"));
 
-  return `<div class="import-row ${!row.include ? "import-row--off" : ""} ${transfer ? "import-row--transfer" : ""}">
+  return `<div class="import-row ${!row.include ? "import-row--off" : ""} ${transfer ? "import-row--transfer" : ""}" id="import-row-${idx}">
     <button class="checkbox ${row.include ? "checked" : ""}" data-action="import-toggle" data-id="${idx}" aria-label="${row.include ? "Não importar" : "Importar"} ${escapeHtml(row.description || "movimento")}">${row.include ? svgIcon("check", 13) : ""}</button>
     <div class="import-row__info">
       <p class="import-row__desc">${escapeHtml(row.description || (row.type === "income" ? "Receita" : "Gasto"))} ${row.duplicate ? `<span class="import-dup-tag">possível duplicata</span>` : ""}${row.roleLabel ? `<span class="import-role-tag">${escapeHtml(row.roleLabel)}</span>` : ""}${recordedTag}</p>
@@ -28879,11 +28879,10 @@ function renderImportReviewRow(row, idx, context) {
   </div>`;
 }
 
-function renderImportReview(rows) {
-  const included = rows.filter((row) => row.include);
-  const includedTransfers = included.filter((row) => row.importAs === "transfer");
-  const includedTransactions = included.filter((row) => row.importAs !== "transfer");
-  const meta = rows.meta || {};
+// Tudo que uma linha precisa saber sobre o documento inteiro. Fica separado
+// porque `patchImportRow` refaz UMA linha e não pode inventar um contexto
+// diferente do que a tela usou para desenhar as outras.
+function importReviewContext() {
   const documentKind = state.importDocumentKind === "card" ? "card" : "account";
   const activeAccounts = (state.data.accounts || []).filter((account) => !account.archived);
   const destinations = documentKind === "card"
@@ -28892,7 +28891,20 @@ function renderImportReview(rows) {
   const destinationId = destinations.some((item) => item.id === state.importDestinationId)
     ? state.importDestinationId
     : (destinations[0] ? destinations[0].id : "");
-  const canTransfer = documentKind === "account" && activeAccounts.length > 1;
+  return {
+    documentKind, activeAccounts, destinations, destinationId,
+    canTransfer: documentKind === "account" && activeAccounts.length > 1,
+  };
+}
+
+// O que muda quando UMA linha muda: a frase do topo, os avisos e o botão. Sai
+// separado do desenho da tela para que marcar uma caixa possa atualizar só isto.
+function importReviewSummary(rows, context) {
+  const ctx = context || importReviewContext();
+  const included = rows.filter((row) => row.include);
+  const includedTransfers = included.filter((row) => row.importAs === "transfer");
+  const includedTransactions = included.filter((row) => row.importAs !== "transfer");
+  const meta = rows.meta || {};
 
   // Transferência fica num terceiro balde. Misturá-la com saída ou entrada
   // faria a própria revisão prometer um gasto ou uma renda que não será criada.
@@ -28904,7 +28916,7 @@ function renderImportReview(rows) {
   if (totalSaidas > 0) partesTotal.push(`${fmtBRL(totalSaidas)} em saídas`);
   if (totalTransferencias > 0) partesTotal.push(`${fmtBRL(totalTransferencias)} em transferências`);
 
-  const contaDestino = documentKind === "account" ? accountById(state.data, destinationId) : null;
+  const contaDestino = ctx.documentKind === "account" ? accountById(state.data, ctx.destinationId) : null;
   const aberturaConta = contaDestino ? String(contaDestino.openingDate || "") : "";
   const anterioresAoSaldo = aberturaConta
     ? includedTransactions.filter((row) => String(row.date || "") < aberturaConta).length
@@ -28922,49 +28934,110 @@ function renderImportReview(rows) {
   }
   if (papeis.carryover) avisoPapeis.push(`${plural(papeis.carryover, "linha é o saldo da fatura anterior", "linhas são saldo da fatura anterior")}: aquele gasto já foi contado no mês em que aconteceu`);
 
-  const documentLabel = documentKind === "card" ? "Fatura de cartão" : "Extrato bancário";
+  const documentLabel = ctx.documentKind === "card" ? "Fatura de cartão" : "Extrato bancário";
   const sourceParts = [meta.format ? meta.format.toUpperCase() : "ARQUIVO"];
   if (meta.bank) sourceParts.push(meta.bank);
   sourceParts.push(documentLabel);
   if (meta.pageCount) sourceParts.push(plural(meta.pageCount, "página", "páginas"));
-  const invalidTransfer = includedTransfers.some((row) => !activeAccounts.some((account) => account.id === row.otherAccountId && account.id !== destinationId));
+
+  const invalidTransfer = includedTransfers.some((row) => !ctx.activeAccounts.some((account) => account.id === row.otherAccountId && account.id !== ctx.destinationId));
   const buttonParts = [];
   if (includedTransactions.length) buttonParts.push(plural(includedTransactions.length, "lançamento", "lançamentos"));
   if (includedTransfers.length) buttonParts.push(plural(includedTransfers.length, "transferência", "transferências"));
+
+  const notices = [
+    ctx.documentKind === "account" && ctx.activeAccounts.length === 1
+      ? `<div class="import-notice">${svgIcon("info", 16)}<div><b>Cadastre outra conta para identificar Pix entre suas contas.</b><span>Com duas contas ativas, cada linha pode ser registrada como transferência e movimentar os dois saldos.</span></div></div>` : "",
+    meta.confidence === "baixa"
+      ? `<div class="import-notice">${svgIcon("alertTriangle", 16)}<div><b>Confira o tipo e os valores com atenção.</b><span>O banco ou o formato da tabela não foi reconhecido com segurança. Nada será gravado antes de você confirmar.</span></div></div>` : "",
+    avisoPapeis.length
+      ? `<div class="import-notice">${svgIcon("creditCard", 16)}<div><b>Isto parece a fatura de um cartão.</b><span>${escapeHtml(avisoPapeis.join(". "))}. As compras continuam marcadas normalmente; se você quiser importar alguma dessas linhas mesmo assim, é só marcar a caixa.</span></div></div>` : "",
+    anterioresAoSaldo
+      ? `<div class="import-notice">${svgIcon("info", 16)}<div><b>${anterioresAoSaldo} ${anterioresAoSaldo === 1 ? "lançamento é anterior" : "lançamentos são anteriores"} à abertura de ${escapeHtml(contaDestino.name)} em ${fmtDateFull(aberturaConta)}.</b><span>${anterioresAoSaldo === 1 ? "Ele entra" : "Eles entram"} nas despesas, categorias e gráficos, mas não ${anterioresAoSaldo === 1 ? "altera" : "alteram"} o saldo da conta: o saldo inicial que você informou já inclui esse período. Para que ${anterioresAoSaldo === 1 ? "ele conte" : "eles contem"} no saldo, edite a conta e recue a data de abertura.</span></div></div>` : "",
+    transferenciasAntesDaAbertura
+      ? `<div class="import-notice">${svgIcon("info", 16)}<div><b>${transferenciasAntesDaAbertura === 1 ? "Uma transferência está" : `${transferenciasAntesDaAbertura} transferências estão`} fora do período acompanhado por uma das contas.</b><span>O saldo inicial dessa conta já inclui o movimento, então somente a ponta dentro do período será recalculada.</span></div></div>` : "",
+  ].join("");
+
+  return {
+    subtitle: `${sourceParts.map(escapeHtml).join(" · ")} · ${plural(included.length, "selecionado para importar", "selecionados para importar")}${partesTotal.length ? ` · ${partesTotal.join(" e ")}` : ""}. Duplicados e transferências já registradas vêm desmarcados${meta.skipped ? ` · ${plural(meta.skipped, "linha ignorada", "linhas ignoradas")}` : ""}.`,
+    notices,
+    buttonLabel: `Importar ${buttonParts.join(" e ")}`,
+    blocked: included.length === 0 || !ctx.destinationId || invalidTransfer,
+  };
+}
+
+// MARCAR UMA CAIXA NÃO PODE REDESENHAR SESSENTA LINHAS.
+//
+// `render()` reconstrói o aplicativo inteiro. Num extrato de sessenta
+// lançamentos isso significa refazer as sessenta linhas, com todos os seus
+// seletores, para mudar uma caixa: a tela treme, o seletor que a pessoa estava
+// usando deixa de existir no meio da escolha e a lista volta para o topo. Estes
+// dois remendos trocam a linha alterada e o resumo que depende dela; o resto do
+// DOM nem toma conhecimento.
+function patchImportRow(idx) {
+  const alvo = document.getElementById(`import-row-${idx}`);
+  const row = (state.importRows || [])[idx];
+  if (!alvo || !row) return;
+  // O seletor recriado é justamente o que a pessoa acabou de usar, então o foco
+  // precisa voltar para ele pelo mesmo caminho que `render()` usaria.
+  const ativo = document.activeElement;
+  const chave = typeof focusKeyOf === "function" ? focusKeyOf(ativo) : null;
+  const inicio = ativo && "selectionStart" in ativo ? ativo.selectionStart : null;
+  const fim = ativo && "selectionStart" in ativo ? ativo.selectionEnd : null;
+  alvo.outerHTML = renderImportReviewRow(row, idx, importReviewContext());
+  if (chave && typeof restoreFocus === "function") restoreFocus(chave, inicio, fim);
+}
+
+function patchImportSummary() {
+  const rows = state.importRows;
+  if (!rows) return;
+  const modelo = importReviewSummary(rows, importReviewContext());
+  const resumo = document.getElementById("import-summary");
+  const avisos = document.getElementById("import-notices");
+  const botao = document.getElementById("import-confirm-btn");
+  if (resumo) resumo.innerHTML = modelo.subtitle;
+  if (avisos) avisos.innerHTML = modelo.notices;
+  if (botao) {
+    botao.textContent = modelo.buttonLabel;
+    if (modelo.blocked) botao.setAttribute("disabled", "");
+    else botao.removeAttribute("disabled");
+  }
+}
+
+function renderImportReview(rows) {
+  const ctx = importReviewContext();
+  const modelo = importReviewSummary(rows, ctx);
+  const meta = rows.meta || {};
 
   return `<div class="card">
     <div class="settings-row-header">
       <p class="card-title">Revisar lançamentos (${rows.length})</p>
       <button class="icon-btn" data-action="import-cancel" aria-label="Cancelar importação">${svgIcon("x", 16)}</button>
     </div>
-    <p class="card-subtitle">${sourceParts.map(escapeHtml).join(" · ")} · ${plural(included.length, "selecionado para importar", "selecionados para importar")}${partesTotal.length ? ` · ${partesTotal.join(" e ")}` : ""}. Duplicados e transferências já registradas vêm desmarcados${meta.skipped ? ` · ${plural(meta.skipped, "linha ignorada", "linhas ignoradas")}` : ""}.</p>
+    <p class="card-subtitle" id="import-summary">${modelo.subtitle}</p>
     <div class="import-destination-grid">
       <div class="field">
         <label class="field__label" for="import-document-kind">O que este arquivo contém</label>
         <select id="import-document-kind" class="input" data-action-select="import-document-kind">
-          <option value="account" ${documentKind === "account" ? "selected" : ""}>Extrato bancário</option>
-          <option value="card" ${documentKind === "card" ? "selected" : ""}>Fatura de cartão</option>
+          <option value="account" ${ctx.documentKind === "account" ? "selected" : ""}>Extrato bancário</option>
+          <option value="card" ${ctx.documentKind === "card" ? "selected" : ""}>Fatura de cartão</option>
         </select>
       </div>
       <div class="field">
-        <label class="field__label" for="import-destination">${documentKind === "card" ? "Cartão da fatura" : "Conta do extrato"}</label>
-        <select id="import-destination" class="input" data-action-select="import-destination" ${destinations.length ? "" : "disabled"}>
-          ${destinations.length
-            ? destinations.map((item) => `<option value="${item.id}" ${item.id === destinationId ? "selected" : ""}>${escapeHtml(item.name)}</option>`).join("")
-            : `<option value="">${documentKind === "card" ? "Nenhum cartão cadastrado" : "Nenhuma conta cadastrada"}</option>`}
+        <label class="field__label" for="import-destination">${ctx.documentKind === "card" ? "Cartão da fatura" : "Conta do extrato"}</label>
+        <select id="import-destination" class="input" data-action-select="import-destination" ${ctx.destinations.length ? "" : "disabled"}>
+          ${ctx.destinations.length
+            ? ctx.destinations.map((item) => `<option value="${item.id}" ${item.id === ctx.destinationId ? "selected" : ""}>${escapeHtml(item.name)}</option>`).join("")
+            : `<option value="">${ctx.documentKind === "card" ? "Nenhum cartão cadastrado" : "Nenhuma conta cadastrada"}</option>`}
         </select>
       </div>
     </div>
-    ${!destinations.length ? `<div class="inline-error import-destination-error">${svgIcon("alertTriangle", 16)}<div><p class="inline-error__title">Cadastre ${documentKind === "card" ? "um cartão" : "uma conta"} antes de importar.</p><p class="inline-error__detail">O destino é obrigatório para manter saldos e faturas corretos.</p></div><button class="btn btn--secondary btn--sm" data-action="nav" data-tab="accounts">Cadastrar</button></div>` : ""}
-    ${documentKind === "account" && activeAccounts.length === 1 ? `<div class="import-notice">${svgIcon("info", 16)}<div><b>Cadastre outra conta para identificar Pix entre suas contas.</b><span>Com duas contas ativas, cada linha pode ser registrada como transferência e movimentar os dois saldos.</span></div></div>` : ""}
-    ${meta.confidence === "baixa" ? `<div class="import-notice">${svgIcon("alertTriangle", 16)}<div><b>Confira o tipo e os valores com atenção.</b><span>O banco ou o formato da tabela não foi reconhecido com segurança. Nada será gravado antes de você confirmar.</span></div></div>` : ""}
-    ${avisoPapeis.length ? `<div class="import-notice">${svgIcon("creditCard", 16)}<div><b>Isto parece a fatura de um cartão.</b><span>${escapeHtml(avisoPapeis.join(". "))}. As compras continuam marcadas normalmente; se você quiser importar alguma dessas linhas mesmo assim, é só marcar a caixa.</span></div></div>` : ""}
-    ${anterioresAoSaldo ? `<div class="import-notice">${svgIcon("info", 16)}<div><b>${anterioresAoSaldo} ${anterioresAoSaldo === 1 ? "lançamento é anterior" : "lançamentos são anteriores"} à abertura de ${escapeHtml(contaDestino.name)} em ${fmtDateFull(aberturaConta)}.</b><span>${anterioresAoSaldo === 1 ? "Ele entra" : "Eles entram"} nas despesas, categorias e gráficos, mas não ${anterioresAoSaldo === 1 ? "altera" : "alteram"} o saldo da conta: o saldo inicial que você informou já inclui esse período. Para que ${anterioresAoSaldo === 1 ? "ele conte" : "eles contem"} no saldo, edite a conta e recue a data de abertura.</span></div></div>` : ""}
-    ${transferenciasAntesDaAbertura ? `<div class="import-notice">${svgIcon("info", 16)}<div><b>${transferenciasAntesDaAbertura === 1 ? "Uma transferência está" : `${transferenciasAntesDaAbertura} transferências estão`} fora do período acompanhado por uma das contas.</b><span>O saldo inicial dessa conta já inclui o movimento, então somente a ponta dentro do período será recalculada.</span></div></div>` : ""}
+    ${!ctx.destinations.length ? `<div class="inline-error import-destination-error">${svgIcon("alertTriangle", 16)}<div><p class="inline-error__title">Cadastre ${ctx.documentKind === "card" ? "um cartão" : "uma conta"} antes de importar.</p><p class="inline-error__detail">O destino é obrigatório para manter saldos e faturas corretos.</p></div><button class="btn btn--secondary btn--sm" data-action="nav" data-tab="accounts">Cadastrar</button></div>` : ""}
+    <div id="import-notices">${modelo.notices}</div>
     <div class="import-list">
-      ${rows.map((row, idx) => renderImportReviewRow(row, idx, { activeAccounts, destinationId, canTransfer })).join("")}
+      ${rows.map((row, idx) => renderImportReviewRow(row, idx, ctx)).join("")}
     </div>
-    <button class="btn btn--primary btn--block" data-ui-css="margin-top:14px" data-action="import-confirm" ${included.length === 0 || !destinationId || invalidTransfer ? "disabled" : ""}>Importar ${buttonParts.join(" e ")}</button>
+    <button id="import-confirm-btn" class="btn btn--primary btn--block" data-ui-css="margin-top:14px" data-action="import-confirm" ${modelo.blocked ? "disabled" : ""}>${modelo.buttonLabel}</button>
     <button class="btn btn--ghost btn--block btn--sm" data-ui-css="margin-top:8px" data-action="nav" data-tab="rules">${svgIcon("tag", 14)} Corrigindo a mesma categoria várias vezes? Crie uma regra</button>
   </div>`;
 }
@@ -33025,7 +33098,11 @@ function onClick(e) {
         state.importRows[idx].include = !state.importRows[idx].include;
         state.importRows[idx].includeTouched = true;
       }
-      render();
+      // Remendo em vez de `render()`: um extrato tem dezenas de linhas, e
+      // refazer todas para marcar uma caixa fazia a tela tremer e a lista voltar
+      // ao topo. Ver patchImportRow em js/screens/import.js.
+      patchImportRow(idx);
+      patchImportSummary();
       break;
     }
     case "import-cancel":
@@ -34778,6 +34855,9 @@ function onChange(e) {
   if (actionSelect === "import-category") {
     const idx = Number(e.target.dataset.id);
     if (state.importRows && state.importRows[idx]) state.importRows[idx].categoryId = e.target.value;
+    // Nada mais na tela depende da categoria de uma linha: o `<select>` já
+    // mostra a escolha, e redesenhar aqui só tiraria o foco de quem está
+    // corrigindo várias linhas seguidas.
     return;
   }
   if (actionSelect === "import-record-type") {
@@ -34794,14 +34874,18 @@ function onChange(e) {
       row.include = true;
       row.includeTouched = true;
     }
-    render();
+    // Só esta linha muda de forma (a categoria dá lugar à outra conta), e é
+    // nela que está o seletor que a pessoa acabou de usar.
+    patchImportRow(idx);
+    patchImportSummary();
     return;
   }
   if (actionSelect === "import-transfer-account") {
     const idx = Number(e.target.dataset.id);
     const row = state.importRows && state.importRows[idx];
     if (row) row.otherAccountId = e.target.value;
-    render();
+    patchImportRow(idx);
+    patchImportSummary();
     return;
   }
   if (actionSelect === "import-document-kind") {

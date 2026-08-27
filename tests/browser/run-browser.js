@@ -595,6 +595,98 @@ async function runOnboardingViewportM4(browser, scenario) {
     assert(shared.pageErrors.length === 0, `erros no navegador: ${shared.pageErrors.join("; ")}`);
   });
 
+  // REVISAR SESSENTA LINHAS ERA UM CAMPO MINADO.
+  //
+  // Cada caixa marcada chamava `render()`, que reconstrói o aplicativo inteiro:
+  // a tela tremia, a lista voltava ao topo e o seletor em uso deixava de existir
+  // no meio da escolha. Só o navegador de verdade prova o conserto, porque o que
+  // importa é o DOM sobreviver e a rolagem interna ficar onde estava.
+  await test("revisar um extrato longo não redesenha nem rola a lista", async () => {
+    const page = shared.page;
+
+    // A escolha "transferência entre minhas contas" só existe com duas contas
+    // ativas, e é um dos caminhos remendados; sem a segunda conta o teste
+    // passaria sem exercitá-lo.
+    await page.evaluate(() => CofreUI.test.navigate("accounts"));
+    await page.waitForSelector('[data-action="account-new"]');
+    await page.evaluate(() => {
+      if (document.querySelectorAll('[data-action="account-edit"]').length > 1) return;
+      document.querySelector('[data-action="account-new"]').click();
+      const preencher = (campo, valor) => {
+        const el = document.querySelector(`[data-field="${campo}"]`);
+        el.value = valor;
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+      };
+      preencher("account-name", "Conta B");
+      preencher("account-opening-balance", "500,00");
+      document.querySelector('[data-action="account-save"]').click();
+    });
+
+    await page.evaluate(() => CofreUI.test.navigate("import"));
+    // O campo de arquivo fica escondido atrás da área de soltar, então esperar
+    // por visibilidade nunca terminaria; "attached" é o estado que existe.
+    await page.waitForSelector("#statement-file-input", { state: "attached" });
+    await page.setInputFiles("#statement-file-input", {
+      name: "extrato-longo.csv",
+      mimeType: "text/csv",
+      buffer: Buffer.from(["data;descricao;valor"].concat(
+        Array.from({ length: 60 }, (_, i) => `${String((i % 28) + 1).padStart(2, "0")}/08/2026;COMPRA ${i + 1} MERCADO LTDA;-${10 + i},00`),
+      ).join("\n"), "utf8"),
+    });
+    await page.waitForSelector(".import-row");
+    const linhas = await page.locator(".import-row").count();
+    assert(linhas === 60, `o extrato deveria abrir com 60 linhas, veio com ${linhas}`);
+
+    const medida = await page.evaluate(() => {
+      const raiz = document.getElementById("app");
+      let redesenhos = 0;
+      const observador = new MutationObserver((registros) => {
+        registros.forEach((r) => { if (r.target === raiz && r.type === "childList") redesenhos += 1; });
+      });
+      observador.observe(raiz, { childList: true });
+
+      const lista = () => document.querySelector(".import-list");
+      lista().scrollTop = 900;
+      const rolagemAntes = Math.round(lista().scrollTop);
+      ["30", "31", "32"].forEach((id) => document.querySelector(`[data-action="import-toggle"][data-id="${id}"]`).click());
+      const seletor = document.querySelector('[data-action-select="import-record-type"][data-id="33"]');
+      const tinhaSeletor = !!seletor;
+      if (seletor) {
+        seletor.value = "transfer";
+        seletor.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      observador.disconnect();
+      const marcadas = document.querySelectorAll(".import-row .checkbox.checked").length;
+      return {
+        redesenhos,
+        rolagemAntes,
+        rolagemDepois: Math.round(lista().scrollTop),
+        linhasNaTela: document.querySelectorAll(".import-row").length,
+        botao: ((document.getElementById("import-confirm-btn") || {}).textContent || "").replace(/\s+/g, " ").trim(),
+        tinhaSeletor,
+        virouTransferencia: !!document.querySelector('[data-action-select="import-transfer-account"][data-id="33"]'),
+        marcadas,
+      };
+    });
+
+    assert(medida.redesenhos === 0, `mexer nas linhas redesenhou o aplicativo ${medida.redesenhos} vez(es)`);
+    assert(medida.rolagemDepois === medida.rolagemAntes,
+      `a lista saiu de ${medida.rolagemAntes} para ${medida.rolagemDepois}`);
+    assert(medida.linhasNaTela === 60, "a lista perdeu linhas durante o remendo");
+    assert(medida.tinhaSeletor, "a escolha do tipo de registro não apareceu; faltou a segunda conta ativa");
+    assert(medida.virouTransferencia, "a linha não virou transferência ao trocar o tipo");
+    // Uma das linhas marcadas virou transferência, então ela sai da contagem de
+    // lançamentos e entra na de transferências.
+    const esperado = `Importar ${medida.marcadas - 1} lançamentos e 1 transferência`;
+    assert(medida.botao === esperado, `o botão diz "${medida.botao}" e deveria dizer "${esperado}"`);
+
+    await page.evaluate(() => document.querySelector('[data-action="import-cancel"]').click());
+    await page.waitForSelector(".import-row", { state: "detached" });
+    await page.evaluate(() => CofreUI.test.navigate("dashboard"));
+    assert(shared.pageErrors.length === 0, `erros no navegador: ${shared.pageErrors.join("; ")}`);
+  });
+
   await test("320, 390, 768, 1440, zoom de 200% e temas não quebram a página", async () => {
     const page = shared.page;
     await page.evaluate(() => CofreUI.test.navigate("dashboard"));

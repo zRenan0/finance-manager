@@ -1928,7 +1928,11 @@ function onClick(e) {
         state.importRows[idx].include = !state.importRows[idx].include;
         state.importRows[idx].includeTouched = true;
       }
-      render();
+      // Remendo em vez de `render()`: um extrato tem dezenas de linhas, e
+      // refazer todas para marcar uma caixa fazia a tela tremer e a lista voltar
+      // ao topo. Ver patchImportRow em js/screens/import.js.
+      patchImportRow(idx);
+      patchImportSummary();
       break;
     }
     case "import-cancel":

@@ -2,6 +2,29 @@
 
 ## Não publicado
 
+### Marcar uma linha do extrato redesenhava o extrato inteiro
+
+- **A causa que faltava, e a que a pessoa sentia mais.** Marcar uma caixa, trocar
+  o tipo do registro ou escolher a outra conta chamava `render()`, que reconstrói
+  o aplicativo inteiro. Num extrato de sessenta lançamentos isso significa refazer
+  sessenta linhas e todos os seus seletores para mudar uma caixa: a tela tremia, a
+  lista rolável voltava para o topo e o seletor em uso deixava de existir no meio
+  da escolha.
+- **Agora cada uma dessas ações remenda só a linha que mudou** e o resumo que
+  depende dela (a frase do topo, os avisos e o botão). O foco volta para o
+  seletor recriado pelo mesmo caminho que `render()` usaria, então dá para
+  corrigir várias linhas seguidas sem perder o lugar.
+- **Trocar a conta ou o tipo do documento continua redesenhando tudo**, porque aí
+  todas as linhas mudam de significado; tirar o redesenho desse caminho seria o
+  defeito oposto.
+- **O contexto da linha saiu para `importReviewContext()`**, usado tanto pelo
+  desenho da tela quanto pelo remendo: uma linha remendada não pode discordar das
+  vizinhas sobre o que é possível fazer com ela.
+- Medido com sessenta linhas: **zero redesenhos do aplicativo** em cinco cliques e
+  uma troca de tipo, e a lista parada onde estava. Travado no bloco F-22 de
+  `tests/test-beta-fixes.js` e num teste de navegador que importa um extrato de
+  sessenta linhas e conta os redesenhos.
+
 ### O que rola por dentro também precisa ficar parado
 
 - **O conserto anterior cuidou da janela e da folha, e faltou o miolo.** A grade

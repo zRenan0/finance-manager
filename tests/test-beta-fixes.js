@@ -13,6 +13,7 @@
 //   F-19  não havia como excluir uma conta do banco nem um cartão
 //   F-20  o conserto do F-18 fazia o assistente tomar a tela dois segundos depois
 //   F-21  a tela subia sozinha ao digitar, e ao criar ou editar uma categoria
+//   F-22  marcar uma linha do extrato redesenhava o app inteiro e tirava o foco
 "use strict";
 const fs = require("fs");
 const vm = require("vm");
@@ -1144,6 +1145,69 @@ function blocoF21() {
   run(`state.tab = "dashboard"; state.categoriesUi.editor = null;`);
 }
 
+/* ------------------------------------------------------------------ F-22 */
+// UM EXTRATO TEM DEZENAS DE LINHAS; MARCAR UMA CAIXA REDESENHAVA TODAS.
+//
+// `import-toggle`, `import-record-type` e `import-transfer-account` chamavam
+// `render()`, que reconstrói o aplicativo inteiro. Com sessenta lançamentos na
+// tela isso significava refazer sessenta linhas e seus seletores para mudar uma
+// caixa: a tela tremia, o seletor em uso deixava de existir no meio da escolha e
+// a lista voltava para o topo.
+function blocoF22() {
+  section("F-22. Mexer numa linha do extrato não pode redesenhar o extrato inteiro");
+  const acoes = readSrc("js/actions.js");
+  const app = readSrc("js/app.js");
+  const tela = readSrc("js/screens/import.js");
+
+  // Recorta o corpo de UM tratador. O delimitador é procurado DEPOIS do início,
+  // senão o recorte sai vazio e as conferências passam sem olhar para nada.
+  const LF = String.fromCharCode(10);
+  const corpo = (fonte, abertura, delimitador) => {
+    const posicao = fonte.indexOf(abertura);
+    if (posicao < 0) return "";
+    const resto = fonte.slice(posicao + abertura.length);
+    const parada = resto.indexOf(delimitador);
+    const trecho = parada < 0 ? resto : resto.slice(0, parada);
+    // Comentário citando `render()` não é chamada de `render()`: sem tirar a
+    // prosa, a conferência acusaria a explicação em vez do código.
+    // O `$` não serve aqui: o arquivo é CRLF, e o `\r` no fim da linha impede a
+    // âncora de casar. Recortar tudo que não é quebra de linha é o que funciona.
+    return trecho.split(LF).map((linha) => linha.replace(/\/\/[^\r\n]*/, "")).join(LF);
+  };
+
+  const corpoToggle = corpo(acoes, 'case "import-toggle"', 'case "');
+  check("o recorte do tratador encontrou código", corpoToggle.length > 40, corpoToggle.length);
+  check("marcar uma linha não redesenha o aplicativo",
+    !/\brender\(\)/.test(corpoToggle), corpoToggle.slice(0, 160));
+  check("marcar uma linha remenda a própria linha e o resumo",
+    /patchImportRow\(/.test(corpoToggle) && /patchImportSummary\(\)/.test(corpoToggle));
+
+  const corpoTipo = corpo(app, 'if (actionSelect === "import-record-type")', "if (actionSelect ===");
+  check("trocar o tipo do registro também só remenda a linha",
+    corpoTipo.length > 40 && !/\brender\(\)/.test(corpoTipo) && /patchImportRow\(/.test(corpoTipo),
+    corpoTipo.slice(0, 160));
+
+  const corpoConta = corpo(app, 'if (actionSelect === "import-transfer-account")', "if (actionSelect ===");
+  check("escolher a outra conta da transferência também só remenda a linha",
+    corpoConta.length > 40 && !/\brender\(\)/.test(corpoConta) && /patchImportRow\(/.test(corpoConta),
+    corpoConta.slice(0, 160));
+
+  // Trocar a conta ou o tipo do documento reavalia TODAS as linhas; aí o
+  // redesenho completo é o certo, e tirá-lo seria o defeito oposto.
+  const corpoDestino = corpo(app, 'if (actionSelect === "import-destination")', "if (actionSelect ===");
+  check("trocar a conta do extrato continua redesenhando a tela toda",
+    /\brender\(\)/.test(corpoDestino), corpoDestino.slice(0, 160));
+
+  check("a linha tem identidade para poder ser remendada", /id="import-row-\$\{idx\}"/.test(tela));
+  check("o resumo e o botão também", /id="import-summary"/.test(tela) && /id="import-confirm-btn"/.test(tela));
+  check("o remendo devolve o foco ao seletor recriado",
+    /function patchImportRow[\s\S]{0,900}restoreFocus\(/.test(tela));
+  // O contexto da linha precisa vir do mesmo lugar nos dois caminhos, senão uma
+  // linha remendada pode discordar das vizinhas sobre o que é possível fazer.
+  check("linha remendada e linha desenhada usam o mesmo contexto",
+    (tela.match(/importReviewContext\(\)/g) || []).length >= 3);
+}
+
 async function main() {
   blocoF01();
   blocoF02();
@@ -1165,6 +1229,7 @@ async function main() {
   blocoF20();
   blocoF19();
   blocoF21();
+  blocoF22();
   console.log(`\n${fail === 0 ? "TODOS OS TESTES PASSARAM" : "FALHAS ENCONTRADAS"}: ${ok} ok, ${fail} falha(s)\n`);
   process.exit(fail === 0 ? 0 : 1);
 }
