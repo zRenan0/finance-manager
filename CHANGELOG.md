@@ -2,6 +2,62 @@
 
 ## Não publicado
 
+### Um Pix entre contas próprias vira transferência de verdade, na importação ou depois
+
+- **O problema não era classificar errado: era não ter onde classificar.** Um Pix
+  da conta A para a conta B saía como gasto em A e entrava como renda em B. O
+  dinheiro não tinha ido a lugar nenhum, mas o mês fechava com R$ 250 de gasto e
+  R$ 250 de renda que nunca existiram, e o orçamento da categoria levava a conta.
+- **Uma transação comum não resolve isso**, porque ela conhece UMA conta e o
+  movimento precisa produzir o efeito igual e oposto em duas. O registro é um
+  `accountTransfer`: fica fora de `transactions` e, com isso, fora de gastos,
+  renda, orçamentos, regra x/x/x, análises e conquistas. Nos saldos ele aparece,
+  como tem de aparecer: sai da origem, entra no destino.
+- **Na revisão do extrato, cada linha escolhe como será gravada.** Marcada como
+  transferência, a linha esconde a categoria, pede a outra conta e passa a contar
+  num terceiro balde do resumo, separado de entradas e saídas. O sinal do valor
+  define a direção: saída faz da conta do extrato a origem, entrada faz dela o
+  destino. Só extrato bancário oferece a opção, e só com duas contas ativas.
+- **A segunda conta não duplica o movimento.** Ao importar o extrato do outro
+  lado, a linha que corresponde a uma transferência já registrada chega
+  DESMARCADA e explicada. A correspondência exige valor idêntico em centavos,
+  direção oposta, o mesmo par de contas, no máximo dois dias de diferença e
+  indício de transferência na descrição. Com mais de uma candidata o aplicativo
+  não escolhe: a linha fica marcada como "semelhante" e a decisão é de quem está
+  revisando.
+- **Um lançamento já importado pode ser convertido depois.** Escolher
+  "Transferência entre contas" na edição troca o editor pelo fluxo de conversão:
+  valor, data, descrição, conta de origem e conta de destino, sem categoria,
+  pagamento, parcelas ou recorrência. Havendo uma única outra ponta compatível, a
+  tela avisa que ela também será substituída; havendo várias, exige a escolha ou
+  a decisão de converter somente o lançamento atual. A gravação é uma só: cria a
+  transferência, remove uma ou duas transações com as lápides da sincronização e
+  preserva a referência do arquivo e os identificadores removidos.
+- **Transferência deixou de ser oferecida em lançamento novo**, onde não há o que
+  substituir; para criar uma do zero o caminho continua sendo a tela de Contas.
+- Cobertura em `tests/test-import-transfers.js` (35 conferências, da construção
+  aos saldos, à contraparte, à ambiguidade e à conversão pelo editor).
+
+### A tela subia sozinha enquanto a pessoa mexia nela
+
+- **Digitar no editor de categoria jogava a folha para o topo.** `render()`
+  reconstrói o DOM inteiro a cada interação e devolve o foco ao campo recriado;
+  sem `preventScroll`, o navegador leva a janela até ele, e uma folha modal
+  refeita nasce com `scrollTop` zero. A pessoa perdia o lugar a cada escolha.
+- **O foco volta com `focus({ preventScroll: true })`**, com o foco simples como
+  reserva para navegador que não conhece a opção.
+- **A rolagem é guardada antes de trocar o HTML e reposta depois**, tanto a da
+  janela quanto a da folha modal aberta; a segunda reposição, depois do foco,
+  existe justamente para o caso da reserva acima.
+- **A posição só é herdada quando a tela é a mesma.** Trocar de aba, abrir ou
+  fechar uma camada, avançar um passo do assistente inicial ou usar
+  `revealTarget` continuam começando do topo, que é o certo nesses casos.
+- **`overflow-anchor: none` na folha modal**: a âncora de rolagem do navegador
+  tentava "segurar" um elemento que acabara de ser destruído e empurrava a folha
+  alguns pixels logo depois da troca do DOM.
+- Regressão travada no bloco F-21 de `tests/test-beta-fixes.js` e num teste de
+  navegador de verdade em `tests/browser/run-browser.js`.
+
 ### O painel dizia quantos lançamentos ficavam de fora do saldo, nunca quanto
 
 - **O saldo em contas e as despesas do mês não fechavam entre si, e nada

@@ -46,15 +46,10 @@ function convertTransactionToAccountTransfer(data, transactionId, draft) {
     throw transferConversionError("TRANSFER_AMOUNT_INVALID", "Informe um valor válido para a transferência.");
   }
   const date = isRealIsoDate(String(input.date || "")) ? input.date : transaction.date;
-  const anchor = { ...transaction, amount, date, description: input.description == null ? transaction.description : input.description };
-  const linkedSideMatches = transaction.type === "expense"
-    ? fromAccountId === transaction.accountId
-    : toAccountId === transaction.accountId;
-  const otherAccountId = fromAccountId === transaction.accountId ? toAccountId
-    : (toAccountId === transaction.accountId ? fromAccountId : "");
-  const resolution = linkedSideMatches && otherAccountId
-    ? resolveOppositeTransferTransaction(anchor, source.transactions, { otherAccountId })
-    : { status: "none", matches: [], transaction: null };
+  const description = input.description == null ? transaction.description : input.description;
+  const resolution = resolveTransferConversionCounterpart(transaction, source.transactions, {
+    fromAccountId, toAccountId, amount, date, description,
+  });
 
   let counterpart = null;
   if (input.counterpartId && input.counterpartId !== "none") {
@@ -73,7 +68,7 @@ function convertTransactionToAccountTransfer(data, transactionId, draft) {
     toAccountId,
     amount,
     date,
-    description: anchor.description || "Transferência",
+    description: description || "Transferência",
     sourceTransactionIds: removedIds,
     origin: {
       channel: "transfer",
@@ -91,6 +86,98 @@ function convertTransactionToAccountTransfer(data, transactionId, draft) {
     removedIds,
     counterpartStatus: resolution.status,
   };
+}
+
+// Preenche as duas pontas da conversão com o que dá para deduzir do próprio
+// lançamento: a conta vinculada fica do lado que o tipo indica (saída na
+// origem, entrada no destino) e, havendo uma única outra conta ativa, ela é a
+// única outra ponta possível. O que não dá para deduzir fica em branco, para a
+// pessoa escolher; nada é gravado por dedução.
+function transferConversionDefaults(form, transaction, accounts) {
+  const active = (accounts || []).filter((account) => account && !account.archived);
+  const known = (id) => active.some((account) => account.id === id);
+  const linked = transaction && known(transaction.accountId) ? transaction.accountId : "";
+  const isIncome = (form && form.type) === "income";
+  let fromAccountId = known(form && form.transferFromAccountId) ? form.transferFromAccountId : "";
+  let toAccountId = known(form && form.transferToAccountId) ? form.transferToAccountId : "";
+  if (linked && !fromAccountId && !toAccountId) {
+    if (isIncome) toAccountId = linked; else fromAccountId = linked;
+  }
+  const others = active.filter((account) => account.id !== linked);
+  if (linked && others.length === 1) {
+    if (!fromAccountId && others[0].id !== toAccountId) fromAccountId = others[0].id;
+    else if (!toAccountId && others[0].id !== fromAccountId) toAccountId = others[0].id;
+  }
+  if (fromAccountId && fromAccountId === toAccountId) toAccountId = "";
+  return { transferFromAccountId: fromAccountId, transferToAccountId: toAccountId, transferCounterpartId: "" };
+}
+
+// Gravação da conversão. Fica fora de `submit-tx` porque não compartilha nada
+// com o caminho comum: não avalia orçamento, não atualiza uma transação e não
+// pode gravar pela metade. Ou sai uma transferência com as duas pontas certas,
+// ou a tela volta com o erro no campo que precisa de correção.
+function commitTransferConversion() {
+  const f = state.form;
+  const txId = state.editingTxId;
+  const model = typeof transferConversionModel === "function" ? transferConversionModel() : null;
+  const amount = parseMoneyInput(f.amount);
+  if (!model || !model.transaction) {
+    notify("O lançamento não existe mais", "warn");
+    state.editingTxId = null; state.editingTxReturnTab = "dashboard"; state.form = freshTxForm();
+    setState({ tab: "dashboard" });
+    return;
+  }
+  if (!model.enoughAccounts) {
+    notify("Cadastre duas contas ativas para registrar uma transferência", "warn");
+    return;
+  }
+  if (!model.accountsOk) {
+    showFormErrors({
+      "tx-transfer-from-select": model.fromAccountId ? "" : "Escolha a conta de origem.",
+      "tx-transfer-to-select": model.toAccountId && model.toAccountId !== model.fromAccountId
+        ? "" : "Escolha uma conta de destino diferente da origem.",
+    }, "Escolha duas contas ativas e diferentes");
+    return;
+  }
+  if (model.needsChoice) {
+    showFormErrors({ "tx-transfer-counterpart-select": "Escolha qual lançamento é a outra ponta, ou converta somente este." },
+      "Mais de um lançamento combina com esta transferência");
+    return;
+  }
+
+  let result = null;
+  try {
+    result = convertTransactionToAccountTransfer(state.data, txId, {
+      fromAccountId: model.fromAccountId,
+      toAccountId: model.toAccountId,
+      amount,
+      date: f.date,
+      description: f.description,
+      counterpartId: model.counterpartId || undefined,
+    });
+  } catch (error) {
+    const code = error && error.code;
+    if (code === "TRANSFER_AMOUNT_INVALID") showFormErrors({ "tx-amount-input": error.message }, error.message);
+    else if (code === "TRANSFER_ACCOUNT_INVALID") showFormErrors({ "tx-transfer-from-select": error.message, "tx-transfer-to-select": error.message }, error.message);
+    else if (code === "TRANSFER_COUNTERPART_AMBIGUOUS" || code === "TRANSFER_COUNTERPART_INVALID") showFormErrors({ "tx-transfer-counterpart-select": error.message }, error.message);
+    else if (code === "TRANSFER_TRANSACTION_MISSING") notify(error.message, "warn");
+    else throw error;
+    if (code === "TRANSFER_TRANSACTION_MISSING") {
+      state.editingTxId = null; state.editingTxReturnTab = "dashboard"; state.form = freshTxForm();
+      setState({ tab: "dashboard" });
+    }
+    return;
+  }
+
+  setData(result.data);
+  const returnTab = state.editingTxReturnTab || "dashboard";
+  state.editingTxId = null;
+  state.editingTxReturnTab = "dashboard";
+  state.form = freshTxForm();
+  setState({ tab: returnTab });
+  notify(result.removedIds.length > 1
+    ? "Transferência criada; os dois lançamentos saíram de gastos e receitas"
+    : "Transferência criada; ela não conta como gasto nem como renda");
 }
 
 // actions.js: traduz cliques da interface em mudanças de estado e comandos.
@@ -1379,13 +1466,22 @@ function onClick(e) {
       break;
     case "toggle-recurring": state.form.recurring = !state.form.recurring; render(); break;
     case "toggle-nature-field": state.natureFieldOpen = !state.natureFieldOpen; render(); break;
-    case "set-nature":
+    case "set-nature": {
       // A escolha do usuário vale sobre a dedução. É o que permite marcar um
       // estorno, uma transferência entre contas próprias ou os juros de uma
       // dívida, três coisas que o app não tem como adivinhar sozinho.
-      state.form.nature = normalizeTransactionNature(value, { ...state.form, categoryId: state.form.categoryId });
+      const escolhida = normalizeTransactionNature(value, { ...state.form, categoryId: state.form.categoryId });
+      state.form.nature = escolhida;
+      // Transferência troca o editor pelo fluxo de conversão. Ele abre com as
+      // contas já deduzidas do lançamento, senão a primeira coisa que a tela
+      // faria seria perguntar algo que ela mesma já sabe.
+      if (escolhida === "transferencia" && state.editingTxId) {
+        const emEdicao = (state.data.transactions || []).find((t) => t.id === state.editingTxId) || null;
+        Object.assign(state.form, transferConversionDefaults(state.form, emEdicao, state.data.accounts));
+      }
       render();
       break;
+    }
     case "cancel-edit": {
       const returnTab = state.editingTxReturnTab || "dashboard";
       state.editingTxId = null; state.editingTxReturnTab = "dashboard"; state.form = freshTxForm(); setState({ tab:returnTab }); break;
@@ -1404,7 +1500,16 @@ function onClick(e) {
         // volta em renda comum na gravação.
         nature: t.nature || "",
         goalId: t.goalId || null, debtId: t.debtId || null,
+        transferFromAccountId: "", transferToAccountId: "", transferCounterpartId: "",
       };
+      // Um lançamento gravado com `nature: "transferencia"` por uma versão
+      // anterior abre direto no fluxo de conversão; as pontas precisam existir
+      // antes do primeiro desenho da tela. Nos outros casos elas ficam em branco
+      // de propósito: quem escolher transferência depois deduz a direção a
+      // partir do tipo que estiver valendo naquele momento, não deste.
+      if (state.form.nature === "transferencia") {
+        Object.assign(state.form, transferConversionDefaults(state.form, t, state.data.accounts));
+      }
       setState({ tab: "add" });
       break;
     }
@@ -1430,6 +1535,10 @@ function onClick(e) {
     }
     case "submit-tx": {
       const f = state.form;
+      // Converter não é salvar: o resultado não é uma transação, então nada do
+      // caminho comum (categoria obrigatória, impacto no orçamento, parcelas)
+      // se aplica aqui.
+      if (state.editingTxId && f.nature === "transferencia") { commitTransferConversion(); break; }
       const amt = parseMoneyInput(f.amount);
       if (!(amt > 0) || !moneyWithinMax(amt) || (f.type === "expense" && !f.categoryId)) {
         showFormErrors({

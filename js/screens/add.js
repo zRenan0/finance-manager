@@ -19,7 +19,12 @@ function renderNatureField(f, isIncome) {
     debtId: f.debtId || null,
     categoryId: f.categoryId,
   });
-  const opcoes = transactionNatureOptions(isIncome ? "income" : "expense");
+  // "Transferência entre contas" não salva um lançamento: ela troca o editor
+  // pelo fluxo de conversão, que precisa de um lançamento gravado para
+  // substituir. Num cadastro novo a opção seria uma armadilha, e o caminho
+  // certo continua sendo a transferência própria da tela de Contas.
+  const opcoes = transactionNatureOptions(isIncome ? "income" : "expense")
+    .filter((o) => o.id !== "transferencia" || !!state.editingTxId);
   const aberto = !!state.natureFieldOpen;
   const rotulo = TRANSACTION_NATURE_LABELS[atual] || "Gasto";
 
@@ -45,6 +50,150 @@ function renderNatureField(f, isIncome) {
 }
 
 // ==================================================================
+// CONVERSÃO DE UM LANÇAMENTO EM TRANSFERÊNCIA ENTRE CONTAS PRÓPRIAS
+// ==================================================================
+// Uma transferência de verdade mexe em DUAS contas, e uma transação comum só
+// conhece uma. Por isso escolher "Transferência entre contas" na edição não
+// grava mais um lançamento de uma ponta só: troca o editor por este fluxo, que
+// pede origem e destino e substitui as transações envolvidas por um
+// `accountTransfer`, fora de gasto, renda e orçamento.
+function transferConversionModel() {
+  const f = state.form || {};
+  const data = state.data || {};
+  const accounts = (data.accounts || []).filter((a) => a && !a.archived);
+  const transaction = (data.transactions || []).find((t) => t.id === state.editingTxId) || null;
+  const amount = parseMoneyInput(f.amount);
+  const known = (id) => accounts.some((a) => a.id === id);
+  const fromAccountId = known(f.transferFromAccountId) ? f.transferFromAccountId : "";
+  const toAccountId = known(f.transferToAccountId) ? f.transferToAccountId : "";
+  const accountsOk = !!fromAccountId && !!toAccountId && fromAccountId !== toAccountId;
+  const resolution = transaction && accountsOk
+    ? resolveTransferConversionCounterpart(transaction, data.transactions, {
+        fromAccountId, toAccountId,
+        amount: Number.isFinite(amount) && amount > 0 ? amount : transaction.amount,
+        date: f.date || transaction.date,
+        description: f.description,
+      })
+    : { status: "none", matches: [], transaction: null };
+  // "none" é a decisão explícita de converter só este lançamento; ela precisa
+  // sobreviver a um novo desenho da tela, senão a sugestão automática voltaria
+  // a prometer substituir dois.
+  const counterpartId = f.transferCounterpartId === "none"
+    ? "none"
+    : (resolution.matches.some((item) => item.id === f.transferCounterpartId) ? f.transferCounterpartId : "");
+  const counterpart = counterpartId && counterpartId !== "none"
+    ? resolution.matches.find((item) => item.id === counterpartId)
+    : (counterpartId === "none" ? null : resolution.transaction);
+  const needsChoice = resolution.status === "ambiguous" && !counterpartId;
+  return {
+    accounts, transaction, fromAccountId, toAccountId, amount, accountsOk,
+    resolution, counterpartId, counterpart, needsChoice,
+    enoughAccounts: accounts.length > 1,
+    ready: !!transaction && accountsOk && Number.isFinite(amount) && amount > 0 && !needsChoice,
+  };
+}
+
+function transferAccountOptions(accounts, selectedId, excludeId) {
+  return accounts.map((a) => `<option value="${a.id}" ${a.id === selectedId ? "selected" : ""} ${a.id === excludeId ? "disabled" : ""}>${escapeHtml(a.name)} · ${fmtBRL(accountBalance(state.data, a.id, todayIso()))}</option>`).join("");
+}
+
+function transferCounterpartLabel(tx) {
+  return `${tx.type === "income" ? "entrada" : "saída"} de ${fmtBRL(tx.amount)} em ${fmtDateFull(tx.date)}${tx.description ? ` · ${tx.description}` : ""}`;
+}
+
+function renderTransferConversionScreen() {
+  const f = state.form;
+  const m = transferConversionModel();
+
+  return `<div class="screen screen--narrow add-form">
+    <div class="screen-header">
+      <h1 class="page-title">Converter em transferência</h1>
+      <button class="icon-btn icon-btn--muted" data-action="cancel-edit" aria-label="Fechar">${svgIcon("x", 18)}</button>
+    </div>
+
+    <div class="origin-chip">${svgIcon("info", 14)}<span>Uma transferência entre suas contas sai de uma e entra na outra. Ela não conta como gasto nem como renda.</span></div>
+
+    <div class="amount-input-wrap">
+      <p class="field__label center">Valor</p>
+      <div class="amount-row">
+        <span class="amount-currency" data-ui-css="color:var(--ink-soft)">R$</span>
+        <input id="tx-amount-input" data-field="tx-amount" class="amount-field" data-ui-css="color:var(--ink)"
+          value="${escapeHtml(f.amount)}" inputmode="decimal" placeholder="0,00" autocomplete="off" />
+      </div>
+    </div>
+
+    <div class="field">
+      <label class="field__label" for="tx-date-input">Data</label>
+      <input id="tx-date-input" type="date" class="input" data-field="tx-date" value="${f.date}" />
+    </div>
+
+    ${m.enoughAccounts ? `
+    <div class="field">
+      <label class="field__label" for="tx-transfer-from-select">Conta de origem</label>
+      <select id="tx-transfer-from-select" class="input" data-action-select="tx-transfer-from">
+        <option value="">Escolha a conta que envia</option>
+        ${transferAccountOptions(m.accounts, m.fromAccountId, m.toAccountId)}
+      </select>
+    </div>
+
+    <div class="field">
+      <label class="field__label" for="tx-transfer-to-select">Conta de destino</label>
+      <select id="tx-transfer-to-select" class="input" data-action-select="tx-transfer-to">
+        <option value="">Escolha a conta que recebe</option>
+        ${transferAccountOptions(m.accounts, m.toAccountId, m.fromAccountId)}
+      </select>
+    </div>` : `<div class="origin-chip">${svgIcon("alertTriangle", 14)}<span>Uma transferência precisa de duas contas ativas. Cadastre a outra conta para converter este lançamento.</span><button class="btn btn--ghost btn--sm" data-action="nav" data-tab="accounts">Cadastrar</button></div>`}
+
+    <div class="field">
+      <label class="field__label" for="tx-desc-input">Descrição (opcional)</label>
+      <input id="tx-desc-input" class="input" data-field="tx-description" value="${escapeHtml(f.description)}" placeholder="Ex: Pix para a reserva" autocomplete="off" />
+    </div>
+
+    ${renderTransferCounterpartBlock(m)}
+
+    ${renderNatureField(f, f.type === "income")}
+
+    ${state.editingTxId ? `<button class="btn btn--danger btn--block" data-action="delete-tx" data-id="${state.editingTxId}" data-ui-css="margin-top:14px">${svgIcon("trash", 16)} Excluir lançamento</button>` : ""}
+
+    <div id="form-warnings-slot"></div>
+    <p class="micro" id="tx-transfer-hint">${m.ready
+      ? "As duas contas mudam de saldo; nenhum gasto e nenhuma renda são criados."
+      : "Escolha o valor e duas contas ativas diferentes para converter."}</p>
+
+    <div class="submit-bar">
+      <button id="tx-submit-btn" class="btn btn--block btn--primary" data-action="submit-tx" aria-describedby="tx-transfer-hint">
+        Converter em transferência
+      </button>
+    </div>
+  </div>`;
+}
+
+// A promessa da tela e o que a gravação faz têm de ser a mesma coisa. Com uma
+// única candidata dá para dizer qual lançamento some junto; com várias, o app
+// não escolhe sozinho: ou a pessoa aponta a outra ponta, ou diz que só este
+// lançamento vira transferência.
+function renderTransferCounterpartBlock(m) {
+  if (!m.accountsOk || !m.transaction) return "";
+  if (m.resolution.status === "ambiguous") {
+    return `<div class="field">
+      <label class="field__label" for="tx-transfer-counterpart-select">Outra ponta desta transferência</label>
+      <select id="tx-transfer-counterpart-select" class="input ${m.needsChoice ? "input--error" : ""}" data-action-select="tx-transfer-counterpart">
+        <option value="">Escolha o lançamento correspondente</option>
+        ${m.resolution.matches.map((tx) => `<option value="${tx.id}" ${tx.id === m.counterpartId ? "selected" : ""}>${escapeHtml(transferCounterpartLabel(tx))}</option>`).join("")}
+        <option value="none" ${m.counterpartId === "none" ? "selected" : ""}>Converter somente este lançamento</option>
+      </select>
+      <p class="field-hint">${m.needsChoice
+        ? `Existem ${m.resolution.matches.length} lançamentos que combinam com esta transferência. Escolha qual é a outra ponta antes de converter.`
+        : (m.counterpartId === "none" ? "Só o lançamento em edição será substituído." : "O lançamento escolhido também será substituído pela transferência.")}</p>
+    </div>`;
+  }
+  if (m.counterpart) {
+    return `<div class="origin-chip">${svgIcon("info", 14)}<span>A ${escapeHtml(transferCounterpartLabel(m.counterpart))} também será substituída por esta transferência.</span></div>`;
+  }
+  return `<p class="field-hint">Só este lançamento será substituído. A outra conta recebe o efeito da transferência mesmo sem um lançamento correspondente.</p>`;
+}
+
+// ==================================================================
 // ADD / EDIT TRANSACTION
 // ==================================================================
 function isTxFormValid() {
@@ -60,6 +209,10 @@ function isTxFormValid() {
 
 function renderAddScreen() {
   const f = state.form;
+  // A conversão tem outras regras, outros campos e outro botão. Tentar
+  // acomodá-la dentro do editor comum devolveria uma tela com categoria,
+  // parcelas e "Salvar alterações" para algo que não é gasto nem renda.
+  if (state.editingTxId && f.nature === "transferencia") return renderTransferConversionScreen();
   const valid = isTxFormValid();
   const editing = !!state.editingTxId;
   const isIncome = f.type === "income";

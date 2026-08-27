@@ -700,6 +700,12 @@
   padding: 22px 20px calc(22px + env(safe-area-inset-bottom));
   width: 100%; max-width: 540px; max-height: 88vh; overflow-y: auto;
   box-shadow: var(--shadow-lg);
+  /* A ÂNCORA DE ROLAGEM DO NAVEGADOR ATRAPALHA QUEM REFAZ O DOM INTEIRO.
+     render() troca todo o conteúdo da folha e repõe a posição na mesma linha;
+     o Chrome, sem saber disso, ainda tenta "segurar" um elemento antigo e
+     empurra a rolagem alguns pixels logo depois. Como a posição aqui é
+     restaurada de propósito, a âncora só tem o que atrapalhar. */
+  overflow-anchor: none;
 }
 .modal-sheet::before {
   content: ""; display: block; width: 38px; height: 4px; border-radius: 999px;

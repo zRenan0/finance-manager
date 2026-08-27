@@ -196,5 +196,123 @@ check("editor não chama a conversão de gasto nem de renda",
     && !ctx.__editHtml.includes('data-action="set-type"'),
   ctx.__editHtml);
 
+section("7. O editor grava a conversão ou não grava nada");
+// A tela de conversão vive dentro do app; aqui entram só os arredores mínimos
+// para exercitar a gravação de verdade (`commitTransferConversion`) sem montar
+// um navegador inteiro.
+ctx.__notes = [];
+ctx.__errors = [];
+run(`
+  function notify(mensagem){ __notes.push(String(mensagem)); }
+  function setData(updater){ state.data = typeof updater === "function" ? updater(state.data) : updater; }
+  function setState(patch){ Object.assign(state, patch || {}); }
+  function render(){}
+  function freshTxForm(){ return { type:"expense", amount:"", categoryId:"outros", date:"2026-08-26",
+    payment:"Débito", description:"", recurring:false, installments:"1", source:"manual", origin:null,
+    accountId:"", creditCardId:"", nature:"", transferFromAccountId:"", transferToAccountId:"", transferCounterpartId:"" }; }
+  function showFormErrors(errors, resumo){ __errors.push({ errors, resumo }); notify(resumo); }
+`);
+
+const abrirConversao = (dados, txId, patch) => {
+  ctx.__notes = [];
+  ctx.__errors = [];
+  ctx.state = {
+    data: dados,
+    tab: "add",
+    editingTxId: txId,
+    editingTxReturnTab: "analytics",
+    natureFieldOpen: true,
+    form: Object.assign({
+      type: "expense", amount: "90,00", categoryId: "outros", date: "2026-08-23", payment: "Débito",
+      description: "PIX ENVIADO RENAN", recurring: false, installments: "1", source: "import-ofx",
+      accountId: "a1", creditCardId: "", nature: "transferencia",
+      transferFromAccountId: "a1", transferToAccountId: "a2", transferCounterpartId: "",
+    }, patch || {}),
+  };
+};
+
+// Duas pontas: a conversão substitui as duas e some dos totais.
+abrirConversao(ctx.__pairData, "out");
+run("commitTransferConversion()");
+check("converter pelo editor cria a transferência e apaga as duas pontas",
+  ctx.state.data.accountTransfers.length === 1 && ctx.state.data.transactions.length === 0,
+  { transferencias: ctx.state.data.accountTransfers.length, lancamentos: ctx.state.data.transactions.length });
+check("os saldos das duas contas mudam em sentidos opostos",
+  run("accountBalance(state.data, 'a1', '2026-08-31')") === 910
+    && run("accountBalance(state.data, 'a2', '2026-08-31')") === 590,
+  [run("accountBalance(state.data, 'a1', '2026-08-31')"), run("accountBalance(state.data, 'a2', '2026-08-31')")]);
+check("o aviso diz que a transferência não é gasto nem renda",
+  ctx.__notes.some((mensagem) => /gasto/i.test(mensagem)), ctx.__notes);
+check("o editor fecha e volta para a tela de onde veio",
+  ctx.state.editingTxId === null && ctx.state.tab === "analytics",
+  { editingTxId: ctx.state.editingTxId, tab: ctx.state.tab });
+
+// Origem e destino iguais: erro no campo, nada gravado.
+abrirConversao(ctx.__pairData, "out", { transferToAccountId: "a1" });
+run("commitTransferConversion()");
+check("origem igual ao destino não grava nada",
+  ctx.state.data.transactions.length === 2 && (ctx.state.data.accountTransfers || []).length === 0
+    && ctx.__errors.length === 1,
+  { erros: ctx.__errors, lancamentos: ctx.state.data.transactions.length });
+check("o erro aponta o campo do destino",
+  !!ctx.__errors[0] && Object.keys(ctx.__errors[0].errors).indexOf("tx-transfer-to-select") !== -1,
+  ctx.__errors[0]);
+
+// Ambiguidade: a escolha é da pessoa, e até ela chegar nada é gravado.
+ctx.__ambiguousData = run(`migrate({ version:22, accounts:__data.accounts, transactions:[
+  {id:'out',type:'expense',amount:90,date:'2026-08-23',categoryId:'outros',description:'PIX ENVIADO RENAN',source:'import-ofx',accountId:'a1'},
+  {id:'in1',type:'income',amount:90,date:'2026-08-23',categoryId:'outros',description:'PIX RECEBIDO RENAN',source:'import-ofx',accountId:'a2'},
+  {id:'in2',type:'income',amount:90,date:'2026-08-24',categoryId:'outros',description:'PIX RECEBIDO',source:'import-ofx',accountId:'a2'}
+] })`);
+abrirConversao(ctx.__ambiguousData, "out");
+run("commitTransferConversion()");
+check("com duas candidatas a gravação para e pede a escolha",
+  ctx.state.data.transactions.length === 3 && (ctx.state.data.accountTransfers || []).length === 0
+    && !!ctx.__errors[0] && Object.keys(ctx.__errors[0].errors).indexOf("tx-transfer-counterpart-select") !== -1,
+  ctx.__errors);
+ctx.__ambiguousHtml = run("renderAddScreen()");
+check("a tela mostra as candidatas e a opção de converter só este lançamento",
+  ctx.__ambiguousHtml.includes('data-action-select="tx-transfer-counterpart"')
+    && ctx.__ambiguousHtml.includes('value="in1"') && ctx.__ambiguousHtml.includes('value="in2"')
+    && ctx.__ambiguousHtml.includes('value="none"'),
+  ctx.__ambiguousHtml.slice(0, 0));
+
+abrirConversao(ctx.__ambiguousData, "out", { transferCounterpartId: "in2" });
+run("commitTransferConversion()");
+check("escolhida a outra ponta, só as duas escolhidas saem",
+  ctx.state.data.transactions.length === 1 && ctx.state.data.transactions[0].id === "in1"
+    && ctx.state.data.accountTransfers.length === 1,
+  ctx.state.data.transactions.map((t) => t.id));
+
+abrirConversao(ctx.__ambiguousData, "out", { transferCounterpartId: "none" });
+run("commitTransferConversion()");
+check("convertendo somente este, as outras duas continuam lá",
+  ctx.state.data.transactions.length === 2 && ctx.state.data.accountTransfers.length === 1,
+  ctx.state.data.transactions.map((t) => t.id));
+check("mesmo sozinha, a transferência mexe nos dois saldos",
+  run("accountBalance(state.data, 'a1', '2026-08-31')") === 910
+    && run("accountBalance(state.data, 'a2', '2026-08-31')") === 590 + 180,
+  [run("accountBalance(state.data, 'a1', '2026-08-31')"), run("accountBalance(state.data, 'a2', '2026-08-31')")]);
+
+// Lançamento novo não oferece transferência: não há o que substituir.
+ctx.state = {
+  data: ctx.__pairData,
+  editingTxId: null,
+  natureFieldOpen: true,
+  form: { type:"expense", amount:"", categoryId:"outros", date:"2026-08-26", payment:"Débito",
+    description:"", recurring:false, installments:"1", source:"manual", accountId:"a1", creditCardId:"", nature:"consumo" },
+};
+ctx.__novoHtml = run("renderAddScreen()");
+check("cadastro novo não oferece transferência entre contas",
+  !ctx.__novoHtml.includes('data-value="transferencia"')
+    && ctx.__novoHtml.includes('data-value="consumo"'),
+  ctx.__novoHtml.slice(0, 0));
+
+const fonteActions = readSrc("js/actions.js");
+check("salvar em modo de transferência desvia para a conversão",
+  /f\.nature === "transferencia"\) \{ commitTransferConversion\(\); break; \}/.test(fonteActions));
+check("a conversão não avalia impacto de orçamento",
+  fonteActions.indexOf("commitTransferConversion();") < fonteActions.indexOf("const impact = f.type === \"expense\""));
+
 console.log(`\nResultado: ${pass} passou, ${fail} falhou.`);
 if (fail) process.exit(1);

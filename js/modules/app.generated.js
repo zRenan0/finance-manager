@@ -3647,15 +3647,15 @@ function migrate(parsed) {
     //
     // Zerar `accountId` quando a conta não está na base é saneamento correto
     // para um backup adulterado. Durante a SINCRONIZAÇÃO é destruição, e não
-    // por acaso: no vínculo do visitante a ordem é garantida — o ciclo desce
+    // por acaso: no vínculo do visitante a ordem é garantida: o ciclo desce
     // primeiro (chegam os lançamentos, apontando para a conta do banco) e só
     // depois o "juntar dados" traz a conta. Nesse intervalo TODOS eles perdiam
     // o vínculo.
     //
     // O estrago não era perder o vínculo; era o registro mutilado ser gravado
     // COM A MARCA DO SERVIDOR. A partir daí dois aparelhos carregavam a mesma
-    // marca com conteúdos diferentes, e a comparação de marcas — que é toda a
-    // defesa do protocolo — não enxerga: `>` é falso entre iguais. Cada um
+    // marca com conteúdos diferentes, e a comparação de marcas, que é toda a
+    // defesa do protocolo, não enxerga: `>` é falso entre iguais. Cada um
     // mostrava um saldo, os dois diziam "Tudo sincronizado", nenhum tinha o que
     // enviar, e nada no funcionamento normal desfazia isso.
     //
@@ -9416,7 +9416,7 @@ const CloudSync = (() => {
     // `trustRemoteOnTie` vale SÓ dentro de uma reconciliação, e é o que a torna
     // capaz de reparar. O defeito que ela conserta produz registros com a MESMA
     // marca e conteúdos diferentes em dois aparelhos; entre marcas iguais o
-    // ciclo comum não tem como escolher, e não deve mesmo — ali um empate é o
+    // ciclo comum não tem como escolher, e não deve mesmo: ali um empate é o
     // eco do que este aparelho acabou de enviar. Numa releitura explícita do
     // zero a resposta é outra: para uma marca que este aparelho não autorou,
     // quem tem a versão boa é o servidor.
@@ -10376,7 +10376,7 @@ function accountBalance(data, accountId, asOf) {
 //
 // A condição era `!t.accountId`, e isso deixava um buraco: um lançamento que
 // aponta para uma conta que este aparelho ainda não tem não entra em conta
-// nenhuma (nenhuma casa com o id) e também não entrava aqui — sumia do saldo
+// nenhuma (nenhuma casa com o id) e também não entrava aqui: sumia do saldo
 // sem deixar rastro. A situação é normal e temporária durante uma descida: o
 // lançamento pode chegar antes da conta dele. Contar pelo que EXISTE, e não
 // pela ausência do campo, mantém o saldo correto no intervalo e faz o número
@@ -10386,7 +10386,7 @@ function accountBalance(data, accountId, asOf) {
 // A exclusão é correta e proposital: o saldo inicial informado já embute tudo
 // que veio antes dele, e somar de novo contaria duas vezes. O que estava errado
 // era a tela dizer QUANTOS lançamentos ficaram de fora sem dizer QUANTO. Com a
-// contagem sozinha ninguém consegue julgar se são R$ 5 ou R$ 1.180 — e sem
+// contagem sozinha ninguém consegue julgar se são R$ 5 ou R$ 1.180, e sem
 // isso o painel se contradiz em silêncio: a despesa entra em "Despesas do mês"
 // e o saldo não se mexe.
 //
@@ -10860,6 +10860,94 @@ function transactionReviewIgnored(transaction, key) {
 
 function reviewDescriptionKey(value) {
   return normalizeText(value).replace(/[^a-z0-9 ]/g, "").replace(/\b(transferencia|pix|ted|doc|pagamento|recebido|enviado)\b/g, "").replace(/\s+/g, " ").trim();
+}
+
+// A mesma janela usada pela Caixa de revisão também protege a importação da
+// segunda conta e a conversão pelo editor. Um Pix pode aparecer num banco no
+// dia seguinte, mas uma janela grande demais passa a juntar pagamentos iguais
+// que não têm relação entre si.
+const TRANSFER_MATCH_WINDOW_DAYS = 2;
+
+function hasTransferHint(value) {
+  return /\b(pix|ted|doc|transf)/.test(normalizeText(value));
+}
+
+function transferDatesMatch(left, right) {
+  return daysBetweenIso(left, right) <= TRANSFER_MATCH_WINDOW_DAYS;
+}
+
+// Procura a outra transação comum que representa a ponta oposta de uma
+// transferência. A função não escolhe em caso de empate: quem chama decide se
+// mostra uma sugestão ou pede a escolha da pessoa.
+function resolveOppositeTransferTransaction(transaction, transactions, options) {
+  const anchor = transaction || {};
+  const opts = options || {};
+  const matches = (transactions || []).filter((candidate) => {
+    if (!candidate || candidate.id === anchor.id) return false;
+    if (!anchor.accountId || !candidate.accountId || candidate.accountId === anchor.accountId) return false;
+    if (opts.otherAccountId && candidate.accountId !== opts.otherAccountId) return false;
+    if (candidate.type === anchor.type) return false;
+    if (moneyToCents(candidate.amount) !== moneyToCents(anchor.amount)) return false;
+    if (!transferDatesMatch(candidate.date, anchor.date)) return false;
+    if (!hasTransferHint(anchor.description) && !hasTransferHint(candidate.description)) return false;
+    if (candidate.creditCardId || candidate.goalId || candidate.debtId || candidate.installmentGroupId) return false;
+    return true;
+  });
+  return {
+    status: matches.length === 0 ? "none" : (matches.length === 1 ? "unique" : "ambiguous"),
+    matches,
+    transaction: matches.length === 1 ? matches[0] : null,
+  };
+}
+
+// A tela de conversão e a gravação precisam enxergar exatamente a mesma outra
+// ponta, senão o editor promete substituir dois lançamentos e a gravação
+// substitui um. Esta função monta a âncora com os valores em edição e devolve a
+// resolução crua; quem chama decide entre sugerir, exigir escolha ou recusar.
+function resolveTransferConversionCounterpart(transaction, transactions, draft) {
+  const source = transaction || {};
+  const input = draft || {};
+  const fromAccountId = input.fromAccountId || "";
+  const toAccountId = input.toAccountId || "";
+  const anchor = {
+    ...source,
+    amount: input.amount == null ? source.amount : input.amount,
+    date: input.date == null ? source.date : input.date,
+    description: input.description == null ? source.description : input.description,
+  };
+  // A conta do lançamento tem de continuar do lado que o tipo dele indica: uma
+  // saída pertence à origem, uma entrada ao destino. Com a direção invertida, o
+  // que existe do outro lado não é a contraparte deste lançamento.
+  const linkedSideMatches = source.type === "expense"
+    ? fromAccountId === source.accountId
+    : toAccountId === source.accountId;
+  const otherAccountId = fromAccountId === source.accountId
+    ? toAccountId
+    : (toAccountId === source.accountId ? fromAccountId : "");
+  if (!linkedSideMatches || !otherAccountId) return { status: "none", matches: [], transaction: null };
+  return resolveOppositeTransferTransaction(anchor, transactions, { otherAccountId });
+}
+
+// A segunda importação não procura outra transação: procura um registro de
+// transferência que já representa justamente aquela ponta. O sinal da linha
+// informa de que lado a conta do extrato deve aparecer.
+function resolveRecordedAccountTransfer(row, statementAccountId, transfers) {
+  const item = row || {};
+  const matches = (transfers || []).filter((transfer) => {
+    if (!transfer || !statementAccountId) return false;
+    const accountMatches = item.type === "expense"
+      ? transfer.fromAccountId === statementAccountId
+      : (item.type === "income" && transfer.toAccountId === statementAccountId);
+    if (!accountMatches) return false;
+    if (moneyToCents(transfer.amount) !== moneyToCents(item.amount)) return false;
+    if (!transferDatesMatch(transfer.date, item.date)) return false;
+    return hasTransferHint(item.description) || hasTransferHint(transfer.description);
+  });
+  return {
+    status: matches.length === 0 ? "none" : (matches.length === 1 ? "unique" : "ambiguous"),
+    matches,
+    transfer: matches.length === 1 ? matches[0] : null,
+  };
 }
 
 function buildTransactionReviewModel(data) {
@@ -13012,6 +13100,10 @@ function prepareImportRows(rawFile, filename, data) {
       roleLabel: role ? role.label : null,
       roleDetail: role ? role.detail : null,
       include: !r.duplicate && !(role && role.skip),
+      defaultInclude: !r.duplicate && !(role && role.skip),
+      includeTouched: false,
+      importAs: "transaction",
+      otherAccountId: "",
       categoryId: suggestion ? suggestion.categoryId : null,
       confidence: suggestion ? suggestion.confidence : "alta",
       categoryReason: suggestion ? suggestion.reason : null,
@@ -13064,6 +13156,89 @@ function buildTransactionsFromRows(rows, format, destination, filename) {
     }
     return tx;
   });
+}
+
+// Marca a ponta que já está representada por uma transferência criada na
+// importação da outra conta. `defaultInclude` guarda a decisão original de
+// duplicidade/papel da linha; assim trocar a conta de destino não transforma
+// silenciosamente uma duplicata antiga em lançamento selecionado.
+function applyRecordedTransferMatches(rows, data, destinationId) {
+  const source = Array.isArray(rows) ? rows : [];
+  const prepared = source.map((row) => {
+    const defaultInclude = Object.prototype.hasOwnProperty.call(row, "defaultInclude")
+      ? !!row.defaultInclude
+      : !!row.include;
+    const result = destinationId
+      ? resolveRecordedAccountTransfer(row, destinationId, (data && data.accountTransfers) || [])
+      : { status: "none", matches: [], transfer: null };
+    const next = {
+      ...row,
+      defaultInclude,
+      recordedTransferStatus: result.status,
+      recordedTransferId: result.transfer ? result.transfer.id : null,
+      recordedTransferMatches: result.matches.map((item) => item.id),
+    };
+    if (!row.includeTouched) next.include = result.status === "unique" ? false : defaultInclude;
+    return next;
+  });
+  if (rows && rows.meta) prepared.meta = rows.meta;
+  return prepared;
+}
+
+function importOriginMeta(format, filename, transfer) {
+  const source = format === "ofx" ? "import-ofx" : (format === "pdf" ? "import-pdf" : "import-csv");
+  const fileLabel = source === "import-ofx" ? "Extrato OFX" : (source === "import-pdf" ? "PDF bancário" : "Extrato CSV");
+  return transfer
+    ? { channel: "transfer", label: `Transferência importada de ${fileLabel}`, reference: filename || null, importedAt: new Date().toISOString() }
+    : { channel: source, label: fileLabel, reference: filename || null, importedAt: new Date().toISOString() };
+}
+
+function importTransferAccounts(row, statementAccountId) {
+  if (!row || !statementAccountId || !row.otherAccountId) return null;
+  if (row.type === "expense") return { fromAccountId: statementAccountId, toAccountId: row.otherAccountId };
+  if (row.type === "income") return { fromAccountId: row.otherAccountId, toAccountId: statementAccountId };
+  return null;
+}
+
+// Constrói os dois tipos de registro sem misturá-los. O chamador grava o
+// resultado numa única mutação, evitando um intervalo em que uma transação já
+// sumiu mas a transferência ainda não existe.
+function buildImportRecordsFromRows(rows, format, destination, filename, accounts) {
+  const settings = destination && typeof destination === "object"
+    ? destination
+    : { documentKind: "account", destinationId: destination || null };
+  const included = (rows || []).filter((row) => row && row.include !== false);
+  const transferRows = included.filter((row) => row.importAs === "transfer");
+  const transactionRows = included.filter((row) => row.importAs !== "transfer");
+  const transactions = buildTransactionsFromRows(transactionRows, format, settings, filename);
+  if (!transferRows.length) return { transactions, accountTransfers: [] };
+  if (settings.documentKind !== "account") {
+    throw new ImportError("IMPORT_TRANSFER_DOCUMENT", "Transferências entre contas só podem vir de um extrato bancário.");
+  }
+
+  const activeAccounts = (accounts || []).filter((account) => account && !account.archived);
+  const activeIds = new Set(activeAccounts.map((account) => account.id));
+  if (!activeIds.has(settings.destinationId) || activeIds.size < 2) {
+    throw new ImportError("IMPORT_TRANSFER_ACCOUNT", "Cadastre e escolha duas contas ativas para registrar a transferência.");
+  }
+
+  const accountTransfers = transferRows.map((row) => {
+    const pair = importTransferAccounts(row, settings.destinationId);
+    if (!pair || pair.fromAccountId === pair.toAccountId || !activeIds.has(pair.fromAccountId) || !activeIds.has(pair.toAccountId)) {
+      throw new ImportError("IMPORT_TRANSFER_ACCOUNT", "Escolha outra conta ativa para a transferência.");
+    }
+    const transfer = makeAccountTransfer({
+      ...pair,
+      amount: row.amount,
+      date: row.date,
+      description: row.description || "Transferência",
+      origin: importOriginMeta(format, filename, true),
+      sourceTransactionIds: Array.isArray(row.sourceTransactionIds) ? row.sourceTransactionIds : [],
+    }, activeAccounts);
+    if (!transfer) throw new ImportError("IMPORT_TRANSFER_ACCOUNT", "Não foi possível montar a transferência com as contas escolhidas.");
+    return transfer;
+  });
+  return { transactions, accountTransfers };
 }
 
 // ------------------------------------------------------------------------------
@@ -23412,7 +23587,7 @@ function renderHeroCard(m) {
           Lançamento anterior à abertura da conta fica fora do saldo de
           propósito: o saldo inicial já embute o que veio antes dele. Só que ele
           continua entrando em "Despesas do mês", logo acima, e o painel passava
-          a se contradizer em silêncio — a despesa aparecia e o saldo não se
+          a se contradizer em silêncio: a despesa aparecia e o saldo não se
           mexia. Dizer aqui, ao lado do número, é o que transforma isso de
           suspeita de erro em informação. */
       accounts.preOpening && accounts.preOpening.count
@@ -24213,7 +24388,12 @@ function renderNatureField(f, isIncome) {
     debtId: f.debtId || null,
     categoryId: f.categoryId,
   });
-  const opcoes = transactionNatureOptions(isIncome ? "income" : "expense");
+  // "Transferência entre contas" não salva um lançamento: ela troca o editor
+  // pelo fluxo de conversão, que precisa de um lançamento gravado para
+  // substituir. Num cadastro novo a opção seria uma armadilha, e o caminho
+  // certo continua sendo a transferência própria da tela de Contas.
+  const opcoes = transactionNatureOptions(isIncome ? "income" : "expense")
+    .filter((o) => o.id !== "transferencia" || !!state.editingTxId);
   const aberto = !!state.natureFieldOpen;
   const rotulo = TRANSACTION_NATURE_LABELS[atual] || "Gasto";
 
@@ -24239,6 +24419,150 @@ function renderNatureField(f, isIncome) {
 }
 
 // ==================================================================
+// CONVERSÃO DE UM LANÇAMENTO EM TRANSFERÊNCIA ENTRE CONTAS PRÓPRIAS
+// ==================================================================
+// Uma transferência de verdade mexe em DUAS contas, e uma transação comum só
+// conhece uma. Por isso escolher "Transferência entre contas" na edição não
+// grava mais um lançamento de uma ponta só: troca o editor por este fluxo, que
+// pede origem e destino e substitui as transações envolvidas por um
+// `accountTransfer`, fora de gasto, renda e orçamento.
+function transferConversionModel() {
+  const f = state.form || {};
+  const data = state.data || {};
+  const accounts = (data.accounts || []).filter((a) => a && !a.archived);
+  const transaction = (data.transactions || []).find((t) => t.id === state.editingTxId) || null;
+  const amount = parseMoneyInput(f.amount);
+  const known = (id) => accounts.some((a) => a.id === id);
+  const fromAccountId = known(f.transferFromAccountId) ? f.transferFromAccountId : "";
+  const toAccountId = known(f.transferToAccountId) ? f.transferToAccountId : "";
+  const accountsOk = !!fromAccountId && !!toAccountId && fromAccountId !== toAccountId;
+  const resolution = transaction && accountsOk
+    ? resolveTransferConversionCounterpart(transaction, data.transactions, {
+        fromAccountId, toAccountId,
+        amount: Number.isFinite(amount) && amount > 0 ? amount : transaction.amount,
+        date: f.date || transaction.date,
+        description: f.description,
+      })
+    : { status: "none", matches: [], transaction: null };
+  // "none" é a decisão explícita de converter só este lançamento; ela precisa
+  // sobreviver a um novo desenho da tela, senão a sugestão automática voltaria
+  // a prometer substituir dois.
+  const counterpartId = f.transferCounterpartId === "none"
+    ? "none"
+    : (resolution.matches.some((item) => item.id === f.transferCounterpartId) ? f.transferCounterpartId : "");
+  const counterpart = counterpartId && counterpartId !== "none"
+    ? resolution.matches.find((item) => item.id === counterpartId)
+    : (counterpartId === "none" ? null : resolution.transaction);
+  const needsChoice = resolution.status === "ambiguous" && !counterpartId;
+  return {
+    accounts, transaction, fromAccountId, toAccountId, amount, accountsOk,
+    resolution, counterpartId, counterpart, needsChoice,
+    enoughAccounts: accounts.length > 1,
+    ready: !!transaction && accountsOk && Number.isFinite(amount) && amount > 0 && !needsChoice,
+  };
+}
+
+function transferAccountOptions(accounts, selectedId, excludeId) {
+  return accounts.map((a) => `<option value="${a.id}" ${a.id === selectedId ? "selected" : ""} ${a.id === excludeId ? "disabled" : ""}>${escapeHtml(a.name)} · ${fmtBRL(accountBalance(state.data, a.id, todayIso()))}</option>`).join("");
+}
+
+function transferCounterpartLabel(tx) {
+  return `${tx.type === "income" ? "entrada" : "saída"} de ${fmtBRL(tx.amount)} em ${fmtDateFull(tx.date)}${tx.description ? ` · ${tx.description}` : ""}`;
+}
+
+function renderTransferConversionScreen() {
+  const f = state.form;
+  const m = transferConversionModel();
+
+  return `<div class="screen screen--narrow add-form">
+    <div class="screen-header">
+      <h1 class="page-title">Converter em transferência</h1>
+      <button class="icon-btn icon-btn--muted" data-action="cancel-edit" aria-label="Fechar">${svgIcon("x", 18)}</button>
+    </div>
+
+    <div class="origin-chip">${svgIcon("info", 14)}<span>Uma transferência entre suas contas sai de uma e entra na outra. Ela não conta como gasto nem como renda.</span></div>
+
+    <div class="amount-input-wrap">
+      <p class="field__label center">Valor</p>
+      <div class="amount-row">
+        <span class="amount-currency" data-ui-css="color:var(--ink-soft)">R$</span>
+        <input id="tx-amount-input" data-field="tx-amount" class="amount-field" data-ui-css="color:var(--ink)"
+          value="${escapeHtml(f.amount)}" inputmode="decimal" placeholder="0,00" autocomplete="off" />
+      </div>
+    </div>
+
+    <div class="field">
+      <label class="field__label" for="tx-date-input">Data</label>
+      <input id="tx-date-input" type="date" class="input" data-field="tx-date" value="${f.date}" />
+    </div>
+
+    ${m.enoughAccounts ? `
+    <div class="field">
+      <label class="field__label" for="tx-transfer-from-select">Conta de origem</label>
+      <select id="tx-transfer-from-select" class="input" data-action-select="tx-transfer-from">
+        <option value="">Escolha a conta que envia</option>
+        ${transferAccountOptions(m.accounts, m.fromAccountId, m.toAccountId)}
+      </select>
+    </div>
+
+    <div class="field">
+      <label class="field__label" for="tx-transfer-to-select">Conta de destino</label>
+      <select id="tx-transfer-to-select" class="input" data-action-select="tx-transfer-to">
+        <option value="">Escolha a conta que recebe</option>
+        ${transferAccountOptions(m.accounts, m.toAccountId, m.fromAccountId)}
+      </select>
+    </div>` : `<div class="origin-chip">${svgIcon("alertTriangle", 14)}<span>Uma transferência precisa de duas contas ativas. Cadastre a outra conta para converter este lançamento.</span><button class="btn btn--ghost btn--sm" data-action="nav" data-tab="accounts">Cadastrar</button></div>`}
+
+    <div class="field">
+      <label class="field__label" for="tx-desc-input">Descrição (opcional)</label>
+      <input id="tx-desc-input" class="input" data-field="tx-description" value="${escapeHtml(f.description)}" placeholder="Ex: Pix para a reserva" autocomplete="off" />
+    </div>
+
+    ${renderTransferCounterpartBlock(m)}
+
+    ${renderNatureField(f, f.type === "income")}
+
+    ${state.editingTxId ? `<button class="btn btn--danger btn--block" data-action="delete-tx" data-id="${state.editingTxId}" data-ui-css="margin-top:14px">${svgIcon("trash", 16)} Excluir lançamento</button>` : ""}
+
+    <div id="form-warnings-slot"></div>
+    <p class="micro" id="tx-transfer-hint">${m.ready
+      ? "As duas contas mudam de saldo; nenhum gasto e nenhuma renda são criados."
+      : "Escolha o valor e duas contas ativas diferentes para converter."}</p>
+
+    <div class="submit-bar">
+      <button id="tx-submit-btn" class="btn btn--block btn--primary" data-action="submit-tx" aria-describedby="tx-transfer-hint">
+        Converter em transferência
+      </button>
+    </div>
+  </div>`;
+}
+
+// A promessa da tela e o que a gravação faz têm de ser a mesma coisa. Com uma
+// única candidata dá para dizer qual lançamento some junto; com várias, o app
+// não escolhe sozinho: ou a pessoa aponta a outra ponta, ou diz que só este
+// lançamento vira transferência.
+function renderTransferCounterpartBlock(m) {
+  if (!m.accountsOk || !m.transaction) return "";
+  if (m.resolution.status === "ambiguous") {
+    return `<div class="field">
+      <label class="field__label" for="tx-transfer-counterpart-select">Outra ponta desta transferência</label>
+      <select id="tx-transfer-counterpart-select" class="input ${m.needsChoice ? "input--error" : ""}" data-action-select="tx-transfer-counterpart">
+        <option value="">Escolha o lançamento correspondente</option>
+        ${m.resolution.matches.map((tx) => `<option value="${tx.id}" ${tx.id === m.counterpartId ? "selected" : ""}>${escapeHtml(transferCounterpartLabel(tx))}</option>`).join("")}
+        <option value="none" ${m.counterpartId === "none" ? "selected" : ""}>Converter somente este lançamento</option>
+      </select>
+      <p class="field-hint">${m.needsChoice
+        ? `Existem ${m.resolution.matches.length} lançamentos que combinam com esta transferência. Escolha qual é a outra ponta antes de converter.`
+        : (m.counterpartId === "none" ? "Só o lançamento em edição será substituído." : "O lançamento escolhido também será substituído pela transferência.")}</p>
+    </div>`;
+  }
+  if (m.counterpart) {
+    return `<div class="origin-chip">${svgIcon("info", 14)}<span>A ${escapeHtml(transferCounterpartLabel(m.counterpart))} também será substituída por esta transferência.</span></div>`;
+  }
+  return `<p class="field-hint">Só este lançamento será substituído. A outra conta recebe o efeito da transferência mesmo sem um lançamento correspondente.</p>`;
+}
+
+// ==================================================================
 // ADD / EDIT TRANSACTION
 // ==================================================================
 function isTxFormValid() {
@@ -24254,6 +24578,10 @@ function isTxFormValid() {
 
 function renderAddScreen() {
   const f = state.form;
+  // A conversão tem outras regras, outros campos e outro botão. Tentar
+  // acomodá-la dentro do editor comum devolveria uma tela com categoria,
+  // parcelas e "Salvar alterações" para algo que não é gasto nem renda.
+  if (state.editingTxId && f.nature === "transferencia") return renderTransferConversionScreen();
   const valid = isTxFormValid();
   const editing = !!state.editingTxId;
   const isIncome = f.type === "income";
@@ -28515,72 +28843,101 @@ function renderImportScreen() {
   </div>`;
 }
 
+function renderImportReviewRow(row, idx, context) {
+  const transfer = row.importAs === "transfer";
+  const otherAccounts = context.activeAccounts.filter((account) => account.id !== context.destinationId);
+  const otherIsValid = otherAccounts.some((account) => account.id === row.otherAccountId);
+  const transferError = transfer && !otherIsValid;
+  const recordedTag = row.recordedTransferStatus === "unique"
+    ? `<span class="import-role-tag">transferência já registrada</span>`
+    : (row.recordedTransferStatus === "ambiguous" ? `<span class="import-dup-tag">transferência semelhante</span>` : "");
+  const reason = row.recordedTransferStatus === "unique"
+    ? "A outra conta já registrou esta transferência. Marque a linha apenas se for outro movimento."
+    : (row.roleDetail || row.categoryReason || "");
+  const typeLabel = transfer ? "Transferência" : (row.nature === "estorno" ? "Estorno" : (row.type === "income" ? "Receita" : "Gasto"));
+
+  return `<div class="import-row ${!row.include ? "import-row--off" : ""} ${transfer ? "import-row--transfer" : ""}">
+    <button class="checkbox ${row.include ? "checked" : ""}" data-action="import-toggle" data-id="${idx}" aria-label="${row.include ? "Não importar" : "Importar"} ${escapeHtml(row.description || "movimento")}">${row.include ? svgIcon("check", 13) : ""}</button>
+    <div class="import-row__info">
+      <p class="import-row__desc">${escapeHtml(row.description || (row.type === "income" ? "Receita" : "Gasto"))} ${row.duplicate ? `<span class="import-dup-tag">possível duplicata</span>` : ""}${row.roleLabel ? `<span class="import-role-tag">${escapeHtml(row.roleLabel)}</span>` : ""}${recordedTag}</p>
+      <p class="import-row__meta">${fmtDateShort(row.date)} · ${typeLabel}${row.page ? ` · página ${row.page}` : ""}${reason ? ` · ${escapeHtml(reason)}` : ""}</p>
+    </div>
+    <span class="import-row__amount ${!transfer && row.type === "income" ? "tx-amount--income" : ""}">${row.type === "income" ? "+" : "-"}${fmtBRL(row.amount)}</span>
+    <div class="import-row__controls">
+      ${context.canTransfer ? `<select class="import-kind-select" data-action-select="import-record-type" data-id="${idx}" aria-label="Como registrar ${escapeHtml(row.description || "este movimento")}">
+        <option value="transaction" ${transfer ? "" : "selected"}>${row.type === "income" ? "Entrada" : "Saída"}</option>
+        <option value="transfer" ${transfer ? "selected" : ""}>Transferência entre minhas contas</option>
+      </select>` : ""}
+      ${transfer ? `<select class="import-transfer-select ${transferError ? "input--error" : ""}" data-action-select="import-transfer-account" data-id="${idx}" aria-label="Outra conta da transferência">
+        <option value="">Escolha a outra conta</option>
+        ${otherAccounts.map((account) => `<option value="${account.id}" ${account.id === row.otherAccountId ? "selected" : ""}>${escapeHtml(account.name)}</option>`).join("")}
+      </select>` : (row.type === "expense" ? `<select class="import-cat-select" data-action-select="import-category" data-id="${idx}" aria-label="Categoria de ${escapeHtml(row.description || "gasto")}">
+        ${state.data.categories.map((category) => `<option value="${category.id}" ${category.id === row.categoryId ? "selected" : ""}>${escapeHtml(category.name)}</option>`).join("")}
+      </select>` : "")}
+    </div>
+    ${transferError ? `<p class="import-row__error">Escolha a outra conta para registrar a transferência.</p>` : ""}
+  </div>`;
+}
+
 function renderImportReview(rows) {
-  const included = rows.filter((r) => r.include);
+  const included = rows.filter((row) => row.include);
+  const includedTransfers = included.filter((row) => row.importAs === "transfer");
+  const includedTransactions = included.filter((row) => row.importAs !== "transfer");
   const meta = rows.meta || {};
   const documentKind = state.importDocumentKind === "card" ? "card" : "account";
+  const activeAccounts = (state.data.accounts || []).filter((account) => !account.archived);
   const destinations = documentKind === "card"
     ? (state.data.creditCards || []).filter((card) => !card.archived)
-    : (state.data.accounts || []).filter((account) => !account.archived);
+    : activeAccounts;
   const destinationId = destinations.some((item) => item.id === state.importDestinationId)
     ? state.importDestinationId
     : (destinations[0] ? destinations[0].id : "");
+  const canTransfer = documentKind === "account" && activeAccounts.length > 1;
 
-  // O "total" antigo somava receita e despesa no mesmo balde e devolvia um
-  // número que não existe em lugar nenhum do extrato: R$ 5.420,00 de salário
-  // mais R$ 1.830,25 de gastos viravam "total R$ 7.250,25", que não é nem o
-  // que entrou, nem o que saiu, nem o saldo entre os dois. As duas direções
-  // andam separadas. r.amount é sempre a magnitude; quem dá o sinal é r.type.
-  // sumMoney trabalha em centavos inteiros, ao contrário do reduce com + que
-  // acumulava erro de float a cada linha do arquivo.
-  const totalEntradas = sumMoney(included.filter((r) => r.type === "income"), (r) => r.amount);
-  const totalSaidas = sumMoney(included.filter((r) => r.type !== "income"), (r) => r.amount);
-  // Extrato só de gastos é o caso comum. Mostrar "R$ 0,00 em entradas" ali
-  // seria ruído, então cada direção só aparece quando tem valor.
+  // Transferência fica num terceiro balde. Misturá-la com saída ou entrada
+  // faria a própria revisão prometer um gasto ou uma renda que não será criada.
+  const totalEntradas = sumMoney(includedTransactions.filter((row) => row.type === "income"), (row) => row.amount);
+  const totalSaidas = sumMoney(includedTransactions.filter((row) => row.type !== "income"), (row) => row.amount);
+  const totalTransferencias = sumMoney(includedTransfers, (row) => row.amount);
   const partesTotal = [];
   if (totalEntradas > 0) partesTotal.push(`${fmtBRL(totalEntradas)} em entradas`);
   if (totalSaidas > 0) partesTotal.push(`${fmtBRL(totalSaidas)} em saídas`);
+  if (totalTransferencias > 0) partesTotal.push(`${fmtBRL(totalTransferencias)} em transferências`);
 
-  // A DATA DE ABERTURA DA CONTA MORDE MAIS FORTE AQUI.
-  //
-  // O extrato vem com o mês inteiro, quase sempre com datas anteriores ao dia
-  // em que a conta foi cadastrada. Esses lançamentos entram nas despesas, nos
-  // gráficos e nas categorias, mas ficam de fora do SALDO, porque o saldo
-  // inicial informado no cadastro já os embute, e somar de novo seria contar
-  // duas vezes. A regra é correta; o que faltava era dizê-la. Sem isso o
-  // usuário importa agosto, vê o gasto subir, vê o saldo parado e conclui,
-  // razoavelmente, que a conta do aplicativo está errada.
   const contaDestino = documentKind === "account" ? accountById(state.data, destinationId) : null;
   const aberturaConta = contaDestino ? String(contaDestino.openingDate || "") : "";
   const anterioresAoSaldo = aberturaConta
-    ? included.filter((r) => String(r.date || "") < aberturaConta).length
+    ? includedTransactions.filter((row) => String(row.date || "") < aberturaConta).length
     : 0;
+  const transferenciasAntesDaAbertura = includedTransfers.filter((row) => {
+    const other = accountById(state.data, row.otherAccountId);
+    return (aberturaConta && String(row.date || "") < aberturaConta)
+      || (other && other.openingDate && String(row.date || "") < other.openingDate);
+  }).length;
 
-  // Linhas que a fatura traz para explicar a própria fatura: o pagamento do mês
-  // passado e o saldo rolado. Elas chegam desmarcadas, e o aviso diz por quê;
-  // sem essa frase o usuário só veria caixas desmarcadas sem explicação, o que
-  // é pior do que o erro que estamos evitando.
   const papeis = meta.roles || {};
   const avisoPapeis = [];
   if (papeis["card-payment"]) {
     avisoPapeis.push(`${plural(papeis["card-payment"], "linha é o pagamento da própria fatura", "linhas são pagamentos da própria fatura")} e ${papeis["card-payment"] === 1 ? "veio desmarcada" : "vieram desmarcadas"}: esse dinheiro saiu da sua conta para quitar o mês passado, então lançá-lo como receita inflaria o que você recebeu`);
   }
-  if (papeis.carryover) {
-    avisoPapeis.push(`${plural(papeis.carryover, "linha é o saldo da fatura anterior", "linhas são saldo da fatura anterior")}: aquele gasto já foi contado no mês em que aconteceu`);
-  }
+  if (papeis.carryover) avisoPapeis.push(`${plural(papeis.carryover, "linha é o saldo da fatura anterior", "linhas são saldo da fatura anterior")}: aquele gasto já foi contado no mês em que aconteceu`);
 
   const documentLabel = documentKind === "card" ? "Fatura de cartão" : "Extrato bancário";
   const sourceParts = [meta.format ? meta.format.toUpperCase() : "ARQUIVO"];
   if (meta.bank) sourceParts.push(meta.bank);
   sourceParts.push(documentLabel);
   if (meta.pageCount) sourceParts.push(plural(meta.pageCount, "página", "páginas"));
+  const invalidTransfer = includedTransfers.some((row) => !activeAccounts.some((account) => account.id === row.otherAccountId && account.id !== destinationId));
+  const buttonParts = [];
+  if (includedTransactions.length) buttonParts.push(plural(includedTransactions.length, "lançamento", "lançamentos"));
+  if (includedTransfers.length) buttonParts.push(plural(includedTransfers.length, "transferência", "transferências"));
 
   return `<div class="card">
     <div class="settings-row-header">
       <p class="card-title">Revisar lançamentos (${rows.length})</p>
       <button class="icon-btn" data-action="import-cancel" aria-label="Cancelar importação">${svgIcon("x", 16)}</button>
     </div>
-    <p class="card-subtitle">${sourceParts.map(escapeHtml).join(" · ")} · ${plural(included.length, "selecionado para importar", "selecionados para importar")}${partesTotal.length ? ` · ${partesTotal.join(" e ")}` : ""}. Duplicados já vêm desmarcados${meta.skipped ? ` · ${plural(meta.skipped, "linha ignorada", "linhas ignoradas")}` : ""}.</p>
+    <p class="card-subtitle">${sourceParts.map(escapeHtml).join(" · ")} · ${plural(included.length, "selecionado para importar", "selecionados para importar")}${partesTotal.length ? ` · ${partesTotal.join(" e ")}` : ""}. Duplicados e transferências já registradas vêm desmarcados${meta.skipped ? ` · ${plural(meta.skipped, "linha ignorada", "linhas ignoradas")}` : ""}.</p>
     <div class="import-destination-grid">
       <div class="field">
         <label class="field__label" for="import-document-kind">O que este arquivo contém</label>
@@ -28599,32 +28956,16 @@ function renderImportReview(rows) {
       </div>
     </div>
     ${!destinations.length ? `<div class="inline-error import-destination-error">${svgIcon("alertTriangle", 16)}<div><p class="inline-error__title">Cadastre ${documentKind === "card" ? "um cartão" : "uma conta"} antes de importar.</p><p class="inline-error__detail">O destino é obrigatório para manter saldos e faturas corretos.</p></div><button class="btn btn--secondary btn--sm" data-action="nav" data-tab="accounts">Cadastrar</button></div>` : ""}
+    ${documentKind === "account" && activeAccounts.length === 1 ? `<div class="import-notice">${svgIcon("info", 16)}<div><b>Cadastre outra conta para identificar Pix entre suas contas.</b><span>Com duas contas ativas, cada linha pode ser registrada como transferência e movimentar os dois saldos.</span></div></div>` : ""}
     ${meta.confidence === "baixa" ? `<div class="import-notice">${svgIcon("alertTriangle", 16)}<div><b>Confira o tipo e os valores com atenção.</b><span>O banco ou o formato da tabela não foi reconhecido com segurança. Nada será gravado antes de você confirmar.</span></div></div>` : ""}
-    ${avisoPapeis.length ? `<div class="import-notice">${svgIcon("creditCard", 16)}<div>
-      <b>Isto parece a fatura de um cartão.</b>
-      <span>${escapeHtml(avisoPapeis.join(". "))}. As compras continuam marcadas normalmente; se você quiser importar alguma dessas linhas mesmo assim, é só marcar a caixa.</span>
-    </div></div>` : ""}
-    ${anterioresAoSaldo ? `<div class="import-notice">${svgIcon("info", 16)}<div>
-      <b>${anterioresAoSaldo} ${anterioresAoSaldo === 1 ? "lançamento é anterior" : "lançamentos são anteriores"} à abertura de ${escapeHtml(contaDestino.name)} em ${fmtDateFull(aberturaConta)}.</b>
-      <span>${anterioresAoSaldo === 1 ? "Ele entra" : "Eles entram"} nas despesas, categorias e gráficos, mas não ${anterioresAoSaldo === 1 ? "altera" : "alteram"} o saldo da conta: o saldo inicial que você informou já inclui esse período. Para que ${anterioresAoSaldo === 1 ? "ele conte" : "eles contem"} no saldo, edite a conta e recue a data de abertura.</span>
-    </div></div>` : ""}
+    ${avisoPapeis.length ? `<div class="import-notice">${svgIcon("creditCard", 16)}<div><b>Isto parece a fatura de um cartão.</b><span>${escapeHtml(avisoPapeis.join(". "))}. As compras continuam marcadas normalmente; se você quiser importar alguma dessas linhas mesmo assim, é só marcar a caixa.</span></div></div>` : ""}
+    ${anterioresAoSaldo ? `<div class="import-notice">${svgIcon("info", 16)}<div><b>${anterioresAoSaldo} ${anterioresAoSaldo === 1 ? "lançamento é anterior" : "lançamentos são anteriores"} à abertura de ${escapeHtml(contaDestino.name)} em ${fmtDateFull(aberturaConta)}.</b><span>${anterioresAoSaldo === 1 ? "Ele entra" : "Eles entram"} nas despesas, categorias e gráficos, mas não ${anterioresAoSaldo === 1 ? "altera" : "alteram"} o saldo da conta: o saldo inicial que você informou já inclui esse período. Para que ${anterioresAoSaldo === 1 ? "ele conte" : "eles contem"} no saldo, edite a conta e recue a data de abertura.</span></div></div>` : ""}
+    ${transferenciasAntesDaAbertura ? `<div class="import-notice">${svgIcon("info", 16)}<div><b>${transferenciasAntesDaAbertura === 1 ? "Uma transferência está" : `${transferenciasAntesDaAbertura} transferências estão`} fora do período acompanhado por uma das contas.</b><span>O saldo inicial dessa conta já inclui o movimento, então somente a ponta dentro do período será recalculada.</span></div></div>` : ""}
     <div class="import-list">
-      ${rows.map((r, idx) => `<div class="import-row ${!r.include ? "import-row--off" : ""}">
-        <button class="checkbox ${r.include ? "checked" : ""}" data-action="import-toggle" data-id="${idx}">${r.include ? svgIcon("check", 13) : ""}</button>
-        <div class="import-row__info">
-          <p class="import-row__desc">${escapeHtml(r.description || (r.type === "income" ? "Receita" : "Gasto"))} ${r.duplicate ? `<span class="import-dup-tag">possível duplicata</span>` : ""}${r.roleLabel ? `<span class="import-role-tag">${escapeHtml(r.roleLabel)}</span>` : ""}</p>
-          <p class="import-row__meta">${fmtDateShort(r.date)} · ${r.nature === "estorno" ? "Estorno" : (r.type === "income" ? "Receita" : "Gasto")}${r.page ? ` · página ${r.page}` : ""}${r.roleDetail ? ` · ${escapeHtml(r.roleDetail)}` : (r.categoryReason ? ` · ${escapeHtml(r.categoryReason)}` : "")}</p>
-        </div>
-        ${r.type === "expense" ? `<select class="import-cat-select" data-action-select="import-category" data-id="${idx}">
-          ${state.data.categories.map((c) => `<option value="${c.id}" ${c.id === r.categoryId ? "selected" : ""}>${escapeHtml(c.name)}</option>`).join("")}
-        </select>` : ""}
-        <span class="import-row__amount ${r.type === "income" ? "tx-amount--income" : ""}">${r.type === "income" ? "+" : "-"}${fmtBRL(r.amount)}</span>
-      </div>`).join("")}
+      ${rows.map((row, idx) => renderImportReviewRow(row, idx, { activeAccounts, destinationId, canTransfer })).join("")}
     </div>
-    <button class="btn btn--primary btn--block" data-ui-css="margin-top:14px" data-action="import-confirm" ${included.length === 0 || !destinationId ? "disabled" : ""}>Importar ${plural(included.length, "lançamento", "lançamentos")}</button>
-    <button class="btn btn--ghost btn--block btn--sm" data-ui-css="margin-top:8px" data-action="nav" data-tab="rules">
-      ${svgIcon("tag", 14)} Corrigindo a mesma categoria várias vezes? Crie uma regra
-    </button>
+    <button class="btn btn--primary btn--block" data-ui-css="margin-top:14px" data-action="import-confirm" ${included.length === 0 || !destinationId || invalidTransfer ? "disabled" : ""}>Importar ${buttonParts.join(" e ")}</button>
+    <button class="btn btn--ghost btn--block btn--sm" data-ui-css="margin-top:8px" data-action="nav" data-tab="rules">${svgIcon("tag", 14)} Corrigindo a mesma categoria várias vezes? Crie uma regra</button>
   </div>`;
 }
 
@@ -30774,6 +31115,168 @@ function removeTransactionsWithIntegrity(data, ids) {
   };
 }
 
+function transferConversionError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+// Substitui uma ou duas transações comuns por um único movimento interno. Esta
+// é a fronteira que garante que marcar "transferência" nunca produza só uma
+// etiqueta em cima de gasto ou renda.
+function convertTransactionToAccountTransfer(data, transactionId, draft) {
+  const source = data || {};
+  const input = draft || {};
+  const transaction = (source.transactions || []).find((item) => item.id === transactionId);
+  if (!transaction) throw transferConversionError("TRANSFER_TRANSACTION_MISSING", "O lançamento não existe mais.");
+
+  const activeAccounts = (source.accounts || []).filter((account) => account && !account.archived);
+  const activeIds = new Set(activeAccounts.map((account) => account.id));
+  const fromAccountId = input.fromAccountId || "";
+  const toAccountId = input.toAccountId || "";
+  if (!activeIds.has(fromAccountId) || !activeIds.has(toAccountId) || fromAccountId === toAccountId) {
+    throw transferConversionError("TRANSFER_ACCOUNT_INVALID", "Escolha duas contas ativas e diferentes.");
+  }
+
+  const amount = input.amount == null ? transaction.amount : roundMoney(input.amount);
+  if (!(amount > 0) || !moneyWithinMax(amount)) {
+    throw transferConversionError("TRANSFER_AMOUNT_INVALID", "Informe um valor válido para a transferência.");
+  }
+  const date = isRealIsoDate(String(input.date || "")) ? input.date : transaction.date;
+  const description = input.description == null ? transaction.description : input.description;
+  const resolution = resolveTransferConversionCounterpart(transaction, source.transactions, {
+    fromAccountId, toAccountId, amount, date, description,
+  });
+
+  let counterpart = null;
+  if (input.counterpartId && input.counterpartId !== "none") {
+    counterpart = resolution.matches.find((item) => item.id === input.counterpartId) || null;
+    if (!counterpart) throw transferConversionError("TRANSFER_COUNTERPART_INVALID", "A outra ponta escolhida não corresponde mais ao lançamento.");
+  } else if (input.counterpartId !== "none" && resolution.status === "unique") {
+    counterpart = resolution.transaction;
+  } else if (input.counterpartId !== "none" && resolution.status === "ambiguous") {
+    throw transferConversionError("TRANSFER_COUNTERPART_AMBIGUOUS", "Escolha qual lançamento representa a outra ponta da transferência.");
+  }
+
+  const removedIds = [transaction.id, counterpart && counterpart.id].filter(Boolean);
+  const primaryOrigin = transaction.origin || (counterpart && counterpart.origin) || null;
+  const transfer = makeAccountTransfer({
+    fromAccountId,
+    toAccountId,
+    amount,
+    date,
+    description: description || "Transferência",
+    sourceTransactionIds: removedIds,
+    origin: {
+      channel: "transfer",
+      label: primaryOrigin && primaryOrigin.label ? `Conversão de ${primaryOrigin.label}` : "Conversão de lançamento",
+      reference: primaryOrigin && primaryOrigin.reference ? primaryOrigin.reference : null,
+      importedAt: primaryOrigin && primaryOrigin.importedAt ? primaryOrigin.importedAt : new Date().toISOString(),
+    },
+  }, activeAccounts);
+  if (!transfer) throw transferConversionError("TRANSFER_ACCOUNT_INVALID", "Não foi possível montar a transferência com essas contas.");
+
+  const cleaned = removeTransactionsWithIntegrity(source, removedIds);
+  return {
+    data: { ...cleaned, accountTransfers: [...(cleaned.accountTransfers || []), transfer] },
+    transfer,
+    removedIds,
+    counterpartStatus: resolution.status,
+  };
+}
+
+// Preenche as duas pontas da conversão com o que dá para deduzir do próprio
+// lançamento: a conta vinculada fica do lado que o tipo indica (saída na
+// origem, entrada no destino) e, havendo uma única outra conta ativa, ela é a
+// única outra ponta possível. O que não dá para deduzir fica em branco, para a
+// pessoa escolher; nada é gravado por dedução.
+function transferConversionDefaults(form, transaction, accounts) {
+  const active = (accounts || []).filter((account) => account && !account.archived);
+  const known = (id) => active.some((account) => account.id === id);
+  const linked = transaction && known(transaction.accountId) ? transaction.accountId : "";
+  const isIncome = (form && form.type) === "income";
+  let fromAccountId = known(form && form.transferFromAccountId) ? form.transferFromAccountId : "";
+  let toAccountId = known(form && form.transferToAccountId) ? form.transferToAccountId : "";
+  if (linked && !fromAccountId && !toAccountId) {
+    if (isIncome) toAccountId = linked; else fromAccountId = linked;
+  }
+  const others = active.filter((account) => account.id !== linked);
+  if (linked && others.length === 1) {
+    if (!fromAccountId && others[0].id !== toAccountId) fromAccountId = others[0].id;
+    else if (!toAccountId && others[0].id !== fromAccountId) toAccountId = others[0].id;
+  }
+  if (fromAccountId && fromAccountId === toAccountId) toAccountId = "";
+  return { transferFromAccountId: fromAccountId, transferToAccountId: toAccountId, transferCounterpartId: "" };
+}
+
+// Gravação da conversão. Fica fora de `submit-tx` porque não compartilha nada
+// com o caminho comum: não avalia orçamento, não atualiza uma transação e não
+// pode gravar pela metade. Ou sai uma transferência com as duas pontas certas,
+// ou a tela volta com o erro no campo que precisa de correção.
+function commitTransferConversion() {
+  const f = state.form;
+  const txId = state.editingTxId;
+  const model = typeof transferConversionModel === "function" ? transferConversionModel() : null;
+  const amount = parseMoneyInput(f.amount);
+  if (!model || !model.transaction) {
+    notify("O lançamento não existe mais", "warn");
+    state.editingTxId = null; state.editingTxReturnTab = "dashboard"; state.form = freshTxForm();
+    setState({ tab: "dashboard" });
+    return;
+  }
+  if (!model.enoughAccounts) {
+    notify("Cadastre duas contas ativas para registrar uma transferência", "warn");
+    return;
+  }
+  if (!model.accountsOk) {
+    showFormErrors({
+      "tx-transfer-from-select": model.fromAccountId ? "" : "Escolha a conta de origem.",
+      "tx-transfer-to-select": model.toAccountId && model.toAccountId !== model.fromAccountId
+        ? "" : "Escolha uma conta de destino diferente da origem.",
+    }, "Escolha duas contas ativas e diferentes");
+    return;
+  }
+  if (model.needsChoice) {
+    showFormErrors({ "tx-transfer-counterpart-select": "Escolha qual lançamento é a outra ponta, ou converta somente este." },
+      "Mais de um lançamento combina com esta transferência");
+    return;
+  }
+
+  let result = null;
+  try {
+    result = convertTransactionToAccountTransfer(state.data, txId, {
+      fromAccountId: model.fromAccountId,
+      toAccountId: model.toAccountId,
+      amount,
+      date: f.date,
+      description: f.description,
+      counterpartId: model.counterpartId || undefined,
+    });
+  } catch (error) {
+    const code = error && error.code;
+    if (code === "TRANSFER_AMOUNT_INVALID") showFormErrors({ "tx-amount-input": error.message }, error.message);
+    else if (code === "TRANSFER_ACCOUNT_INVALID") showFormErrors({ "tx-transfer-from-select": error.message, "tx-transfer-to-select": error.message }, error.message);
+    else if (code === "TRANSFER_COUNTERPART_AMBIGUOUS" || code === "TRANSFER_COUNTERPART_INVALID") showFormErrors({ "tx-transfer-counterpart-select": error.message }, error.message);
+    else if (code === "TRANSFER_TRANSACTION_MISSING") notify(error.message, "warn");
+    else throw error;
+    if (code === "TRANSFER_TRANSACTION_MISSING") {
+      state.editingTxId = null; state.editingTxReturnTab = "dashboard"; state.form = freshTxForm();
+      setState({ tab: "dashboard" });
+    }
+    return;
+  }
+
+  setData(result.data);
+  const returnTab = state.editingTxReturnTab || "dashboard";
+  state.editingTxId = null;
+  state.editingTxReturnTab = "dashboard";
+  state.form = freshTxForm();
+  setState({ tab: returnTab });
+  notify(result.removedIds.length > 1
+    ? "Transferência criada; os dois lançamentos saíram de gastos e receitas"
+    : "Transferência criada; ela não conta como gasto nem como renda");
+}
+
 // actions.js: traduz cliques da interface em mudanças de estado e comandos.
 // Carregado antes de app.js; as dependências são consultadas somente no clique.
 function commitDebtPayment(p) {
@@ -32060,13 +32563,22 @@ function onClick(e) {
       break;
     case "toggle-recurring": state.form.recurring = !state.form.recurring; render(); break;
     case "toggle-nature-field": state.natureFieldOpen = !state.natureFieldOpen; render(); break;
-    case "set-nature":
+    case "set-nature": {
       // A escolha do usuário vale sobre a dedução. É o que permite marcar um
       // estorno, uma transferência entre contas próprias ou os juros de uma
       // dívida, três coisas que o app não tem como adivinhar sozinho.
-      state.form.nature = normalizeTransactionNature(value, { ...state.form, categoryId: state.form.categoryId });
+      const escolhida = normalizeTransactionNature(value, { ...state.form, categoryId: state.form.categoryId });
+      state.form.nature = escolhida;
+      // Transferência troca o editor pelo fluxo de conversão. Ele abre com as
+      // contas já deduzidas do lançamento, senão a primeira coisa que a tela
+      // faria seria perguntar algo que ela mesma já sabe.
+      if (escolhida === "transferencia" && state.editingTxId) {
+        const emEdicao = (state.data.transactions || []).find((t) => t.id === state.editingTxId) || null;
+        Object.assign(state.form, transferConversionDefaults(state.form, emEdicao, state.data.accounts));
+      }
       render();
       break;
+    }
     case "cancel-edit": {
       const returnTab = state.editingTxReturnTab || "dashboard";
       state.editingTxId = null; state.editingTxReturnTab = "dashboard"; state.form = freshTxForm(); setState({ tab:returnTab }); break;
@@ -32085,7 +32597,16 @@ function onClick(e) {
         // volta em renda comum na gravação.
         nature: t.nature || "",
         goalId: t.goalId || null, debtId: t.debtId || null,
+        transferFromAccountId: "", transferToAccountId: "", transferCounterpartId: "",
       };
+      // Um lançamento gravado com `nature: "transferencia"` por uma versão
+      // anterior abre direto no fluxo de conversão; as pontas precisam existir
+      // antes do primeiro desenho da tela. Nos outros casos elas ficam em branco
+      // de propósito: quem escolher transferência depois deduz a direção a
+      // partir do tipo que estiver valendo naquele momento, não deste.
+      if (state.form.nature === "transferencia") {
+        Object.assign(state.form, transferConversionDefaults(state.form, t, state.data.accounts));
+      }
       setState({ tab: "add" });
       break;
     }
@@ -32111,6 +32632,10 @@ function onClick(e) {
     }
     case "submit-tx": {
       const f = state.form;
+      // Converter não é salvar: o resultado não é uma transação, então nada do
+      // caminho comum (categoria obrigatória, impacto no orçamento, parcelas)
+      // se aplica aqui.
+      if (state.editingTxId && f.nature === "transferencia") { commitTransferConversion(); break; }
       const amt = parseMoneyInput(f.amount);
       if (!(amt > 0) || !moneyWithinMax(amt) || (f.type === "expense" && !f.categoryId)) {
         showFormErrors({
@@ -32496,7 +33021,10 @@ function onClick(e) {
     case "statement-dropzone-click": document.getElementById("statement-file-input").click(); break;
     case "import-toggle": {
       const idx = Number(id);
-      if (state.importRows && state.importRows[idx]) state.importRows[idx].include = !state.importRows[idx].include;
+      if (state.importRows && state.importRows[idx]) {
+        state.importRows[idx].include = !state.importRows[idx].include;
+        state.importRows[idx].includeTouched = true;
+      }
       render();
       break;
     }
@@ -32524,10 +33052,29 @@ function onClick(e) {
         notify(documentKind === "card" ? "Cadastre ou escolha um cartão" : "Cadastre ou escolha uma conta", "warn");
         break;
       }
-      const newTx = buildTransactionsFromRows(included, meta.format, { documentKind, destinationId }, state.importFilename);
-      setData((d) => ({ ...d, transactions: [...d.transactions, ...newTx] }));
+      let records = null;
+      try {
+        records = buildImportRecordsFromRows(included, meta.format, { documentKind, destinationId }, state.importFilename, state.data.accounts);
+      } catch (error) {
+        if (error && error.code === "IMPORT_TRANSFER_ACCOUNT") {
+          notify(error.message || "Escolha a outra conta da transferência", "warn");
+          render();
+          break;
+        }
+        throw error;
+      }
+      const newTx = records.transactions;
+      const newTransfers = records.accountTransfers;
+      setData((d) => ({
+        ...d,
+        transactions: [...d.transactions, ...newTx],
+        accountTransfers: [...(d.accountTransfers || []), ...newTransfers],
+      }));
       state.importRows = null; state.importFilename = null; state.importDestinationId = "";
-      notify(plural(newTx.length, "lançamento importado", "lançamentos importados"));
+      const importedParts = [];
+      if (newTx.length) importedParts.push(plural(newTx.length, "lançamento importado", "lançamentos importados"));
+      if (newTransfers.length) importedParts.push(plural(newTransfers.length, "transferência registrada", "transferências registradas"));
+      notify(importedParts.join(" e "));
       setState({ tab: "dashboard" });
       break;
     }
@@ -32599,6 +33146,9 @@ function freshTxForm() {
     source: "manual", origin: null,
     accountId: firstAccount ? firstAccount.id : "",
     creditCardId: firstCard ? firstCard.id : "",
+    // Só têm uso na conversão de um lançamento já gravado em transferência,
+    // mas nascem aqui para o formulário ter sempre a mesma forma.
+    transferFromAccountId: "", transferToAccountId: "", transferCounterpartId: "",
   };
 }
 
@@ -33295,7 +33845,15 @@ function restoreFocus(key, selStart, selEnd) {
   // próprio botão que foi acionado. Aí não há para onde voltar, e insistir num
   // vizinho seria pior do que deixar o navegador seguir a ordem natural.
   if (!el || typeof el.focus !== "function") return;
-  el.focus();
+  // O FOCO ERA O QUE JOGAVA A TELA PARA CIMA.
+  //
+  // `render()` recria o campo e devolve o foco a ele. Sem `preventScroll`, o
+  // navegador leva a janela (e a folha modal) até o elemento recém-criado, que
+  // no DOM novo está em outra posição: a pessoa digitava uma letra no editor de
+  // categoria e a tela saltava. Navegador antigo ignora o objeto de opções e
+  // lança; nesse caso o foco comum ainda vale, e a rolagem guardada é reposta
+  // logo depois, em render().
+  try { el.focus({ preventScroll: true }); } catch (e) { el.focus(); }
   // `setSelectionRange` lança em input[type=number]; o try/catch mantém o foco
   // mesmo quando o cursor não pode ser reposicionado.
   if (selStart != null && el.setSelectionRange) {
@@ -33339,15 +33897,82 @@ function systemThemePreference() {
   return null;
 }
 
+// A MESMA TELA REDESENHADA NÃO PODE VOLTAR PARA O TOPO.
+//
+// Um redesenho só tem direito de herdar a rolagem quando continua sendo A MESMA
+// coisa na tela: mesma aba, mesma camada aberta, mesmo passo do assistente,
+// mesmo editor. Trocar de aba, abrir ou fechar uma folha e avançar o onboarding
+// são justamente os momentos em que começar do topo é o certo, e por isso cada
+// um deles entra nesta chave.
+function renderSurfaceKey() {
+  const onboarding = state.onboarding && state.onboarding.open ? `onb:${state.onboarding.step}` : "";
+  const editor = state.categoriesUi && state.categoriesUi.editor
+    ? `cat-editor:${state.categoriesUi.editor.id || "novo"}`
+    : "";
+  return [
+    state.booting ? "booting" : "app",
+    onboarding || `tab:${state.tab}`,
+    `ov:${(state.overlayStack || []).join(">")}`,
+    state.confirmation ? "confirm" : "",
+    state.categoryPickerFor ? `cat-picker:${state.categoryPickerFor}` : "",
+    editor,
+    state.calculationDetail ? "calc" : "",
+    state.editingTxId ? `tx:${state.editingTxId}` : "",
+  ].join("|");
+}
+
+// Chave do que está DESENHADO agora. O estado já mudou quando `render()` roda
+// (quem tratou o clique mexeu nele antes de pedir o desenho), então comparar o
+// estado com ele mesmo diria sempre "é a mesma tela".
+let __superficieDesenhada = null;
+
+function scrollSheetElement() {
+  return typeof document.querySelector === "function" ? document.querySelector(".modal-sheet") : null;
+}
+
+function captureScrollSnapshot() {
+  const sheet = scrollSheetElement();
+  return {
+    x: typeof window.scrollX === "number" ? window.scrollX : 0,
+    y: typeof window.scrollY === "number" ? window.scrollY : 0,
+    // A folha modal é rolável por si; recriada, ela nasce no topo mesmo que a
+    // janela atrás dela não tenha se mexido.
+    sheetTop: sheet && typeof sheet.scrollTop === "number" ? sheet.scrollTop : null,
+  };
+}
+
+function restoreScrollSnapshot(snapshot) {
+  if (!snapshot) return;
+  if ((snapshot.x || snapshot.y) && typeof window.scrollTo === "function") {
+    try { window.scrollTo(snapshot.x, snapshot.y); } catch (e) { /* navegador sem scrollTo programático */ }
+  }
+  if (snapshot.sheetTop) {
+    const sheet = scrollSheetElement();
+    if (sheet && typeof sheet.scrollTop === "number") sheet.scrollTop = snapshot.sheetTop;
+  }
+}
+
 function render() {
   const root = document.getElementById("app");
   const active = document.activeElement;
   const focusKey = focusKeyOf(active);
   const selStart = active && "selectionStart" in active ? active.selectionStart : null;
   const selEnd = active && "selectionStart" in active ? active.selectionEnd : null;
+  const surfaceKey = renderSurfaceKey();
+  // `revealTarget` é rolagem pedida de propósito (o formulário que abre longe do
+  // botão). Herdar a posição antiga desfaria exatamente o que ela existe para
+  // fazer.
+  const snapshot = __superficieDesenhada === surfaceKey && !state.revealTarget
+    ? captureScrollSnapshot()
+    : null;
   applyTheme(state.data.theme);
   root.innerHTML = renderShell();
+  restoreScrollSnapshot(snapshot);
   restoreFocus(focusKey, selStart, selEnd);
+  // De novo depois do foco: num navegador sem `preventScroll` o `catch` acima
+  // rola a página até o campo, e é esta segunda reposição que segura a tela.
+  restoreScrollSnapshot(snapshot);
+  __superficieDesenhada = surfaceKey;
   afterRender();
 }
 
@@ -33503,10 +34128,12 @@ async function handleStatementFile(file, password) {
     const content = await readStatementFile(file, { password: password || "" });
     const rows = prepareImportRows(content, file.name, state.data);
     const meta = rows.meta || {};
-    state.importRows = rows;
     state.importFilename = file.name;
     state.importDocumentKind = meta.documentKind === "card" ? "card" : "account";
     state.importDestinationId = defaultImportDestinationId(state.importDocumentKind);
+    state.importRows = state.importDocumentKind === "account"
+      ? applyRecordedTransferMatches(rows, state.data, state.importDestinationId)
+      : rows;
     state.importPendingFile = null;
     state.importPassword = "";
     state.importLoading = false;
@@ -34127,13 +34754,57 @@ function onChange(e) {
     if (state.importRows && state.importRows[idx]) state.importRows[idx].categoryId = e.target.value;
     return;
   }
-  if (actionSelect === "import-document-kind") {
-    state.importDocumentKind = e.target.value === "card" ? "card" : "account";
-    state.importDestinationId = defaultImportDestinationId(state.importDocumentKind);
+  if (actionSelect === "import-record-type") {
+    const idx = Number(e.target.dataset.id);
+    const row = state.importRows && state.importRows[idx];
+    const activeAccounts = (state.data.accounts || []).filter((account) => !account.archived);
+    if (!row) return;
+    const canTransfer = state.importDocumentKind === "account" && activeAccounts.length > 1;
+    row.importAs = e.target.value === "transfer" && canTransfer ? "transfer" : "transaction";
+    row.otherAccountId = row.importAs === "transfer" && activeAccounts.some((account) => account.id === row.otherAccountId && account.id !== state.importDestinationId)
+      ? row.otherAccountId
+      : "";
+    if (row.importAs === "transfer") {
+      row.include = true;
+      row.includeTouched = true;
+    }
     render();
     return;
   }
-  if (actionSelect === "import-destination") { state.importDestinationId = e.target.value; render(); return; }
+  if (actionSelect === "import-transfer-account") {
+    const idx = Number(e.target.dataset.id);
+    const row = state.importRows && state.importRows[idx];
+    if (row) row.otherAccountId = e.target.value;
+    render();
+    return;
+  }
+  if (actionSelect === "import-document-kind") {
+    state.importDocumentKind = e.target.value === "card" ? "card" : "account";
+    state.importDestinationId = defaultImportDestinationId(state.importDocumentKind);
+    if (state.importRows) {
+      state.importRows.forEach((row) => {
+        row.importAs = "transaction";
+        row.otherAccountId = "";
+      });
+      state.importRows = state.importDocumentKind === "account"
+        ? applyRecordedTransferMatches(state.importRows, state.data, state.importDestinationId)
+        : applyRecordedTransferMatches(state.importRows, state.data, "");
+    }
+    render();
+    return;
+  }
+  if (actionSelect === "import-destination") {
+    state.importDestinationId = e.target.value;
+    if (state.importRows) {
+      state.importRows.forEach((row) => {
+        if (row.importAs === "transfer" && row.otherAccountId === state.importDestinationId) row.otherAccountId = "";
+      });
+      state.importRows = state.importDocumentKind === "account"
+        ? applyRecordedTransferMatches(state.importRows, state.data, state.importDestinationId)
+        : state.importRows;
+    }
+    render(); return;
+  }
   if (actionSelect === "movement-type") { state.movementFilters.type = e.target.value; state.analyticsLimit = 30; render(); return; }
   if (actionSelect === "movement-category") { state.movementFilters.categoryId = e.target.value; state.analyticsLimit = 30; render(); return; }
   if (actionSelect === "movement-account") { state.movementFilters.accountId = e.target.value; state.analyticsLimit = 30; render(); return; }
@@ -34184,6 +34855,24 @@ function onChange(e) {
     return;
   }
   if (actionSelect === "tx-account") { state.form.accountId = e.target.value; patchSubmitButton(); return; }
+  // Trocar uma das pontas invalida a outra ponta escolhida antes: a candidata
+  // de agora pode nem existir mais entre as contas novas, e manter a escolha
+  // antiga faria a tela prometer substituir um lançamento que não corresponde.
+  if (actionSelect === "tx-transfer-from") {
+    state.form.transferFromAccountId = e.target.value;
+    if (state.form.transferToAccountId === e.target.value) state.form.transferToAccountId = "";
+    state.form.transferCounterpartId = "";
+    render();
+    return;
+  }
+  if (actionSelect === "tx-transfer-to") {
+    state.form.transferToAccountId = e.target.value;
+    if (state.form.transferFromAccountId === e.target.value) state.form.transferFromAccountId = "";
+    state.form.transferCounterpartId = "";
+    render();
+    return;
+  }
+  if (actionSelect === "tx-transfer-counterpart") { state.form.transferCounterpartId = e.target.value; render(); return; }
   if (actionSelect === "tx-card") { state.form.creditCardId = e.target.value; patchSubmitButton(); return; }
   if (actionSelect === "account-type" && state.accountsUi.accountForm) { state.accountsUi.accountForm.type = e.target.value; return; }
   if (actionSelect === "card-account" && state.accountsUi.cardForm) { state.accountsUi.cardForm.accountId = e.target.value; return; }

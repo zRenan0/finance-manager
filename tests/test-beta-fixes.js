@@ -12,6 +12,7 @@
 //   F-18  entrar na conta reabria o assistente e duplicava a conta do banco
 //   F-19  não havia como excluir uma conta do banco nem um cartão
 //   F-20  o conserto do F-18 fazia o assistente tomar a tela dois segundos depois
+//   F-21  a tela subia sozinha ao digitar, e ao criar ou editar uma categoria
 "use strict";
 const fs = require("fs");
 const vm = require("vm");
@@ -1011,6 +1012,105 @@ function blocoF19() {
   check("e arquivar continua disponível", /data-action="account-archive"/.test(tela));
 }
 
+/* ------------------------------------------------------------------ F-21 */
+// A TELA SUBIA SOZINHA A CADA TECLA.
+//
+// `render()` troca o `innerHTML` do app inteiro e devolve o foco ao campo
+// recriado. O foco sem `preventScroll` arrasta a janela até o elemento, e uma
+// folha modal refeita nasce com `scrollTop` zero. Juntos, os dois jogavam a
+// pessoa para o topo enquanto ela digitava o nome de uma categoria.
+function blocoF21() {
+  section("F-21. Redesenhar a mesma tela não pode jogar a rolagem para o topo");
+  const fonte = readSrc("js/app.js");
+  check("o foco volta sem arrastar a rolagem",
+    /el\.focus\(\{ preventScroll: true \}\)/.test(fonte));
+  check("navegador antigo, sem a opção, continua recebendo o foco",
+    /catch \(e\) \{ el\.focus\(\); \}/.test(fonte));
+
+  // ---- A chave visual: o que conta como "a mesma tela" ----
+  run(`state.data = migrate(defaultData()); state.tab = "categories"; state.booting = false;`);
+  run(`state.categoriesUi.editor = freshCategoryEditor({ name: "Merc" });`);
+  const editorAntes = run(`renderSurfaceKey()`);
+  run(`state.categoriesUi.editor.name = "Mercado";`);
+  check("digitar no editor de categoria continua sendo a mesma tela",
+    run(`renderSurfaceKey()`) === editorAntes, [editorAntes, run(`renderSurfaceKey()`)]);
+  run(`state.categoriesUi.editor = null;`);
+  check("fechar a folha do editor muda a tela desenhada",
+    run(`renderSurfaceKey()`) !== editorAntes);
+  const abaAntes = run(`renderSurfaceKey()`);
+  run(`state.tab = "dashboard";`);
+  check("trocar de aba muda a tela desenhada", run(`renderSurfaceKey()`) !== abaAntes);
+  run(`state.onboarding.open = true; state.onboarding.step = 2;`);
+  const passoAntes = run(`renderSurfaceKey()`);
+  run(`state.onboarding.step = 3;`);
+  check("avançar o onboarding muda a tela desenhada",
+    run(`renderSurfaceKey()`) !== passoAntes);
+  run(`state.onboarding.open = false; state.onboarding.step = 1;`);
+
+  // ---- O comportamento, com um DOM que registra o que foi rolado ----
+  const documentoOriginal = ctx.document;
+  const scrollToOriginal = ctx.scrollTo;
+  const rolagens = [];
+  let folha = fakeEl("div");
+  folha.scrollTop = 220;
+  const raiz = fakeEl("div");
+  let html = "";
+  // Trocar o `innerHTML` é o que destrói a folha antiga: a nova nasce no topo,
+  // exatamente como no navegador.
+  Object.defineProperty(raiz, "innerHTML", {
+    get() { return html; },
+    set(valor) { html = valor; folha = fakeEl("div"); folha.scrollTop = 0; },
+  });
+  const campo = fakeEl("input");
+  campo.id = "cat-editor-name-input";
+  ctx.document = Object.assign(Object.create(null), documentoOriginal, {
+    getElementById: (id) => (id === "app" ? raiz : (id === campo.id ? campo : null)),
+    querySelector: (sel) => (sel === ".modal-sheet" ? folha : null),
+    querySelectorAll: () => [],
+    activeElement: campo,
+  });
+  ctx.scrollTo = (x, y) => rolagens.push([x, y]);
+  ctx.scrollX = 0;
+  ctx.scrollY = 0;
+
+  run(`state.tab = "categories"; state.categoriesUi.editor = freshCategoryEditor({ name: "Merc" });`);
+  run(`render()`);                    // primeiro desenho desta tela: nada a herdar
+  check("abrir a tela não repõe rolagem nenhuma", rolagens.length === 0, rolagens);
+
+  ctx.scrollY = 380;
+  folha.scrollTop = 220;
+  run(`state.categoriesUi.editor.name = "Mercado";`);
+  run(`render()`);
+  // A posição é reposta duas vezes de propósito: depois do HTML novo e outra vez
+  // depois do foco, para o caso de o navegador não conhecer `preventScroll`.
+  check("a mesma tela redesenhada volta para onde estava",
+    rolagens.length > 0 && rolagens.every(([x, y]) => x === 0 && y === 380), rolagens);
+  check("a folha modal recriada também volta para onde estava",
+    folha.scrollTop === 220, folha.scrollTop);
+
+  // Navegar é outra coisa: a tela nova começa onde o navegador quiser.
+  const antesDaNavegacao = rolagens.length;
+  run(`state.categoriesUi.editor = null; state.tab = "dashboard";`);
+  run(`render()`);
+  check("navegar para outra aba não herda a rolagem anterior",
+    rolagens.length === antesDaNavegacao, rolagens.slice(antesDaNavegacao));
+
+  // E uma rolagem pedida de propósito continua tendo prioridade.
+  run(`render()`);                    // segunda vez na mesma aba: herdaria
+  const antesDoReveal = rolagens.length;
+  run(`state.revealTarget = "wealth-form";`);
+  run(`render()`);
+  check("revealTarget não herda a rolagem antiga",
+    rolagens.length === antesDoReveal, rolagens.slice(antesDoReveal));
+  run(`state.revealTarget = null;`);
+
+  ctx.document = documentoOriginal;
+  ctx.scrollTo = scrollToOriginal;
+  delete ctx.scrollX;
+  delete ctx.scrollY;
+  run(`state.tab = "dashboard"; state.categoriesUi.editor = null;`);
+}
+
 async function main() {
   blocoF01();
   blocoF02();
@@ -1031,6 +1131,7 @@ async function main() {
   blocoF18();
   blocoF20();
   blocoF19();
+  blocoF21();
   console.log(`\n${fail === 0 ? "TODOS OS TESTES PASSARAM" : "FALHAS ENCONTRADAS"}: ${ok} ok, ${fail} falha(s)\n`);
   process.exit(fail === 0 ? 0 : 1);
 }

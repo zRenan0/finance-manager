@@ -60,7 +60,7 @@ function accountBalance(data, accountId, asOf) {
 //
 // A condição era `!t.accountId`, e isso deixava um buraco: um lançamento que
 // aponta para uma conta que este aparelho ainda não tem não entra em conta
-// nenhuma (nenhuma casa com o id) e também não entrava aqui — sumia do saldo
+// nenhuma (nenhuma casa com o id) e também não entrava aqui: sumia do saldo
 // sem deixar rastro. A situação é normal e temporária durante uma descida: o
 // lançamento pode chegar antes da conta dele. Contar pelo que EXISTE, e não
 // pela ausência do campo, mantém o saldo correto no intervalo e faz o número
@@ -70,7 +70,7 @@ function accountBalance(data, accountId, asOf) {
 // A exclusão é correta e proposital: o saldo inicial informado já embute tudo
 // que veio antes dele, e somar de novo contaria duas vezes. O que estava errado
 // era a tela dizer QUANTOS lançamentos ficaram de fora sem dizer QUANTO. Com a
-// contagem sozinha ninguém consegue julgar se são R$ 5 ou R$ 1.180 — e sem
+// contagem sozinha ninguém consegue julgar se são R$ 5 ou R$ 1.180, e sem
 // isso o painel se contradiz em silêncio: a despesa entra em "Despesas do mês"
 // e o saldo não se mexe.
 //

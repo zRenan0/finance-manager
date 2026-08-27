@@ -536,6 +536,65 @@ async function runOnboardingViewportM4(browser, scenario) {
     }
   });
 
+  // A TELA SUBIA SOZINHA ENQUANTO A PESSOA MEXIA NELA.
+  //
+  // Só o navegador de verdade prova este conserto: em Node não existe rolagem,
+  // e o defeito nascia justamente do que o navegador faz sozinho (levar a
+  // janela até o campo que recebeu foco, e recriar a folha modal no topo).
+  // Os cliques aqui são disparados por `element.click()` de propósito: o clique
+  // do Playwright rolaria o elemento para dentro da tela antes de acionar,
+  // apagando a medição.
+  await test("mexer na mesma tela não joga a rolagem para o topo", async () => {
+    const page = shared.page;
+
+    await page.evaluate(() => CofreUI.test.navigate("add"));
+    await page.waitForSelector("#tx-amount-input");
+    await page.evaluate(() => window.scrollTo(0, 240));
+    const antesDaTela = await page.evaluate(() => Math.round(window.scrollY));
+    assert(antesDaTela > 0, "a tela de lançamento não rolou; a medição não valeria nada");
+    await page.evaluate(() => document.querySelector('[data-action="select-payment"][data-value="Pix"]').click());
+    const depoisDaTela = await page.evaluate(() => Math.round(window.scrollY));
+    assert(Math.abs(depoisDaTela - antesDaTela) <= 2,
+      `a página voltou para ${depoisDaTela} depois de escolher a forma de pagamento (estava em ${antesDaTela})`);
+
+    // Editor de categoria: a folha é rolável por si, e era ela que voltava ao
+    // topo a cada escolha de ícone, cor ou grupo. O `finally` existe porque uma
+    // falha aqui deixaria a folha aberta na página compartilhada e derrubaria
+    // os testes seguintes por tabela.
+    await page.evaluate(() => CofreUI.test.navigate("categories"));
+    await page.waitForSelector("#cat-search-input");
+    await page.evaluate(() => document.querySelector('[data-action="cat-editor-open"]').click());
+    await page.waitForSelector(".modal-sheet.cat-editor");
+    try {
+      const rolou = await page.evaluate(() => {
+        const folha = document.querySelector(".modal-sheet.cat-editor");
+        folha.scrollTop = folha.scrollHeight;
+        return Math.round(folha.scrollTop);
+      });
+      assert(rolou > 0, "a folha do editor de categoria não rolou; a medição não valeria nada");
+      await page.evaluate(() => {
+        const icones = document.querySelectorAll(".cat-icon-option");
+        icones[icones.length - 1].click();
+      });
+      // A conferência espera um quadro: a âncora de rolagem do navegador (desligada
+      // em `.modal-sheet`) agia depois da troca do DOM, não durante.
+      await page.waitForTimeout(120);
+      const depoisDaFolha = await page.evaluate(() => Math.round(document.querySelector(".modal-sheet.cat-editor").scrollTop));
+      assert(Math.abs(depoisDaFolha - rolou) <= 2,
+        `a folha do editor voltou para ${depoisDaFolha} depois de escolher o ícone (estava em ${rolou})`);
+    } finally {
+      // Fechar a folha passa pelo histórico do navegador, que responde no
+      // proximo quadro. Navegar antes disso desfaria o fechamento.
+      await page.evaluate(() => {
+        const fechar = document.querySelector('[data-action="cat-editor-close"]');
+        if (fechar) fechar.click();
+      });
+      await page.waitForSelector(".modal-sheet.cat-editor", { state: "detached" });
+      await page.evaluate(() => { CofreUI.test.navigate("dashboard"); window.scrollTo(0, 0); });
+    }
+    assert(shared.pageErrors.length === 0, `erros no navegador: ${shared.pageErrors.join("; ")}`);
+  });
+
   await test("320, 390, 768, 1440, zoom de 200% e temas não quebram a página", async () => {
     const page = shared.page;
     await page.evaluate(() => CofreUI.test.navigate("dashboard"));

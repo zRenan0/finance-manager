@@ -153,6 +153,34 @@ function resolveOppositeTransferTransaction(transaction, transactions, options) 
   };
 }
 
+// A tela de conversão e a gravação precisam enxergar exatamente a mesma outra
+// ponta, senão o editor promete substituir dois lançamentos e a gravação
+// substitui um. Esta função monta a âncora com os valores em edição e devolve a
+// resolução crua; quem chama decide entre sugerir, exigir escolha ou recusar.
+function resolveTransferConversionCounterpart(transaction, transactions, draft) {
+  const source = transaction || {};
+  const input = draft || {};
+  const fromAccountId = input.fromAccountId || "";
+  const toAccountId = input.toAccountId || "";
+  const anchor = {
+    ...source,
+    amount: input.amount == null ? source.amount : input.amount,
+    date: input.date == null ? source.date : input.date,
+    description: input.description == null ? source.description : input.description,
+  };
+  // A conta do lançamento tem de continuar do lado que o tipo dele indica: uma
+  // saída pertence à origem, uma entrada ao destino. Com a direção invertida, o
+  // que existe do outro lado não é a contraparte deste lançamento.
+  const linkedSideMatches = source.type === "expense"
+    ? fromAccountId === source.accountId
+    : toAccountId === source.accountId;
+  const otherAccountId = fromAccountId === source.accountId
+    ? toAccountId
+    : (toAccountId === source.accountId ? fromAccountId : "");
+  if (!linkedSideMatches || !otherAccountId) return { status: "none", matches: [], transaction: null };
+  return resolveOppositeTransferTransaction(anchor, transactions, { otherAccountId });
+}
+
 // A segunda importação não procura outra transação: procura um registro de
 // transferência que já representa justamente aquela ponta. O sinal da linha
 // informa de que lado a conta do extrato deve aparecer.

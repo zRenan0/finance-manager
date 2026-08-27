@@ -399,7 +399,7 @@ const CloudSync = (() => {
     // `trustRemoteOnTie` vale SÓ dentro de uma reconciliação, e é o que a torna
     // capaz de reparar. O defeito que ela conserta produz registros com a MESMA
     // marca e conteúdos diferentes em dois aparelhos; entre marcas iguais o
-    // ciclo comum não tem como escolher, e não deve mesmo — ali um empate é o
+    // ciclo comum não tem como escolher, e não deve mesmo: ali um empate é o
     // eco do que este aparelho acabou de enviar. Numa releitura explícita do
     // zero a resposta é outra: para uma marca que este aparelho não autorou,
     // quem tem a versão boa é o servidor.

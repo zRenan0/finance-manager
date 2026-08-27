@@ -15,6 +15,9 @@ function freshTxForm() {
     source: "manual", origin: null,
     accountId: firstAccount ? firstAccount.id : "",
     creditCardId: firstCard ? firstCard.id : "",
+    // Só têm uso na conversão de um lançamento já gravado em transferência,
+    // mas nascem aqui para o formulário ter sempre a mesma forma.
+    transferFromAccountId: "", transferToAccountId: "", transferCounterpartId: "",
   };
 }
 
@@ -711,7 +714,15 @@ function restoreFocus(key, selStart, selEnd) {
   // próprio botão que foi acionado. Aí não há para onde voltar, e insistir num
   // vizinho seria pior do que deixar o navegador seguir a ordem natural.
   if (!el || typeof el.focus !== "function") return;
-  el.focus();
+  // O FOCO ERA O QUE JOGAVA A TELA PARA CIMA.
+  //
+  // `render()` recria o campo e devolve o foco a ele. Sem `preventScroll`, o
+  // navegador leva a janela (e a folha modal) até o elemento recém-criado, que
+  // no DOM novo está em outra posição: a pessoa digitava uma letra no editor de
+  // categoria e a tela saltava. Navegador antigo ignora o objeto de opções e
+  // lança; nesse caso o foco comum ainda vale, e a rolagem guardada é reposta
+  // logo depois, em render().
+  try { el.focus({ preventScroll: true }); } catch (e) { el.focus(); }
   // `setSelectionRange` lança em input[type=number]; o try/catch mantém o foco
   // mesmo quando o cursor não pode ser reposicionado.
   if (selStart != null && el.setSelectionRange) {
@@ -755,15 +766,82 @@ function systemThemePreference() {
   return null;
 }
 
+// A MESMA TELA REDESENHADA NÃO PODE VOLTAR PARA O TOPO.
+//
+// Um redesenho só tem direito de herdar a rolagem quando continua sendo A MESMA
+// coisa na tela: mesma aba, mesma camada aberta, mesmo passo do assistente,
+// mesmo editor. Trocar de aba, abrir ou fechar uma folha e avançar o onboarding
+// são justamente os momentos em que começar do topo é o certo, e por isso cada
+// um deles entra nesta chave.
+function renderSurfaceKey() {
+  const onboarding = state.onboarding && state.onboarding.open ? `onb:${state.onboarding.step}` : "";
+  const editor = state.categoriesUi && state.categoriesUi.editor
+    ? `cat-editor:${state.categoriesUi.editor.id || "novo"}`
+    : "";
+  return [
+    state.booting ? "booting" : "app",
+    onboarding || `tab:${state.tab}`,
+    `ov:${(state.overlayStack || []).join(">")}`,
+    state.confirmation ? "confirm" : "",
+    state.categoryPickerFor ? `cat-picker:${state.categoryPickerFor}` : "",
+    editor,
+    state.calculationDetail ? "calc" : "",
+    state.editingTxId ? `tx:${state.editingTxId}` : "",
+  ].join("|");
+}
+
+// Chave do que está DESENHADO agora. O estado já mudou quando `render()` roda
+// (quem tratou o clique mexeu nele antes de pedir o desenho), então comparar o
+// estado com ele mesmo diria sempre "é a mesma tela".
+let __superficieDesenhada = null;
+
+function scrollSheetElement() {
+  return typeof document.querySelector === "function" ? document.querySelector(".modal-sheet") : null;
+}
+
+function captureScrollSnapshot() {
+  const sheet = scrollSheetElement();
+  return {
+    x: typeof window.scrollX === "number" ? window.scrollX : 0,
+    y: typeof window.scrollY === "number" ? window.scrollY : 0,
+    // A folha modal é rolável por si; recriada, ela nasce no topo mesmo que a
+    // janela atrás dela não tenha se mexido.
+    sheetTop: sheet && typeof sheet.scrollTop === "number" ? sheet.scrollTop : null,
+  };
+}
+
+function restoreScrollSnapshot(snapshot) {
+  if (!snapshot) return;
+  if ((snapshot.x || snapshot.y) && typeof window.scrollTo === "function") {
+    try { window.scrollTo(snapshot.x, snapshot.y); } catch (e) { /* navegador sem scrollTo programático */ }
+  }
+  if (snapshot.sheetTop) {
+    const sheet = scrollSheetElement();
+    if (sheet && typeof sheet.scrollTop === "number") sheet.scrollTop = snapshot.sheetTop;
+  }
+}
+
 function render() {
   const root = document.getElementById("app");
   const active = document.activeElement;
   const focusKey = focusKeyOf(active);
   const selStart = active && "selectionStart" in active ? active.selectionStart : null;
   const selEnd = active && "selectionStart" in active ? active.selectionEnd : null;
+  const surfaceKey = renderSurfaceKey();
+  // `revealTarget` é rolagem pedida de propósito (o formulário que abre longe do
+  // botão). Herdar a posição antiga desfaria exatamente o que ela existe para
+  // fazer.
+  const snapshot = __superficieDesenhada === surfaceKey && !state.revealTarget
+    ? captureScrollSnapshot()
+    : null;
   applyTheme(state.data.theme);
   root.innerHTML = renderShell();
+  restoreScrollSnapshot(snapshot);
   restoreFocus(focusKey, selStart, selEnd);
+  // De novo depois do foco: num navegador sem `preventScroll` o `catch` acima
+  // rola a página até o campo, e é esta segunda reposição que segura a tela.
+  restoreScrollSnapshot(snapshot);
+  __superficieDesenhada = surfaceKey;
   afterRender();
 }
 
@@ -1646,6 +1724,24 @@ function onChange(e) {
     return;
   }
   if (actionSelect === "tx-account") { state.form.accountId = e.target.value; patchSubmitButton(); return; }
+  // Trocar uma das pontas invalida a outra ponta escolhida antes: a candidata
+  // de agora pode nem existir mais entre as contas novas, e manter a escolha
+  // antiga faria a tela prometer substituir um lançamento que não corresponde.
+  if (actionSelect === "tx-transfer-from") {
+    state.form.transferFromAccountId = e.target.value;
+    if (state.form.transferToAccountId === e.target.value) state.form.transferToAccountId = "";
+    state.form.transferCounterpartId = "";
+    render();
+    return;
+  }
+  if (actionSelect === "tx-transfer-to") {
+    state.form.transferToAccountId = e.target.value;
+    if (state.form.transferFromAccountId === e.target.value) state.form.transferFromAccountId = "";
+    state.form.transferCounterpartId = "";
+    render();
+    return;
+  }
+  if (actionSelect === "tx-transfer-counterpart") { state.form.transferCounterpartId = e.target.value; render(); return; }
   if (actionSelect === "tx-card") { state.form.creditCardId = e.target.value; patchSubmitButton(); return; }
   if (actionSelect === "account-type" && state.accountsUi.accountForm) { state.accountsUi.accountForm.type = e.target.value; return; }
   if (actionSelect === "card-account" && state.accountsUi.cardForm) { state.accountsUi.cardForm.accountId = e.target.value; return; }

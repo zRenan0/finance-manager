@@ -297,8 +297,7 @@ const espera = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     a.run("CloudSync.disable()");
   }
 
-  console.log("
-6. O lançamento que desce antes da conta não perde o vínculo");
+  console.log("\n6. O lançamento que desce antes da conta não perde o vínculo");
   {
     const servidor = servidorFalso();
     // O servidor já tem os lançamentos apontando para a conta do banco, mas a
@@ -341,8 +340,7 @@ const espera = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     b.run("CloudSync.disable()");
   }
 
-  console.log("
-7. Reparo de registro com marca empatada e conteúdo diferente");
+  console.log("\n7. Reparo de registro com marca empatada e conteúdo diferente");
   {
     const servidor = servidorFalso();
     const REV = "000001760000000.000001.device-aparelho-b02";

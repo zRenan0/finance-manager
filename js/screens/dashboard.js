@@ -240,7 +240,7 @@ function renderHeroCard(m) {
           Lançamento anterior à abertura da conta fica fora do saldo de
           propósito: o saldo inicial já embute o que veio antes dele. Só que ele
           continua entrando em "Despesas do mês", logo acima, e o painel passava
-          a se contradizer em silêncio — a despesa aparecia e o saldo não se
+          a se contradizer em silêncio: a despesa aparecia e o saldo não se
           mexia. Dizer aqui, ao lado do número, é o que transforma isso de
           suspeita de erro em informação. */
       accounts.preOpening && accounts.preOpening.count

@@ -1878,15 +1878,15 @@ function migrate(parsed) {
     //
     // Zerar `accountId` quando a conta não está na base é saneamento correto
     // para um backup adulterado. Durante a SINCRONIZAÇÃO é destruição, e não
-    // por acaso: no vínculo do visitante a ordem é garantida — o ciclo desce
+    // por acaso: no vínculo do visitante a ordem é garantida: o ciclo desce
     // primeiro (chegam os lançamentos, apontando para a conta do banco) e só
     // depois o "juntar dados" traz a conta. Nesse intervalo TODOS eles perdiam
     // o vínculo.
     //
     // O estrago não era perder o vínculo; era o registro mutilado ser gravado
     // COM A MARCA DO SERVIDOR. A partir daí dois aparelhos carregavam a mesma
-    // marca com conteúdos diferentes, e a comparação de marcas — que é toda a
-    // defesa do protocolo — não enxerga: `>` é falso entre iguais. Cada um
+    // marca com conteúdos diferentes, e a comparação de marcas, que é toda a
+    // defesa do protocolo, não enxerga: `>` é falso entre iguais. Cada um
     // mostrava um saldo, os dois diziam "Tudo sincronizado", nenhum tinha o que
     // enviar, e nada no funcionamento normal desfazia isso.
     //
