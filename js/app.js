@@ -1038,6 +1038,45 @@ function applyQrDraftToForm(draft) {
   state.editingTxId = null;
 }
 
+// OS DOIS CAMPOS DE ARQUIVO NÃO PODEM MORAR DENTRO DE `#app`.
+//
+// `render()` refaz `#app` inteiro por `innerHTML`, e enquanto o seletor de
+// arquivos está aberto o aplicativo continua vivo. No iPhone isso é regra, não
+// exceção: o Safari congela temporizadores e sincronização ao abrir o app
+// Arquivos e solta tudo de uma vez quando a pessoa volta com o extrato
+// escolhido — o toast que ia sumir, o relógio da nuvem, a revalidação da
+// sessão. Qualquer um deles redesenha, e o `<input>` que abriu o seletor deixa
+// de existir. O `change` então chega num nó solto, não sobe até `#app`, e a
+// tela não muda: dá para escolher o extrato e não acontece absolutamente nada,
+// que é o defeito relatado.
+//
+// Fora de `#app` o campo é criado uma vez e nenhum `render()` o alcança. O
+// `change` é ouvido no próprio grupo em vez de por delegação, pelo mesmo
+// motivo. Continuam invisíveis e fora da leitura de tela: quem tem rótulo de
+// verdade é o botão de restaurar backup e a área de soltar do importador.
+let __fileInputsHost = null;
+
+function ensureFileInputs() {
+  if (__fileInputsHost && __fileInputsHost.isConnected) return __fileInputsHost;
+  const host = document.createElement("div");
+  host.id = "file-inputs";
+  host.innerHTML = `
+    <input type="file" id="import-file-input" class="file-input-offscreen" tabindex="-1" aria-hidden="true" accept="application/json,.json" />
+    <input type="file" id="statement-file-input" class="file-input-offscreen" tabindex="-1" aria-hidden="true"${statementAcceptAttr()} />`;
+  document.body.appendChild(host);
+  host.addEventListener("change", onChange);
+  __fileInputsHost = host;
+  return host;
+}
+
+// Ponto único para abrir um dos dois seletores. Garantir o campo aqui, e não só
+// na partida, evita o `TypeError` de clicar em `null` se a ordem de carga mudar.
+function openFilePicker(id) {
+  const host = ensureFileInputs();
+  const input = host.querySelector(`#${id}`);
+  if (input) input.click();
+}
+
 // Importação 100% offline: lê, decodifica, parseia e categoriza no navegador.
 // Qualquer falha vira um erro visual explicativo na própria tela de importação.
 async function handleStatementFile(file, password) {
@@ -1141,8 +1180,6 @@ function renderShell() {
     ${renderCelebrationOverlay()}
     <div class="sr-live" role="status" aria-live="polite" aria-atomic="true">${state.toast ? escapeHtml(state.toast) : ""}</div>
     ${state.toast ? `<div class="toast ${state.toastTone ? `toast--${state.toastTone}` : ""}" aria-hidden="true">${svgIcon(state.toastTone === "danger" || state.toastTone === "warn" ? "alertTriangle" : "checkCircle", 16)}<span>${escapeHtml(state.toast)}</span></div>` : ""}
-    <input type="file" id="import-file-input" class="file-input-offscreen" tabindex="-1" aria-hidden="true" accept="application/json,.json" />
-    <input type="file" id="statement-file-input" class="file-input-offscreen" tabindex="-1" aria-hidden="true"${statementAcceptAttr()} />
     ${state.qr.open ? renderQrModal() : ""}
     ${state.wrapped.open ? renderWrappedModal() : ""}
     ${state.categoryPickerFor ? renderCategoryPickerModal() : ""}
@@ -2217,6 +2254,11 @@ async function init() {
   // precisa redesenhar com o que chegou. Sem isto, a aba parada continuaria
   // mostrando (e regravando) uma base que já não existe.
   FinanceStore.onOtherTabWrite((data) => { setDataFromRemote(data); });
+
+  // Os campos de arquivo ficam FORA de `#app` e ouvem o próprio `change`; ver
+  // `ensureFileInputs`. Criá-los aqui deixa a árvore pronta antes do primeiro
+  // desenho, inclusive para os testes de navegador, que os procuram por id.
+  ensureFileInputs();
 
   root.addEventListener("click", onClick);
   root.addEventListener("input", onInput);

@@ -1888,7 +1888,7 @@ function onClick(e) {
     case "export-statement-pdf": exportStatementPdf(); break;
     case "export-budgets-csv": exportBudgetsCsv(); break;
     case "export-json": exportBackupJson(); break;
-    case "import-json-trigger": document.getElementById("import-file-input").click(); break;
+    case "import-json-trigger": openFilePicker("import-file-input"); break;
     case "backup-set-mode": state.backup.mode = value; render(); break;
     case "backup-cancel": state.backup = { preview: null, error: null, mode: "merge", busy: false, undoAvailable: state.backup.undoAvailable }; render(); break;
     case "backup-confirm": confirmBackupRestore(); break;
@@ -1952,7 +1952,7 @@ function onClick(e) {
     case "ai-preview-toggle-json": state.aiPreview = { ...state.aiPreview, showJson: !state.aiPreview.showJson }; break;
 
     // ---- Importador de extratos ----
-    case "statement-dropzone-click": document.getElementById("statement-file-input").click(); break;
+    case "statement-dropzone-click": openFilePicker("statement-file-input"); break;
     case "import-toggle": {
       const idx = Number(id);
       if (state.importRows && state.importRows[idx]) {

@@ -2,6 +2,26 @@
 
 ## Não publicado
 
+### Escolher o extrato no iPhone não fazia nada
+
+- **O campo de arquivo era destruído no meio da escolha.** `render()` refaz
+  `#app` inteiro por `innerHTML`, e os dois `<input type="file">` moravam lá
+  dentro. Enquanto o app Arquivos está na frente o aplicativo continua vivo: o
+  Safari do iPhone congela temporizadores e sincronização e solta tudo de uma vez
+  na volta — o toast que ia sumir, o relógio da nuvem, a revalidação da sessão.
+  Qualquer um deles redesenha, e o campo que abriu o seletor deixa de existir.
+  O `change` então chegava num nó solto, não subia até `#app`, e a tela não
+  mudava: dava para escolher o extrato (PDF, OFX ou CSV) e não acontecia nada.
+- **Os dois campos passaram a morar fora de `#app`.** `ensureFileInputs()` cria o
+  par uma vez, na partida, e nenhum `render()` o alcança; o `change` é ouvido no
+  próprio grupo, não por delegação em `#app`. Vale para o extrato e para a
+  restauração de backup, que tinham o mesmo defeito. `openFilePicker()` virou o
+  único caminho para abrir os dois, no lugar de dois `getElementById(...).click()`
+  que estouravam em `null` se o campo ainda não existisse.
+- **Um teste de navegador cobre a volta do seletor**: o campo tem de ser o MESMO
+  nó antes e depois de uma rajada de redesenhos, e o extrato entregue depois dela
+  ainda precisa abrir a conferência.
+
 ### Não dava para importar extrato pelo Safari do iPhone
 
 - **O `accept` do campo de arquivo virava uma restrição cega no iOS.** iPhone e

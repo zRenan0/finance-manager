@@ -87,7 +87,10 @@
    não abre o seletor de um campo que saiu do layout — tocar a área de soltar
    não fazia nada. Aqui o campo continua no layout, com 1px e invisível. Fora
    da leitura de tela quem cuida é o HTML (`aria-hidden` + `tabindex="-1"`),
-   porque o rótulo de verdade está no elemento que aciona o campo. */
+   porque o rótulo de verdade está no elemento que aciona o campo.
+   Os dois campos moram FORA de `#app`, num grupo criado uma vez por
+   `ensureFileInputs()` (js/app.js): `render()` refaz `#app` inteiro e destruiria
+   o campo enquanto o seletor está aberto. */
 .file-input-offscreen {
   position: absolute; width: 1px; height: 1px;
   margin: -1px; padding: 0; border: 0; overflow: hidden;

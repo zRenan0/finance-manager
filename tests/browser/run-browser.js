@@ -687,6 +687,52 @@ async function runOnboardingViewportM4(browser, scenario) {
     assert(shared.pageErrors.length === 0, `erros no navegador: ${shared.pageErrors.join("; ")}`);
   });
 
+  // O EXTRATO PRECISA ENTRAR MESMO QUE O APP REDESENHE COM O SELETOR ABERTO.
+  //
+  // No iPhone o Safari congela temporizadores e sincronização enquanto o app
+  // Arquivos está na frente e solta tudo de uma vez na volta. Se o `<input>`
+  // morar dentro de `#app`, esse redesenho o destrói e o `change` chega num nó
+  // solto: dava para escolher o extrato e a tela não mudava. Só o navegador de
+  // verdade prova o conserto, porque o que importa é o campo ser o MESMO nó
+  // antes e depois do redesenho.
+  await test("o extrato entra mesmo com o app redesenhando durante a escolha", async () => {
+    const page = shared.page;
+    await page.evaluate(() => CofreUI.test.navigate("import"));
+    await page.waitForSelector("#statement-file-input", { state: "attached" });
+
+    const campo = await page.evaluate(async () => {
+      const antes = document.getElementById("statement-file-input");
+      const foraDoApp = !!antes && !antes.closest("#app");
+      // A rajada de redesenhos que a volta do seletor provoca no iPhone.
+      CofreUI.test.navigate("dashboard");
+      CofreUI.test.navigate("analytics");
+      CofreUI.test.navigate("import");
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      const depois = document.getElementById("statement-file-input");
+      return { foraDoApp, mesmoNo: antes === depois && antes.isConnected };
+    });
+    assert(campo.foraDoApp, "o campo de arquivo voltou para dentro de #app e será destruído por render()");
+    assert(campo.mesmoNo, "o campo de arquivo não sobreviveu ao redesenho; o change chegaria num nó solto");
+
+    await page.setInputFiles("#statement-file-input", {
+      name: "extrato-volta.csv",
+      mimeType: "text/csv",
+      buffer: Buffer.from([
+        "data;descricao;valor",
+        "02/08/2026;PIX ENVIADO JOAO DA SILVA;-150,00",
+        "05/08/2026;SALARIO AGOSTO;3200,00",
+      ].join("\n"), "utf8"),
+    });
+    await page.waitForSelector(".import-row");
+    const linhas = await page.locator(".import-row").count();
+    assert(linhas === 2, `o extrato deveria abrir com 2 linhas, veio com ${linhas}`);
+
+    await page.evaluate(() => document.querySelector('[data-action="import-cancel"]').click());
+    await page.waitForSelector(".import-row", { state: "detached" });
+    await page.evaluate(() => CofreUI.test.navigate("dashboard"));
+    assert(shared.pageErrors.length === 0, `erros no navegador: ${shared.pageErrors.join("; ")}`);
+  });
+
   await test("320, 390, 768, 1440, zoom de 200% e temas não quebram a página", async () => {
     const page = shared.page;
     await page.evaluate(() => CofreUI.test.navigate("dashboard"));
