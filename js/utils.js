@@ -410,13 +410,49 @@ function resampleSeries(series, targetPoints = 60) {
   return out;
 }
 
+// O ATRIBUTO `download` NÃO EXISTE NO IOS, E NO APP INSTALADO ISSO É SILÊNCIO.
+//
+// Todo o "Exportar" do aplicativo passa por aqui: backup em JSON, lançamentos e
+// orçamentos em CSV, extrato em PDF e o diagnóstico. A âncora com `download` é o
+// caminho de sempre e funciona em computador e Android. No iPhone, não: o Safari
+// ignora o atributo. Aberto no navegador o estrago é meio invisível (o arquivo
+// abre na própria aba, como texto cru); INSTALADO na tela de início não há aba
+// para onde abrir, e tocar em "Backup completo (JSON)" não faz nada. Nenhum
+// erro, nenhum aviso — a pessoa conclui que o botão está quebrado, e está.
+//
+// O caminho que o iOS oferece é o painel de compartilhamento, com "Salvar em
+// Arquivos" dentro dele. Ele exige gesto da pessoa, e todos os exportadores são
+// síncronos do clique até aqui, então o gesto chega inteiro.
 function downloadFile(filename, content, mime) {
   const blob = new Blob([content], { type: mime });
+  if (shareFileOnAppleTouch(blob, filename, mime)) return;
+  saveBlobByAnchor(blob, filename);
+}
+
+function saveBlobByAnchor(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url; a.download = filename; document.body.appendChild(a); a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// Devolve `true` quando assumiu a entrega do arquivo. A decisão é SÍNCRONA de
+// propósito: `navigator.share` só é aceito enquanto o gesto do clique vale, e
+// qualquer `await` antes dele perderia essa janela.
+function shareFileOnAppleTouch(blob, filename, mime) {
+  if (!isAppleTouchBrowser()) return false;
+  if (typeof File !== "function" || !navigator.share || !navigator.canShare) return false;
+  let file;
+  try { file = new File([blob], filename, { type: mime }); } catch (e) { return false; }
+  try { if (!navigator.canShare({ files: [file] })) return false; } catch (e) { return false; }
+  navigator.share({ files: [file] }).catch((error) => {
+    // Fechar o painel é decisão da pessoa, não falha: repetir a entrega aqui
+    // reabriria o que ela acabou de dispensar.
+    if (error && error.name === "AbortError") return;
+    saveBlobByAnchor(blob, filename);
+  });
+  return true;
 }
 
 // iPhone e iPad (e o Safari de Mac com tela sensível ao toque, que se anuncia

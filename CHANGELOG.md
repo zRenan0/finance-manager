@@ -2,6 +2,51 @@
 
 ## Não publicado
 
+### O app instalado na tela de início não era o mesmo app
+
+Adicionado à tela de início, o Cofre deixa de ter navegador em volta. Não havia
+uma linha sequer tratando esse caso — nenhum `display-mode: standalone`, nenhum
+`navigator.standalone` — e três coisas quebravam de uma vez.
+
+- **A barra de status ficava ilegível no tema claro.** O `index.html` pedia
+  `apple-mobile-web-app-status-bar-style: black-translucent`, que entrega a tela
+  inteira ao app e, em troca, pinta relógio, sinal e bateria SEMPRE de branco. O
+  papel do tema claro é `#EFF2F0`: branco em cima de branco. Agora o valor é
+  `default`, e o iOS volta a reservar e pintar a faixa, escolhendo a cor do texto
+  que dá para ler. No Safari nada disso aparecia, porque quem desenhava a barra
+  era o navegador.
+- **A cor da faixa seguia o sistema, não o tema escolhido.** Eram duas etiquetas
+  `theme-color` presas a `prefers-color-scheme`, mas o tema do app é escolha da
+  pessoa e mora no localStorage: aparelho no escuro com app no claro recebia a
+  cor errada. Agora é uma etiqueta só, escrita por `js/boot.js` antes da primeira
+  pintura e mantida por `applyTheme()` a partir do próprio `--paper`.
+- **Deitado, o entalhe comia a primeira coluna de texto.** O iOS ignora o
+  `orientation` do manifesto para app de tela de início, então o aplicativo gira;
+  e o CSS não usava `safe-area-inset-left/right` em lugar nenhum. `.main-content`
+  e o atalho de pular passaram a respeitar as duas faixas laterais.
+
+- **Os quatro `env(safe-area-inset-*)` viraram os tokens `--sa-top/bottom/left/right`.**
+  Eram onze chamadas espalhadas por seis folhas, e nenhuma podia ser testada:
+  `env()` não se sobrescreve, então o layout do aparelho com entalhe era
+  impossível de simular fora do aparelho. Com o nome no meio do caminho, um teste
+  de navegador novo troca os quatro e confere as bordas em pé e deitado.
+
+### Exportar não fazia nada no iPhone
+
+- **`<a download>` não existe no iOS, e no app instalado isso vira silêncio.**
+  Backup em JSON, lançamentos e orçamentos em CSV, extrato em PDF e o
+  diagnóstico: todos passam por `downloadFile()`, que criava uma âncora com o
+  atributo `download`. O Safari ignora esse atributo. Aberto no navegador o
+  estrago era meio invisível (o arquivo abria na própria aba, como texto cru);
+  instalado, não há aba para onde abrir, e tocar em "Backup completo (JSON)" não
+  fazia absolutamente nada — sem erro, sem aviso.
+- **No iOS a entrega passa pelo painel de compartilhamento**, que é onde mora o
+  "Salvar em Arquivos". A escolha do caminho é síncrona de propósito:
+  `navigator.share` só vale enquanto o gesto do toque vale, e todos os
+  exportadores são síncronos do clique até ali. Fechar o painel não é falha e não
+  refaz a entrega; falha de verdade e aparelho sem suporte caem na âncora de
+  sempre. Em computador e Android nada muda.
+
 ### Escolher o extrato no iPhone não fazia nada
 
 - **O campo de arquivo era destruído no meio da escolha.** `render()` refaz

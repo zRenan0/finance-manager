@@ -58,6 +58,25 @@
 }
 
 :root {
+  /* --- Bordas seguras do aparelho ---
+     Um nome só para cada `env(safe-area-inset-*)`, em vez de onze chamadas
+     espalhadas por seis folhas. Vale por dois motivos.
+
+     O primeiro é o app INSTALADO na tela de início. No Safari o navegador
+     ocupa o entalhe e a barra inferior por conta própria, e os recuos chegam
+     quase sempre zerados; instalado, o app recebe a tela inteira e passa a
+     ser o único responsável por não escrever embaixo do relógio nem do risco
+     de arrastar. Um valor esquecido só aparece lá, no aparelho de alguém.
+
+     O segundo é poder TESTAR isso. `env()` não se sobrescreve, então o
+     layout do aparelho com entalhe era impossível de simular no computador.
+     Com os nomes no meio do caminho, basta redefinir os quatro para ver a
+     tela do iPhone instalada em qualquer navegador. */
+  --sa-top:    env(safe-area-inset-top, 0px);
+  --sa-bottom: env(safe-area-inset-bottom, 0px);
+  --sa-left:   env(safe-area-inset-left, 0px);
+  --sa-right:  env(safe-area-inset-right, 0px);
+
   /* --- Tinta e papel --- */
   --ink:         #0B1512;
   --ink-soft:    #55655F;
@@ -162,7 +181,7 @@
   --gap:     14px;
   /* No toque, o FAB cresce para 44px e leva a doca a 90px. Os 9px entre a
      doca e a borda também fazem parte da área que nada pode ocupar. */
-  --nav-h:   calc(100px + env(safe-area-inset-bottom, 0px));
+  --nav-h:   calc(100px + var(--sa-bottom, 0px));
   --side-w:  240px;
 
   /* --- Movimento --- */
@@ -356,7 +375,16 @@ a { color: inherit; }
    3. LAYOUT
    ================================================================== */
 .main-content {
-  padding-top: env(safe-area-inset-top, 10px);
+  padding-top: var(--sa-top, 0px);
+  /* DEITADO, O ENTALHE COME A LATERAL.
+     O iOS ignora o `orientation` do manifesto para app de tela de início, então
+     o aplicativo instalado gira. Deitado num iPhone com entalhe, a faixa da
+     câmera avança 59px sobre um dos lados e a barra inferior sobre o outro; sem
+     estes recuos o texto da primeira coluna passava por baixo do entalhe. No
+     Safari o navegador ocupa essas faixas com a barra dele e o defeito não
+     aparece, o que é justamente por que ele só foi notado depois de instalar. */
+  padding-left: var(--sa-left, 0px);
+  padding-right: var(--sa-right, 0px);
   /* A tela já deixa 30px depois do último bloco. Somados a estes 40px, eles
      passam os 66px ocupados pelo vão e pelo lançador acima da doca. */
   padding-bottom: calc(var(--nav-h) + 40px);

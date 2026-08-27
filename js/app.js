@@ -767,6 +767,17 @@ const THEME_KEY = "financas_theme";
 function applyTheme(theme) {
   const t = theme === "dark" ? "dark" : "light";
   document.documentElement.setAttribute("data-theme", t);
+  // A faixa da barra de status do app instalado é pintada por esta etiqueta, e
+  // o tema é escolha da pessoa, não do sistema (ver js/boot.js, que a escreve
+  // antes da primeira pintura). Aqui a folha já existe, então a cor vem do
+  // próprio `--paper` em vez de um segundo lugar para esquecer de atualizar.
+  const meta = document.querySelector('meta[name="theme-color"]');
+  // `getComputedStyle` é conferido porque o DOM mínimo dos testes em Node não o
+  // tem, e uma cor de barra de status não vale derrubar a suíte inteira.
+  if (meta && typeof getComputedStyle === "function") {
+    const paper = getComputedStyle(document.documentElement).getPropertyValue("--paper").trim();
+    if (paper) meta.setAttribute("content", paper);
+  }
   try { localStorage.setItem(THEME_KEY, t); } catch (e) { /* modo anônimo: sem persistência */ }
 }
 

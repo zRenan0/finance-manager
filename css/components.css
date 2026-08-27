@@ -697,7 +697,7 @@
   background: var(--surface-raised);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-xl) var(--radius-xl) 0 0;
-  padding: 22px 20px calc(22px + env(safe-area-inset-bottom));
+  padding: 22px 20px calc(22px + var(--sa-bottom, 0px));
   width: 100%; max-width: 540px; max-height: 88vh; overflow-y: auto;
   box-shadow: var(--shadow-lg);
 }
@@ -1229,7 +1229,7 @@
        Com `auto`, a coluna ocupa exatamente o espaço que sobra. */
     width: auto;
     padding-bottom: 44px;
-    padding-top: env(safe-area-inset-top, 0px);
+    padding-top: var(--sa-top, 0px);
   }
   .bottom-nav { display: none; }
 
@@ -1326,7 +1326,7 @@
   .modal-sheet {
     border-radius: var(--radius-xl) var(--radius-xl) 0 0;
     max-height: 92dvh;
-    padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(20px + var(--sa-bottom, 0px));
   }
   .modal-actions { flex-direction: column-reverse; }
   .modal-actions .btn { width: 100%; }

@@ -47,10 +47,10 @@
 /* Atalho para saltar a navegação. Invisível até receber foco pelo
    teclado; a primeira Tab da página revela o botão. */
 .skip-link {
-  position: fixed; left: 10px; z-index: 999;
+  position: fixed; left: calc(10px + var(--sa-left, 0px)); z-index: 999;
   /* Instalado como app, a pagina vai por baixo da barra de status. Sem o
      recuo, o atalho aparecia por cima do relogio e do sinal. */
-  top: calc(10px + env(safe-area-inset-top, 0px));
+  top: calc(10px + var(--sa-top, 0px));
   transform: translateY(-260%);
   padding: 11px 17px; border-radius: var(--radius-sm);
   /* `--brand-solid` e não `--brand`: no tema escuro a marca clareia para
@@ -363,7 +363,7 @@
 .celebrate-card {
   position: relative; overflow: hidden;
   width: min(400px, 100%); text-align: center; color: #fff;
-  padding: 30px 24px calc(24px + env(safe-area-inset-bottom, 0px));
+  padding: 30px 24px calc(24px + var(--sa-bottom, 0px));
   border-radius: var(--radius-lg);
   background:
     radial-gradient(120% 130% at 50% -10%, color-mix(in srgb, var(--brand-glow) 55%, transparent), transparent 60%),

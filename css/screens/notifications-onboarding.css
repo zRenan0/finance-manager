@@ -119,8 +119,8 @@
    então nada aqui herda espaçamento de `.screen` nem da barra inferior.
    ================================================================== */
 .onb {
-  --onb-inset-top: max(16px, env(safe-area-inset-top, 0px));
-  --onb-inset-bottom: max(16px, env(safe-area-inset-bottom, 0px));
+  --onb-inset-top: max(16px, var(--sa-top, 0px));
+  --onb-inset-bottom: max(16px, var(--sa-bottom, 0px));
   position: fixed; inset: 0; z-index: 90;
   display: flex; align-items: center; justify-content: center;
   height: 100vh;

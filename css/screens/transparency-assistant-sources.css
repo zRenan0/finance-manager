@@ -32,7 +32,7 @@
 .calculation-legend svg { flex:0 0 auto; margin-top:2px; }
 
 .assistant-launcher {
-  position:fixed; right:max(18px,env(safe-area-inset-right)); bottom:calc(var(--nav-h) + 18px); z-index:35;
+  position:fixed; right:max(18px,var(--sa-right, 0px)); bottom:calc(var(--nav-h) + 18px); z-index:35;
   min-height:48px; display:flex; align-items:center; gap:8px; padding:0 16px; border-radius:999px;
   color:#fff; background:linear-gradient(145deg,var(--brand),var(--brand-dark)); box-shadow:var(--shadow-lg),var(--shadow-brand); font-size:12px; font-weight:750;
 }

@@ -733,6 +733,116 @@ async function runOnboardingViewportM4(browser, scenario) {
     assert(shared.pageErrors.length === 0, `erros no navegador: ${shared.pageErrors.join("; ")}`);
   });
 
+  // O APP INSTALADO NA TELA DE INÍCIO RECEBE A TELA INTEIRA.
+  //
+  // No Safari o navegador ocupa o entalhe, a barra de status e a faixa do risco
+  // de arrastar com a barra dele, e `env(safe-area-inset-*)` chega quase sempre
+  // zerado. Instalado, não há barra nenhuma: o aplicativo é o único responsável
+  // por não escrever embaixo do relógio nem atrás do entalhe. Um recuo esquecido
+  // só aparece no aparelho de alguém, e foi assim que apareceu.
+  //
+  // Os quatro recuos passam por `--sa-*` (css/base.css) justamente para poderem
+  // ser trocados aqui: `env()` não se sobrescreve, e sem isso este teste não
+  // existiria.
+  await test("app instalado respeita entalhe, barra de status e risco de arrastar", async () => {
+    const page = shared.page;
+    const simular = (t, b, l, r) => page.evaluate(([top, bottom, left, right]) => {
+      let el = document.getElementById("sim-standalone");
+      if (!el) { el = document.createElement("style"); el.id = "sim-standalone"; document.head.appendChild(el); }
+      el.textContent = `:root{--sa-top:${top}px;--sa-bottom:${bottom}px;--sa-left:${left}px;--sa-right:${right}px;}`;
+    }, [t, b, l, r]);
+
+    const invasores = (ladoTop, ladoBottom, ladoLeft, ladoRight) => page.evaluate(([sTop, sBottom, sLeft, sRight]) => {
+      const H = window.innerHeight, W = window.innerWidth;
+      const fora = [];
+      document.querySelectorAll("#app *").forEach((node) => {
+        if (getComputedStyle(node).position !== "fixed") return;
+        const r = node.getBoundingClientRect();
+        if (r.height === 0 || r.width === 0) return;
+        // O atalho de pular fica estacionado ACIMA da tela até o teclado revelá-lo
+        // (`translateY(-260%)`), deixando uma sobra de poucos pixels assomando no
+        // topo. Quem está quase todo fora da viewport não disputa borda com
+        // ninguém, e medi-lo aqui só produziria falso positivo. A posição do
+        // atalho revelado é conferida logo abaixo, que é quando ela existe.
+        const visivel = Math.min(r.bottom, H) - Math.max(r.top, 0);
+        if (visivel < r.height / 2) return;
+        if (r.bottom > H - sBottom || r.top < sTop || r.left < sLeft - 1 || W - r.right < sRight - 1) {
+          fora.push(String(node.className || node.tagName).slice(0, 40));
+        }
+      });
+      const tela = document.querySelector(".main-content .screen");
+      const caixa = tela ? tela.getBoundingClientRect() : null;
+      return {
+        fixos: fora,
+        telaEsquerda: caixa ? Math.round(caixa.left) : null,
+        telaDireita: caixa ? Math.round(W - caixa.right) : null,
+        overflowX: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      };
+    }, [ladoTop, ladoBottom, ladoLeft, ladoRight]);
+
+    // Em pé: barra de status em cima, risco de arrastar embaixo.
+    await page.setViewportSize({ width: 393, height: 852 });
+    await simular(59, 34, 0, 0);
+    for (const aba of ["dashboard", "analytics", "add", "settings", "import"]) {
+      await page.evaluate((destino) => CofreUI.test.navigate(destino), aba);
+      await page.evaluate(() => window.scrollTo(0, 0));
+      const m = await invasores(59, 34, 0, 0);
+      assert(m.fixos.length === 0, `em pé, "${aba}" deixa elemento fixo na borda insegura: ${m.fixos.join(", ")}`);
+      assert(m.overflowX <= 2, `em pé, "${aba}" ganhou rolagem horizontal de ${m.overflowX}px`);
+    }
+
+    // Deitado: o entalhe come uma lateral inteira. O iOS ignora o `orientation`
+    // do manifesto para app de tela de início, então esta orientação acontece.
+    await page.setViewportSize({ width: 852, height: 393 });
+    await simular(0, 21, 59, 59);
+    for (const aba of ["dashboard", "analytics", "settings"]) {
+      await page.evaluate((destino) => CofreUI.test.navigate(destino), aba);
+      await page.evaluate(() => window.scrollTo(0, 0));
+      const m = await invasores(0, 21, 59, 59);
+      assert(m.fixos.length === 0, `deitado, "${aba}" deixa elemento fixo embaixo do entalhe: ${m.fixos.join(", ")}`);
+      assert(m.telaEsquerda === null || m.telaEsquerda >= 58, `deitado, "${aba}" começa em ${m.telaEsquerda}px e o entalhe ocupa 59px`);
+      assert(m.telaDireita === null || m.telaDireita >= 58, `deitado, "${aba}" encosta na faixa direita (${m.telaDireita}px)`);
+    }
+
+    // O atalho de pular é o primeiro elemento que o teclado revela, e ele é
+    // fixo no alto: sem recuo, aparecia por cima do relógio no app instalado.
+    await page.setViewportSize({ width: 393, height: 852 });
+    await simular(59, 34, 0, 0);
+    await page.evaluate(() => CofreUI.test.navigate("dashboard"));
+    // Tab de verdade, e não `.focus()`: o atalho só desce em `:focus-visible`
+    // (ver css/utilities.css), justamente para que encostar na tela não o revele.
+    await page.evaluate(() => document.body.focus());
+    await page.keyboard.press("Tab");
+    const atalho = await page.evaluate(() => {
+      const link = document.querySelector(".skip-link");
+      if (!link) return null;
+      const r = link.getBoundingClientRect();
+      return { top: Math.round(r.top), left: Math.round(r.left), revelado: r.top >= 0 };
+    });
+    assert(atalho && atalho.revelado, "a primeira Tab não revelou o atalho de pular");
+    assert(atalho && atalho.top >= 59, `o atalho de pular aparece em ${atalho && atalho.top}px, por cima da barra de status`);
+
+    // A faixa da barra de status do app instalado é pintada pela etiqueta
+    // `theme-color`, e o tema é escolha da pessoa, não do sistema.
+    const cores = await page.evaluate(async () => {
+      const ler = () => document.querySelector('meta[name="theme-color"]').getAttribute("content");
+      const espera = () => new Promise((r) => setTimeout(r, 60));
+      CofreUI.test.theme("light"); await espera();
+      const claro = ler();
+      CofreUI.test.theme("dark"); await espera();
+      const escuro = ler();
+      CofreUI.test.theme("light"); await espera();
+      return { claro, escuro, etiquetas: document.querySelectorAll('meta[name="theme-color"]').length };
+    });
+    assert(cores.etiquetas === 1, `deve haver uma etiqueta theme-color, há ${cores.etiquetas}`);
+    assert(cores.claro !== cores.escuro, `a cor da barra não acompanhou o tema (${cores.claro} nos dois)`);
+
+    await page.evaluate(() => document.getElementById("sim-standalone")?.remove());
+    await page.setViewportSize({ width: 390, height: 900 });
+    await page.evaluate(() => CofreUI.test.navigate("dashboard"));
+    assert(shared.pageErrors.length === 0, `erros no navegador: ${shared.pageErrors.join("; ")}`);
+  });
+
   await test("320, 390, 768, 1440, zoom de 200% e temas não quebram a página", async () => {
     const page = shared.page;
     await page.evaluate(() => CofreUI.test.navigate("dashboard"));
