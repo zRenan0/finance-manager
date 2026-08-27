@@ -422,6 +422,30 @@ function downloadFile(filename, content, mime) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+// iPhone e iPad (e o Safari de Mac com tela sensível ao toque, que se anuncia
+// como MacIntel) traduzem cada item de `accept` para um UTI do sistema antes de
+// abrir o app Arquivos. Extensão sem UTI registrado — `.ofx` é o caso — não é
+// simplesmente ignorada: o seletor desabilita tudo que não casou, e o extrato
+// aparece cinza, impossível de tocar. Quem importava pelo celular via a lista de
+// arquivos abrir e nenhum deles poder ser escolhido.
+function isAppleTouchBrowser() {
+  if (typeof navigator === "undefined") return false;
+  const ua = String(navigator.userAgent || "");
+  if (/iPhone|iPod|iPad/i.test(ua)) return true;
+  const platform = String((navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || "");
+  return platform === "MacIntel" && Number(navigator.maxTouchPoints) > 1;
+}
+
+// Formatos que o importador sabe ler. No iOS a lista vira restrição cega (ver
+// isAppleTouchBrowser), então lá o campo abre sem filtro nenhum e a validação
+// fica por conta de detectFormat(), que já decide pelo conteúdo e não pela
+// extensão. No resto dos navegadores o filtro só encurta a lista, e vale a pena.
+const STATEMENT_ACCEPT = ".ofx,.csv,.txt,.pdf,text/csv,text/plain,application/pdf";
+
+function statementAcceptAttr() {
+  return isAppleTouchBrowser() ? "" : ` accept="${STATEMENT_ACCEPT}"`;
+}
+
 // Leitura de arquivo texto com detecção de codificação (UTF-8 → windows-1252),
 // usada tanto pelo importador de extratos quanto pelo restore de backup.
 function readFileAsText(file) {
@@ -34863,8 +34887,8 @@ function renderShell() {
     ${renderCelebrationOverlay()}
     <div class="sr-live" role="status" aria-live="polite" aria-atomic="true">${state.toast ? escapeHtml(state.toast) : ""}</div>
     ${state.toast ? `<div class="toast ${state.toastTone ? `toast--${state.toastTone}` : ""}" aria-hidden="true">${svgIcon(state.toastTone === "danger" || state.toastTone === "warn" ? "alertTriangle" : "checkCircle", 16)}<span>${escapeHtml(state.toast)}</span></div>` : ""}
-    <input type="file" id="import-file-input" accept="application/json,.json" data-ui-css="display:none" />
-    <input type="file" id="statement-file-input" accept=".ofx,.csv,.pdf,.txt,text/csv,application/x-ofx,application/pdf" data-ui-css="display:none" />
+    <input type="file" id="import-file-input" class="file-input-offscreen" tabindex="-1" aria-hidden="true" accept="application/json,.json" />
+    <input type="file" id="statement-file-input" class="file-input-offscreen" tabindex="-1" aria-hidden="true"${statementAcceptAttr()} />
     ${state.qr.open ? renderQrModal() : ""}
     ${state.wrapped.open ? renderWrappedModal() : ""}
     ${state.categoryPickerFor ? renderCategoryPickerModal() : ""}

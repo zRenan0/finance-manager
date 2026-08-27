@@ -1141,8 +1141,8 @@ function renderShell() {
     ${renderCelebrationOverlay()}
     <div class="sr-live" role="status" aria-live="polite" aria-atomic="true">${state.toast ? escapeHtml(state.toast) : ""}</div>
     ${state.toast ? `<div class="toast ${state.toastTone ? `toast--${state.toastTone}` : ""}" aria-hidden="true">${svgIcon(state.toastTone === "danger" || state.toastTone === "warn" ? "alertTriangle" : "checkCircle", 16)}<span>${escapeHtml(state.toast)}</span></div>` : ""}
-    <input type="file" id="import-file-input" accept="application/json,.json" data-ui-css="display:none" />
-    <input type="file" id="statement-file-input" accept=".ofx,.csv,.pdf,.txt,text/csv,application/x-ofx,application/pdf" data-ui-css="display:none" />
+    <input type="file" id="import-file-input" class="file-input-offscreen" tabindex="-1" aria-hidden="true" accept="application/json,.json" />
+    <input type="file" id="statement-file-input" class="file-input-offscreen" tabindex="-1" aria-hidden="true"${statementAcceptAttr()} />
     ${state.qr.open ? renderQrModal() : ""}
     ${state.wrapped.open ? renderWrappedModal() : ""}
     ${state.categoryPickerFor ? renderCategoryPickerModal() : ""}

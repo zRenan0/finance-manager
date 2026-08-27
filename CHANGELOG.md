@@ -2,6 +2,26 @@
 
 ## Não publicado
 
+### Não dava para importar extrato pelo Safari do iPhone
+
+- **O `accept` do campo de arquivo virava uma restrição cega no iOS.** iPhone e
+  iPad traduzem cada item da lista para um UTI do sistema antes de abrir o app
+  Arquivos. `.ofx` e `application/x-ofx` não têm UTI registrado, e o efeito não é
+  serem ignorados: o seletor desabilita tudo que não casou. A pessoa tocava a
+  área de soltar, a lista de arquivos abria, e o extrato aparecia cinza — visível
+  e impossível de tocar.
+- **No iOS o campo agora abre sem filtro nenhum.** Quem decide se o arquivo serve
+  é `detectFormat()`, que já olhava o conteúdo e não a extensão, e as mensagens de
+  erro do importador já explicavam formato não reconhecido. Nos demais navegadores
+  a lista continua, porque lá ela só encurta o seletor. `application/x-ofx` saiu
+  de vez: não é tipo MIME registrado em lugar nenhum.
+- **O campo deixou de ser `display:none`.** O Safari do iPhone não abre o seletor
+  de um campo que saiu do layout, então mesmo com o `accept` corrigido o toque
+  podia não fazer nada. Os dois campos de arquivo (extrato e restauração de
+  backup) passaram para `.file-input-offscreen`: continuam no layout, com 1px e
+  invisíveis, e ficam fora da leitura de tela por `aria-hidden` e `tabindex="-1"`,
+  já que o rótulo de verdade está no elemento que os aciona.
+
 ### Marcar uma linha do extrato redesenhava o extrato inteiro
 
 - **A causa que faltava, e a que a pessoa sentia mais.** Marcar uma caixa, trocar
