@@ -12,12 +12,13 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 
 | Campo | Valor |
 |---|---|
-| Módulo atual | **M1 — Correções críticas de segurança** |
-| Status do M1 | **PARCIAL** — correção escrita, testada e versionada; **falta aplicar no banco** (ver M1) |
-| Módulos concluídos | M0 |
-| Próximo módulo | M2 — Auditoria de service_role e autorização |
+| Módulo atual | **M2 — Auditoria de service_role e autorização** |
+| Status do M2 | **CONCLUÍDO** — nenhuma vulnerabilidade de autorização; invariantes travados por teste |
+| Status do M1 | **PARCIAL** — falta aplicar as migrações no banco e capturar o gatilho (blocos 3 e 5) |
+| Módulos concluídos | M0, M2 (M1 parcial) |
+| Próximo módulo | M3 — RLS e princípio do menor privilégio |
 | Branch | `deploy-atualizado` (árvore limpa no início do M0) |
-| Arquivos alterados até aqui | `tests/test-security.js` (+2 blocos), este arquivo |
+| Arquivos alterados até aqui | `tests/test-security.js` (+3 blocos), `tests/test-service-role-scope.js` (novo), este arquivo. **Nenhum arquivo de produção alterado.** |
 | Migrations criadas até aqui | `20260828120000_rls_auto_enable_least_privilege.sql`, `20260828130000_rls_auto_enable_versionada.sql` |
 | Versão do app | `0.30.0` (package.json) |
 
@@ -407,6 +408,129 @@ explicitamente na migração que as cria. O gatilho é rede de segurança para o
 
 ---
 
+## M2 — Auditoria de service_role e autorização (IDOR/BOLA)
+
+### Antes (situação encontrada)
+
+O prompt supunha que endpoints privilegiados pudessem confiar num `user_id` vindo do
+cliente. **Não é o caso.** A auditoria cobriu as 12 chamadas com `service_role`, as
+4 leituras por RLS, o adaptador da Vercel e a cadeia de sessão inteira.
+
+### Inventário das 12 chamadas com `service_role`
+
+| Onde | O que faz | Como é escopada |
+|---|---|---|
+| `account.js:257` | lê aparelho (`touchDevice`) | `deviceLookupPath(userId, deviceId)` — filtra `user_id=eq.` |
+| `account.js:273` | marca atividade do aparelho | filtro por `user_id` + `secret_hash` + `revoked_at is null` |
+| `account.js:287` | lê aparelho (`authorizeDevice`) | `deviceLookupPath(userId, deviceId)` |
+| `account.js:303` | reativa aparelho e troca segredo | filtro por `user_id` e `device_id` |
+| `account.js:312` | insere aparelho | linha nasce com `user_id: userId` |
+| `account.js:560` | revoga aparelho | `user_id=eq.${session.user.id}` |
+| `account.js:594` | `rpc/cofre_purge_account` | `p_user_id: session.user.id` |
+| `sync.js:52` | lê `cofre_sync_config` | linha única `id=1`, configuração global sem dado de usuário |
+| `sync.js:182` | `rpc/cofre_apply_ops` | `p_user_id: session.user.id` |
+| `sync.js:276` | `rpc/cofre_reset_data` | `p_user_id: session.user.id` |
+| `sync.js:330` | `rpc/cofre_create_checkpoint` | `p_user_id: session.user.id` |
+| `rate-limit.js:94` | `rpc/cofre_rate_hit` | identidade já em HMAC-SHA256, sem id de usuário |
+
+Mais `supabase-rest.js:180` (`auth/v1/admin/users/<id>`), chamada em um único ponto e
+sempre com `session.user.id`.
+
+**`p_user_id` aparece 4 vezes no backend inteiro e é `session.user.id` nas 4.**
+`body.userId`, `body.user_id` e `body.accountId` não existem no backend.
+
+### A cadeia de identidade
+
+`sessionOf` chama `api.auth.user(token)` — ou seja, `GET /auth/v1/user` no Supabase,
+que **confere a assinatura do JWT**. A identidade não é decodificada aqui.
+
+`jwtSubjectOf` decodifica sem verificar, mas só é usado em
+`rejectClaimedAccountMismatch`, para **recusar cedo** — igualdade nunca autoriza. O
+código diz isso num comentário e o teste novo fixa a regra.
+
+`X-Account-Id` nunca autoriza sozinho: `requireAccountScope` compara com
+`session.user.id` e devolve `403 account_scope_changed` na divergência.
+
+### IDOR do checkpoint: verificado e fechado
+
+O ponto clássico de IDOR é `GET /api/sync/checkpoint?id=<uuid>`. Conferido:
+`cofre_sync_checkpoint_rows` tem coluna `user_id`, RLS habilitado, policy
+`for select to authenticated using ((select auth.uid()) = user_id)`, e `authenticated`
+só tem `select`. A leitura usa `{ token: session.token }`, então o PostgREST resolve
+`auth.uid()` do JWT e o RLS recorta. **Saber o UUID do checkpoint alheio não basta.**
+
+### CSRF
+
+`assertSameOrigin` em todo método diferente de GET, em `account.js` e `sync.js`;
+`analyze.js` tem allowlist própria que **falha fechada**. Cookies são
+`HttpOnly; SameSite=Lax; Secure`. Origem ausente é recusada, não tratada como própria.
+
+Testado em produção com preflight `OPTIONS /api/analyze` mandando
+`X-Forwarded-Host: evil.example`: a resposta continuou ecoando
+`https://www.financemanager.dev.br`. **O caminho de origem derivada do cabeçalho não é
+alcançável do cliente em produção** — mas o teste não distingue se isso vem de
+`ALLOWED_ORIGIN` estar configurada ou de a Vercel sobrescrever o cabeçalho. Ver M2-03.
+
+### Injeção no filtro do PostgREST
+
+Ids de aparelho entram em filtros PostgREST. São validados antes por conjunto fechado
+(`^[A-Za-z0-9][A-Za-z0-9:_-]{7,79}$`) e passam por `encodeURIComponent`. `secret_hash`
+é hex de SHA-256. O cursor de checkpoint é base64url com entidade validada contra
+`OP_ENTITIES` e id contra regex. **Nenhum ponto de injeção encontrado.**
+
+### Alterações
+
+| Arquivo | O que |
+|---|---|
+| `tests/test-service-role-scope.js` | **novo.** 27 asserções estruturais sobre o código do backend. |
+
+**Nenhuma linha de backend foi alterada.** A auditoria não encontrou o que corrigir; o
+que faltava era impedir a regressão. Os testes existentes
+(`test-account-backend`, `test-device-revocation-backend`, `test-session-scope-backend`,
+`test-user-isolation`) cobrem o que o backend **faz**; este cobre o que ele **não pode
+passar a fazer**.
+
+O teste recorta cada `api.db(...)` contando parênteses — expressão regular não serve,
+porque os argumentos têm objetos, template strings e parênteses aninhados, e um recorte
+errado classificaria a chamada errada. Comentário de linha inteira sai antes: a prosa
+deste projeto cita `service: true` e `p_user_id` ao explicar as regras.
+
+### Achados (nenhum P0 ou P1)
+
+| # | P | Achado | Vai para |
+|---|---|---|---|
+| M2-01 | **P2** | `POST /api/account/password` troca a senha **sem pedir a senha atual**. Sessão roubada vira tomada permanente da conta, e o dono não é avisado nem expulso. Contrasta com `delete`, que já exige senha + frase de confirmação. | **M6** (é o item "reautenticação antes de ações críticas"; entra lá, não aqui) |
+| M2-02 | P3 | As leituras por RLS não repetem `user_id=eq.` no caminho. É o desenho: o RLS recorta. Mas se o RLS de uma tabela fosse desligado por engano, essas quatro leituras viravam IDOR silencioso. O teste novo cobre o inverso (não trocar `token` por `service_role`); o filtro redundante seria defesa em profundidade. | registrado, sem ação |
+| M2-03 | P3 | Sem `ALLOWED_ORIGIN` configurada, `allowedOrigins()` deriva a origem de `x-forwarded-host`, que é cabeçalho da requisição. O projeto já resolveu isso para o link de e-mail (`canonicalOrigin`), mas `assertSameOrigin` continua no caminho antigo. Não alcançável em produção hoje. | **M5** (precisa confirmar se `ALLOWED_ORIGIN` está definida na Vercel) |
+| M2-04 | P3 | `RATE_LIMIT_SECRET` cai para `SUPABASE_SERVICE_ROLE_KEY` quando não definida. Funciona, mas amarra o tempero do HMAC ao segredo mais sensível: **girar a chave de serviço zera todos os baldes de rate limit**, porque as identidades passam a gerar outro hash — e girar a chave é exatamente o que se faz depois de um vazamento, quando o limite mais importa. | **M17/M6** |
+
+### Compatibilidade
+
+Total. Nenhum arquivo de produção foi tocado — só um arquivo de teste novo.
+
+### Testes
+
+| Teste | Resultado |
+|---|---|
+| `node tests/test-service-role-scope.js` | **PASSOU** — 27 ok, 0 falha |
+| **Mutação 1** — `p_user_id: session.user.id` → `body.userId` | **PASSOU** — 3 asserções dispararam |
+| **Mutação 2** — leitura de checkpoint troca `{token}` por `{service: true}` | **PASSOU** — 3 asserções dispararam |
+| **Mutação 3** — remover `assertSameOrigin` de `sync.js` | **PASSOU** — 1 asserção disparou |
+| **Mutação 4** — identidade decodificada localmente em vez de validada no provedor | **PASSOU** — 2 asserções dispararam |
+| Preflight em produção com `X-Forwarded-Host` forjado | **PASSOU** — origem ecoada continuou a canônica |
+| `node scripts/lint.js` | **PASSOU** — 0 erro, 0 aviso |
+| `node tests/run-all.js` (fora do OneDrive) | **PASSOU** — 50/50 |
+| `node scripts/coverage.js` | **PASSOU** — 21,9%, piso 20% |
+| Tentativa real de ler dados de outro usuário contra produção | **NÃO VALIDADO** — exige duas contas de teste; não se ataca produção (regra do próprio prompt) |
+
+### Status
+
+**CONCLUÍDO** — auditoria completa, nenhuma vulnerabilidade de autorização encontrada,
+invariantes travados por teste. Os quatro achados são P2/P3 e estão endereçados aos
+módulos donos.
+
+---
+
 ## Checklist de regressão
 
 Executar após **todo** módulo que toque no código. Marcar `OK` / `FALHOU` / `NÃO VALIDADO`.
@@ -415,7 +539,7 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
 ### A. Automatizado (CI ou máquina com Node) — porta de entrada obrigatória
 
 - [ ] `npm run lint`
-- [ ] `npm test` (49 arquivos)
+- [ ] `npm test` (50 arquivos)
 - [ ] `npm run check:build` (o `app.generated.js` publicado corresponde às fontes)
 - [ ] `npm run check:release`
 - [ ] `npm run build:dist`
