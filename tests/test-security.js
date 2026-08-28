@@ -294,6 +294,20 @@ async function main() {
   check("o script de verificação acompanha a migração",
     fs.existsSync(path.join(ROOT, "supabase/tests/verify_rls_auto_enable.sql")));
 
+  // `\echo`, `\d` e afins são comandos do psql, não SQL. O SQL Editor do
+  // Supabase manda o texto direto ao servidor e falha com erro de sintaxe na
+  // primeira barra invertida — foi o que aconteceu na primeira versão deste
+  // script de verificação. Todo SQL do projeto precisa rodar nos dois lugares.
+  const arquivosSql = ["supabase/tests", "supabase/migrations"].reduce((lista, dir) => {
+    fs.readdirSync(path.join(ROOT, dir))
+      .filter((nome) => nome.endsWith(".sql"))
+      .forEach((nome) => lista.push(`${dir}/${nome}`));
+    return lista;
+  }, []);
+  const comMetaComando = arquivosSql.filter((arq) => /^[ \t]*\\[a-z]/m.test(read(arq)));
+  check("nenhum SQL depende de comando do psql",
+    comMetaComando.length === 0, comMetaComando.join(", "));
+
   console.log(`\n${fail === 0 ? "TODOS OS TESTES PASSARAM" : "FALHAS ENCONTRADAS"} - ${pass} ok, ${fail} falha(s)\n`);
   process.exit(fail === 0 ? 0 : 1);
 }

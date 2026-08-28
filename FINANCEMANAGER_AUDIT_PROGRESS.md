@@ -275,7 +275,7 @@ os privilégios do dono da função.
 | Arquivo | O que |
 |---|---|
 | `supabase/migrations/20260828120000_rls_auto_enable_least_privilege.sql` | **novo.** Revoga EXECUTE de `PUBLIC`, `anon` e `authenticated` em toda sobrecarga de `public.rls_auto_enable`. |
-| `supabase/tests/verify_rls_auto_enable.sql` | **novo.** Diagnóstico somente-leitura, para rodar antes e depois. |
+| `supabase/tests/verify_rls_auto_enable.sql` | **novo.** Diagnóstico somente-leitura, em 5 blocos, para rodar antes e depois. **SQL puro, sem comando de psql**: a primeira versão usava `\echo` e quebrava no SQL Editor do Supabase com `syntax error at or near "\"`. No painel, rodar **um bloco por vez** — o editor mostra só o resultado da última consulta. |
 | `tests/test-security.js` | blocos 7 e 8 acrescentados (nada removido). |
 
 ### Motivo
@@ -309,8 +309,9 @@ documentada no cabeçalho do próprio arquivo.
 
 | Teste | Resultado |
 |---|---|
-| `node tests/test-security.js` | **PASSOU** — 58 ok, 0 falha (era 45; +13 asserções) |
-| **Teste de mutação da guarda** — migração sintética com `security definer` + `grant execute ... to authenticated` | **PASSOU** — as duas asserções novas dispararam; removido o mutante, voltou a 58/0. A guarda não é decorativa. |
+| `node tests/test-security.js` | **PASSOU** — 59 ok, 0 falha (era 45; +14 asserções) |
+| **Teste de mutação da guarda** — migração sintética com `security definer` + `grant execute ... to authenticated` | **PASSOU** — as duas asserções novas dispararam; removido o mutante, voltou a 59/0. A guarda não é decorativa. |
+| **Teste de mutação da guarda de psql** — arquivo `.sql` sintético com `\echo` | **PASSOU** — a asserção disparou e apontou o arquivo; removido, voltou a 59/0. |
 | `node scripts/lint.js` | **PASSOU** — 0 erro, 0 aviso |
 | `node tests/run-all.js` | **PASSOU** — 49/49 (execução fora do OneDrive) |
 | `node scripts/build-app-module.js --check` | **PASSOU** — 70 fontes |
@@ -320,7 +321,8 @@ documentada no cabeçalho do próprio arquivo.
 
 ### O que falta para fechar o M1 (ação sua, no SQL Editor do Supabase)
 
-1. **Antes:** rodar `supabase/tests/verify_rls_auto_enable.sql`. O bloco 1 devolve
+1. **Antes:** rodar `supabase/tests/verify_rls_auto_enable.sql` — **um bloco por vez**,
+   porque o SQL Editor exibe apenas o resultado da última consulta. O bloco 1 devolve
    `pg_get_functiondef` — **guarde esse texto**: é o que fecha o desvio de versionamento
    (a função passa a existir no repositório). O bloco 5 pode revelar outras
    `security definer` expostas, que viram achado do M2.
