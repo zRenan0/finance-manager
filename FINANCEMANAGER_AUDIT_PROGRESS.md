@@ -12,13 +12,13 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 
 | Campo | Valor |
 |---|---|
-| Módulo atual | **M0 — Auditoria e baseline** |
-| Status do M0 | **CONCLUÍDO** (auditoria estática + baseline de produção) |
+| Módulo atual | **M1 — Correções críticas de segurança** |
+| Status do M1 | **PARCIAL** — correção escrita, testada e versionada; **falta aplicar no banco** (ver M1) |
 | Módulos concluídos | M0 |
-| Próximo módulo | M1 — Correções críticas de segurança (`rls_auto_enable`) |
+| Próximo módulo | M2 — Auditoria de service_role e autorização |
 | Branch | `deploy-atualizado` (árvore limpa no início do M0) |
-| Arquivos alterados até aqui | apenas este arquivo (nenhum código tocado) |
-| Migrations criadas até aqui | nenhuma |
+| Arquivos alterados até aqui | `tests/test-security.js` (+2 blocos), este arquivo |
+| Migrations criadas até aqui | `20260828120000_rls_auto_enable_least_privilege.sql` |
 | Versão do app | `0.30.0` (package.json) |
 
 ### Ambiente de execução (RESOLVIDO)
@@ -59,6 +59,15 @@ em 24 — divergência conhecida, sem efeito observado).
    `test-service-worker-update.js`, que passou sozinho (16/16) e passou na re-execução
    completa da suíte. **Falha isolada de EPERM não é regressão — re-execute antes de
    investigar.**
+
+**Contorno para as duas:** copiar a árvore para fora do OneDrive e rodar lá.
+
+```sh
+tar -cf - --exclude=.git --exclude=coverage --exclude=dist \n  --exclude='tests/browser/screenshots' . | (cd "$DESTINO" && tar -xf -)
+```
+
+Com isso a suíte fecha 49/49 e a cobertura roda (21,9%, piso 20%). **É assim que
+cada módulo deve ser validado**; rodar dentro do OneDrive dá falso vermelho.
 
 Playwright não está instalado localmente; `test:browser` continua só na CI, que segue
 sendo o validador final (`.github/workflows/ci.yml`).
@@ -179,7 +188,7 @@ Sondagens (GET, sem efeito colateral):
 | `/manifest.webmanifest`, `/service-worker.js` | 200 |
 | Carga de `/index.html` | 27 recursos, **0 erro**, **0 recurso 4xx/5xx**, SW registrado, `financas_db` v4 criado |
 
-Cobertura de testes (último `coverage/resumo.json`): **22,6% global**, 69 arquivos.
+Cobertura de testes: **21,9% global** (piso configurado: 20%), 69 arquivos.
 Piores: `js/actions.js` 0,2%, `js/screens/accounts.js` 1,3%, `js/screens/privacy.js` 1,6%,
 `js/screens/debts.js` 2,4%, `js/screens/analytics.js` 4,0%. Insumo do M15.
 
@@ -194,7 +203,7 @@ Piores: `js/actions.js` 0,2%, `js/screens/accounts.js` 1,3%, `js/screens/privacy
 | R5 | P2 | **A marca "FinanceManager" não aparece em nenhum arquivo do projeto.** O produto se chama "Cofre" no `<title>`, no manifest, na landing (16 ocorrências) e na UI; "FinanceManager" existe apenas no domínio. Não é ambiguidade de marca — é ausência total de uma delas no código. | M22 |
 | R6 | P2 | `APP_VERSION` duplicada (`package.json` + `js/safe-errors.js`), sem amarração. | M13 |
 | R7 | P3 | `financas_db_mirror` mantém a base financeira em texto claro no localStorage (decisão anti-perda deliberada; precisa ficar documentada, não removida). | M8/M18 |
-| R8 | P3 | Cobertura 22,6%; `js/actions.js` (110 KB, orquestra as ações das telas) praticamente sem teste. | M15 |
+| R8 | P3 | Cobertura 21,9%; `js/actions.js` (110 KB, orquestra as ações das telas) praticamente sem teste. | M15 |
 | R9 | P3 | Achados de beta ainda abertos em `docs/PROXIMA-SESSAO.md`: F-06 (bundle sem minificação), F-08 a F-17 (UX/acessibilidade). Absorver nos módulos correspondentes em vez de duplicar. | M38/M39 |
 | — | — | Itens 17 e 19 de `AUDIT_FIX_PROGRESS.md` continuam PENDENTES (teclado/ARIA/contraste; HTML inicial/rota/paginação/SW). | M39/M9 |
 
@@ -240,6 +249,96 @@ integralmente preservada por não haver mudança.
 
 ---
 
+## M1 — Correções críticas de segurança (`rls_auto_enable`)
+
+### Antes (situação encontrada)
+
+O Security Advisor do Supabase aponta `public.rls_auto_enable()` como função
+`security definer` com EXECUTE para `anon` e `authenticated`. Como o PostgREST
+publica o esquema `public`, isso equivale a uma rota de internet
+(`POST /rest/v1/rpc/rls_auto_enable`) chamável por qualquer visitante, rodando com
+os privilégios do dono da função.
+
+**Investigação — dependências (o passo obrigatório antes de tocar em qualquer coisa):**
+
+| Pergunta | Resposta |
+|---|---|
+| Quem usa? | Ninguém no projeto. `grep -rni rls_auto_enable` em `*.sql`, `*.js`, `*.md` retorna **zero** ocorrências. |
+| Está em migração? | **Não.** Criada fora do versionamento — é o desvio R1 do M0. |
+| O backend chama? | Não. `netlify/functions/*` só chama RPC `cofre_*`, sempre com `service: true`. |
+| O Service Worker / fluxo offline dependem? | Não. Nada do cliente fala com PostgREST direto; tudo passa por `/api/`. |
+| Existe fallback ligado a ela? | Não encontrado. |
+| Há razão de segurança para ela existir? | **Sim, provavelmente.** O nome indica função de *event trigger* que liga RLS automaticamente em tabela nova. Isso é uma defesa, não um problema. O problema é só o privilégio. |
+
+### Alterações
+
+| Arquivo | O que |
+|---|---|
+| `supabase/migrations/20260828120000_rls_auto_enable_least_privilege.sql` | **novo.** Revoga EXECUTE de `PUBLIC`, `anon` e `authenticated` em toda sobrecarga de `public.rls_auto_enable`. |
+| `supabase/tests/verify_rls_auto_enable.sql` | **novo.** Diagnóstico somente-leitura, para rodar antes e depois. |
+| `tests/test-security.js` | blocos 7 e 8 acrescentados (nada removido). |
+
+### Motivo
+
+Princípio do menor privilégio. Uma função administrativa não precisa de superfície
+pública, e `security definer` transforma essa superfície em execução privilegiada.
+
+**Por que o revoke não quebra o gatilho automático:** o PostgreSQL confere EXECUTE de
+uma função de gatilho no momento em que o **gatilho é criado**, não a cada disparo. O
+disparo é feito pelo próprio servidor dentro do evento e não consulta a ACL da função.
+Retirar EXECUTE de `anon`/`authenticated` fecha a chamada por RPC e deixa o automatismo
+intacto. É por isso que a correção é a **mínima possível**: um `revoke`, e nada mais.
+
+### O que a migração deliberadamente NÃO faz
+
+- **Não remove a função.** Ela pode sustentar o event trigger que liga RLS sozinho;
+  apagá-la trocaria um risco por outro maior.
+- **Não altera o corpo, o dono nem o `search_path`.** O corpo não está versionado.
+  Mexer no `search_path` sem tê-lo em mãos podia quebrar justamente a parte que
+  ninguém consegue revisar. Fica como **P2**, para depois da captura da definição.
+- **Não revoga de `service_role` nem do dono.** Só o que o Advisor aponta.
+
+### Compatibilidade
+
+Total. Nenhuma rota, contrato, tabela, coluna ou chave local foi tocada. A migração é
+idempotente e tolera o banco que nunca teve a função (`supabase db reset` a partir só
+destas migrações), registrando um `notice` em vez de falhar. É reversível com uma linha,
+documentada no cabeçalho do próprio arquivo.
+
+### Testes
+
+| Teste | Resultado |
+|---|---|
+| `node tests/test-security.js` | **PASSOU** — 58 ok, 0 falha (era 45; +13 asserções) |
+| **Teste de mutação da guarda** — migração sintética com `security definer` + `grant execute ... to authenticated` | **PASSOU** — as duas asserções novas dispararam; removido o mutante, voltou a 58/0. A guarda não é decorativa. |
+| `node scripts/lint.js` | **PASSOU** — 0 erro, 0 aviso |
+| `node tests/run-all.js` | **PASSOU** — 49/49 (execução fora do OneDrive) |
+| `node scripts/build-app-module.js --check` | **PASSOU** — 70 fontes |
+| `node scripts/coverage.js` | **PASSOU** — 21,9% global, piso 20% (fora do OneDrive) |
+| Aplicação da migração no banco | **NÃO VALIDADO** — sem acesso ao banco daqui |
+| Event trigger continua disparando depois do revoke | **NÃO VALIDADO** — depende da aplicação |
+
+### O que falta para fechar o M1 (ação sua, no SQL Editor do Supabase)
+
+1. **Antes:** rodar `supabase/tests/verify_rls_auto_enable.sql`. O bloco 1 devolve
+   `pg_get_functiondef` — **guarde esse texto**: é o que fecha o desvio de versionamento
+   (a função passa a existir no repositório). O bloco 5 pode revelar outras
+   `security definer` expostas, que viram achado do M2.
+2. Aplicar `supabase/migrations/20260828120000_rls_auto_enable_least_privilege.sql`.
+3. **Depois:** rodar o mesmo script de verificação. O bloco 4 deve imprimir
+   `OK: nem anon nem authenticated executam public.rls_auto_enable.`
+4. Criar uma tabela de teste em staging e confirmar que ela nasce com RLS ligado
+   (prova de que o event trigger sobreviveu).
+
+Enquanto os passos acima não forem feitos, o M1 fica **PARCIAL**: o código está pronto,
+testado e versionado, mas o banco de produção ainda está exposto.
+
+### Status
+
+**PARCIAL** — correção implementada, testada e versionada. Pendente de aplicação no banco.
+
+---
+
 ## Checklist de regressão
 
 Executar após **todo** módulo que toque no código. Marcar `OK` / `FALHOU` / `NÃO VALIDADO`.
@@ -253,7 +352,7 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
 - [ ] `npm run check:release`
 - [ ] `npm run build:dist`
 - [ ] `npm run test:browser` (chromium + firefox + webkit)
-- [ ] Cobertura não caiu abaixo da baseline **22,6%**
+- [ ] Cobertura não caiu abaixo da baseline **21,9%** (piso do script: 20%)
 
 ### B. Visitante (sem conta)
 
@@ -343,8 +442,15 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
 
 ## Pendências abertas
 
-- **M1 depende de dado externo:** a definição real de `public.rls_auto_enable()` e os
-  privilégios efetivos, que só existem no banco de produção. Vou pedir no início do M1.
-- Node.js indisponível localmente (R2).
+- **M1 está PARCIAL.** A migração existe e passou nos testes, mas o banco de produção
+  só fica corrigido depois de aplicá-la. Passos em "O que falta para fechar o M1".
+- **Definição de `public.rls_auto_enable` ainda não capturada.** Sai do bloco 1 de
+  `supabase/tests/verify_rls_auto_enable.sql`. Sem ela, o desvio de versionamento
+  continua aberto e o `search_path` da função não pode ser revisado (P2).
+- **Bloco 5 do script de verificação** pode revelar outras `security definer` expostas
+  no banco que não estão em migração. É a primeira coisa a olhar no M2.
+- Cobertura e Playwright indisponíveis dentro do OneDrive; usar a cópia externa (R2).
 - Itens 17 e 19 de `AUDIT_FIX_PROGRESS.md` e F-06/F-08 a F-17 de `docs/PROXIMA-SESSAO.md`
   continuam abertos e serão absorvidos pelos módulos correspondentes.
+- 7 campos legais do controlador ainda com marcador (`docs/LEGAL-LAUNCH.md`); o
+  `check-release.js` avisa a cada execução. Decisão externa, entra no M18.

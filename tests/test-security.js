@@ -228,6 +228,72 @@ async function main() {
   check("o email entra no balde já normalizado",
     /const email = emailOf\(body\.email\);\s*(\n\s*\/\/[^\n]*)*\s*\n\s*await limitarPorEmail\(event, email\)/.test(accountSource));
 
+  console.log("\n7. Nenhuma função SECURITY DEFINER fica executável por anon ou authenticated");
+  // O esquema `public` é publicado pelo PostgREST. Uma função `security definer`
+  // com EXECUTE para `anon` ou `authenticated` é, na prática, uma rota de
+  // internet rodando com o privilégio do dono. O projeto já segue a regra em
+  // todas as `cofre_*`; este bloco impede que a próxima função esqueça dela.
+  //
+  // O que o Advisor do Supabase encontrou em produção (`public.rls_auto_enable`)
+  // não estava em migração nenhuma. Este teste não alcança o que não está
+  // versionado; ele garante que o repositório nunca seja a origem do problema.
+  const migrationsDir = path.join(ROOT, "supabase/migrations");
+  const migrations = fs.readdirSync(migrationsDir).filter((n) => n.endsWith(".sql")).sort();
+  check("há migrações para auditar", migrations.length > 0, migrations.length);
+
+  const sqlBruto = migrations.map((n) => read(`supabase/migrations/${n}`)).join("\n");
+  // Os corpos entre `$$` contêm `;` e palavras que confundem a leitura do
+  // cabeçalho. Removidos, sobra exatamente a parte declarativa, que é a que
+  // carrega `security definer`, `revoke` e `grant`.
+  // Os comentarios saem depois: esta migracao documenta no cabecalho como
+  // desfazer o revoke, e a frase de exemplo nao pode ser lida como concessao.
+  const sql = sqlBruto.replace(/\$\$[\s\S]*?\$\$/g, " CORPO ").replace(/--[^\n]*/g, " ").replace(/\s+/g, " ").toLowerCase();
+
+  const concessoesIndevidas = (sql.match(/grant\s+execute\s+on\s+function\s+[^;]*?\s+to\s+[^;]*/g) || [])
+    .filter((trecho) => /\b(anon|authenticated|public)\b/.test(trecho.split(" to ").pop()));
+  check("nenhum grant execute para anon, authenticated ou public",
+    concessoesIndevidas.length === 0, concessoesIndevidas.join(" || "));
+
+  const declaradas = [];
+  const declaracao = /create\s+(?:or\s+replace\s+)?function\s+public\.(\w+)\s*\(([^)]*)\)(.*?)\bas\s+corpo/g;
+  let achado;
+  while ((achado = declaracao.exec(sql)) !== null) {
+    if (/security\s+definer/.test(achado[3])) declaradas.push(achado[1]);
+  }
+  check("a auditoria encontrou as funções security definer do projeto",
+    declaradas.length >= 7, declaradas.join(", "));
+
+  const semRevoke = [...new Set(declaradas)].filter((nome) => {
+    const revokes = sql.match(new RegExp(`revoke\\s+[^;]*?on\\s+function\\s+public\\.${nome}\\s*\\([^)]*\\)\\s*from\\s+[^;]*`, "g")) || [];
+    return !revokes.some((r) => {
+      const papeis = r.split(" from ").pop();
+      return /\bpublic\b/.test(papeis) && /\banon\b/.test(papeis) && /\bauthenticated\b/.test(papeis);
+    });
+  });
+  check("toda security definer revoga de public, anon e authenticated",
+    semRevoke.length === 0, semRevoke.join(", "));
+
+  console.log("\n8. A correção de rls_auto_enable é mínima e reversível");
+  const correcao = migrations.filter((n) => /rls_auto_enable/.test(n));
+  check("a migração de menor privilégio existe", correcao.length === 1, correcao.join(", "));
+  if (correcao.length === 1) {
+    const texto = read(`supabase/migrations/${correcao[0]}`);
+    const executavel = texto.replace(/^\s*--.*$/gm, "").toLowerCase();
+    check("ela revoga o privilégio de public", /revoke all on function %s from public/.test(executavel));
+    check("ela revoga também de anon e authenticated",
+      /'anon',\s*'authenticated'/.test(executavel) && /revoke all on function %s from %i/.test(executavel));
+    // Menor privilégio não é remoção. A função pode sustentar um gatilho de
+    // evento que liga RLS sozinho; apagá-la trocaria um risco por outro maior.
+    check("ela não remove a função", !/\bdrop\s+function\b/.test(executavel));
+    // O corpo não está versionado. Mexer no `search_path` sem ele podia quebrar
+    // a função justamente na parte que ninguém consegue revisar.
+    check("ela não altera a função às cegas", !/\balter\s+function\b/.test(executavel));
+    check("ela tolera o banco que nunca teve a função", /atingidas = 0/.test(executavel));
+  }
+
+  check("o script de verificação acompanha a migração",
+    fs.existsSync(path.join(ROOT, "supabase/tests/verify_rls_auto_enable.sql")));
+
   console.log(`\n${fail === 0 ? "TODOS OS TESTES PASSARAM" : "FALHAS ENCONTRADAS"} - ${pass} ok, ${fail} falha(s)\n`);
   process.exit(fail === 0 ? 0 : 1);
 }
