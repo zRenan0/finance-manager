@@ -12,14 +12,15 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 
 | Campo | Valor |
 |---|---|
-| Módulo atual | **M2 — Auditoria de service_role e autorização** |
+| Módulo atual | **M3 — RLS e menor privilégio** |
+| Status do M3 | **PARCIAL** — correção escrita e testada; falta aplicar no banco |
 | Status do M2 | **CONCLUÍDO** — nenhuma vulnerabilidade de autorização; invariantes travados por teste |
 | Status do M1 | **PARCIAL** — falta aplicar as migrações no banco e capturar o gatilho (blocos 3 e 5) |
-| Módulos concluídos | M0, M2 (M1 parcial) |
-| Próximo módulo | M3 — RLS e princípio do menor privilégio |
+| Módulos concluídos | M0, M2 (M1 e M3 parciais: falta aplicar migrações) |
+| Próximo módulo | M4 — XSS e entradas não confiáveis |
 | Branch | `deploy-atualizado` (árvore limpa no início do M0) |
 | Arquivos alterados até aqui | `tests/test-security.js` (+3 blocos), `tests/test-service-role-scope.js` (novo), este arquivo. **Nenhum arquivo de produção alterado.** |
-| Migrations criadas até aqui | `20260828120000_rls_auto_enable_least_privilege.sql`, `20260828130000_rls_auto_enable_versionada.sql` |
+| Migrations criadas até aqui | `20260828120000_rls_auto_enable_least_privilege.sql`, `20260828130000_rls_auto_enable_versionada.sql`, `20260828140000_menor_privilegio_tabelas.sql` — **nenhuma aplicada ainda** |
 | Versão do app | `0.30.0` (package.json) |
 
 ### Ambiente de execução (RESOLVIDO)
@@ -531,6 +532,140 @@ módulos donos.
 
 ---
 
+## M3 — RLS e princípio do menor privilégio
+
+### Antes (situação encontrada)
+
+Nove tabelas `cofre_*`, todas com RLS habilitado. Seis policies, todas de `select`,
+todas `to authenticated` com `(select auth.uid()) = user_id`. Nenhuma policy de escrita:
+toda escrita passa por RPC `security definer`.
+
+**Resultado do bloco 5 do M1, executado em produção:** a varredura de `security definer`
+expostas devolveu **só `rls_auto_enable`** (uma linha por papel). Nenhuma outra função
+privilegiada é executável por `anon`/`authenticated`. Isso confirma que, quanto a
+privilégio de função, **as migrações descrevem o banco real** — não há mais desvio.
+
+### O achado: o privilégio padrão do Supabase nunca foi desfeito em duas tabelas
+
+O Supabase concede `ALL` sobre toda tabela nova do esquema `public` para `anon`,
+`authenticated` e `service_role`, por `alter default privileges`. **Uma tabela nasce
+aberta**, e é a migração que precisa fechá-la. As migrações do projeto fazem isso caso a
+caso — e duas passaram sem a parte de `authenticated`:
+
+| Tabela | O que a migração fez | O que ficou |
+|---|---|---|
+| `cofre_financial_snapshots` | `revoke all ... from anon` + `grant select to authenticated` | **conceder não revoga**: `insert`, `update` e `delete` do privilégio padrão continuam |
+| `cofre_mutations` | `revoke all ... from anon`, e nada mais | `authenticated` provavelmente mantém `ALL` |
+
+**Hoje o RLS segura, e é exatamente esse o problema.** As duas têm RLS ligado;
+`cofre_financial_snapshots` só tem policy de `select` e `cofre_mutations` não tem policy
+nenhuma, então escrita já é negada. Não há falha explorável hoje.
+
+Mas é **uma camada só**. Uma policy escrita sem cuidado, ou um
+`disable row level security` num diagnóstico às pressas, transformaria privilégio
+esquecido em escrita real sobre o diário financeiro e sobre o registro de idempotência.
+Privilégio que ninguém usa não deve existir: é a diferença entre "não dá porque a porta
+está trancada" e "não dá porque não existe porta".
+
+### Consumidores conferidos antes de revogar
+
+Busca por `cofre_financial_snapshots` e `cofre_mutations` em `netlify/`, `api/` e `js/`:
+**nenhuma ocorrência**. As duas só são tocadas por funções `security definer` que rodam
+com `service_role`, e `service_role` tem concessão própria, não herdada de
+`authenticated`. Revogar não alcança nenhum caminho vivo.
+
+### A armadilha que a auditoria evitou
+
+`cofre_devices` **fica de fora de propósito**. Ela usa concessão **por coluna**
+(`grant select (user_id, device_id, label, first_seen_at, last_seen_at, revoked_at)`, mais
+`device_type` na migração `20260825001552`) — é assim que `secret_hash` nunca chega ao
+cliente. Um `revoke all ... from authenticated` "por simetria" apagaria as concessões das
+duas migrações e quebraria `GET /api/account/devices`, que lê a lista com o token do
+usuário. O teste novo fixa isso nos dois sentidos: a tabela não pode receber `grant
+select` de tabela inteira, e a migração do M3 não pode mencioná-la.
+
+### Alterações
+
+| Arquivo | O que |
+|---|---|
+| `supabase/migrations/20260828140000_menor_privilegio_tabelas.sql` | **novo.** Revoga o privilégio padrão sobrando nas duas tabelas; reconcede só `select` em `cofre_financial_snapshots`; documenta as três tabelas server-only com `comment on table`. |
+| `supabase/tests/verify_table_privileges.sql` | **novo.** Matriz de RLS, policies e privilégios de tabela e de coluna, em 5 blocos somente-leitura. |
+| `tests/test-rls-least-privilege.js` | **novo.** 21 asserções sobre as migrações. |
+
+### RLS sem policy: decisão, não esquecimento
+
+O linter do Supabase avisa "RLS habilitado sem policy" em `cofre_mutations`,
+`cofre_rate_limit` e `cofre_sync_config`. **O aviso está certo quanto ao fato e errado
+quanto à conclusão.** Criar policy para calá-lo abriria caminho de leitura onde hoje não
+existe nenhum. As três ganharam `comment on table` explicando o porquê, para que quem
+abrir o banco sem abrir o repositório leia a decisão:
+
+- `cofre_mutations` — idempotência de escrita; só `service_role`.
+- `cofre_rate_limit` — legível, seria um **oráculo**: dá para descobrir se um e-mail
+  existe medindo o consumo do balde.
+- `cofre_sync_config` — o cliente já recebe protocolo e mínimo de escrita no envelope
+  de `/api/sync`; nunca precisa ler a tabela.
+
+A lista de server-only é **fechada** no teste: uma tabela server-only nova precisa ser
+declarada de propósito, não descoberta depois pelo linter.
+
+### Verificações que passaram sem achado
+
+- `cofre_purge_account` apaga das **seis** tabelas do usuário, incluindo
+  `cofre_financial_snapshots` e `cofre_mutations`. Some-se a isso
+  `references auth.users(id) on delete cascade` em todas. Exclusão de conta é completa —
+  sem pendência de LGPD aqui.
+- A restrição de entidade de `cofre_sync_ops` **foi migrada** para as 9 coleções do
+  protocolo 3 (`cofre_sync_ops_entity_v3_check`, migração `202608200001`). A lista de 5
+  da migração original não ficou para trás.
+- `secret_hash` não aparece em `grant` nenhum.
+
+### Achados registrados (nenhum P0/P1)
+
+| # | P | Achado | Vai para |
+|---|---|---|---|
+| M3-01 | P3 | `cofre_financial_snapshots` mantém `grant select` + policy de leitura, mas **nenhum código lê a tabela**: é resíduo do protocolo 1. Preservado por ser funcionalidade declarada; remover seria arrumação, não correção. | revisão futura |
+| M3-02 | P3 | `cofre_commit_snapshot` (RPC do protocolo 1) **não é chamada por lugar nenhum**. Já está com `revoke all from public, anon, authenticated`, então não há exposição — é peso morto. Não removida: é o caminho de escrita do contrato 1, e o projeto ainda declara compatibilidade de leitura com ele. | revisão futura |
+
+### Compatibilidade
+
+Total. Nenhum código de aplicação foi tocado. A migração só retira privilégio que
+nenhum caminho vivo exerce, e reconcede explicitamente o `select` que a migração
+original de `cofre_financial_snapshots` declarava. `cofre_devices` intocada. Nenhuma
+policy criada ou removida, RLS de nada foi desligado. Reversível com `grant`.
+
+### Testes
+
+| Teste | Resultado |
+|---|---|
+| `node tests/test-rls-least-privilege.js` | **PASSOU** — 21 ok, 0 falha |
+| **Mutação 1** — remover o revoke de `cofre_mutations` | **PASSOU** — 2 asserções dispararam |
+| **Mutação 2** — policy com `using (true)` | **PASSOU** — 2 asserções dispararam |
+| **Mutação 3** — `grant insert, update ... to authenticated` | **PASSOU** — 1 asserção disparou |
+| **Mutação 4** — `grant select` de tabela inteira em `cofre_devices` | **PASSOU** — 1 asserção disparou |
+| **Mutação 5** — policy de `insert` pelo PostgREST | **PASSOU** — 1 asserção disparou |
+| `node scripts/lint.js` | **PASSOU** — 0 erro, 0 aviso |
+| `node tests/run-all.js` (fora do OneDrive) | **PASSOU** — 51/51 |
+| Aplicação da migração no banco | **NÃO VALIDADO** |
+| Matriz real de privilégios do banco | **NÃO VALIDADO** — sai de `verify_table_privileges.sql` |
+
+### O que falta para fechar o M3
+
+1. Rodar `supabase/tests/verify_table_privileges.sql` **antes** (um bloco por vez).
+   O **bloco 5** lista os problemas; espera-se ver `cofre_financial_snapshots` e
+   `cofre_mutations` com escrita concedida a `authenticated`, que é o achado.
+2. Aplicar `20260828140000_menor_privilegio_tabelas.sql`.
+3. Rodar o **bloco 5** de novo: deve vir **vazio**.
+4. Conferir que `GET /api/account/devices` continua listando aparelhos (é a única rota
+   que depende de concessão por coluna).
+
+### Status
+
+**PARCIAL** — correção escrita, testada por mutação e versionada; pendente de aplicação
+no banco e da conferência da matriz real.
+
+---
+
 ## Checklist de regressão
 
 Executar após **todo** módulo que toque no código. Marcar `OK` / `FALHOU` / `NÃO VALIDADO`.
@@ -539,7 +674,7 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
 ### A. Automatizado (CI ou máquina com Node) — porta de entrada obrigatória
 
 - [ ] `npm run lint`
-- [ ] `npm test` (50 arquivos)
+- [ ] `npm test` (51 arquivos)
 - [ ] `npm run check:build` (o `app.generated.js` publicado corresponde às fontes)
 - [ ] `npm run check:release`
 - [ ] `npm run build:dist`
@@ -639,8 +774,8 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
 - ~~Definição de `public.rls_auto_enable` não capturada~~ **feito em 2026-08-28**: a
   função está versionada e o achado caiu para P2 (não é explorável).
 - **O GATILHO de evento ainda não está versionado**, só a função. Falta o bloco 3.
-- **Bloco 5 do script de verificação** pode revelar outras `security definer` expostas
-  no banco que não estão em migração. É a primeira coisa a olhar no M2.
+- ~~Bloco 5: outras `security definer` expostas~~ **executado em 2026-08-28: só `rls_auto_enable`**.
+  Nenhuma outra função privilegiada é executável por `anon`/`authenticated` no banco real.
 - Cobertura e Playwright indisponíveis dentro do OneDrive; usar a cópia externa (R2).
 - Itens 17 e 19 de `AUDIT_FIX_PROGRESS.md` e F-06/F-08 a F-17 de `docs/PROXIMA-SESSAO.md`
   continuam abertos e serão absorvidos pelos módulos correspondentes.
