@@ -567,6 +567,52 @@ esquecido em escrita real sobre o diário financeiro e sobre o registro de idemp
 Privilégio que ninguém usa não deve existir: é a diferença entre "não dá porque a porta
 está trancada" e "não dá porque não existe porta".
 
+### Confirmação no banco real (2026-08-28, bloco 5 do `verify_table_privileges.sql`)
+
+O achado não era hipótese sobre o privilégio padrão do Supabase. É o estado de produção:
+
+```
+tabela,problema
+cofre_financial_snapshots,escrita concedida a authenticated: DELETE
+cofre_financial_snapshots,escrita concedida a authenticated: INSERT
+cofre_financial_snapshots,escrita concedida a authenticated: TRUNCATE
+cofre_financial_snapshots,escrita concedida a authenticated: UPDATE
+cofre_mutations,escrita concedida a authenticated: DELETE
+cofre_mutations,escrita concedida a authenticated: INSERT
+cofre_mutations,escrita concedida a authenticated: TRUNCATE
+cofre_mutations,escrita concedida a authenticated: UPDATE
+```
+
+**Exatamente as duas tabelas previstas, e só elas.** O resto da matriz veio limpo:
+
+- nenhuma linha `RLS DESLIGADO` → as nove têm RLS ligado;
+- nenhuma linha `leitura concedida a anon` → `anon` não lê nada;
+- nenhuma linha `policy permissiva demais` → nenhuma policy com `using (true)` nem sem
+  condição;
+- as outras sete tabelas não aparecem → os `revoke ... from authenticated` das
+  migrações `202608180001`, `202608180002` e `202608200001` funcionaram.
+
+Ou seja: a migração do M3 acerta o alvo e não precisa tocar em mais nada.
+
+### Correção de uma coisa que eu disse antes: TRUNCATE não é coberto por RLS
+
+Eu escrevi que "hoje o RLS segura" as quatro escritas. Isso vale para `INSERT`,
+`UPDATE` e `DELETE`, que são filtrados por policy — e como não existe policy de escrita,
+são negados.
+
+**`TRUNCATE` não.** As policies do PostgreSQL se aplicam a `SELECT`, `INSERT`, `UPDATE`,
+`DELETE` e `MERGE`. `TRUNCATE` não tem conceito de linha, não é filtrado por RLS e
+depende só do privilégio `TRUNCATE` — que `authenticated` possui nas duas tabelas.
+
+O que impede hoje **não é o RLS**: é o PostgREST não ter como emitir `TRUNCATE`. Ele
+expõe `SELECT`/`INSERT`/`UPDATE`/`DELETE` pelos verbos HTTP e funções por RPC; um
+`DELETE` sem filtro vira `DELETE` (filtrado por RLS), nunca `TRUNCATE`. E nenhuma função
+do projeto executa `TRUNCATE`. Não há caminho vivo.
+
+Continua **P2**, não explorável. Mas a garantia é mais fina do que eu disse: para três
+privilégios o RLS é a rede; para o quarto a rede é "nenhuma rota emite esse comando". A
+migração cobre os quatro, porque `revoke all` inclui `TRUNCATE`.
+
 ### Consumidores conferidos antes de revogar
 
 Busca por `cofre_financial_snapshots` e `cofre_mutations` em `netlify/`, `api/` e `js/`:
@@ -671,9 +717,8 @@ aplicadas primeiro em staging.
 
 ### O que falta para fechar o M3
 
-1. Rodar `supabase/tests/verify_table_privileges.sql` **antes** (um bloco por vez).
-   O **bloco 5** lista os problemas; espera-se ver `cofre_financial_snapshots` e
-   `cofre_mutations` com escrita concedida a `authenticated`, que é o achado.
+1. ~~Rodar o `verify_table_privileges.sql` antes~~ **FEITO em 2026-08-28**: o bloco 5
+   confirmou as 8 linhas previstas e nada mais. Evidência acima.
 2. Aplicar `20260828140000_menor_privilegio_tabelas.sql`.
 3. Rodar o **bloco 5** de novo: deve vir **vazio**.
 4. Conferir que `GET /api/account/devices` continua listando aparelhos (é a única rota
