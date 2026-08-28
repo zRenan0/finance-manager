@@ -613,6 +613,42 @@ Continua **P2**, não explorável. Mas a garantia é mais fina do que eu disse: 
 privilégios o RLS é a rede; para o quarto a rede é "nenhuma rota emite esse comando". A
 migração cobre os quatro, porque `revoke all` inclui `TRUNCATE`.
 
+### Confirmado no banco depois de aplicar (2026-08-28)
+
+**M1 — veredito do `verify_rls_auto_enable.sql`:**
+`OK: nem anon nem authenticated executam public.rls_auto_enable.`
+As migrações `120000` e `130000` pegaram.
+
+**Gatilho (bloco 3):** `ensure_rls`, evento `ddl_command_end`, `evtenabled = 'O'`
+(estado normal, habilitado), chamando `rls_auto_enable()`. O automatismo está de pé em
+produção; a migração `150000` só importa para banco novo.
+
+**M3 — bloco 4 (todas as policies, por extenso):** seis policies, e nada além delas.
+
+```
+cofre_devices               owner reads devices          SELECT  authenticated  ((SELECT auth.uid()) = user_id)  null
+cofre_financial_snapshots   owner reads snapshot         SELECT  authenticated  ((SELECT auth.uid()) = user_id)  null
+cofre_sync_checkpoint_rows  owner reads checkpoint rows  SELECT  authenticated  ((SELECT auth.uid()) = user_id)  null
+cofre_sync_checkpoints      owner reads checkpoints      SELECT  authenticated  ((SELECT auth.uid()) = user_id)  null
+cofre_sync_ops              owner reads sync ops         SELECT  authenticated  ((SELECT auth.uid()) = user_id)  null
+cofre_sync_state            owner reads sync state       SELECT  authenticated  ((SELECT auth.uid()) = user_id)  null
+```
+
+Confirma no banco real o que o teste afirma sobre as migrações:
+
+- **nenhuma policy de escrita** — as seis são `SELECT`, e `com_verificacao` é nulo em
+  todas. Não há caminho de escrita direta pelo PostgREST;
+- **nenhuma `using (true)`** — as seis comparam `auth.uid()` com `user_id`;
+- **nenhuma vale para `anon`** — as seis são `to authenticated`;
+- `cofre_mutations`, `cofre_rate_limit` e `cofre_sync_config` **não aparecem**: o trio
+  server-only continua sem policy, negando por ausência, como projetado.
+
+A forma `(select auth.uid())` em vez de `auth.uid()` direto é a recomendada pelo
+Supabase: o planejador a avalia uma vez como initplan em vez de por linha.
+
+**Falta ainda o bloco 5** (`tabela, problema`), que é o que confirma se o `revoke` da
+migração `140000` desfez os oito privilégios de escrita.
+
 ### Consumidores conferidos antes de revogar
 
 Busca por `cofre_financial_snapshots` e `cofre_mutations` em `netlify/`, `api/` e `js/`:
