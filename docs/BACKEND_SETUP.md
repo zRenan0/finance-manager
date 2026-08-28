@@ -22,6 +22,17 @@ Consequência prática: **sem as variáveis do Supabase configuradas, as anális
    | `202608180002_rate_limit.sql` | `cofre_rate_hit` | O limite de tentativas compartilhado (cai num limite pior, por instância). |
    | `202608200001_sync_protocol_3_prepare.sql` | entidades de contas e cartões por registro, compatibilidade e corte gradual do protocolo | Contas, cartões, transferências, pagamentos e conciliações entre aparelhos. |
    | `20260825001552_add_device_type.sql` | tipo visual do aparelho e restrição de valores aceitos | Identificação correta de computador, celular, tablet e acesso desconhecido. |
+   | `20260825003000_reset_dominant_tombstones.sql` | `cofre_hlc_successor`, recria `cofre_apply_ops` e `cofre_reset_data`, adiciona `cofre_mutations.result_hlc` | O primeiro lançamento criado depois de "apagar tudo" some no ciclo seguinte, porque nasce menor que as lápides. |
+   | `20260828120000_rls_auto_enable_least_privilege.sql` | tira `EXECUTE` de `public.rls_auto_enable` de `PUBLIC`, `anon` e `authenticated` | Nada. É higiene de privilégio; sem ela o Security Advisor continua acusando. |
+   | `20260828130000_rls_auto_enable_versionada.sql` | traz `rls_auto_enable` para o versionamento e fixa `pg_temp` no fim do `search_path` | Num banco novo a função não existe, e tabela criada depois não ganha RLS sozinha. |
+   | `20260828140000_menor_privilegio_tabelas.sql` | desfaz o `INSERT`/`UPDATE`/`DELETE`/`TRUNCATE` que o privilégio padrão deu a `authenticated` em `cofre_financial_snapshots` e `cofre_mutations` | Nada hoje. Sem ela, o RLS fica sendo a única camada — e `TRUNCATE` sequer passa por policy. |
+
+   **O gatilho de evento que dispara `rls_auto_enable` ainda NÃO está versionado**, só a
+   função. Num projeto novo, criado apenas a partir destas migrações, tabela nova não
+   ganha RLS automaticamente. Nenhuma tabela do projeto depende disso — todas as
+   `cofre_*` ligam RLS na própria migração que as cria —, mas a rede de segurança para o
+   que vier depois precisa ser recriada à mão (`create event trigger`, que exige
+   superusuário).
 
    **Rodar só a primeira é o erro mais fácil de cometer aqui**, e ele não aparece na tela de entrar: login e cadastro funcionam, porque o que eles usam é `cofre_devices`. Quem falha é a sincronização, e antes ela só sabia dizer "Sincronização com falha". Hoje ela repete o motivo que veio do banco ("o projeto está sem as tabelas desta função"), mas conferir aqui continua sendo mais barato que descobrir depois.
 

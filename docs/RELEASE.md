@@ -13,6 +13,14 @@
 9. Aplique as migrações pendentes **em ordem de nome** e confirme cada uma no banco alvo antes de publicar; não presuma que produção já recebeu alguma:
    1. `20260825001552_add_device_type.sql`, antes de publicar o cliente que envia `X-Device-Type`;
    2. `20260825003000_reset_dominant_tombstones.sql`, antes de publicar o cliente que absorve `reset_rev` como barreira. Ela recria `cofre_apply_ops` e `cofre_reset_data` na mesma transação e adiciona `cofre_mutations.result_hlc`.
+   3. `20260828120000_rls_auto_enable_least_privilege.sql`, `20260828130000_rls_auto_enable_versionada.sql` e `20260828140000_menor_privilegio_tabelas.sql`. **Não dependem de versão de cliente**: só retiram privilégio que nenhum caminho vivo exerce e trazem `rls_auto_enable` para o versionamento. Podem ir juntas, em qualquer release.
+
+      Confira o resultado com os dois scripts somente-leitura, **um bloco por vez** no editor SQL (ele exibe apenas o resultado da última consulta enviada):
+
+      - `supabase/tests/verify_rls_auto_enable.sql` — o bloco 4 precisa dizer `OK: nem anon nem authenticated executam public.rls_auto_enable.`
+      - `supabase/tests/verify_table_privileges.sql` — o bloco 5 precisa vir **vazio**.
+
+      Depois confirme `GET /api/account/devices` no ambiente: é a única rota que depende de concessão **por coluna**, e é o que quebraria se alguém aplicasse um `revoke all` em `cofre_devices` "por simetria".
 10. Publique cliente e funções do contrato `X-Account-Id` juntos. Abas antigas falham fechado e mantêm a fila local até recarregar; não trate esse `400 invalid_account_scope` como perda de dados.
 
 ## Avisos abertos desta release
