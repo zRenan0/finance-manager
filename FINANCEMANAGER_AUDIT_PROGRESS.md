@@ -18,7 +18,7 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 | Próximo módulo | M2 — Auditoria de service_role e autorização |
 | Branch | `deploy-atualizado` (árvore limpa no início do M0) |
 | Arquivos alterados até aqui | `tests/test-security.js` (+2 blocos), este arquivo |
-| Migrations criadas até aqui | `20260828120000_rls_auto_enable_least_privilege.sql` |
+| Migrations criadas até aqui | `20260828120000_rls_auto_enable_least_privilege.sql`, `20260828130000_rls_auto_enable_versionada.sql` |
 | Versão do app | `0.30.0` (package.json) |
 
 ### Ambiente de execução (RESOLVIDO)
@@ -196,7 +196,7 @@ Piores: `js/actions.js` 0,2%, `js/screens/accounts.js` 1,3%, `js/screens/privacy
 
 | # | P | Achado | Módulo |
 |---|---|---|---|
-| R1 | **P0** | `public.rls_auto_enable()` **não existe em nenhuma migration do repositório**. Ela só existe no banco de produção — foi criada fora do versionamento. Há **drift entre o banco real e as migrations**. Corrigir o privilégio sem primeiro obter a definição real (`pg_get_functiondef`) seria corrigir às cegas. | M1 |
+| R1 | ~~P0~~ **P2** | `public.rls_auto_enable()` **não existe em nenhuma migration do repositório**. Ela só existe no banco de produção — foi criada fora do versionamento. Há **drift entre o banco real e as migrations**. Definição capturada em 2026-08-28 e versionada. **Reclassificado para P2: o alerta não é explorável** — função que devolve `event_trigger` não pode ser chamada diretamente e o PostgREST não a publica. Ver adendo do M1. | M1 |
 | R2 | P3 | ~~Sem Node local~~ **resolvido** via Electron do VS Code. Resta: `coverage` e Playwright indisponíveis localmente (OneDrive/ausência), e `js/modules/app.generated.js` continua exigindo `node scripts/build-app-module.js` a cada alteração em `js/**`. | todos |
 | R3 | P2 | `/.well-known/security.txt` e `/robots.txt` ausentes em produção. | M21 |
 | R4 | P2 | HSTS sem `includeSubDomains` nem `preload`. Ativar exige certeza sobre subdomínios. | M5 |
@@ -276,7 +276,8 @@ os privilégios do dono da função.
 |---|---|
 | `supabase/migrations/20260828120000_rls_auto_enable_least_privilege.sql` | **novo.** Revoga EXECUTE de `PUBLIC`, `anon` e `authenticated` em toda sobrecarga de `public.rls_auto_enable`. |
 | `supabase/tests/verify_rls_auto_enable.sql` | **novo.** Diagnóstico somente-leitura, em 5 blocos, para rodar antes e depois. **SQL puro, sem comando de psql**: a primeira versão usava `\echo` e quebrava no SQL Editor do Supabase com `syntax error at or near "\"`. No painel, rodar **um bloco por vez** — o editor mostra só o resultado da última consulta. |
-| `tests/test-security.js` | blocos 7 e 8 acrescentados (nada removido). |
+| `supabase/migrations/20260828130000_rls_auto_enable_versionada.sql` | **novo.** Traz a função para o versionamento com o corpo verbatim de produção. |
+| `tests/test-security.js` | blocos 7, 8 e 9 acrescentados (nada removido). |
 
 ### Motivo
 
@@ -319,21 +320,86 @@ documentada no cabeçalho do próprio arquivo.
 | Aplicação da migração no banco | **NÃO VALIDADO** — sem acesso ao banco daqui |
 | Event trigger continua disparando depois do revoke | **NÃO VALIDADO** — depende da aplicação |
 
-### O que falta para fechar o M1 (ação sua, no SQL Editor do Supabase)
+### Adendo — a definição chegou (2026-08-28) e ela reclassifica o achado
 
-1. **Antes:** rodar `supabase/tests/verify_rls_auto_enable.sql` — **um bloco por vez**,
-   porque o SQL Editor exibe apenas o resultado da última consulta. O bloco 1 devolve
-   `pg_get_functiondef` — **guarde esse texto**: é o que fecha o desvio de versionamento
-   (a função passa a existir no repositório). O bloco 5 pode revelar outras
-   `security definer` expostas, que viram achado do M2.
-2. Aplicar `supabase/migrations/20260828120000_rls_auto_enable_least_privilege.sql`.
-3. **Depois:** rodar o mesmo script de verificação. O bloco 4 deve imprimir
-   `OK: nem anon nem authenticated executam public.rls_auto_enable.`
-4. Criar uma tabela de teste em staging e confirmar que ela nasce com RLS ligado
-   (prova de que o event trigger sobreviveu).
+O bloco 1 foi executado em produção e devolveu a função inteira. Três coisas mudaram.
 
-Enquanto os passos acima não forem feitos, o M1 fica **PARCIAL**: o código está pronto,
-testado e versionado, mas o banco de produção ainda está exposto.
+**1. Confirmado: é event trigger, e a ACL está mesmo errada.**
+
+```
+rls_auto_enable() | dono postgres | security_definer = true | search_path = pg_catalog
+retorno: event_trigger
+acl: =X/postgres / postgres=X / anon=X / authenticated=X / service_role=X
+```
+
+O corpo percorre `pg_event_trigger_ddl_commands()` e, para todo `CREATE TABLE` /
+`CREATE TABLE AS` / `SELECT INTO` no esquema `public`, executa
+`alter table ... enable row level security`. Falha individual é engolida com
+`RAISE LOG`. **É uma defesa. Não remover.**
+
+**2. A gravidade cai de P0 para P2 — o alerta não é explorável.**
+
+Registrado para não virar incidente por engano. `anon` e `authenticated` têm mesmo
+EXECUTE, mas não existe caminho para exercê-lo:
+
+- Função que devolve `event_trigger` **não pode ser chamada diretamente**. O plpgsql
+  recusa na compilação da chamada (`trigger functions can only be called as triggers`).
+- O PostgREST **não publica** função com retorno de pseudo-tipo: ela nunca chega a
+  existir como rota `POST /rest/v1/rpc/...`.
+
+O Advisor lê a ACL, não a chamabilidade. A correção continua certa e continua valendo
+— higiene de privilégio, defesa em profundidade e o alerta some — mas **não houve
+exposição de dados**, e nada aqui pede comunicação de incidente.
+
+**3. `search_path` estava melhor do que eu supunha, e ficou melhor ainda.**
+
+Produção já tinha `search_path = 'pg_catalog'`, então o alerta clássico de
+"search path mutable" não se aplica. Faltava só `pg_temp`: **quando não é listado, o
+PostgreSQL o pesquisa antes de `pg_catalog`** para nomes de relação e de tipo.
+Listá-lo por último inverte a ordem e fecha a classe de sombreamento por tabela
+temporária. O corpo não referencia nenhuma relação por nome curto, então a mudança
+não altera comportamento — só remove a possibilidade. Reversível trocando uma linha.
+
+**4. Migração nova: `20260828130000_rls_auto_enable_versionada.sql`.**
+
+Traz a função para o repositório (fecha o desvio R1) com o corpo verbatim de produção.
+
+**A armadilha que ela evita:** `create or replace` preserva a ACL de uma função que já
+existe, mas num banco novo (`supabase db reset`) a função **nasce com EXECUTE para
+PUBLIC**. Sem o `revoke` dentro desta mesma migração, o banco novo reintroduziria
+exatamente o achado que a migração anterior corrigiu no banco antigo. O teste 9 fixa a
+ordem `create` → `revoke` para que isso não volte.
+
+**Ainda pendente de propósito: o GATILHO não está versionado.** Só a função está. O
+`create event trigger` continua apenas no banco (sai do bloco 3, ainda não executado).
+Não foi escrito às cegas porque o nome real é desconhecido e `create event trigger`
+exige superusuário — falhar nisso derrubaria a migração e travaria a publicação.
+Nenhuma tabela do projeto depende do automatismo: todas as `cofre_*` ligam RLS
+explicitamente na migração que as cria. O gatilho é rede de segurança para o que vier.
+
+### Testes do adendo
+
+| Teste | Resultado |
+|---|---|
+| `node tests/test-security.js` | **PASSOU** — 66 ok, 0 falha (blocos 7, 8 e 9) |
+| **Mutação:** remover o `revoke` da migração de versionamento | **PASSOU** — 3 asserções dispararam, incluindo `create=43 revoke=-1` |
+| **Mutação:** voltar `search_path` para só `pg_catalog` | **PASSOU** — a asserção do `pg_temp` disparou |
+| `node scripts/lint.js` | **PASSOU** — 0 erro, 0 aviso |
+| `node tests/run-all.js` (fora do OneDrive) | **PASSOU** — 49/49 |
+| `node scripts/build-app-module.js --check` | **PASSOU** — 70 fontes |
+| Aplicação das duas migrações no banco | **NÃO VALIDADO** |
+| Gatilho continua disparando depois do revoke | **NÃO VALIDADO** |
+
+### O que ainda falta para fechar o M1
+
+1. Rodar o **bloco 3** do script de verificação: dá o nome e a configuração do event
+   trigger, único item que falta para o automatismo entrar no versionamento.
+2. Rodar o **bloco 5**: lista outras `security definer` expostas. Se vier vazio, a
+   varredura do M2 começa limpa; se vier com linhas, são achados do M2.
+3. Aplicar as duas migrações (`120000` e `130000`).
+4. Rodar o **bloco 4**: deve dizer `OK: nem anon nem authenticated executam
+   public.rls_auto_enable.`
+5. Em staging, criar uma tabela e confirmar que ela nasce com RLS ligado.
 
 ### Status
 
@@ -446,9 +512,9 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
 
 - **M1 está PARCIAL.** A migração existe e passou nos testes, mas o banco de produção
   só fica corrigido depois de aplicá-la. Passos em "O que falta para fechar o M1".
-- **Definição de `public.rls_auto_enable` ainda não capturada.** Sai do bloco 1 de
-  `supabase/tests/verify_rls_auto_enable.sql`. Sem ela, o desvio de versionamento
-  continua aberto e o `search_path` da função não pode ser revisado (P2).
+- ~~Definição de `public.rls_auto_enable` não capturada~~ **feito em 2026-08-28**: a
+  função está versionada e o achado caiu para P2 (não é explorável).
+- **O GATILHO de evento ainda não está versionado**, só a função. Falta o bloco 3.
 - **Bloco 5 do script de verificação** pode revelar outras `security definer` expostas
   no banco que não estão em migração. É a primeira coisa a olhar no M2.
 - Cobertura e Playwright indisponíveis dentro do OneDrive; usar a cópia externa (R2).

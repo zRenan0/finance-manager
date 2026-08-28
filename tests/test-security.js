@@ -247,7 +247,7 @@ async function main() {
   // carrega `security definer`, `revoke` e `grant`.
   // Os comentarios saem depois: esta migracao documenta no cabecalho como
   // desfazer o revoke, e a frase de exemplo nao pode ser lida como concessao.
-  const sql = sqlBruto.replace(/\$\$[\s\S]*?\$\$/g, " CORPO ").replace(/--[^\n]*/g, " ").replace(/\s+/g, " ").toLowerCase();
+  const sql = sqlBruto.replace(/\$(\w*)\$[\s\S]*?\$\1\$/g, " CORPO ").replace(/--[^\n]*/g, " ").replace(/\s+/g, " ").toLowerCase();
 
   const concessoesIndevidas = (sql.match(/grant\s+execute\s+on\s+function\s+[^;]*?\s+to\s+[^;]*/g) || [])
     .filter((trecho) => /\b(anon|authenticated|public)\b/.test(trecho.split(" to ").pop()));
@@ -274,7 +274,7 @@ async function main() {
     semRevoke.length === 0, semRevoke.join(", "));
 
   console.log("\n8. A correção de rls_auto_enable é mínima e reversível");
-  const correcao = migrations.filter((n) => /rls_auto_enable/.test(n));
+  const correcao = migrations.filter((n) => /rls_auto_enable_least_privilege/.test(n));
   check("a migração de menor privilégio existe", correcao.length === 1, correcao.join(", "));
   if (correcao.length === 1) {
     const texto = read(`supabase/migrations/${correcao[0]}`);
@@ -307,6 +307,44 @@ async function main() {
   const comMetaComando = arquivosSql.filter((arq) => /^[ \t]*\\[a-z]/m.test(read(arq)));
   check("nenhum SQL depende de comando do psql",
     comMetaComando.length === 0, comMetaComando.join(", "));
+
+  console.log("\n9. rls_auto_enable está versionada e nasce sem privilégio público");
+  // A função foi capturada do banco em 2026-08-28 (`pg_get_functiondef`) e entrou
+  // no repositório. Antes disso ela só existia em produção, e um `supabase db
+  // reset` produzia um ambiente diferente do real.
+  const versionadas = migrations.filter((n) => /rls_auto_enable_versionada/.test(n));
+  check("a migração que versiona a função existe", versionadas.length === 1, versionadas.join(", "));
+  if (versionadas.length === 1) {
+    const fonte = read(`supabase/migrations/${versionadas[0]}`);
+    const corpo = fonte.replace(/^\s*--.*$/gm, "");
+    check("ela declara a função de event trigger",
+      /create or replace function public\.rls_auto_enable\(\)/.test(corpo)
+      && /returns event_trigger/.test(corpo));
+    // O corpo é a defesa: liga RLS em toda tabela nova de `public`. Se esta
+    // asserção cair, alguém esvaziou a função sem perceber.
+    check("o corpo continua ligando RLS na tabela recém-criada",
+      /pg_event_trigger_ddl_commands\(\)/.test(corpo)
+      && /enable row level security/.test(corpo));
+    // `pg_temp` não listado é pesquisado ANTES de `pg_catalog` para nomes de
+    // relação e de tipo. Listá-lo por último fecha o sombreamento por tabela
+    // temporária.
+    check("o search_path fixa pg_temp por último",
+      /set search_path to 'pg_catalog', 'pg_temp'/.test(corpo));
+    // A armadilha da ordem: `create or replace` preserva a ACL de função que já
+    // existe, mas num banco novo a função nasce com EXECUTE para PUBLIC. Sem o
+    // revoke NESTA migração, o `db reset` reintroduziria o achado do Advisor.
+    const posCreate = corpo.indexOf("create or replace function public.rls_auto_enable");
+    const posRevoke = corpo.indexOf("revoke all on function public.rls_auto_enable()");
+    check("o revoke vem depois do create, na mesma migração",
+      posCreate >= 0 && posRevoke > posCreate, `create=${posCreate} revoke=${posRevoke}`);
+    check("o revoke cobre public, anon e authenticated",
+      /revoke all on function public\.rls_auto_enable\(\) from public, anon, authenticated;/.test(corpo));
+    // Nada chama esta função: o disparo é do servidor, dentro do evento, e não
+    // consulta a ACL. Um grant aqui seria privilégio sem consumidor.
+    check("nenhum papel recebe execute de volta",
+      !/grant\s+execute\s+on\s+function\s+public\.rls_auto_enable/i.test(corpo));
+  }
+
 
   console.log(`\n${fail === 0 ? "TODOS OS TESTES PASSARAM" : "FALHAS ENCONTRADAS"} - ${pass} ok, ${fail} falha(s)\n`);
   process.exit(fail === 0 ? 0 : 1);
