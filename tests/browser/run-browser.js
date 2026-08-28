@@ -5,9 +5,10 @@ const http = require("http");
 const os = require("os");
 const path = require("path");
 const { chromium } = require("playwright");
+const PdfWriter = require(path.join(__dirname, "..", "..", "js", "pdf.js"));
 
 const root = path.resolve(__dirname, "..", "..");
-const mime = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json", ".webmanifest": "application/manifest+json", ".png": "image/png" };
+const mime = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json", ".webmanifest": "application/manifest+json", ".png": "image/png" };
 
 const server = http.createServer((request, response) => {
   const urlPath = decodeURIComponent(new URL(request.url, "http://localhost").pathname);
@@ -62,8 +63,11 @@ async function escolherPrimeiraCategoria(page) {
   await seletor.waitFor({ state: "detached" });
 }
 
-async function openFresh(browser, viewport = { width: 390, height: 844 }, contextOptions = {}) {
+async function openFresh(browser, viewport = { width: 390, height: 844 }, contextOptions = {}, initScript = null) {
   const context = await browser.newContext({ viewport, ...contextOptions });
+  // Roteiro de partida: roda antes de qualquer script da página, que é a única
+  // hora em que dá para simular um navegador SEM um recurso que este tem.
+  if (initScript) await context.addInitScript(initScript);
   const page = await context.newPage();
   const pageErrors = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
@@ -802,6 +806,55 @@ async function runOnboardingViewportM4(browser, scenario) {
     await page.waitForSelector(".import-row", { state: "detached" });
     await page.evaluate(() => CofreUI.test.navigate("dashboard"));
     assert(shared.pageErrors.length === 0, `erros no navegador: ${shared.pageErrors.join("; ")}`);
+  });
+
+  // O PDF PRECISA SER LIDO EM SAFARI SEM ITERAÇÃO ASSÍNCRONA DE FLUXO.
+  //
+  // `page.getTextContent()` do PDF.js junta os pedaços do texto com
+  // `for await (const pedaco of fluxo)`, e iterar um `ReadableStream` assim só
+  // existe no Safari a partir da versão 18.4. No iPhone de quem não atualizou, a
+  // fatura morria em "undefined is not a function" e a tela só sabia dizer que
+  // não foi possível ler o arquivo. Chrome, Firefox e o Safari novo têm o
+  // recurso, então o defeito não aparecia em teste nenhum: é preciso TIRAR o
+  // recurso do navegador para que ele apareça.
+  //
+  // O importador passou a ler pelo `getReader()`, que é a interface de sempre do
+  // `ReadableStream`. Com o código antigo este teste reprova.
+  await test("a fatura em PDF abre em navegador sem iteração assíncrona de fluxo", async () => {
+    const semIterador = await openFresh(browser, { width: 390, height: 844 }, {}, () => {
+      try { delete ReadableStream.prototype[Symbol.asyncIterator]; } catch (erro) { /* já não existia */ }
+    });
+    try {
+      const tinha = await semIterador.page.evaluate(
+        () => typeof ReadableStream.prototype[Symbol.asyncIterator] === "function");
+      assert(!tinha, "o recurso não foi removido; o teste não estaria exercitando nada");
+
+      await completeOnboarding(semIterador.page);
+      await semIterador.page.evaluate(() => CofreUI.test.navigate("import"));
+      await semIterador.page.waitForSelector("#statement-file-input", { state: "attached" });
+
+      const fatura = PdfWriter.createPdfDocument({ title: "Fatura Santander" });
+      fatura.text("Santander", 40, 60, { size: 12, bold: true });
+      fatura.text("Fatura do cartao", 40, 80, { size: 10 });
+      fatura.text("Vencimento 10/09/2026", 40, 100, { size: 10 });
+      fatura.text("18/08 MERCADO SAO JOSE 123,45", 40, 130, { size: 10 });
+      fatura.text("19/08 Estorno LOJA TESTE -20,00", 40, 150, { size: 10 });
+      await semIterador.page.setInputFiles("#statement-file-input", {
+        name: "fatura.pdf", mimeType: "application/pdf", buffer: Buffer.from(fatura.build()),
+      });
+
+      await semIterador.page.waitForSelector(".import-row", { timeout: 20000 });
+      const linhas = await semIterador.page.locator(".import-row").count();
+      assert(linhas === 2, `a fatura deveria abrir com 2 linhas, veio com ${linhas}`);
+      // O aviso de destino ("cadastre um cartão") é esperado nesta base; o que
+      // não pode aparecer é a falha de leitura.
+      const falhouALeitura = await semIterador.page.evaluate(
+        () => document.body.innerText.includes("Não foi possível ler o arquivo"));
+      assert(!falhouALeitura, "a leitura do PDF falhou onde o fluxo não se deixa iterar");
+      assert(semIterador.pageErrors.length === 0, `erros no navegador: ${semIterador.pageErrors.join("; ")}`);
+    } finally {
+      await semIterador.context.close();
+    }
   });
 
   // O APP INSTALADO NA TELA DE INÍCIO RECEBE A TELA INTEIRA.

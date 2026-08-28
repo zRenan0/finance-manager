@@ -324,6 +324,39 @@ function parsePdfStatementLines(lines, filename, pageCount) {
   };
 }
 
+// LER O TEXTO DA PÁGINA SEM `for await`.
+//
+// `page.getTextContent()` junta os pedaços do fluxo com
+// `for await (const pedaco of fluxo)`, e isso exige iteração assíncrona de
+// `ReadableStream`: recurso que o Safari só ganhou na versão 18.4. Num iPhone
+// que ainda não atualizou, a chamada morre com "undefined is not a function"
+// antes da primeira palavra ser lida, e o importador só sabia dizer que não
+// conseguiu ler o arquivo. Era o defeito relatado, e ele só existe lá: Chrome,
+// Firefox e o Safari novo têm o recurso, então a leitura de PDF passava em
+// todos os testes e no computador de quem escreveu o código.
+//
+// `streamTextContent()` devolve exatamente o mesmo fluxo, e ler pelo
+// `getReader()` é a interface de sempre do `ReadableStream`, presente desde que
+// ele existe. Onde o `for await` funciona, este caminho entrega o mesmo texto.
+const PDF_IMPORT_TEXT_OPTIONS = { disableNormalization: false, includeMarkedContent: false };
+
+async function readPdfPageTextItems(page) {
+  if (typeof page.streamTextContent !== "function") {
+    const content = await page.getTextContent(PDF_IMPORT_TEXT_OPTIONS);
+    return (content && content.items) || [];
+  }
+  const reader = page.streamTextContent(PDF_IMPORT_TEXT_OPTIONS).getReader();
+  const items = [];
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    // `push(...pedaco)` passa cada item como argumento e estoura a pilha numa
+    // fatura longa; o laço custa o mesmo e não tem teto.
+    if (value && Array.isArray(value.items)) value.items.forEach((item) => items.push(item));
+  }
+  return items;
+}
+
 async function readPdfStatementFile(file, password) {
   let bytes;
   try {
@@ -345,7 +378,11 @@ async function readPdfStatementFile(file, password) {
   let documentProxy;
   try {
     loadingTask = pdfjs.getDocument({
-      data: bytes,
+      // Cópia, e não o instantâneo: o PDF.js TRANSFERE este array para o worker,
+      // e transferir esvazia o original. Sem a cópia, um PDF protegido perderia
+      // os próprios bytes ao pedir a senha, e a segunda tentativa (a que traz a
+      // senha digitada) encontraria um arquivo de zero byte.
+      data: bytes.slice(),
       password: password || undefined,
       isEvalSupported: false,
       stopAtErrors: false,
@@ -372,8 +409,7 @@ async function readPdfStatementFile(file, password) {
     const lines = [];
     for (let pageNumber = 1; pageNumber <= documentProxy.numPages; pageNumber++) {
       const page = await documentProxy.getPage(pageNumber);
-      const content = await page.getTextContent({ disableNormalization: false, includeMarkedContent: false });
-      lines.push(...pdfItemsToLines(content.items, pageNumber));
+      lines.push(...pdfItemsToLines(await readPdfPageTextItems(page), pageNumber));
       page.cleanup();
     }
     if (!lines.length || !lines.some((line) => line.text.replace(/\s/g, "").length >= 3)) {

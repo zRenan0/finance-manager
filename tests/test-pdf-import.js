@@ -169,6 +169,27 @@ function line(text, page, items) {
   check("PDF.js extrai o arquivo completo", extracted.rows.length === 2, extracted);
   check("o arquivo completo mantém banco e páginas", extracted.bank === "Santander" && extracted.pageCount === 1, extracted);
 
+  // O INSTANTÂNEO TEM DE SOBREVIVER À PRÓPRIA LEITURA.
+  //
+  // O PDF.js TRANSFERE para o worker o array que recebe em `data`, e transferir
+  // esvazia o original: depois da primeira leitura ele fica com zero byte. Como
+  // o importador guarda o instantâneo justamente para reler o arquivo quando a
+  // pessoa digita a senha do PDF, entregar o array original ali significaria que
+  // a segunda tentativa nunca teria chance. Por isso vai uma cópia.
+  //
+  // O esvaziamento não acontece AQUI: sem navegador não há worker de verdade, o
+  // PDF.js cai no worker de mentira do mesmo realm e não transfere nada. O que
+  // estas três linhas guardam é o comportamento (reler o instantâneo funciona);
+  // a transferência em si foi medida no WebKit, onde o array de 1018 bytes volta
+  // com zero quando a cópia sai.
+  ctx.__snapshot = await run("snapshotStatementFile(__pdfFile)");
+  const primeiraLeitura = await run("readPdfStatementFile(__snapshot, '')");
+  check("o instantâneo abre na primeira leitura", primeiraLeitura.rows.length === 2, primeiraLeitura.rows.length);
+  check("a leitura não esvazia o instantâneo", ctx.__snapshot.bytes.length > 0, ctx.__snapshot.bytes.length);
+  const segundaLeitura = await run("readPdfStatementFile(__snapshot, '')");
+  check("reler o mesmo instantâneo devolve o mesmo extrato",
+    segundaLeitura.rows.length === 2, segundaLeitura.rows.length);
+
   section("7. Pacote local e cache offline");
   check("módulo do PDF.js foi sincronizado", fs.existsSync(path.join(ROOT, "vendor/pdfjs/pdf.min.mjs")));
   check("worker do PDF.js foi sincronizado", fs.existsSync(path.join(ROOT, "vendor/pdfjs/pdf.worker.min.mjs")));

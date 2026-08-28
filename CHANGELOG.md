@@ -47,6 +47,30 @@ uma linha sequer tratando esse caso — nenhum `display-mode: standalone`, nenhu
   refaz a entrega; falha de verdade e aparelho sem suporte caem na âncora de
   sempre. Em computador e Android nada muda.
 
+### A fatura em PDF não abria no Safari do iPhone
+
+Com o extrato finalmente chegando inteiro ao leitor (defeito acima), o PDF passou
+a morrer um passo adiante, sempre no mesmo lugar e com a mesma cara: "Não foi
+possível ler o arquivo."
+
+- **O leitor de PDF usava um recurso que o Safari só ganhou na versão 18.4.**
+  `page.getTextContent()` do PDF.js junta os pedaços do texto com
+  `for await (const pedaco of fluxo)`, e iterar um `ReadableStream` assim é
+  recente. Onde o recurso não existe, a chamada morre em "undefined is not a
+  function" antes da primeira palavra ser lida. Chrome, Firefox e o Safari novo
+  têm o recurso: o defeito não aparecia em nenhum teste nem em nenhum
+  computador, só no aparelho de quem ainda não atualizou.
+- **A leitura passou a usar `streamTextContent()` com `getReader()`**, que é o
+  mesmo fluxo pela interface de sempre do `ReadableStream`. O texto lido é
+  idêntico; o que muda é que agora ele é lido em todo lugar. Um teste de
+  navegador novo remove o recurso antes de a página abrir e importa uma fatura,
+  para o defeito não poder voltar sem ser visto.
+- **O PDF.js transfere para o worker o array de bytes que recebe, e transferir
+  esvazia o original.** O importador guarda o arquivo lido para reler quando a
+  pessoa digita a senha do PDF; entregar o array original ao leitor deixava esse
+  guardado com zero byte, e a segunda tentativa nunca teria chance. Agora vai
+  uma cópia.
+
 ### O extrato escolhido no iPhone morria antes de ser lido
 
 Escolher o extrato passou a mudar a tela (defeito anterior), mas a tela que
