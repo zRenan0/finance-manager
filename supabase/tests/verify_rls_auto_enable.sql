@@ -73,12 +73,17 @@ order by 1, 2;
 -- CRIAÇÃO do gatilho, não a cada disparo.
 -- ============================================================================
 
+-- `evtenabled`: O = habilitado (sessão de origem, o normal), D = desabilitado,
+-- R = só em réplica, A = sempre. Qualquer coisa diferente de O ou A merece
+-- explicação. `evttags` nulo significa que o gatilho dispara em TODO comando do
+-- evento e quem filtra é a função — que é o desenho de `rls_auto_enable`.
 select
-  'event trigger'         as tipo,
-  e.evtname               as nome,
-  e.evtevent              as evento_ou_tabela,
-  e.evtenabled::text      as habilitado,
-  e.evtfoid::regprocedure as funcao
+  'event trigger'                            as tipo,
+  e.evtname::text                            as nome,
+  e.evtevent::text                           as evento_ou_tabela,
+  e.evtenabled::text                         as habilitado,
+  coalesce(array_to_string(e.evttags, ', '), '(sem filtro de tag: a função filtra)') as tags,
+  e.evtfoid::regprocedure::text              as funcao
 from pg_event_trigger e
 join pg_proc p on p.oid = e.evtfoid
 join pg_namespace n on n.oid = p.pronamespace
@@ -86,14 +91,47 @@ where n.nspname = 'public' and p.proname = 'rls_auto_enable'
 union all
 select
   'trigger',
-  t.tgname,
+  t.tgname::text,
   t.tgrelid::regclass::text,
   t.tgenabled::text,
-  t.tgfoid::regprocedure
+  '(não se aplica)',
+  t.tgfoid::regprocedure::text
 from pg_trigger t
 join pg_proc p on p.oid = t.tgfoid
 join pg_namespace n on n.oid = p.pronamespace
 where n.nspname = 'public' and p.proname = 'rls_auto_enable';
+
+
+-- ----------------------------------------------------------------------------
+-- BLOCO 3.1 — O automatismo está de pé?
+--
+-- Uma linha. Função sem gatilho é o caso silencioso: nada dá erro, e tabela
+-- nova simplesmente nasce sem RLS.
+-- ----------------------------------------------------------------------------
+
+select
+  case
+    when not exists (
+      select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public' and p.proname = 'rls_auto_enable'
+    ) then 'AUSENTE: a função nem existe neste banco.'
+    when not exists (
+      select 1 from pg_event_trigger e
+      join pg_proc p on p.oid = e.evtfoid
+      join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public' and p.proname = 'rls_auto_enable'
+    ) then 'QUEBRADO: a função existe mas NENHUM gatilho a chama. '
+           || 'Tabela nova em public não ganha RLS sozinha. '
+           || 'Aplique 20260828150000_rls_auto_enable_gatilho.sql.'
+    when exists (
+      select 1 from pg_event_trigger e
+      join pg_proc p on p.oid = e.evtfoid
+      join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public' and p.proname = 'rls_auto_enable'
+        and e.evtenabled not in ('O', 'A')
+    ) then 'DESLIGADO: existe gatilho, mas ele está desabilitado.'
+    else 'OK: o gatilho existe e está habilitado.'
+  end as automatismo;
 
 
 -- ============================================================================

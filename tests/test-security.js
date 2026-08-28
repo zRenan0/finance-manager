@@ -346,6 +346,39 @@ async function main() {
   }
 
 
+
+  console.log("\n10. O gatilho de evento também está versionado");
+  // A migração 20260828130000 trouxe a FUNÇÃO. Sem quem a chame, um banco novo
+  // fica com o pior estado possível: a defesa existe e não roda, e o furo só
+  // aparece no dia em que alguém criar uma tabela sem lembrar do RLS.
+  const gatilho = migrations.filter((n) => /rls_auto_enable_gatilho/.test(n));
+  check("a migração do gatilho existe", gatilho.length === 1, gatilho.join(", "));
+  if (gatilho.length === 1) {
+    const fonte = read(`supabase/migrations/${gatilho[0]}`);
+    const corpo = fonte.replace(/^\s*--.*$/gm, "").toLowerCase();
+    check("ela cria ensure_rls em ddl_command_end",
+      /create event trigger ensure_rls\s+on ddl_command_end\s+execute function public\.rls_auto_enable\(\)/.test(corpo));
+    // A checagem é pela FUNÇÃO ALVO, não pelo nome: um gatilho com outro nome
+    // apontando para a mesma função já cumpre o papel, e criar um segundo faria
+    // a função rodar duas vezes por comando.
+    check("ela só cria quando não há gatilho para a função",
+      /from pg_event_trigger e[\s\S]*?p\.proname = 'rls_auto_enable'[\s\S]*?into ja_existe/.test(corpo)
+      && /if ja_existe then[\s\S]*?return;/.test(corpo));
+    // `create event trigger` exige superusuário, que o papel de migração do
+    // Supabase nem sempre tem. Deixar a exceção subir travaria toda migração
+    // futura nesse ambiente.
+    check("falta de privilégio vira aviso, não erro",
+      /when insufficient_privilege then\s*raise warning/.test(corpo));
+    check("o aviso diz o comando a rodar à mão",
+      /raise warning[\s\S]*?create event trigger ensure_rls on ddl_command_end/.test(corpo));
+    // Recriar o gatilho às cegas em produção seria trocar um estado conhecido e
+    // funcionando por um recém-escrito.
+    check("ela não apaga nem recria o gatilho existente",
+      !/drop event trigger/.test(corpo) && !/alter event trigger/.test(corpo));
+  }
+  check("o script de verificação sabe dizer se o automatismo está de pé",
+    /BLOCO 3\.1/.test(read("supabase/tests/verify_rls_auto_enable.sql")));
+
   console.log(`\n${fail === 0 ? "TODOS OS TESTES PASSARAM" : "FALHAS ENCONTRADAS"} - ${pass} ok, ${fail} falha(s)\n`);
   process.exit(fail === 0 ? 0 : 1);
 }

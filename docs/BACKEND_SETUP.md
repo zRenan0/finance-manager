@@ -27,12 +27,16 @@ Consequência prática: **sem as variáveis do Supabase configuradas, as anális
    | `20260828130000_rls_auto_enable_versionada.sql` | traz `rls_auto_enable` para o versionamento e fixa `pg_temp` no fim do `search_path` | Num banco novo a função não existe, e tabela criada depois não ganha RLS sozinha. |
    | `20260828140000_menor_privilegio_tabelas.sql` | desfaz o `INSERT`/`UPDATE`/`DELETE`/`TRUNCATE` que o privilégio padrão deu a `authenticated` em `cofre_financial_snapshots` e `cofre_mutations` | Nada hoje. Sem ela, o RLS fica sendo a única camada — e `TRUNCATE` sequer passa por policy. |
 
-   **O gatilho de evento que dispara `rls_auto_enable` ainda NÃO está versionado**, só a
-   função. Num projeto novo, criado apenas a partir destas migrações, tabela nova não
-   ganha RLS automaticamente. Nenhuma tabela do projeto depende disso — todas as
-   `cofre_*` ligam RLS na própria migração que as cria —, mas a rede de segurança para o
-   que vier depois precisa ser recriada à mão (`create event trigger`, que exige
-   superusuário).
+   | `20260828150000_rls_auto_enable_gatilho.sql` | o gatilho de evento `ensure_rls`, em `ddl_command_end` | Tabela nova em `public` não ganha RLS sozinha. |
+
+   **`create event trigger` exige superusuário**, e o papel que aplica migrações no
+   Supabase nem sempre tem esse poder. A migração trata isso: se não conseguir criar,
+   emite `WARNING` com o comando a rodar à mão em vez de derrubar a migração. **Confira
+   o resultado** com o bloco 3.1 de `supabase/tests/verify_rls_auto_enable.sql`, que
+   responde em uma linha se o automatismo está de pé.
+
+   Nenhuma tabela do projeto depende desse gatilho — todas as `cofre_*` ligam RLS na
+   própria migração que as cria. Ele é rede de segurança para o que vier depois.
 
    **Rodar só a primeira é o erro mais fácil de cometer aqui**, e ele não aparece na tela de entrar: login e cadastro funcionam, porque o que eles usam é `cofre_devices`. Quem falha é a sincronização, e antes ela só sabia dizer "Sincronização com falha". Hoje ela repete o motivo que veio do banco ("o projeto está sem as tabelas desta função"), mas conferir aqui continua sendo mais barato que descobrir depois.
 
