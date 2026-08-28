@@ -24,7 +24,9 @@ select
   c.relrowsecurity                            as rls_ligado,
   c.relforcerowsecurity                       as rls_forcado_para_o_dono,
   count(p.polname)                            as policies,
-  coalesce(string_agg(p.polname || ' [' || p.polcmd || ']', ' / ' order by p.polname), '(nenhuma: nega tudo)') as detalhe,
+  -- `polcmd` é do tipo `"char"` do catálogo, não `text`. Sem o cast, `||` casa
+  -- com mais de um operador e o PostgreSQL recusa: "operator is not unique".
+  coalesce(string_agg(p.polname::text || ' [' || p.polcmd::text || ']', ' / ' order by p.polname), '(nenhuma: nega tudo)') as detalhe,
   coalesce(obj_description(c.oid, 'pg_class'), '(sem comentário)') as proposito
 from pg_class c
 join pg_namespace n on n.oid = c.relnamespace
@@ -103,7 +105,7 @@ select
     when 'r' then 'SELECT' when 'a' then 'INSERT' when 'w' then 'UPDATE'
     when 'd' then 'DELETE' else 'ALL' end as comando,
   coalesce(
-    (select string_agg(rolname, ', ') from pg_roles where oid = any(p.polroles)),
+    (select string_agg(rolname::text, ', ') from pg_roles where oid = any(p.polroles)),
     'PUBLIC'
   )                                  as papeis,
   pg_get_expr(p.polqual, p.polrelid)      as usando,
@@ -130,17 +132,18 @@ with tabelas as (
 select relname as tabela, 'RLS DESLIGADO' as problema
 from tabelas where not relrowsecurity
 union all
-select t.relname, 'escrita concedida a ' || r.rolname || ': ' || p.privilegio
+select t.relname, 'escrita concedida a ' || r.rolname::text || ': ' || p.privilegio
 from tabelas t
 cross join (select rolname from pg_roles where rolname in ('anon', 'authenticated')) r
 cross join lateral (select unnest(array['INSERT', 'UPDATE', 'DELETE', 'TRUNCATE']) as privilegio) p
 where has_table_privilege(r.rolname, t.oid, p.privilegio)
 union all
-select t.relname, 'leitura concedida a anon'
+select t.relname, 'leitura concedida a ' || r.rolname::text
 from tabelas t
-where has_table_privilege('anon', t.oid, 'SELECT')
+cross join (select rolname from pg_roles where rolname = 'anon') r
+where has_table_privilege(r.rolname, t.oid, 'SELECT')
 union all
-select c.relname, 'policy permissiva demais: ' || p.polname
+select c.relname, 'policy permissiva demais: ' || p.polname::text
 from pg_policy p
 join pg_class c on c.oid = p.polrelid
 join pg_namespace n on n.oid = c.relnamespace

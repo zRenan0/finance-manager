@@ -649,6 +649,26 @@ policy criada ou removida, RLS de nada foi desligado. Reversível com `grant`.
 | Aplicação da migração no banco | **NÃO VALIDADO** |
 | Matriz real de privilégios do banco | **NÃO VALIDADO** — sai de `verify_table_privileges.sql` |
 
+### Limitação conhecida destes scripts SQL
+
+**Não existe PostgreSQL nesta máquina**, então os arquivos de `supabase/tests/` e as
+migrações **não são executados em lugar nenhum antes de chegarem a você**. Os testes em
+Node conferem o TEXTO do SQL, não a semântica. Dois erros já escaparam por isso:
+
+1. `\echo` no primeiro `verify_rls_auto_enable.sql` — comando de psql, não SQL.
+2. `p.polcmd` sem cast no `verify_table_privileges.sql` — `polcmd` é do tipo `"char"`
+   do catálogo, e `text || "char"` casa com mais de um operador
+   (`operator is not unique`).
+
+Correção aplicada e generalizada: **toda coluna de catálogo agora vai com `::text`
+explícito** nas concatenações (`polcmd`, `polname`, `rolname`), e a busca por `anon`
+passa pelo `pg_roles` em vez de literal, para devolver zero linha em vez de exceção num
+banco sem os papéis do PostgREST.
+
+O que segura de verdade: os scripts são **somente leitura**, então o custo de um erro é
+uma mensagem no editor, nunca dado alterado. As migrações, essas sim, precisam ser
+aplicadas primeiro em staging.
+
 ### O que falta para fechar o M3
 
 1. Rodar `supabase/tests/verify_table_privileges.sql` **antes** (um bloco por vez).
