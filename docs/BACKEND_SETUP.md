@@ -26,7 +26,6 @@ Consequência prática: **sem as variáveis do Supabase configuradas, as anális
    | `20260828120000_rls_auto_enable_least_privilege.sql` | tira `EXECUTE` de `public.rls_auto_enable` de `PUBLIC`, `anon` e `authenticated` | Nada. É higiene de privilégio; sem ela o Security Advisor continua acusando. |
    | `20260828130000_rls_auto_enable_versionada.sql` | traz `rls_auto_enable` para o versionamento e fixa `pg_temp` no fim do `search_path` | Num banco novo a função não existe, e tabela criada depois não ganha RLS sozinha. |
    | `20260828140000_menor_privilegio_tabelas.sql` | desfaz o `INSERT`/`UPDATE`/`DELETE`/`TRUNCATE` que o privilégio padrão deu a `authenticated` em `cofre_financial_snapshots` e `cofre_mutations` | Nada hoje. Sem ela, o RLS fica sendo a única camada — e `TRUNCATE` sequer passa por policy. |
-
    | `20260828150000_rls_auto_enable_gatilho.sql` | o gatilho de evento `ensure_rls`, em `ddl_command_end` | Tabela nova em `public` não ganha RLS sozinha. |
 
    **`create event trigger` exige superusuário**, e o papel que aplica migrações no
