@@ -12,15 +12,15 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 
 | Campo | Valor |
 |---|---|
-| Módulo atual | **M3 — RLS e menor privilégio** |
-| Status do M3 | **PARCIAL** — correção escrita e testada; falta aplicar no banco |
+| Módulo atual | **M4 — XSS e entradas não confiáveis** (a iniciar) |
+| Status do M3 | **CONCLUÍDO** — aplicado e confirmado no banco em 2026-08-28 |
 | Status do M2 | **CONCLUÍDO** — nenhuma vulnerabilidade de autorização; invariantes travados por teste |
-| Status do M1 | **PARCIAL** — falta aplicar as migrações no banco e capturar o gatilho (blocos 3 e 5) |
-| Módulos concluídos | M0, M2 (M1 e M3 parciais: falta aplicar migrações) |
+| Status do M1 | **CONCLUÍDO** — aplicado e confirmado; gatilho capturado e versionado |
+| Módulos concluídos | M0, M1, M2, M3 |
 | Próximo módulo | M4 — XSS e entradas não confiáveis |
 | Branch | `deploy-atualizado` (árvore limpa no início do M0) |
 | Arquivos alterados até aqui | `tests/test-security.js` (+3 blocos), `tests/test-service-role-scope.js` (novo), este arquivo. **Nenhum arquivo de produção alterado.** |
-| Migrations criadas até aqui | `20260828120000_rls_auto_enable_least_privilege.sql`, `20260828130000_rls_auto_enable_versionada.sql`, `20260828140000_menor_privilegio_tabelas.sql` — **nenhuma aplicada ainda** |
+| Migrations criadas até aqui | `20260828120000_rls_auto_enable_least_privilege.sql`, `20260828130000_rls_auto_enable_versionada.sql`, `20260828140000_menor_privilegio_tabelas.sql` (as três **aplicadas e confirmadas em 2026-08-28**), `20260828150000_rls_auto_enable_gatilho.sql` (**ainda não aplicada**; é no-op em produção, onde o gatilho já existe) |
 | Versão do app | `0.30.0` (package.json) |
 
 ### Ambiente de execução (RESOLVIDO)
@@ -405,7 +405,8 @@ explicitamente na migração que as cria. O gatilho é rede de segurança para o
 
 ### Status
 
-**PARCIAL** — correção implementada, testada e versionada. Pendente de aplicação no banco.
+**CONCLUÍDO** — aplicado em 2026-08-28 e confirmado no banco: `OK: nem anon nem
+authenticated executam public.rls_auto_enable.` Função e gatilho versionados.
 
 ---
 
@@ -762,8 +763,15 @@ aplicadas primeiro em staging.
 
 ### Status
 
-**PARCIAL** — correção escrita, testada por mutação e versionada; pendente de aplicação
-no banco e da conferência da matriz real.
+**CONCLUÍDO** — aplicado em 2026-08-28. O bloco 5 voltou **vazio**: os oito privilégios
+de escrita sumiram, RLS segue ligado nas nove, `anon` não lê nada e nenhuma policy é
+permissiva.
+
+**Ressalva registrada:** a regressão de `GET /api/account/devices` **não foi validada**
+por quem tem sessão. O risco é próximo de zero — a migração comprovadamente não
+menciona `cofre_devices` (asserção do teste) e o bloco 5 não acusou nada —, mas
+"próximo de zero" não é "testado". O bloco 3 do `verify_table_privileges.sql` fecha isso
+no nível do banco, sem precisar de login.
 
 ---
 
