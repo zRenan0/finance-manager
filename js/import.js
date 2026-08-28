@@ -120,27 +120,70 @@ function categorySuggestionConfidence(description, dataOrCategories) {
 }
 
 // ------------------------------------------------------------------------------
-// LEITURA DO ARQUIVO; com detecção de codificação
+// LEITURA DO ARQUIVO; primeiro os bytes, o resto depois
 // ------------------------------------------------------------------------------
-// Extratos OFX de bancos brasileiros costumam vir em ISO-8859-1 (Latin-1); ler
-// como UTF-8 estraga acentos. Decodificamos como UTF-8 e, se aparecer o caractere
-// de substituição, refazemos em windows-1252.
-// A decodificação (UTF-8 → windows-1252) vive em utils.js/readFileAsText e é
-// compartilhada com o restore de backup; antes havia duas implementações.
-async function readStatementFile(file, options) {
+// `snapshotStatementFile` tira o arquivo das mãos do navegador e o traz para a
+// memória do app antes de qualquer outra coisa. Isso é exigência do iPhone, onde
+// o `File` escolhido não passa de um ponteiro para uma cópia temporária que some
+// assim que a `FileList` é solta (o porquê está em `readFileBytes`, utils.js).
+// Mas serve a todos: a partir daqui o extrato pode ser relido quantas vezes for
+// preciso, e é isso que faz a segunda tentativa com a senha do PDF funcionar.
+//
+// O instantâneo tem a cara mínima de um `File` (name, type, size) mais os bytes,
+// e atravessa `isPdfStatementFile`, o leitor de PDF e o parser sem que nenhum
+// deles precise saber a diferença.
+function isStatementSnapshot(value) {
+  return !!value && value.bytes instanceof Uint8Array;
+}
+
+async function snapshotStatementFile(file) {
+  if (isStatementSnapshot(file)) return file;
   if (!file) throw new ImportError("READ_FAIL", "Nenhum arquivo selecionado.");
-  if (file.size === 0) throw new ImportError("EMPTY", "O arquivo está vazio.");
-  if (file.size > MAX_IMPORT_BYTES) {
+  // O tamanho anunciado serve para não gastar memória com um arquivo enorme; ele
+  // NÃO decide se o arquivo está vazio. No iPhone um arquivo que ainda não desceu
+  // do iCloud anuncia zero byte e mesmo assim é lido inteiro. Quem responde por
+  // "vazio" é o que voltou da leitura, não o que o navegador prometeu antes dela.
+  if (Number(file.size) > MAX_IMPORT_BYTES) {
     throw new ImportError("TOO_LARGE", "Arquivo muito grande (limite de 12 MB). Exporte um período menor no seu banco.");
   }
+  let bytes;
   try {
-    if (typeof isPdfStatementFile === "function" && isPdfStatementFile(file)) {
-      return await readPdfStatementFile(file, options && options.password);
+    bytes = await readFileBytes(file);
+  } catch (err) {
+    throw new ImportError("READ_FAIL", "Não foi possível ler o arquivo. Tente selecioná-lo novamente.", readErrorDetail(err));
+  }
+  if (!bytes || bytes.length === 0) throw new ImportError("EMPTY", "O arquivo está vazio.");
+  if (bytes.length > MAX_IMPORT_BYTES) {
+    throw new ImportError("TOO_LARGE", "Arquivo muito grande (limite de 12 MB). Exporte um período menor no seu banco.");
+  }
+  return { name: String(file.name || ""), type: String(file.type || ""), size: bytes.length, bytes };
+}
+
+// O nome do erro do navegador é o que separa "o arquivo sumiu no meio da leitura"
+// de "o arquivo ainda está na nuvem", e é a única pista que sobra quando o defeito
+// só acontece no aparelho de outra pessoa. Vai para a tela da importação; não sai
+// dali, como nada mais sai deste módulo.
+function readErrorDetail(err) {
+  if (!err) return null;
+  const name = err.name ? String(err.name) : "";
+  const message = err.message ? String(err.message) : String(err);
+  return name && name !== "Error" ? `${name}: ${message}` : message;
+}
+
+// Extratos OFX de bancos brasileiros costumam vir em ISO-8859-1 (Latin-1); ler
+// como UTF-8 estraga acentos. A decodificação (UTF-8 → windows-1252) vive em
+// utils.js/decodeFileText e é compartilhada com o restore de backup; antes havia
+// duas implementações.
+async function readStatementFile(file, options) {
+  const source = await snapshotStatementFile(file);
+  try {
+    if (typeof isPdfStatementFile === "function" && isPdfStatementFile(source)) {
+      return await readPdfStatementFile(source, options && options.password);
     }
-    return await readFileAsText(file);
+    return decodeFileText(source.bytes);
   } catch (err) {
     if (err instanceof ImportError) throw err;
-    throw new ImportError("READ_FAIL", "Não foi possível ler o arquivo. Tente selecioná-lo novamente.", String(err));
+    throw new ImportError("READ_FAIL", "Não foi possível ler o arquivo. Tente selecioná-lo novamente.", readErrorDetail(err));
   }
 }
 

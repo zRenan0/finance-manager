@@ -17,6 +17,13 @@ const ctx = {
 };
 ctx.window = ctx; ctx.self = ctx; ctx.globalThis = ctx;
 vm.createContext(ctx);
+// A paginação da revisão é declarada em js/app.js, que este teste não carrega.
+// Em vez de repetir o número, entra a própria linha do arquivo: se ela mudar, o
+// teste acompanha em vez de mentir.
+const linhaDaPaginacao = (readSrc("js/app.js").match(/^const IMPORT_PAGE_SIZE = \d+;$/m) || [])[0];
+if (!linhaDaPaginacao) throw new Error("IMPORT_PAGE_SIZE saiu de js/app.js; ajuste este teste");
+vm.runInContext(linhaDaPaginacao, ctx, { filename: "js/app.js (recorte)" });
+
 ["js/utils.js", "js/icons.js", "js/rules.js", "js/layout.js", "js/storage.js", "js/accounts.js", "js/movements.js", "js/budgets.js", "js/import.js", "js/screens/_shared.js", "js/screens/add.js", "js/screens/import.js", "js/actions.js"]
   .forEach((file) => vm.runInContext(readSrc(file), ctx, { filename: file }));
 const run = (code) => vm.runInContext(code, ctx);

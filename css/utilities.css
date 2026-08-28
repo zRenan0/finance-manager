@@ -84,7 +84,7 @@
 /* Os dois `<input type="file">` do app nunca são tocados diretamente: quem
    abre o seletor é o botão de restaurar backup ou a área de soltar do
    importador. `display:none` era o esconderijo óbvio, mas o Safari do iPhone
-   não abre o seletor de um campo que saiu do layout — tocar a área de soltar
+   não abre o seletor de um campo que saiu do layout, e tocar a área de soltar
    não fazia nada. Aqui o campo continua no layout, com 1px e invisível. Fora
    da leitura de tela quem cuida é o HTML (`aria-hidden` + `tabindex="-1"`),
    porque o rótulo de verdade está no elemento que aciona o campo.

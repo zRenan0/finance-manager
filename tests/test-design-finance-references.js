@@ -51,7 +51,7 @@ console.log("\n1. Dashboard e navegação móvel");
   check("os cinco rótulos esperados estão presentes",
     ["Início", "Movimentos", "Adicionar", "Planejar", "Recursos"].every((label) => labels.includes(label)));
   check("os nomes acessíveis contêm os rótulos curtos",
-    ["Movimentos, abrir Movimentações", "Planejar, abrir Planejamento"].every((label) => ariaLabels.includes(label)));
+    ["Movimentos, abrir Movimentações", "Planejar, abrir Calendário"].every((label) => ariaLabels.includes(label)));
   check("o painel principal tem uma única ação primária", (dashboard.match(/hero-action--primary/g) || []).length === 1);
   check("ações secundárias são limitadas a duas", dashboard.includes("return actions.slice(0, 2)"));
   check("os cinco atalhos antigos saíram do painel", !dashboard.includes("hero-tool-btn"));

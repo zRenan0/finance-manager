@@ -47,6 +47,36 @@ uma linha sequer tratando esse caso — nenhum `display-mode: standalone`, nenhu
   refaz a entrega; falha de verdade e aparelho sem suporte caem na âncora de
   sempre. Em computador e Android nada muda.
 
+### O extrato escolhido no iPhone morria antes de ser lido
+
+Escolher o extrato passou a mudar a tela (defeito anterior), mas a tela que
+aparecia era sempre a mesma: "Não foi possível ler o arquivo. Tente selecioná-lo
+novamente." Não adiantava tentar de novo, nem trocar de formato, nem sair do app
+adicionado à tela de início para o Safari.
+
+- **O campo de arquivo era limpo com a leitura ainda em curso.** Logo depois de
+  disparar a leitura, o `change` fazia `input.value = ""`, que é o gesto padrão
+  para permitir escolher o MESMO arquivo de novo. No iPhone esse gesto tem preço:
+  o `File` de lá não é o arquivo, é um ponteiro para a cópia temporária que o app
+  Arquivos deixou na área do Safari, e essa cópia morre junto com a `FileList`.
+  A leitura em curso ia junto. Como a limpeza é síncrona e a leitura não, a
+  corrida era decidida sempre do mesmo jeito, o que explica o "não vai nem a pau":
+  não havia tentativa com sorte diferente.
+- **Agora os bytes são copiados antes de qualquer outra coisa** e o campo só é
+  limpo quando a leitura termina. `snapshotStatementFile()` traz o arquivo
+  inteiro para a memória do app numa tacada, e OFX, CSV e PDF seguem daí em
+  diante sobre essa cópia. A segunda tentativa de um PDF com senha também: ela
+  relê o instantâneo, nunca o `File`, que a essa altura pode não existir mais.
+- **`file.size === 0` deixou de significar "arquivo vazio".** No iPhone um
+  arquivo que ainda não desceu do iCloud anuncia zero byte e mesmo assim é lido
+  inteiro. Quem responde por vazio agora é o que voltou da leitura.
+- **A causa técnica aparece na tela quando a leitura falha.** É o que distingue
+  "o arquivo sumiu no meio" de "o arquivo ainda está na nuvem", e sem ela não há
+  como ajudar quem está com o defeito na mão, do outro lado. O detalhe vem do
+  navegador; o conteúdo do extrato continua sem sair do aparelho.
+- **O restaurar backup tinha exatamente o mesmo defeito** e recebeu a mesma
+  correção; lá ele aparecia como "Não foi possível ler o arquivo de backup".
+
 ### Escolher o extrato no iPhone não fazia nada
 
 - **O campo de arquivo era destruído no meio da escolha.** `render()` refaz

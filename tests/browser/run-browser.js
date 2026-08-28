@@ -733,6 +733,77 @@ async function runOnboardingViewportM4(browser, scenario) {
     assert(shared.pageErrors.length === 0, `erros no navegador: ${shared.pageErrors.join("; ")}`);
   });
 
+  // O ARQUIVO ESCOLHIDO NÃO PODE SER SOLTO ANTES DE TER SIDO LIDO.
+  //
+  // No iPhone o `File` não é o arquivo: é um ponteiro para a cópia temporária
+  // que o app Arquivos deixou na área do Safari, e ela morre junto com a
+  // `FileList`. Limpar o campo logo depois de disparar a leitura (o gesto que
+  // permite escolher o MESMO arquivo de novo) soltava essa lista com a leitura
+  // ainda em curso, e o extrato batia sempre em "Não foi possível ler o
+  // arquivo. Tente selecioná-lo novamente." — no aparelho, todas as vezes.
+  //
+  // O teste encena a regra do iPhone: a leitura só termina no próximo ciclo e
+  // falha se o campo tiver sido limpo nesse meio-tempo. Com a limpeza no lugar
+  // antigo o extrato não abre; com ela depois da leitura, abre.
+  await test("o extrato é lido antes de o campo ser limpo", async () => {
+    const page = shared.page;
+    await page.evaluate(() => CofreUI.test.navigate("import"));
+    await page.waitForSelector("#statement-file-input", { state: "attached" });
+
+    await page.evaluate(() => {
+      const campo = document.getElementById("statement-file-input");
+      const arrayBufferOriginal = Blob.prototype.arrayBuffer;
+      const readAsOriginal = FileReader.prototype.readAsArrayBuffer;
+      const arquivoSumiu = () => campo.value === "";
+      Blob.prototype.arrayBuffer = function () {
+        const bytes = arrayBufferOriginal.call(this);
+        return new Promise((resolve, reject) => setTimeout(() => {
+          if (arquivoSumiu()) reject(new DOMException("The operation could not be completed", "NotReadableError"));
+          else bytes.then(resolve, reject);
+        }, 0));
+      };
+      FileReader.prototype.readAsArrayBuffer = function (blob) {
+        setTimeout(() => {
+          if (arquivoSumiu()) this.dispatchEvent(new Event("error"));
+          else readAsOriginal.call(this, blob);
+        }, 0);
+      };
+      window.__devolveLeituraNormal = () => {
+        Blob.prototype.arrayBuffer = arrayBufferOriginal;
+        FileReader.prototype.readAsArrayBuffer = readAsOriginal;
+        delete window.__devolveLeituraNormal;
+      };
+    });
+
+    try {
+      await page.setInputFiles("#statement-file-input", {
+        name: "extrato-iphone.csv",
+        mimeType: "text/csv",
+        buffer: Buffer.from([
+          "data;descricao;valor",
+          "03/08/2026;MERC BOM JESUS;-84,90",
+          "07/08/2026;SALARIO AGOSTO;3200,00",
+        ].join("\n"), "utf8"),
+      });
+      await page.waitForSelector(".import-row", { timeout: 5000 });
+      const linhas = await page.locator(".import-row").count();
+      assert(linhas === 2, `o extrato deveria abrir com 2 linhas, veio com ${linhas}`);
+      const erro = await page.locator(".inline-error").count();
+      assert(erro === 0, "a importação mostrou erro de leitura com o arquivo em mãos");
+      // E o campo TEM de acabar limpo, ou escolher o mesmo arquivo de novo não
+      // dispara `change` nenhum e a tela fica muda na segunda tentativa.
+      const limpo = await page.evaluate(() => document.getElementById("statement-file-input").value === "");
+      assert(limpo, "o campo de arquivo ficou preso no extrato anterior");
+    } finally {
+      await page.evaluate(() => { if (window.__devolveLeituraNormal) window.__devolveLeituraNormal(); });
+    }
+
+    await page.evaluate(() => document.querySelector('[data-action="import-cancel"]').click());
+    await page.waitForSelector(".import-row", { state: "detached" });
+    await page.evaluate(() => CofreUI.test.navigate("dashboard"));
+    assert(shared.pageErrors.length === 0, `erros no navegador: ${shared.pageErrors.join("; ")}`);
+  });
+
   // O APP INSTALADO NA TELA DE INÍCIO RECEBE A TELA INTEIRA.
   //
   // No Safari o navegador ocupa o entalhe, a barra de status e a faixa do risco
@@ -813,6 +884,19 @@ async function runOnboardingViewportM4(browser, scenario) {
     // (ver css/utilities.css), justamente para que encostar na tela não o revele.
     await page.evaluate(() => document.body.focus());
     await page.keyboard.press("Tab");
+    // O atalho desce por transição (`transition: transform`, css/utilities.css).
+    // Medir no mesmo quadro da Tab pega o retângulo de ANTES do movimento, que é
+    // o de fora da tela: a espera aqui é o fim da descida, não o foco. Se ele não
+    // descer, a espera estoura e a asserção seguinte é que reprova.
+    await page.waitForFunction(() => {
+      const link = document.querySelector(".skip-link");
+      if (!link) return false;
+      // A descida terminou quando o deslocamento volta a zero. Esperar pela
+      // POSIÇÃO seria esperar pelo que a asserção mede; esperar pelo fim do
+      // movimento deixa a medida acontecer com o atalho parado.
+      const t = getComputedStyle(link).transform;
+      return t === "none" || t === "matrix(1, 0, 0, 1, 0, 0)";
+    }, null, { timeout: 2000 }).catch(() => {});
     const atalho = await page.evaluate(() => {
       const link = document.querySelector(".skip-link");
       if (!link) return null;

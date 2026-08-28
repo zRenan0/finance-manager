@@ -65,8 +65,27 @@ function normalizarLf(texto) {
   return String(texto).replace(/\r\n?/g, "\n");
 }
 
+// O ATRIBUTO "SOMENTE LEITURA" DO WINDOWS DERRUBA A LIMPEZA.
+//
+// Pasta dentro de área sincronizada (OneDrive, no caso) volta a nascer com o
+// atributo `R`, e `fs.rmSync` responde `EPERM` antes de o build começar. A
+// mensagem não fala em atributo nenhum: fala em permissão, num diretório que a
+// pessoa acabou de criar. No Windows `chmod` é justamente o interruptor desse
+// atributo, então destravar a árvore inteira e só então remover resolve. Nos
+// outros sistemas o laço não muda nada, porque lá o atributo não existe e a
+// permissão de escrita já é a que o dono tem.
+function destravar(alvo) {
+  let stat;
+  try { stat = fs.lstatSync(alvo); } catch (_) { return; }
+  try { fs.chmodSync(alvo, 0o700); } catch (_) { /* se importava, o rm reclama */ }
+  if (stat.isDirectory()) fs.readdirSync(alvo).forEach((nome) => destravar(path.join(alvo, nome)));
+}
+
 function limpar(dir) {
-  if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
+  if (fs.existsSync(dir)) {
+    destravar(dir);
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 120 });
+  }
   fs.mkdirSync(dir, { recursive: true });
 }
 

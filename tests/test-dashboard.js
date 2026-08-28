@@ -196,7 +196,7 @@ check("a navegação móvel usa os rótulos curtos",
   navMovel.includes("<span>Movimentos</span>") && navMovel.includes("<span>Planejar</span>"));
 check("os rótulos curtos preservam os nomes acessíveis completos",
   navMovel.includes('data-tab="analytics" aria-label="Movimentos, abrir Movimentações"')
-    && navMovel.includes('data-tab="calendar" aria-label="Planejar, abrir Planejamento"'));
+    && navMovel.includes('data-tab="calendar" aria-label="Planejar, abrir Calendário"'));
 
 const inicial = run(`renderDashboardScreen()`);
 check("Início renderiza", inicial.length > 1000);

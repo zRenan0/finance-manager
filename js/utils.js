@@ -418,7 +418,7 @@ function resampleSeries(series, targetPoints = 60) {
 // ignora o atributo. Aberto no navegador o estrago é meio invisível (o arquivo
 // abre na própria aba, como texto cru); INSTALADO na tela de início não há aba
 // para onde abrir, e tocar em "Backup completo (JSON)" não faz nada. Nenhum
-// erro, nenhum aviso — a pessoa conclui que o botão está quebrado, e está.
+// erro, nenhum aviso: a pessoa conclui que o botão está quebrado, e está.
 //
 // O caminho que o iOS oferece é o painel de compartilhamento, com "Salvar em
 // Arquivos" dentro dele. Ele exige gesto da pessoa, e todos os exportadores são
@@ -457,7 +457,7 @@ function shareFileOnAppleTouch(blob, filename, mime) {
 
 // iPhone e iPad (e o Safari de Mac com tela sensível ao toque, que se anuncia
 // como MacIntel) traduzem cada item de `accept` para um UTI do sistema antes de
-// abrir o app Arquivos. Extensão sem UTI registrado — `.ofx` é o caso — não é
+// abrir o app Arquivos. Extensão sem UTI registrado (`.ofx` é o caso) não é
 // simplesmente ignorada: o seletor desabilita tudo que não casou, e o extrato
 // aparece cinza, impossível de tocar. Quem importava pelo celular via a lista de
 // arquivos abrir e nenhum deles poder ser escolhido.
@@ -479,25 +479,59 @@ function statementAcceptAttr() {
   return isAppleTouchBrowser() ? "" : ` accept="${STATEMENT_ACCEPT}"`;
 }
 
-// Leitura de arquivo texto com detecção de codificação (UTF-8 → windows-1252),
-// usada tanto pelo importador de extratos quanto pelo restore de backup.
-function readFileAsText(file) {
-  return new Promise((resolve, reject) => {
-    if (!file) { reject(new Error("Nenhum arquivo selecionado.")); return; }
+// COPIAR OS BYTES ANTES QUE O ARQUIVO SUMA.
+//
+// No iPhone um `File` não é o arquivo: é um ponteiro para a cópia temporária
+// que o app Arquivos deixou na área do Safari. Essa cópia morre junto com a
+// `FileList` que a trouxe, e limpar o campo (`input.value = ""`, o gesto padrão
+// para permitir escolher o MESMO arquivo de novo) solta a lista. Se a leitura
+// ainda estiver em curso nesse instante ela falha, com o arquivo inteiro ali do
+// lado. Era o "Não foi possível ler o arquivo" que aparecia sempre, no iPhone
+// e só nele, por mais vezes que a pessoa escolhesse o extrato.
+//
+// A defesa é copiar tudo para a memória do app numa tacada só, o mais cedo
+// possível, e trabalhar sobre a cópia daí em diante. `arrayBuffer()` é o
+// caminho curto; o `FileReader` fica como rota de fuga, tanto para navegador
+// que não tenha o primeiro quanto para o caso de a leitura falhar por conta da
+// corrida acima. Se as duas falharem quem volta é o erro original: é ele que
+// diz o motivo de verdade (arquivo do iCloud ainda não baixado, por exemplo).
+//
+// Aceita também um instantâneo já lido (`{ bytes }`), que é como o importador
+// repete a leitura de um PDF depois que a pessoa digita a senha.
+function readFileBytes(file) {
+  if (!file) return Promise.reject(new Error("Nenhum arquivo selecionado."));
+  if (file.bytes instanceof Uint8Array) return Promise.resolve(file.bytes);
+  const viaReader = () => new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
-      try {
-        const bytes = new Uint8Array(reader.result);
-        let text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
-        if (/\uFFFD/.test(text)) {
-          try { text = new TextDecoder("windows-1252").decode(bytes); } catch (e) { /* mantém utf-8 */ }
-        }
-        resolve(text);
-      } catch (err) { reject(err); }
+      try { resolve(new Uint8Array(reader.result)); } catch (err) { reject(err); }
     };
-    reader.onerror = () => reject(new Error("Não foi possível ler o arquivo."));
+    reader.onerror = () => reject(reader.error || new Error("Não foi possível ler o arquivo."));
     reader.readAsArrayBuffer(file);
   });
+  if (typeof file.arrayBuffer !== "function") return viaReader();
+  return file.arrayBuffer().then(
+    (buffer) => new Uint8Array(buffer),
+    (error) => viaReader().catch(() => { throw error; })
+  );
+}
+
+// Extratos OFX de bancos brasileiros costumam vir em ISO-8859-1 (Latin-1); ler
+// como UTF-8 estraga acentos. Decodifica como UTF-8 e, se aparecer o caractere
+// de substituição, refaz em windows-1252.
+function decodeFileText(bytes) {
+  const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || 0);
+  let text = new TextDecoder("utf-8", { fatal: false }).decode(data);
+  if (/\uFFFD/.test(text)) {
+    try { text = new TextDecoder("windows-1252").decode(data); } catch (e) { /* mantém utf-8 */ }
+  }
+  return text;
+}
+
+// Leitura de arquivo texto com detecção de codificação, usada pelo restore de
+// backup e pelo importador de extratos (este por `snapshotStatementFile`).
+async function readFileAsText(file) {
+  return decodeFileText(await readFileBytes(file));
 }
 
 // Checksum estável (FNV-1a 32 bits) para validar a integridade de backups.

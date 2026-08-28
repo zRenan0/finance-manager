@@ -64,11 +64,18 @@ async function main() {
   check("boot entra no cache offline", worker.includes('"js/boot.js"'));
 
   console.log("\n2. Boot do tema");
+  // A etiqueta `theme-color` pinta a barra de status do app instalado e é escrita
+  // por js/boot.js antes da primeira pintura. Sem ela no documento de mentira o
+  // arquivo nem chegava a aplicar o tema.
+  const etiquetaDeTema = { content: null, setAttribute(nome, valor) { if (nome === "content") this.content = valor; } };
   let applied = null;
   const darkContext = {
     localStorage: { getItem() { return "dark"; } },
     window: { matchMedia() { return { matches: false }; } },
-    document: { documentElement: { setAttribute(name, value) { if (name === "data-theme") applied = value; } } },
+    document: {
+      documentElement: { setAttribute(name, value) { if (name === "data-theme") applied = value; } },
+      querySelector() { return etiquetaDeTema; },
+    },
   };
   vm.runInNewContext(read("js/boot.js"), darkContext, { filename: "js/boot.js" });
   check("preferência gravada é aplicada antes da tela", applied === "dark", applied);
@@ -77,7 +84,10 @@ async function main() {
   const deniedContext = {
     localStorage: { getItem() { throw new Error("blocked"); } },
     window: {},
-    document: { documentElement: { setAttribute(name, value) { if (name === "data-theme") applied = value; } } },
+    document: {
+      documentElement: { setAttribute(name, value) { if (name === "data-theme") applied = value; } },
+      querySelector() { return etiquetaDeTema; },
+    },
   };
   vm.runInNewContext(read("js/boot.js"), deniedContext, { filename: "js/boot.js" });
   check("falha no armazenamento cai para tema claro", applied === "light", applied);

@@ -44,6 +44,9 @@ function isPdfStatementFile(file) {
 }
 
 async function readPdfImportBytes(file) {
+  // Instantâneo já lido pelo importador (o caminho normal desde que o iPhone
+  // ensinou que o `File` não sobrevive à própria escolha; ver import.js).
+  if (file && file.bytes instanceof Uint8Array) return file.bytes;
   if (file && typeof file.arrayBuffer === "function") return new Uint8Array(await file.arrayBuffer());
   return new Promise((resolve, reject) => {
     const reader = new FileReader();

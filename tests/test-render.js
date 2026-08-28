@@ -65,12 +65,33 @@ const documentStub = {
   activeElement: null, visibilityState: "visible",
 };
 
+// O CALLBACK DA CONFIRMAÇÃO NÃO RODA NO MESMO INSTANTE DO "SIM".
+//
+// `closeOverlayState("confirmation")` (js/app.js) agenda o callback com
+// `setTimeout(..., 0)` de propósito: rodá-lo dentro da reconciliação do
+// histórico desfazia a navegação de quem acabara de confirmar. Um teste
+// síncrono nunca chega a esse instante do laço de eventos, então o relógio de
+// prazo zero fica na mão: `correrImediatos()` é o "passou o tempo". Prazos
+// maiores (toast, debounce) seguem no relógio de verdade, como antes.
+const imediatos = [];
+const agendarImediato = (fn, ms) => {
+  if (ms) return setTimeout(fn, ms);
+  imediatos.push(fn);
+  return 0;
+};
+function correrImediatos() {
+  while (imediatos.length) {
+    const fn = imediatos.shift();
+    if (typeof fn === "function") fn();
+  }
+}
+
 const ctx = {
   console,
   document: documentStub,
   navigator: { userAgent: "node", language: "pt-BR", onLine: true, serviceWorker: undefined, share: undefined },
   location: { href: "http://localhost/", protocol: "http:", hostname: "localhost" },
-  setTimeout, clearTimeout, setInterval, clearInterval, requestAnimationFrame: (fn) => setTimeout(fn, 0),
+  setTimeout: agendarImediato, clearTimeout, setInterval, clearInterval, requestAnimationFrame: (fn) => setTimeout(fn, 0),
   requestIdleCallback: undefined,
   fetch: () => Promise.reject(new Error("offline")),
   matchMedia: () => ({ matches: false, addEventListener() {}, addListener() {} }),
@@ -441,6 +462,7 @@ console.log("\n5. Fluxo de cadastro ponta a ponta (clique → estado → dados)"
   check("cancelar mantém o item", run("state.data.assets.length") === 2);
   click("wealth-delete", { id: assetId });
   run("state.confirmation.accepted = true; closeOverlayState('confirmation'); state.overlayStack = [];");
+  correrImediatos();
   check("confirmar exclui", run("state.data.assets.length") === 1, run("state.data.assets.length"));
 
   // Janela do gráfico e acordeão da Saúde Financeira pelo handler real
@@ -472,6 +494,7 @@ console.log("\n5b. Fluxo do Módulo 4 pelos handlers reais");
   check("cancelar o aporte inicial não cria a meta", run("state.data.goals.length") === 0 && run("state.data.transactions.length") === 0);
   click("submit-goal");
   run("state.confirmation.accepted = true; closeOverlayState('confirmation'); state.overlayStack = [];");
+  correrImediatos();
   check("meta criada", run("state.data.goals.length") === 1, run("state.data.goals.length"));
   check("valor alvo no formato brasileiro", run("state.data.goals[0].target") === 12000, run("state.data.goals[0].target"));
   check("valor inicial entra no progresso", run("state.data.goals[0].current") === 1200, run("state.data.goals[0].current"));

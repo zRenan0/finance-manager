@@ -421,7 +421,7 @@ function resampleSeries(series, targetPoints = 60) {
 // ignora o atributo. Aberto no navegador o estrago é meio invisível (o arquivo
 // abre na própria aba, como texto cru); INSTALADO na tela de início não há aba
 // para onde abrir, e tocar em "Backup completo (JSON)" não faz nada. Nenhum
-// erro, nenhum aviso — a pessoa conclui que o botão está quebrado, e está.
+// erro, nenhum aviso: a pessoa conclui que o botão está quebrado, e está.
 //
 // O caminho que o iOS oferece é o painel de compartilhamento, com "Salvar em
 // Arquivos" dentro dele. Ele exige gesto da pessoa, e todos os exportadores são
@@ -460,7 +460,7 @@ function shareFileOnAppleTouch(blob, filename, mime) {
 
 // iPhone e iPad (e o Safari de Mac com tela sensível ao toque, que se anuncia
 // como MacIntel) traduzem cada item de `accept` para um UTI do sistema antes de
-// abrir o app Arquivos. Extensão sem UTI registrado — `.ofx` é o caso — não é
+// abrir o app Arquivos. Extensão sem UTI registrado (`.ofx` é o caso) não é
 // simplesmente ignorada: o seletor desabilita tudo que não casou, e o extrato
 // aparece cinza, impossível de tocar. Quem importava pelo celular via a lista de
 // arquivos abrir e nenhum deles poder ser escolhido.
@@ -482,25 +482,59 @@ function statementAcceptAttr() {
   return isAppleTouchBrowser() ? "" : ` accept="${STATEMENT_ACCEPT}"`;
 }
 
-// Leitura de arquivo texto com detecção de codificação (UTF-8 → windows-1252),
-// usada tanto pelo importador de extratos quanto pelo restore de backup.
-function readFileAsText(file) {
-  return new Promise((resolve, reject) => {
-    if (!file) { reject(new Error("Nenhum arquivo selecionado.")); return; }
+// COPIAR OS BYTES ANTES QUE O ARQUIVO SUMA.
+//
+// No iPhone um `File` não é o arquivo: é um ponteiro para a cópia temporária
+// que o app Arquivos deixou na área do Safari. Essa cópia morre junto com a
+// `FileList` que a trouxe, e limpar o campo (`input.value = ""`, o gesto padrão
+// para permitir escolher o MESMO arquivo de novo) solta a lista. Se a leitura
+// ainda estiver em curso nesse instante ela falha, com o arquivo inteiro ali do
+// lado. Era o "Não foi possível ler o arquivo" que aparecia sempre, no iPhone
+// e só nele, por mais vezes que a pessoa escolhesse o extrato.
+//
+// A defesa é copiar tudo para a memória do app numa tacada só, o mais cedo
+// possível, e trabalhar sobre a cópia daí em diante. `arrayBuffer()` é o
+// caminho curto; o `FileReader` fica como rota de fuga, tanto para navegador
+// que não tenha o primeiro quanto para o caso de a leitura falhar por conta da
+// corrida acima. Se as duas falharem quem volta é o erro original: é ele que
+// diz o motivo de verdade (arquivo do iCloud ainda não baixado, por exemplo).
+//
+// Aceita também um instantâneo já lido (`{ bytes }`), que é como o importador
+// repete a leitura de um PDF depois que a pessoa digita a senha.
+function readFileBytes(file) {
+  if (!file) return Promise.reject(new Error("Nenhum arquivo selecionado."));
+  if (file.bytes instanceof Uint8Array) return Promise.resolve(file.bytes);
+  const viaReader = () => new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
-      try {
-        const bytes = new Uint8Array(reader.result);
-        let text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
-        if (/\uFFFD/.test(text)) {
-          try { text = new TextDecoder("windows-1252").decode(bytes); } catch (e) { /* mantém utf-8 */ }
-        }
-        resolve(text);
-      } catch (err) { reject(err); }
+      try { resolve(new Uint8Array(reader.result)); } catch (err) { reject(err); }
     };
-    reader.onerror = () => reject(new Error("Não foi possível ler o arquivo."));
+    reader.onerror = () => reject(reader.error || new Error("Não foi possível ler o arquivo."));
     reader.readAsArrayBuffer(file);
   });
+  if (typeof file.arrayBuffer !== "function") return viaReader();
+  return file.arrayBuffer().then(
+    (buffer) => new Uint8Array(buffer),
+    (error) => viaReader().catch(() => { throw error; })
+  );
+}
+
+// Extratos OFX de bancos brasileiros costumam vir em ISO-8859-1 (Latin-1); ler
+// como UTF-8 estraga acentos. Decodifica como UTF-8 e, se aparecer o caractere
+// de substituição, refaz em windows-1252.
+function decodeFileText(bytes) {
+  const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || 0);
+  let text = new TextDecoder("utf-8", { fatal: false }).decode(data);
+  if (/\uFFFD/.test(text)) {
+    try { text = new TextDecoder("windows-1252").decode(data); } catch (e) { /* mantém utf-8 */ }
+  }
+  return text;
+}
+
+// Leitura de arquivo texto com detecção de codificação, usada pelo restore de
+// backup e pelo importador de extratos (este por `snapshotStatementFile`).
+async function readFileAsText(file) {
+  return decodeFileText(await readFileBytes(file));
 }
 
 // Checksum estável (FNV-1a 32 bits) para validar a integridade de backups.
@@ -13098,27 +13132,70 @@ function categorySuggestionConfidence(description, dataOrCategories) {
 }
 
 // ------------------------------------------------------------------------------
-// LEITURA DO ARQUIVO; com detecção de codificação
+// LEITURA DO ARQUIVO; primeiro os bytes, o resto depois
 // ------------------------------------------------------------------------------
-// Extratos OFX de bancos brasileiros costumam vir em ISO-8859-1 (Latin-1); ler
-// como UTF-8 estraga acentos. Decodificamos como UTF-8 e, se aparecer o caractere
-// de substituição, refazemos em windows-1252.
-// A decodificação (UTF-8 → windows-1252) vive em utils.js/readFileAsText e é
-// compartilhada com o restore de backup; antes havia duas implementações.
-async function readStatementFile(file, options) {
+// `snapshotStatementFile` tira o arquivo das mãos do navegador e o traz para a
+// memória do app antes de qualquer outra coisa. Isso é exigência do iPhone, onde
+// o `File` escolhido não passa de um ponteiro para uma cópia temporária que some
+// assim que a `FileList` é solta (o porquê está em `readFileBytes`, utils.js).
+// Mas serve a todos: a partir daqui o extrato pode ser relido quantas vezes for
+// preciso, e é isso que faz a segunda tentativa com a senha do PDF funcionar.
+//
+// O instantâneo tem a cara mínima de um `File` (name, type, size) mais os bytes,
+// e atravessa `isPdfStatementFile`, o leitor de PDF e o parser sem que nenhum
+// deles precise saber a diferença.
+function isStatementSnapshot(value) {
+  return !!value && value.bytes instanceof Uint8Array;
+}
+
+async function snapshotStatementFile(file) {
+  if (isStatementSnapshot(file)) return file;
   if (!file) throw new ImportError("READ_FAIL", "Nenhum arquivo selecionado.");
-  if (file.size === 0) throw new ImportError("EMPTY", "O arquivo está vazio.");
-  if (file.size > MAX_IMPORT_BYTES) {
+  // O tamanho anunciado serve para não gastar memória com um arquivo enorme; ele
+  // NÃO decide se o arquivo está vazio. No iPhone um arquivo que ainda não desceu
+  // do iCloud anuncia zero byte e mesmo assim é lido inteiro. Quem responde por
+  // "vazio" é o que voltou da leitura, não o que o navegador prometeu antes dela.
+  if (Number(file.size) > MAX_IMPORT_BYTES) {
     throw new ImportError("TOO_LARGE", "Arquivo muito grande (limite de 12 MB). Exporte um período menor no seu banco.");
   }
+  let bytes;
   try {
-    if (typeof isPdfStatementFile === "function" && isPdfStatementFile(file)) {
-      return await readPdfStatementFile(file, options && options.password);
+    bytes = await readFileBytes(file);
+  } catch (err) {
+    throw new ImportError("READ_FAIL", "Não foi possível ler o arquivo. Tente selecioná-lo novamente.", readErrorDetail(err));
+  }
+  if (!bytes || bytes.length === 0) throw new ImportError("EMPTY", "O arquivo está vazio.");
+  if (bytes.length > MAX_IMPORT_BYTES) {
+    throw new ImportError("TOO_LARGE", "Arquivo muito grande (limite de 12 MB). Exporte um período menor no seu banco.");
+  }
+  return { name: String(file.name || ""), type: String(file.type || ""), size: bytes.length, bytes };
+}
+
+// O nome do erro do navegador é o que separa "o arquivo sumiu no meio da leitura"
+// de "o arquivo ainda está na nuvem", e é a única pista que sobra quando o defeito
+// só acontece no aparelho de outra pessoa. Vai para a tela da importação; não sai
+// dali, como nada mais sai deste módulo.
+function readErrorDetail(err) {
+  if (!err) return null;
+  const name = err.name ? String(err.name) : "";
+  const message = err.message ? String(err.message) : String(err);
+  return name && name !== "Error" ? `${name}: ${message}` : message;
+}
+
+// Extratos OFX de bancos brasileiros costumam vir em ISO-8859-1 (Latin-1); ler
+// como UTF-8 estraga acentos. A decodificação (UTF-8 → windows-1252) vive em
+// utils.js/decodeFileText e é compartilhada com o restore de backup; antes havia
+// duas implementações.
+async function readStatementFile(file, options) {
+  const source = await snapshotStatementFile(file);
+  try {
+    if (typeof isPdfStatementFile === "function" && isPdfStatementFile(source)) {
+      return await readPdfStatementFile(source, options && options.password);
     }
-    return await readFileAsText(file);
+    return decodeFileText(source.bytes);
   } catch (err) {
     if (err instanceof ImportError) throw err;
-    throw new ImportError("READ_FAIL", "Não foi possível ler o arquivo. Tente selecioná-lo novamente.", String(err));
+    throw new ImportError("READ_FAIL", "Não foi possível ler o arquivo. Tente selecioná-lo novamente.", readErrorDetail(err));
   }
 }
 
@@ -13565,6 +13642,9 @@ function isPdfStatementFile(file) {
 }
 
 async function readPdfImportBytes(file) {
+  // Instantâneo já lido pelo importador (o caminho normal desde que o iPhone
+  // ensinou que o `File` não sobrevive à própria escolha; ver import.js).
+  if (file && file.bytes instanceof Uint8Array) return file.bytes;
   if (file && typeof file.arrayBuffer === "function") return new Uint8Array(await file.arrayBuffer());
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -34837,7 +34917,7 @@ function applyQrDraftToForm(draft) {
 // arquivos está aberto o aplicativo continua vivo. No iPhone isso é regra, não
 // exceção: o Safari congela temporizadores e sincronização ao abrir o app
 // Arquivos e solta tudo de uma vez quando a pessoa volta com o extrato
-// escolhido — o toast que ia sumir, o relógio da nuvem, a revalidação da
+// escolhido: o toast que ia sumir, o relógio da nuvem, a revalidação da
 // sessão. Qualquer um deles redesenha, e o `<input>` que abriu o seletor deixa
 // de existir. O `change` então chega num nó solto, não sobe até `#app`, e a
 // tela não muda: dá para escolher o extrato e não acontece absolutamente nada,
@@ -34870,22 +34950,59 @@ function openFilePicker(id) {
   if (input) input.click();
 }
 
+// O CAMPO DE ARQUIVO SÓ É LIMPO DEPOIS QUE A LEITURA TERMINA.
+//
+// Limpar antes (`input.value = ""` logo após disparar a leitura) solta a
+// `FileList`, e no iPhone é ela que segura o arquivo escolhido: a leitura em
+// curso morre no meio e vira "Não foi possível ler o arquivo. Tente
+// selecioná-lo novamente.", sempre, por mais vezes que a pessoa escolha o
+// extrato, porque a corrida é ganha pela limpeza todas as vezes.
+//
+// A limpeza continua sendo necessária, para que escolher o MESMO arquivo de novo
+// dispare um novo `change`; só mudou o momento. O manipulador é chamado de forma
+// síncrona, dentro do próprio `change`, para que a cópia dos bytes comece antes
+// de qualquer outra coisa.
+function consumeFileInput(input, handler) {
+  let started;
+  try { started = handler(input.files[0]); } catch (err) { started = Promise.reject(err); }
+  Promise.resolve(started).catch(() => {}).then(() => { input.value = ""; });
+}
+
+// A ajuda de cada falha da importação. Saiu de dentro da função porque a lista
+// cresceu mais do que o encadeamento de ternários que a guardava.
+const IMPORT_ERROR_HELP = {
+  UNKNOWN_FORMAT: "Formatos aceitos: .OFX, .CSV e .PDF. No app do banco, procure por exportar extrato ou baixar fatura.",
+  PDF_NO_TEXT: "Baixe a versão digital no app do banco. PDF escaneado ou fotografado não tem texto para selecionar.",
+  PDF_DATE_YEAR: "O arquivo precisa mostrar o ano ou o período completo para evitar lançamentos no mês errado.",
+  NO_ROWS: "Confira se o arquivo contém movimentações e se foi baixado diretamente do banco.",
+  READ_FAIL: "Se o arquivo está no iCloud, abra-o uma vez no app Arquivos para baixá-lo e escolha de novo.",
+};
+
 // Importação 100% offline: lê, decodifica, parseia e categoriza no navegador.
 // Qualquer falha vira um erro visual explicativo na própria tela de importação.
 async function handleStatementFile(file, password) {
+  // A cópia dos bytes começa ANTES do primeiro redesenho: no iPhone o arquivo
+  // escolhido é uma cópia temporária de vida curta (ver `readFileBytes`), e o
+  // que garante a leitura é começá-la no mesmo instante em que ele chega.
+  const pending = snapshotStatementFile(file);
+  pending.catch(() => {});
   state.importError = null;
   state.importLoading = true;
   state.importRows = null;
   // Arquivo novo, conferência do zero: a janela volta ao primeiro lote.
   state.importVisible = IMPORT_PAGE_SIZE;
-  state.importPendingFile = typeof isPdfStatementFile === "function" && isPdfStatementFile(file) ? file : null;
+  state.importPendingFile = null;
   render();
 
   try {
-    const content = await readStatementFile(file, { password: password || "" });
-    const rows = prepareImportRows(content, file.name, state.data);
+    const source = await pending;
+    // Um PDF pode pedir senha, e a segunda tentativa relê o instantâneo, nunca
+    // o `File`, que a essa altura já pode não existir mais no aparelho.
+    state.importPendingFile = typeof isPdfStatementFile === "function" && isPdfStatementFile(source) ? source : null;
+    const content = await readStatementFile(source, { password: password || "" });
+    const rows = prepareImportRows(content, source.name, state.data);
     const meta = rows.meta || {};
-    state.importFilename = file.name;
+    state.importFilename = source.name;
     state.importDocumentKind = meta.documentKind === "card" ? "card" : "account";
     state.importDestinationId = defaultImportDestinationId(state.importDocumentKind);
     state.importRows = state.importDocumentKind === "account"
@@ -34906,20 +35023,17 @@ async function handleStatementFile(file, password) {
       state.importPendingFile = null;
       state.importPassword = "";
     }
+    const help = needsPassword
+      ? "Digite a senha abaixo. Ela será usada apenas na memória deste aparelho."
+      : (IMPORT_ERROR_HELP[code] || "Nenhum dado foi enviado para a internet; tudo acontece no seu navegador.");
+    // Só no READ_FAIL a causa técnica aparece na tela: é ela que distingue "o
+    // arquivo sumiu no meio da leitura" de "o arquivo ainda está na nuvem", e sem
+    // ela quem tenta ajudar a distância fica adivinhando. O detalhe vem do
+    // navegador; o conteúdo do extrato continua sem sair daqui.
     state.importError = {
       title: (err && err.message) || "Não foi possível ler o arquivo.",
       code,
-      detail: needsPassword
-        ? "Digite a senha abaixo. Ela será usada apenas na memória deste aparelho."
-        : (code === "UNKNOWN_FORMAT"
-          ? "Formatos aceitos: .OFX, .CSV e .PDF. No app do banco, procure por exportar extrato ou baixar fatura."
-          : (code === "PDF_NO_TEXT"
-            ? "Baixe a versão digital no app do banco. PDF escaneado ou fotografado não tem texto para selecionar."
-            : (code === "PDF_DATE_YEAR"
-              ? "O arquivo precisa mostrar o ano ou o período completo para evitar lançamentos no mês errado."
-              : (code === "NO_ROWS"
-                ? "Confira se o arquivo contém movimentações e se foi baixado diretamente do banco."
-                : "Nenhum dado foi enviado para a internet; tudo acontece no seu navegador.")))),
+      detail: code === "READ_FAIL" && err && err.detail ? `${help} (${err.detail})` : help,
     };
     render();
   }
@@ -35261,12 +35375,16 @@ function exportBackupJson() {
 // Lê o arquivo escolhido e monta a PRÉVIA; nada é gravado antes do usuário
 // confirmar e escolher entre mesclar ou substituir.
 async function handleBackupFile(file) {
+  // Leitura disparada antes do redesenho, pelo mesmo motivo do importador de
+  // extratos: no iPhone o arquivo escolhido não espera.
+  const pending = readFileAsText(file);
+  pending.catch(() => {});
   state.backup.busy = true;
   state.backup.error = null;
   state.backup.preview = null;
   render();
   try {
-    const text = await readFileAsText(file);
+    const text = await pending;
     const { data, meta } = parseBackupFile(text);
     if (meta.checksumOk === false) {
       throw new BackupError("CHECKSUM", "O arquivo parece ter sido alterado depois de exportado (verificação de integridade falhou).");
@@ -35505,8 +35623,7 @@ function onChange(e) {
   const field = e.target.dataset.field;
   const actionSelect = e.target.dataset.actionSelect;
   if (e.target.id === "statement-file-input" && e.target.files && e.target.files[0]) {
-    handleStatementFile(e.target.files[0]);
-    e.target.value = "";
+    consumeFileInput(e.target, handleStatementFile);
     return;
   }
   if (actionSelect === "import-category") {
@@ -35664,8 +35781,7 @@ function onChange(e) {
     return;
   }
   if (e.target.id === "import-file-input" && e.target.files && e.target.files[0]) {
-    handleBackupFile(e.target.files[0]);
-    e.target.value = "";
+    consumeFileInput(e.target, handleBackupFile);
     return;
   }
   if (field === "period-custom-start") { state.analyticsCustomStart = e.target.value; render(); }

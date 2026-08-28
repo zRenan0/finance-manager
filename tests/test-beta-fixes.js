@@ -314,7 +314,7 @@ function blocoF05() {
   check("a revisão da importação avisa antes de confirmar",
     /2 lançamentos são anteriores à abertura/.test(revisao));
   check("o aviso da importação nomeia a conta de destino", /Nubank/.test(revisao));
-  check("a revisão explica como fazer valerem no saldo", /recue a data de abertura/.test(revisao));
+  check("a revisão explica como fazer valerem no saldo", /recue a abertura/.test(revisao));
 
   // Linha desmarcada não deve entrar na contagem do aviso.
   run(`state.importRows[0].include = false; state.importRows[1].include = false;`);

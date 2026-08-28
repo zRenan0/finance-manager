@@ -1055,7 +1055,7 @@ function applyQrDraftToForm(draft) {
 // arquivos está aberto o aplicativo continua vivo. No iPhone isso é regra, não
 // exceção: o Safari congela temporizadores e sincronização ao abrir o app
 // Arquivos e solta tudo de uma vez quando a pessoa volta com o extrato
-// escolhido — o toast que ia sumir, o relógio da nuvem, a revalidação da
+// escolhido: o toast que ia sumir, o relógio da nuvem, a revalidação da
 // sessão. Qualquer um deles redesenha, e o `<input>` que abriu o seletor deixa
 // de existir. O `change` então chega num nó solto, não sobe até `#app`, e a
 // tela não muda: dá para escolher o extrato e não acontece absolutamente nada,
@@ -1088,22 +1088,59 @@ function openFilePicker(id) {
   if (input) input.click();
 }
 
+// O CAMPO DE ARQUIVO SÓ É LIMPO DEPOIS QUE A LEITURA TERMINA.
+//
+// Limpar antes (`input.value = ""` logo após disparar a leitura) solta a
+// `FileList`, e no iPhone é ela que segura o arquivo escolhido: a leitura em
+// curso morre no meio e vira "Não foi possível ler o arquivo. Tente
+// selecioná-lo novamente.", sempre, por mais vezes que a pessoa escolha o
+// extrato, porque a corrida é ganha pela limpeza todas as vezes.
+//
+// A limpeza continua sendo necessária, para que escolher o MESMO arquivo de novo
+// dispare um novo `change`; só mudou o momento. O manipulador é chamado de forma
+// síncrona, dentro do próprio `change`, para que a cópia dos bytes comece antes
+// de qualquer outra coisa.
+function consumeFileInput(input, handler) {
+  let started;
+  try { started = handler(input.files[0]); } catch (err) { started = Promise.reject(err); }
+  Promise.resolve(started).catch(() => {}).then(() => { input.value = ""; });
+}
+
+// A ajuda de cada falha da importação. Saiu de dentro da função porque a lista
+// cresceu mais do que o encadeamento de ternários que a guardava.
+const IMPORT_ERROR_HELP = {
+  UNKNOWN_FORMAT: "Formatos aceitos: .OFX, .CSV e .PDF. No app do banco, procure por exportar extrato ou baixar fatura.",
+  PDF_NO_TEXT: "Baixe a versão digital no app do banco. PDF escaneado ou fotografado não tem texto para selecionar.",
+  PDF_DATE_YEAR: "O arquivo precisa mostrar o ano ou o período completo para evitar lançamentos no mês errado.",
+  NO_ROWS: "Confira se o arquivo contém movimentações e se foi baixado diretamente do banco.",
+  READ_FAIL: "Se o arquivo está no iCloud, abra-o uma vez no app Arquivos para baixá-lo e escolha de novo.",
+};
+
 // Importação 100% offline: lê, decodifica, parseia e categoriza no navegador.
 // Qualquer falha vira um erro visual explicativo na própria tela de importação.
 async function handleStatementFile(file, password) {
+  // A cópia dos bytes começa ANTES do primeiro redesenho: no iPhone o arquivo
+  // escolhido é uma cópia temporária de vida curta (ver `readFileBytes`), e o
+  // que garante a leitura é começá-la no mesmo instante em que ele chega.
+  const pending = snapshotStatementFile(file);
+  pending.catch(() => {});
   state.importError = null;
   state.importLoading = true;
   state.importRows = null;
   // Arquivo novo, conferência do zero: a janela volta ao primeiro lote.
   state.importVisible = IMPORT_PAGE_SIZE;
-  state.importPendingFile = typeof isPdfStatementFile === "function" && isPdfStatementFile(file) ? file : null;
+  state.importPendingFile = null;
   render();
 
   try {
-    const content = await readStatementFile(file, { password: password || "" });
-    const rows = prepareImportRows(content, file.name, state.data);
+    const source = await pending;
+    // Um PDF pode pedir senha, e a segunda tentativa relê o instantâneo, nunca
+    // o `File`, que a essa altura já pode não existir mais no aparelho.
+    state.importPendingFile = typeof isPdfStatementFile === "function" && isPdfStatementFile(source) ? source : null;
+    const content = await readStatementFile(source, { password: password || "" });
+    const rows = prepareImportRows(content, source.name, state.data);
     const meta = rows.meta || {};
-    state.importFilename = file.name;
+    state.importFilename = source.name;
     state.importDocumentKind = meta.documentKind === "card" ? "card" : "account";
     state.importDestinationId = defaultImportDestinationId(state.importDocumentKind);
     state.importRows = state.importDocumentKind === "account"
@@ -1124,20 +1161,17 @@ async function handleStatementFile(file, password) {
       state.importPendingFile = null;
       state.importPassword = "";
     }
+    const help = needsPassword
+      ? "Digite a senha abaixo. Ela será usada apenas na memória deste aparelho."
+      : (IMPORT_ERROR_HELP[code] || "Nenhum dado foi enviado para a internet; tudo acontece no seu navegador.");
+    // Só no READ_FAIL a causa técnica aparece na tela: é ela que distingue "o
+    // arquivo sumiu no meio da leitura" de "o arquivo ainda está na nuvem", e sem
+    // ela quem tenta ajudar a distância fica adivinhando. O detalhe vem do
+    // navegador; o conteúdo do extrato continua sem sair daqui.
     state.importError = {
       title: (err && err.message) || "Não foi possível ler o arquivo.",
       code,
-      detail: needsPassword
-        ? "Digite a senha abaixo. Ela será usada apenas na memória deste aparelho."
-        : (code === "UNKNOWN_FORMAT"
-          ? "Formatos aceitos: .OFX, .CSV e .PDF. No app do banco, procure por exportar extrato ou baixar fatura."
-          : (code === "PDF_NO_TEXT"
-            ? "Baixe a versão digital no app do banco. PDF escaneado ou fotografado não tem texto para selecionar."
-            : (code === "PDF_DATE_YEAR"
-              ? "O arquivo precisa mostrar o ano ou o período completo para evitar lançamentos no mês errado."
-              : (code === "NO_ROWS"
-                ? "Confira se o arquivo contém movimentações e se foi baixado diretamente do banco."
-                : "Nenhum dado foi enviado para a internet; tudo acontece no seu navegador.")))),
+      detail: code === "READ_FAIL" && err && err.detail ? `${help} (${err.detail})` : help,
     };
     render();
   }
@@ -1479,12 +1513,16 @@ function exportBackupJson() {
 // Lê o arquivo escolhido e monta a PRÉVIA; nada é gravado antes do usuário
 // confirmar e escolher entre mesclar ou substituir.
 async function handleBackupFile(file) {
+  // Leitura disparada antes do redesenho, pelo mesmo motivo do importador de
+  // extratos: no iPhone o arquivo escolhido não espera.
+  const pending = readFileAsText(file);
+  pending.catch(() => {});
   state.backup.busy = true;
   state.backup.error = null;
   state.backup.preview = null;
   render();
   try {
-    const text = await readFileAsText(file);
+    const text = await pending;
     const { data, meta } = parseBackupFile(text);
     if (meta.checksumOk === false) {
       throw new BackupError("CHECKSUM", "O arquivo parece ter sido alterado depois de exportado (verificação de integridade falhou).");
@@ -1723,8 +1761,7 @@ function onChange(e) {
   const field = e.target.dataset.field;
   const actionSelect = e.target.dataset.actionSelect;
   if (e.target.id === "statement-file-input" && e.target.files && e.target.files[0]) {
-    handleStatementFile(e.target.files[0]);
-    e.target.value = "";
+    consumeFileInput(e.target, handleStatementFile);
     return;
   }
   if (actionSelect === "import-category") {
@@ -1882,8 +1919,7 @@ function onChange(e) {
     return;
   }
   if (e.target.id === "import-file-input" && e.target.files && e.target.files[0]) {
-    handleBackupFile(e.target.files[0]);
-    e.target.value = "";
+    consumeFileInput(e.target, handleBackupFile);
     return;
   }
   if (field === "period-custom-start") { state.analyticsCustomStart = e.target.value; render(); }

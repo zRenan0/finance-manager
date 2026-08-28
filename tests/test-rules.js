@@ -281,6 +281,27 @@ function fakeEl(tag) {
     getBoundingClientRect() { return { top: 0, left: 0, width: 0, height: 0 }; },
   };
 }
+// O CALLBACK DA CONFIRMAÇÃO NÃO RODA NO MESMO INSTANTE DO "SIM".
+//
+// `closeOverlayState("confirmation")` (js/app.js) agenda o callback com
+// `setTimeout(..., 0)` de propósito: rodá-lo dentro da reconciliação do
+// histórico desfazia a navegação de quem acabara de confirmar. Um teste
+// síncrono nunca chega a esse instante do laço de eventos, então o relógio de
+// prazo zero fica na mão: `correrImediatos()` é o "passou o tempo". Prazos
+// maiores (toast, debounce) seguem no relógio de verdade, como antes.
+const imediatos = [];
+const agendarImediato = (fn, ms) => {
+  if (ms) return setTimeout(fn, ms);
+  imediatos.push(fn);
+  return 0;
+};
+function correrImediatos() {
+  while (imediatos.length) {
+    const fn = imediatos.shift();
+    if (typeof fn === "function") fn();
+  }
+}
+
 const ctx = {
   console: { log() {}, warn() {}, error() {}, info() {} },
   document: {
@@ -291,7 +312,7 @@ const ctx = {
   },
   navigator: { userAgent: "node", language: "pt-BR", onLine: true },
   location: { href: "http://localhost/", protocol: "http:", hostname: "localhost", hash: "" },
-  setTimeout, clearTimeout, setInterval, clearInterval,
+  setTimeout: agendarImediato, clearTimeout, setInterval, clearInterval,
   requestAnimationFrame: (fn) => setTimeout(fn, 0), requestIdleCallback: undefined,
   fetch: () => Promise.reject(new Error("offline")),
   matchMedia: () => ({ matches: false, addEventListener() {}, addListener() {} }),
@@ -369,6 +390,7 @@ click("rule-delete", { id: rid });
 check("exclusão abre o popup sem apagar",
   run(`!!state.confirmation`) && run(`state.data.categoryRules.custom.length`) === 1);
 run(`state.confirmation.accepted = true; closeOverlayState("confirmation"); state.overlayStack = [];`);
+correrImediatos();
 check("confirmar no popup exclui", run(`state.data.categoryRules.custom.length`) === 0);
 
 click("rule-builtin-toggle", { id: "std-lazer" });
