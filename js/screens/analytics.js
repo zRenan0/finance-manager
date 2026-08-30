@@ -365,7 +365,18 @@ function renderAiCard() {
 }
 
 // Renderiza a análise estruturada devolvida pela função Netlify:
-// diagnóstico + score, fluxo de caixa, riscos e recomendações.
+// diagnóstico, fluxo de caixa, riscos e recomendações.
+//
+// [M4] O CORPO DA RESPOSTA É ENTRADA NÃO CONFIÁVEL, MESMO VINDO DO NOSSO BACKEND.
+//
+// `netlify/functions/analyze.js` normaliza a resposta do modelo (whitelist de
+// `situacao` e `nivel`, `str()` com teto de tamanho, `score` descartado). Isso
+// resolve hoje, mas era a ÚNICA barreira: o cliente pegava `body.analise` cru
+// (js/insights.js) e interpolava direto no HTML. Uma resposta fora do contrato
+// (backend antigo em cache, proxy no meio, função republicada com outra
+// validação) chegava sem ninguém conferir. As duas verificações abaixo
+// repetem a whitelist do servidor no cliente; custam uma comparação e tiram o
+// render da dependência de um contrato remoto.
 const AI_FLOW_LABEL = { positivo: "Fluxo positivo", equilibrado: "Fluxo equilibrado", negativo: "Fluxo negativo" };
 
 const AI_FLOW_COLOR = { positivo: "var(--positive)", equilibrado: "var(--goal)", negativo: "var(--negative)" };
@@ -374,14 +385,30 @@ const AI_RISK_COLOR = { alto: "var(--negative)", medio: "var(--goal)", baixo: "v
 
 const AI_RISK_LABEL = { alto: "Risco alto", medio: "Atenção", baixo: "Risco baixo" };
 
+const AI_FLOW_KEYS = ["positivo", "equilibrado", "negativo"];
+const AI_RISK_KEYS = ["alto", "medio", "baixo"];
+function aiFlowKey(value) { return AI_FLOW_KEYS.indexOf(value) === -1 ? "equilibrado" : value; }
+function aiRiskKey(value) { return AI_RISK_KEYS.indexOf(value) === -1 ? "medio" : value; }
+
 function renderAiStructured(a) {
-  const flow = (a.fluxoCaixa && a.fluxoCaixa.situacao) || "equilibrado";
-  const scoreColor = a.score >= 70 ? "var(--positive)" : a.score >= 40 ? "var(--goal)" : "var(--negative)";
+  const flow = aiFlowKey(a.fluxoCaixa && a.fluxoCaixa.situacao);
+  // A NOTA NÃO VEM MAIS DA IA, E A TELA AINDA PEDIA POR ELA.
+  //
+  // `normalizeAnalysis` (netlify/functions/analyze.js) descarta o `score` do
+  // modelo de propósito: a nota de saúde é calculada por regras auditáveis em
+  // js/score.js e mostrada com os pilares na tela de Saúde. Duas notas
+  // diferentes na mesma sessão, uma sem como justificar, é pior do que uma.
+  // O render aqui nunca acompanhou: `a.score` chegava `undefined` e o bloco
+  // saía como "undefined/100" em 38px no topo da análise. O número só aparece
+  // quando existe de verdade; sem ele, o diagnóstico ocupa a linha inteira.
+  const score = Number(a.score);
+  const temNota = Number.isFinite(score);
+  const scoreColor = score >= 70 ? "var(--positive)" : score >= 40 ? "var(--goal)" : "var(--negative)";
   return `<div class="ai-analysis">
     <div class="ai-analysis__head">
-      <div class="ai-score" data-ui-css="color:${scoreColor}">
-        <b>${a.score}</b><span>/100</span>
-      </div>
+      ${temNota ? `<div class="ai-score" data-ui-css="color:${scoreColor}">
+        <b>${Math.round(clamp(score, 0, 100))}</b><span>/100</span>
+      </div>` : ""}
       <p class="ai-analysis__diagnosis">${escapeHtml(a.diagnostico)}</p>
     </div>
 
@@ -393,7 +420,7 @@ function renderAiStructured(a) {
     ${a.riscos && a.riscos.length ? `<div class="ai-block">
       <p class="ai-block__title">${svgIcon("alertTriangle", 14)} Riscos identificados</p>
       ${a.riscos.map((r) => `<div class="ai-item">
-        <span class="ai-item__tag" data-ui-css="color:${AI_RISK_COLOR[r.nivel] || "var(--goal)"}; border-color:${AI_RISK_COLOR[r.nivel] || "var(--goal)"}">${AI_RISK_LABEL[r.nivel] || "Atenção"}</span>
+        <span class="ai-item__tag" data-ui-css="color:${AI_RISK_COLOR[aiRiskKey(r.nivel)]}; border-color:${AI_RISK_COLOR[aiRiskKey(r.nivel)]}">${AI_RISK_LABEL[aiRiskKey(r.nivel)]}</span>
         <div><p class="ai-item__title">${escapeHtml(r.titulo)}</p><p class="ai-block__text">${escapeHtml(r.descricao)}</p></div>
       </div>`).join("")}
     </div>` : ""}

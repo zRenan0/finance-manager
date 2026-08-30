@@ -81,8 +81,19 @@ const CATEGORY_ICON_CHOICES = [
   "book", "coffee", "dumbbell", "paw", "tool", "star", "tag", "other",
 ];
 
+// [M4] A BUSCA PRECISA SER PELA CHAVE PRÓPRIA, NÃO PELA CADEIA DE PROTÓTIPOS.
+//
+// `normalizeIconName` (js/storage.js) aceita qualquer `[A-Za-z][A-Za-z0-9]{0,31}`,
+// e isso inclui `constructor`, `toString` e `valueOf`. Um backup restaurado ou
+// um registro sincronizado com `icon: "constructor"` passava pela normalização,
+// caía em `ICONS[name]`, achava a função herdada de `Object.prototype` e a
+// interpolava no SVG: a tela mostrava `function Object() { [native code] }`
+// dentro do ícone. Não é injeção (o texto nativo não tem `<`), mas é conteúdo
+// que ninguém escreveu aparecendo na interface a partir de um arquivo de fora.
+// `hasOwnProperty` fecha isso e devolve o ícone padrão, como para qualquer
+// outro nome desconhecido.
 function svgIcon(name, size = 20, extraClass = "") {
-  const body = ICONS[name] || ICONS.tag;
+  const body = Object.prototype.hasOwnProperty.call(ICONS, name) ? ICONS[name] : ICONS.tag;
   const cls = extraClass ? ` class="${extraClass}"` : "";
   return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"${cls} aria-hidden="true">${body}</svg>`;
 }

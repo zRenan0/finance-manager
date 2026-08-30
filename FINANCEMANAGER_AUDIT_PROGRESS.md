@@ -12,14 +12,15 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 
 | Campo | Valor |
 |---|---|
-| Módulo atual | **M4 — XSS e entradas não confiáveis** (a iniciar) |
+| Módulo atual | **M5 — Cabeçalhos HTTP e CSP** (a iniciar) |
+| Status do M4 | **CONCLUÍDO** — 3 achados corrigidos (1 P1, 1 P2, 1 P3) + suíte de regressão nova, 52/52 verdes |
 | Status do M3 | **CONCLUÍDO** — aplicado e confirmado no banco em 2026-08-28 |
 | Status do M2 | **CONCLUÍDO** — nenhuma vulnerabilidade de autorização; invariantes travados por teste |
 | Status do M1 | **CONCLUÍDO** — aplicado e confirmado; gatilho capturado e versionado |
-| Módulos concluídos | M0, M1, M2, M3 |
-| Próximo módulo | M4 — XSS e entradas não confiáveis |
+| Módulos concluídos | M0, M1, M2, M3, M4 |
+| Próximo módulo | M5 — Cabeçalhos HTTP e CSP (escopo reduzido: a CSP já é restritiva; sobram HSTS `includeSubDomains`, `security.txt`, revisão de `connect-src`) |
 | Branch | `deploy-atualizado` (árvore limpa no início do M0) |
-| Arquivos alterados até aqui | `tests/test-security.js` (+3 blocos), `tests/test-service-role-scope.js` (novo), este arquivo. **Nenhum arquivo de produção alterado.** |
+| Arquivos alterados até aqui | Testes: `tests/test-security.js` (+3 blocos), `tests/test-service-role-scope.js` (novo), `tests/test-xss-surface.js` (novo, M4). Produção (só no M4): `js/screens/analytics.js`, `js/icons.js`, `js/modules/app.generated.js` (regerado). |
 | Migrations criadas até aqui | `20260828120000_rls_auto_enable_least_privilege.sql`, `20260828130000_rls_auto_enable_versionada.sql`, `20260828140000_menor_privilegio_tabelas.sql` (as três **aplicadas e confirmadas em 2026-08-28**), `20260828150000_rls_auto_enable_gatilho.sql` (**ainda não aplicada**; é no-op em produção, onde o gatilho já existe) |
 | Versão do app | `0.30.0` (package.json) |
 
@@ -775,6 +776,167 @@ no nível do banco, sem precisar de login.
 
 ---
 
+## M4 — XSS e entradas não confiáveis
+
+### Antes (situação encontrada)
+
+O M0 já suspeitava que este módulo seria pequeno ("apenas 10 sinks de HTML;
+`escapeHtml()` usado de forma disciplinada"). A varredura confirmou e explicou
+**por que** o app resiste, o que é a parte que o M0 não tinha.
+
+**Varredura executada** (scripts descartáveis, no scratchpad da sessão; não
+versionados): extração de todo literal de template que contenha `<tag` em
+`js/**` e `scripts/**`, com o contexto anterior de cada `${...}`, para saber se
+a interpolação cai em texto, em atributo aspeado ou em atributo solto.
+1.528 interpolações em 32 arquivos; 448 sobraram depois de descontar as
+obviamente seguras; todas triadas.
+
+| Sink | Ocorrências | Situação |
+|---|---|---|
+| `innerHTML` | 8 | `renderShell()` (2×), campos de arquivo fixos, tela de falha de carga, avisos/histórico do formulário, resumo e avisos da importação |
+| `outerHTML` | 1 | linha da revisão de importação (`renderImportReviewRow`, escapada) |
+| `insertAdjacentHTML` | 0 | — |
+| `document.write` | 0 | — |
+| `eval` / `new Function` | 0 | — |
+| atributo **sem aspas** com interpolação | 0 | — |
+| `href`/`src` dinâmico | 1 | `js/transparency.js:122`, lista constante de fontes oficiais |
+
+**O achado central do módulo não é uma falha, é uma dependência não documentada.**
+A resistência do app vem de **duas camadas**, e só a segunda é visível para
+quem lê uma tela:
+
+1. **Normalização na borda** (`js/storage.js`). Tudo que entra — backup
+   restaurado (32 MB de JSON arbitrário), operação baixada da nuvem
+   (`applyRemoteOps` chama `migrate()` na linha 3224), extrato importado — passa
+   por `migrate()`, e lá cada campo que a interface interpola **sem escapar**
+   tem alfabeto fechado:
+   `normalizeRecordId` (`^[A-Za-z0-9][A-Za-z0-9:_-]{0,79}$`, com slug de
+   contingência), `normalizeHexColor` (`^#[0-9a-f]{6}$`), `normalizeIconName`
+   (`^[A-Za-z][A-Za-z0-9]{0,31}$`), `ACCOUNT_TYPES.includes`,
+   `BUDGET_GROUPS.includes`, `isRealIsoDate`, `normalizeBudgetAlert`, `clamp`.
+2. **Escape no render** (`escapeHtml`, `js/utils.js:379`, 350+ chamadas).
+
+É a camada 1 que faz `data-ui-css="--account-color: ${a.color}"` não ser uma
+quebra de atributo esperando acontecer: `a.color` só existe em `#RRGGBB`.
+Nenhum comentário no código dizia isso, e nenhum teste prendia. **Foi
+comprovado por teste de mutação**: enfraquecendo `normalizeHexColor` para
+`color || fallback`, três telas passam a emitir atributo quebrado a partir de um
+backup forjado (Início, Contas e cartões, Categorias). Ver "Testes".
+
+### Achados
+
+| # | P | Achado | Situação |
+|---|---|---|---|
+| **F4-01** | **P1** | `js/screens/analytics.js`: o cabeçalho da análise de IA renderizava `<b>${a.score}</b><span>/100</span>`, mas `normalizeAnalysis` (`netlify/functions/analyze.js:269`) **descarta o `score` do modelo de propósito**. O front nunca acompanhou: `a.score` chegava `undefined` e a tela mostrava **"undefined/100" em 38px** (`.ai-score b`, `css/components.css:522`) no topo da análise. Bug visível em produção. | **CORRIGIDO** |
+| **F4-02** | P2 | `js/insights.js:439` devolve `body.analise` **cru** para `state.aiInsight`, e a tela interpola `AI_FLOW_COLOR[situacao]`, `AI_FLOW_LABEL[situacao]`, `AI_RISK_COLOR[nivel]`, `AI_RISK_LABEL[nivel]` sem repetir a whitelist do servidor. Hoje o backend valida (não é explorável), mas era a **única** barreira: era um contrato remoto sustentando o render. | **CORRIGIDO** |
+| **F4-03** | P3 | `js/icons.js:85`: `ICONS[name]` lia a cadeia de protótipos. `normalizeIconName` aceita `constructor`, `toString`, `valueOf` e `hasOwnProperty` (todos casam com o alfabeto), então um backup ou registro sincronizado com `icon: "constructor"` fazia a tela desenhar `function Object() { [native code] }` dentro do `<svg>`. Não é injeção (texto nativo não tem `<`), mas é conteúdo vindo de arquivo externo aparecendo na interface. | **CORRIGIDO** |
+| **F4-04** | P2 | A camada 1 não estava documentada nem coberta. Uma troca inocente (aceitar `rgb()` em `normalizeHexColor`) viraria injeção de atributo em três telas de uma vez, sem nenhum teste reprovando. | **COBERTO** por `tests/test-xss-surface.js` |
+| — | — | Fluxos que a auditoria conferiu e passaram **sem achado**: importação CSV/OFX/PDF (descrição, motivo, rótulo e nomes de conta/categoria escapados), QR Code PIX/NFC-e (`js/qrcode.js`: host restrito a `.gov.br` com rótulo `sefaz`/`fazenda`, chave `^\d{44}$`, `estabelecimento` raspado com `[^<]+` e teto de 120 caracteres, tudo escapado no render), toast/`notify` (escapado), lista de dispositivos (`device.label` e `device.id` escapados, `type` por whitelist), nome do usuário (`escapeHtml` no render), exportação CSV (`csvCell` já neutraliza `= + - @ TAB` contra injeção de fórmula), PDF.js (auto-hospedado, `isEvalSupported: false`, sem `enableScripting`), backend (nenhuma função devolve HTML), `index.html`/`landing.html` (nenhum manipulador de evento em linha), `detectSubscriptions` (chave sempre contém `\|`, então `__proto__` é inalcançável). | — |
+
+### Alterações
+
+| Arquivo | O quê |
+|---|---|
+| `js/screens/analytics.js` | `renderAiStructured`: bloco da nota só sai quando `Number.isFinite(score)`, com `Math.round(clamp(score, 0, 100))`; `aiFlowKey()` e `aiRiskKey()` repetem no cliente a whitelist do servidor (`positivo/equilibrado/negativo`, `alto/medio/baixo`) |
+| `js/icons.js` | `svgIcon`: busca por chave própria (`Object.prototype.hasOwnProperty.call`) em vez de leitura direta |
+| `js/modules/app.generated.js` | regerado (`node scripts/build-app-module.js`, 70 fontes) |
+| `tests/test-xss-surface.js` | **novo**, 85 asserções em 10 blocos |
+
+Nenhuma mudança em contrato de API, banco, LocalStorage, IndexedDB, sincronização
+ou formato de dados. Nenhum arquivo, função, coluna, policy ou migração removida.
+
+### Motivo
+
+F4-01 é bug de interface entregue ao usuário. F4-02 e F4-03 tiram o render da
+dependência de um contrato que mora fora do arquivo (a validação do backend, a
+ausência de chaves herdadas). F4-04 é o que sobra do módulo: sem teste, a
+camada 1 é uma convenção, e convenção não sobrevive a refatoração.
+
+### Compatibilidade
+
+- **Nota da IA**: quando `score` for numérico (backend antigo em cache, ou se um
+  dia a nota voltar), o bloco renderiza **exatamente como antes**; asserção
+  `<b>74</b><span>/100</span>` no teste. Quando não for, some em vez de mostrar
+  `undefined`. Não há formato de dado envolvido.
+- **Rótulos de risco e fluxo**: valores dentro da whitelist produzem
+  **byte a byte** o mesmo HTML de antes. Fora dela, caem no mesmo padrão que o
+  `||` anterior já dava (`"Atenção"`, `var(--goal)`), com a diferença de a cor
+  e o rótulo passarem a concordar.
+- **Ícones**: nome conhecido desenha igual; nome desconhecido continua caindo em
+  `tag`. Só muda o caso `constructor`/`toString`/`valueOf`/`hasOwnProperty`, que
+  antes vazava função herdada.
+- **Dados antigos**: nenhum campo persistido muda de forma. Backups antigos
+  continuam restaurando (`parseBackupFile` e `migrate` intocados).
+
+### Testes
+
+Ambiente: Node v22.19.0 via Electron do VS Code (ver "Ambiente de execução").
+
+| Teste | Resultado |
+|---|---|
+| `node scripts/lint.js` | **PASSOU** — 0 erro, 0 aviso (reprovou uma vez por travessão no comentário novo; corrigido) |
+| `node tests/run-all.js` | **PASSOU** — **52/52** arquivos (51 anteriores + o novo), sem EPERM nesta execução |
+| `node tests/test-xss-surface.js` | **PASSOU** — 85 ok, 0 falha |
+| `node scripts/build-app-module.js --check` | **PASSOU** — módulo gerado confere com 70 fontes |
+| `node scripts/check-release.js` | **PASSOU** — `Publicação 0.30.0 verificada` (aviso conhecido: 7 campos legais) |
+| `node scripts/build-dist.js` | **PASSOU** — 38 arquivos (aviso conhecido: `SITE_URL` local) |
+| **Teste de mutação das asserções novas** | **PASSOU** — ver abaixo |
+| Navegador local (`node scripts/serve.js`, 127.0.0.1:4173) | **PASSOU** — ver abaixo |
+| `node scripts/coverage.js` | **NÃO VALIDADO** — EPERM do OneDrive (R2); medido pela CI |
+| `test:browser` (Playwright) | **NÃO VALIDADO** — Playwright indisponível localmente; roda na CI |
+| Cartão de IA com resposta real da `/api/analyze` | **NÃO VALIDADO** — exige `vercel dev` + `ANTHROPIC_API_KEY`; coberto por teste de unidade nos dois caminhos (nota numérica e nota ausente) |
+
+**Teste de mutação** (um teste que nunca falha não prova nada). Quebrando de
+propósito as duas defesas e rodando o arquivo novo:
+
+- `normalizeHexColor` → `return color || fallback`: reprovam 7 asserções,
+  incluindo **"Início / Contas e cartões / Categorias: a carga não virou
+  marcação"**. Isto é a prova de F4-04: a cor é o que separa um backup forjado
+  de injeção de atributo em três telas.
+- `svgIcon` → `ICONS[name] || ICONS.tag`: reprovam as 4 asserções de protótipo.
+
+Restaurados os dois arquivos, 85/85 de novo.
+
+**Navegador local**, aplicativo servido de `js/` (não do `dist/`):
+
+- Parte em `data-module-boot="ready"`, sem erro novo de console.
+- Portão de aceite da política **continua exigido** antes do onboarding avançar
+  (item B da checklist de regressão), e "Pular por agora" leva ao `#/inicio`.
+- **As 23 rotas percorridas uma a uma**: 534 ícones desenhados, **0** ocorrência
+  de `undefined`, `NaN`, `[object Object]` ou `native code`; **0** elemento com
+  `data-ui-css` pendente e **0** com `data-ui-style-rejected` (ou seja, nenhuma
+  declaração visual passou a ser recusada pelo sanitizador).
+- Únicos erros de console: `GET /api/account/session → 404` (duas vezes) e a
+  falha de registro do Service Worker que vem dele. **Pré-existentes e
+  esperados**: `scripts/serve.js` avisa na partida que `/api/*` exige
+  `vercel dev`. Não têm relação com as alterações.
+
+### Funcionalidades preservadas
+
+Confirmado explicitamente: importação (CSV/OFX/PDF), QR Code, backup e
+restauração, sincronização, dispositivos, toast, ícones em todas as telas,
+exportação CSV, onboarding e o portão de aceite. Nenhuma regressão conhecida.
+
+### Status
+
+**CONCLUÍDO** — F4-01, F4-02 e F4-03 corrigidos; F4-04 coberto por teste de
+regressão com mutação comprovada. Pendências do módulo: nenhuma.
+
+### Registrado para módulos seguintes
+
+- **M5**: `js/transparency.js:122` interpola `href="${url}"` sem escapar. A lista
+  é constante (fontes oficiais em `docs/FONTES-FINANCEIRAS.md`), então não é
+  achado hoje; vira achado no dia em que a lista virar dado. `form-action 'none'`
+  e `base-uri 'self'` já estão na CSP e cobrem o resto.
+- **M15**: `tests/test-xss-surface.js` é o primeiro teste do projeto que renderiza
+  **sete telas** com uma base hostil completa. Serve de molde para a cobertura de
+  `js/actions.js` (0,2%, o pior número da baseline).
+- **M12**: a restauração aceita 32 MB de JSON arbitrário e é a maior entrada não
+  confiável do app. `migrate()` a normaliza bem; o que falta lá é o aviso ao
+  usuário sobre o conteúdo do arquivo, não saneamento.
+
+---
+
 ## Checklist de regressão
 
 Executar após **todo** módulo que toque no código. Marcar `OK` / `FALHOU` / `NÃO VALIDADO`.
@@ -783,7 +945,7 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
 ### A. Automatizado (CI ou máquina com Node) — porta de entrada obrigatória
 
 - [ ] `npm run lint`
-- [ ] `npm test` (51 arquivos)
+- [ ] `npm test` (52 arquivos)
 - [ ] `npm run check:build` (o `app.generated.js` publicado corresponde às fontes)
 - [ ] `npm run check:release`
 - [ ] `npm run build:dist`
@@ -886,6 +1048,10 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
 - ~~Bloco 5: outras `security definer` expostas~~ **executado em 2026-08-28: só `rls_auto_enable`**.
   Nenhuma outra função privilegiada é executável por `anon`/`authenticated` no banco real.
 - Cobertura e Playwright indisponíveis dentro do OneDrive; usar a cópia externa (R2).
+- **M4**: o cartão de IA com resposta real da `/api/analyze` não foi visto em
+  navegador (exige `vercel dev` + chave). Os dois caminhos estão cobertos por
+  teste de unidade; a confirmação visual fica para a próxima vez que o backend
+  rodar localmente.
 - Itens 17 e 19 de `AUDIT_FIX_PROGRESS.md` e F-06/F-08 a F-17 de `docs/PROXIMA-SESSAO.md`
   continuam abertos e serão absorvidos pelos módulos correspondentes.
 - 7 campos legais do controlador ainda com marcador (`docs/LEGAL-LAUNCH.md`); o
