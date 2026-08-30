@@ -48,6 +48,17 @@ async function main() {
   check("saída de dados não é qualquer HTTPS", !/\bhttps:(\s|$)/.test(connectSrc), connectSrc);
   check("a única saída externa é a consulta fiscal", /https:\/\/\*\.gov\.br/.test(connectSrc), connectSrc);
 
+  // [M5] O QUE SOBROU DEPOIS DE `default-src 'self'`.
+  //
+  // `default-src 'self'` já cobre a maior parte, mas ele PERMITE moldura de
+  // mesma origem e não fala nada sobre envio de formulário nem sobre subrecurso
+  // em http://. Estas três diretivas não são redundância: cada uma fecha algo
+  // que a herança do `default-src` deixaria aberto.
+  check("nenhuma moldura, nem da própria origem", /frame-src 'none'/.test(csp), csp);
+  check("formulário não tem para onde enviar", /form-action 'none'/.test(csp), csp);
+  check("worker só sai da própria origem", /worker-src 'self'/.test(csp), csp);
+  check("subrecurso em texto claro é promovido a HTTPS", /upgrade-insecure-requests/.test(csp), csp);
+
   // Sem HSTS, a primeira visita digitada sem esquema trafega em texto claro e
   // um downgrade continua possível depois. É o cabeçalho que a plataforma
   // costuma pôr sozinha — e é exatamente por isso que ninguém repara quando
@@ -55,6 +66,63 @@ async function main() {
   const hsts = cabecalho("Strict-Transport-Security");
   const maxAge = Number((hsts.match(/max-age=(\d+)/) || [])[1] || 0);
   check("HTTPS fica obrigatório depois da primeira visita", maxAge >= 15552000, hsts || "ausente");
+
+  // [M5] O DOMÍNIO CANÔNICO É UM SUBDOMÍNIO.
+  //
+  // `financemanager.dev.br` responde 308 para `www.financemanager.dev.br`:
+  // quem digita o endereço sem esquema faz a PRIMEIRA requisição em texto claro
+  // para o ápice e é redirecionado para um subdomínio que o HSTS do ápice não
+  // cobria. Levantamento de DNS feito no M5: só o ápice e `www` resolvem, não
+  // há curinga e não há MX, então `includeSubDomains` não pode derrubar nada
+  // que exista hoje. `preload` continua de fora de propósito: sair da lista
+  // leva meses e é decisão do dono do domínio, não deste teste.
+  check("o subdomínio canônico também fica preso ao HTTPS", /includeSubDomains/i.test(hsts), hsts || "ausente");
+  check("a lista de precarga continua sendo decisão externa", !/preload/i.test(hsts), hsts);
+
+  // Um app financeiro não tem por que contar a outro site de onde o usuário
+  // veio. `same-origin` mantém o caminho completo dentro do próprio site (que é
+  // o que a navegação interna usa) e não manda nada para fora. Importa mais do
+  // que parece porque o retorno da confirmação de email traz `?code=` na URL.
+  check("nenhum referrer atravessa para outra origem",
+    cabecalho("Referrer-Policy") === "same-origin", cabecalho("Referrer-Policy") || "ausente");
+
+  // [M5] A CÂMERA É A ÚNICA PERMISSÃO QUE O APP USA (leitor de QR Code,
+  // js/qrcode.js). `navigator.share` fica DE FORA da lista de propósito: negar
+  // `web-share` desliga o compartilhamento que as telas já oferecem.
+  const permissoes = cabecalho("Permissions-Policy");
+  check("a câmera continua liberada para o leitor de QR", /camera=\(self\)/.test(permissoes), permissoes);
+  check("compartilhamento não foi negado sem querer", !/web-share=/.test(permissoes), permissoes);
+  check("autoplay não foi negado sem querer", !/autoplay=/.test(permissoes), permissoes);
+  [
+    "geolocation", "microphone", "payment", "usb", "serial", "bluetooth", "hid",
+    "midi", "accelerometer", "gyroscope", "magnetometer", "display-capture",
+    "idle-detection", "local-fonts", "screen-wake-lock", "xr-spatial-tracking",
+    "browsing-topics", "interest-cohort",
+  ].forEach((recurso) => {
+    check(`${recurso} está negado para todos`, permissoes.includes(`${recurso}=()`), permissoes);
+  });
+
+  // [M5] O SERVIDOR LOCAL NÃO PODE TER UMA SEGUNDA CÓPIA DA POLÍTICA.
+  //
+  // `scripts/serve.js` existe para que um erro de CSP apareça em `npm start`
+  // antes de aparecer em produção. Enquanto a política estava escrita à mão nos
+  // dois arquivos, mudar um e esquecer o outro dava o pior resultado possível:
+  // um ambiente local que aprova o que a publicação recusa. Ele agora lê
+  // `vercel.json`; estas asserções impedem a cópia de voltar.
+  const servidor = read("scripts/serve.js");
+  check("o servidor local lê os cabeçalhos de vercel.json", /vercel\.json/.test(servidor), "não lê");
+  // A política de emergência (usada só se `vercel.json` não puder ser lido) é
+  // curta de propósito e NÃO contém `script-src`; é isso que separa "reserva"
+  // de "segunda cópia da política de verdade".
+  check("o servidor local não repete a política à mão",
+    !/script-src 'self'/.test(servidor), "há uma segunda cópia da política");
+  // As duas exceções do ambiente local são deliberadas e precisam continuar sendo
+  // as únicas: HSTS gravado a partir de `http://localhost` prenderia o navegador
+  // de quem desenvolve a um esquema que o servidor local não fala, e
+  // `upgrade-insecure-requests` promoveria os subrecursos para `https://`.
+  check("HSTS fica de fora do ambiente local", /Strict-Transport-Security/.test(servidor), "sem a exceção declarada");
+  check("a promoção para HTTPS fica de fora do ambiente local",
+    /upgrade-insecure-requests/.test(servidor), "sem a exceção declarada");
 
   const inlineScripts = [...index.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)]
     .filter((match) => !/\bsrc\s*=/.test(match[1]) && match[2].trim());

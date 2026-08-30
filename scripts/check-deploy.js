@@ -110,6 +110,10 @@ const CSP_ESPERADA = [
   // valendo "qualquer HTTPS" deixava a rede inteira como destino possível de
   // exfiltração caso um script chegasse a rodar aqui.
   "connect-src 'self' https://*.gov.br",
+  // [M5] O que `default-src 'self'` NÃO cobre sozinho: ele permite moldura de
+  // mesma origem, não fala de envio de formulário e não promove http://.
+  "frame-src 'none'", "form-action 'none'", "worker-src 'self'",
+  "upgrade-insecure-requests",
 ];
 
 function referenciasDeModulo(codigo) {
@@ -248,7 +252,46 @@ async function main() {
     const hsts = resposta.headers.get("strict-transport-security") || "";
     check(`${nome} traz Strict-Transport-Security`,
       Number((hsts.match(/max-age=(\d+)/) || [])[1] || 0) >= 15552000, hsts || "ausente");
+    // [M5] O endereço canônico é `www.`, ou seja, um SUBDOMÍNIO do que a pessoa
+    // digita. Sem `includeSubDomains` o HSTS do ápice não alcançava justamente
+    // o host onde o app vive.
+    check(`${nome}: o HSTS alcança o subdomínio canônico`, /includeSubDomains/i.test(hsts), hsts || "ausente");
+    check(`${nome} traz Referrer-Policy fechada`,
+      resposta.headers.get("referrer-policy") === "same-origin", resposta.headers.get("referrer-policy"));
+    const permissoes = resposta.headers.get("permissions-policy") || "";
+    check(`${nome}: a câmera segue liberada para o leitor de QR`, /camera=\(self\)/.test(permissoes), permissoes || "ausente");
+    check(`${nome}: sensores e rádios estão negados`,
+      ["usb=()", "serial=()", "bluetooth=()", "hid=()", "geolocation=()", "microphone=()"]
+        .every((parte) => permissoes.includes(parte)), permissoes || "ausente");
   }
+
+  // [M5] OS CABEÇALHOS PRECISAM VALER TAMBÉM PARA A API.
+  //
+  // Em `vercel.json` a regra é `/(.*)`, que na leitura do arquivo parece cobrir
+  // tudo. Mas as rotas de `/api/*` passam por reescrita e por função, e é
+  // exatamente onde uma configuração "óbvia" costuma não chegar. Conferir na
+  // resposta, e não no arquivo, é o ponto deste script.
+  const apiCabecalhos = await pegar("/api/account/session");
+  check("a API também recebe a política de conteúdo",
+    !!apiCabecalhos.headers.get("content-security-policy"), "ausente");
+  check("a API também recebe nosniff",
+    apiCabecalhos.headers.get("x-content-type-options") === "nosniff",
+    apiCabecalhos.headers.get("x-content-type-options"));
+  check("a API não é guardada em cache",
+    /no-store/.test(String(apiCabecalhos.headers.get("cache-control") || "")),
+    apiCabecalhos.headers.get("cache-control"));
+  // A função põe `no-referrer` por conta própria (netlify/functions/_shared/http.js),
+  // que é mais fechado que o `same-origin` do site. O que não pode é ela ficar
+  // MENOS fechada que o resto.
+  check("a API não vaza referrer",
+    ["no-referrer", "same-origin"].includes(String(apiCabecalhos.headers.get("referrer-policy") || "")),
+    apiCabecalhos.headers.get("referrer-policy"));
+  // Resposta de API com `Access-Control-Allow-Origin: *` seria leitura livre por
+  // qualquer site. Nos estáticos a Vercel põe isso sozinha e é inofensivo (são
+  // arquivos públicos, sem credencial); aqui não pode aparecer.
+  check("a API não abre CORS para qualquer origem",
+    apiCabecalhos.headers.get("access-control-allow-origin") !== "*",
+    apiCabecalhos.headers.get("access-control-allow-origin") || "ausente");
 
   /* ---------------------------------------------------------------- *
    * 5. AS FUNÇÕES RESPONDEM
@@ -258,7 +301,9 @@ async function main() {
    * `require("../netlify/functions/...")` e a função subiu sem o backend).
    * ---------------------------------------------------------------- */
   console.log("\n5. As funções do backend");
-  const sessao = await pegar("/api/account/session");
+  // Mesma resposta já usada no bloco 4; uma requisição basta para as duas
+  // perguntas (os cabeçalhos e o fato de a função existir).
+  const sessao = apiCabecalhos;
   check("/api/account/session não responde 404", sessao.status !== 404,
     "404: a reescrita de /api/account/:action* não chegou, ou a função não foi publicada");
   check("/api/account/session não responde 500", sessao.status !== 500,

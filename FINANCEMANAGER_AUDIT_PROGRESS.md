@@ -12,15 +12,16 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 
 | Campo | Valor |
 |---|---|
-| Módulo atual | **M5 — Cabeçalhos HTTP e CSP** (a iniciar) |
-| Status do M4 | **CONCLUÍDO** — 3 achados corrigidos (1 P1, 1 P2, 1 P3) + suíte de regressão nova, 52/52 verdes |
+| Módulo atual | **M6 — Autenticação e senhas** (a iniciar) |
+| Status do M5 | **CONCLUÍDO no repositório**; vale em produção **depois de publicar**. Critério: `node scripts/check-deploy.js https://www.financemanager.dev.br` passar (hoje reprova 10, de propósito) |
+| Status do M4 | **CONCLUÍDO** — 3 achados corrigidos (1 P1, 1 P2, 1 P3) + suíte de regressão nova |
 | Status do M3 | **CONCLUÍDO** — aplicado e confirmado no banco em 2026-08-28 |
 | Status do M2 | **CONCLUÍDO** — nenhuma vulnerabilidade de autorização; invariantes travados por teste |
 | Status do M1 | **CONCLUÍDO** — aplicado e confirmado; gatilho capturado e versionado |
-| Módulos concluídos | M0, M1, M2, M3, M4 |
-| Próximo módulo | M5 — Cabeçalhos HTTP e CSP (escopo reduzido: a CSP já é restritiva; sobram HSTS `includeSubDomains`, `security.txt`, revisão de `connect-src`) |
+| Módulos concluídos | M0, M1, M2, M3, M4, M5 |
+| Próximo módulo | M6 — Autenticação e senhas (senha forte, senha vazada, rate limit, reautenticação em ação crítica, arquitetura para MFA/TOTP) |
 | Branch | `deploy-atualizado` (árvore limpa no início do M0) |
-| Arquivos alterados até aqui | Testes: `tests/test-security.js` (+3 blocos), `tests/test-service-role-scope.js` (novo), `tests/test-xss-surface.js` (novo, M4). Produção (só no M4): `js/screens/analytics.js`, `js/icons.js`, `js/modules/app.generated.js` (regerado). |
+| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js` (M1/M2/M3 + M5), `tests/test-service-role-scope.js` (novo), `tests/test-xss-surface.js` (novo, M4), `scripts/check-deploy.js` (M5), `scripts/serve.js` (M5). Produção: `js/screens/analytics.js`, `js/icons.js`, `js/modules/app.generated.js` (M4), `vercel.json` (M5). |
 | Migrations criadas até aqui | `20260828120000_rls_auto_enable_least_privilege.sql`, `20260828130000_rls_auto_enable_versionada.sql`, `20260828140000_menor_privilegio_tabelas.sql` (as três **aplicadas e confirmadas em 2026-08-28**), `20260828150000_rls_auto_enable_gatilho.sql` (**ainda não aplicada**; é no-op em produção, onde o gatilho já existe) |
 | Versão do app | `0.30.0` (package.json) |
 
@@ -937,6 +938,198 @@ regressão com mutação comprovada. Pendências do módulo: nenhuma.
 
 ---
 
+## M5 — Cabeçalhos HTTP e CSP
+
+### Antes (situação encontrada)
+
+O M0 já tinha avisado: a CSP **não** precisava ser implantada, ela já existia e já
+era restritiva (sem `unsafe-inline`, sem `unsafe-eval`). O trabalho aqui foi de
+ajuste fino, com uma medição nova que o M0 não tinha feito.
+
+**A medição que mudou o módulo:** `financemanager.dev.br` responde **308 para
+`www.financemanager.dev.br`**. O endereço canônico é um **subdomínio**. Quem
+digita o domínio sem esquema faz a primeira requisição em texto claro para o
+ápice e é mandado para um host que o HSTS do ápice não cobria, porque o
+cabeçalho não trazia `includeSubDomains`. Era o achado R4 do M0, agora com o
+motivo concreto.
+
+Estado medido em produção (`https://www.financemanager.dev.br`, três caminhos
+estáticos + a API):
+
+| Cabeçalho | Valor entregue antes |
+|---|---|
+| `Content-Security-Policy` | restritiva, sem `frame-src` e sem `upgrade-insecure-requests` |
+| `Strict-Transport-Security` | `max-age=63072000` — **sem `includeSubDomains`** |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` (a API já usava `no-referrer`) |
+| `Permissions-Policy` | 5 recursos (`camera=(self)` + 4 negados), incluindo o já obsoleto `interest-cohort` |
+| `X-Content-Type-Options` / `X-Frame-Options` / `COOP` | corretos |
+| `Access-Control-Allow-Origin: *` | só nos estáticos (padrão da Vercel); **ausente na API** |
+| `Cache-Control` da API | `no-store` |
+
+### Achados
+
+| # | P | Achado | Situação |
+|---|---|---|---|
+| **F5-01** | **P2** | HSTS sem `includeSubDomains` num domínio cujo host canônico é o subdomínio `www`. | **CORRIGIDO** |
+| **F5-02** | P2 | **A política de conteúdo estava escrita à mão em DOIS arquivos**: `vercel.json` e `scripts/serve.js`. O servidor local existe justamente para que um erro de CSP apareça antes de produção; com duas cópias, mudar uma e esquecer a outra dava o pior caso possível — um ambiente local que aprova o que a publicação recusa. Não estava divergente ainda; a estrutura é que garantia que um dia divergiria. | **CORRIGIDO** |
+| **F5-03** | P3 | `default-src 'self'` **permite moldura de mesma origem** e não diz nada sobre promoção de subrecurso. Faltavam `frame-src 'none'` e `upgrade-insecure-requests`. | **CORRIGIDO** |
+| **F5-04** | P3 | `Permissions-Policy` cobria 5 recursos. USB, serial, bluetooth, HID, MIDI, sensores, captura de tela, detecção de ociosidade e fontes locais ficavam no padrão do navegador (permitido). `interest-cohort` sozinho é obsoleto: o nome atual é `browsing-topics`. | **CORRIGIDO** |
+| **F5-05** | P3 | `Referrer-Policy: strict-origin-when-cross-origin` manda a origem para fora. Num app financeiro cujo retorno de confirmação de email carrega `?code=` na URL, `same-origin` custa nada e fecha a porta. | **CORRIGIDO** |
+| **F5-06** | P3 | Nenhum teste conferia se os cabeçalhos chegam **na API**. Em `vercel.json` a regra é `/(.*)` e parece cobrir tudo, mas `/api/*` passa por reescrita e por função — exatamente onde configuração "óbvia" costuma não chegar. (Na medição, chega.) | **COBERTO** por teste |
+
+### Decisões tomadas e NÃO implementadas (com o motivo)
+
+Registradas para não serem reabertas sem argumento novo:
+
+- **`preload` no HSTS: NÃO.** Entrar na lista de precarga é praticamente
+  irreversível (sair leva meses e depende do ciclo de versões dos navegadores).
+  É decisão do dono do domínio, não de uma auditoria. O que falta para poder
+  optar já está feito: `includeSubDomains` presente e `max-age` de dois anos.
+  Para ativar, bastaria acrescentar `; preload` e submeter em hstspreload.org.
+- **`Cross-Origin-Resource-Policy`: NÃO.** `same-origin` bloquearia a
+  incorporação da `og:image` por qualquer cliente de pré-visualização que use
+  navegador, e o ganho seria quase nulo: os estáticos são públicos por
+  definição e a API não é incorporável (é JSON e tem `nosniff`).
+- **`Cross-Origin-Embedder-Policy: require-corp`: NÃO.** Exigiria CORP em todo
+  subrecurso; quebra sem entregar nada, porque o app não usa
+  `SharedArrayBuffer` nem precisa de isolamento de origem cruzada.
+- **`require-trusted-types-for 'script'`: NÃO.** O render inteiro do app passa
+  por `innerHTML` (`renderShell()`); ligar Trusted Types sem antes criar uma
+  política **derruba o aplicativo na primeira pintura**. Fica registrado como
+  P3 de longo prazo, dependente do M38.
+- **Remover `Access-Control-Allow-Origin: *` dos estáticos: NÃO.** É padrão da
+  plataforma, incide só sobre arquivos públicos (HTML, JS, CSS, ícones) e não
+  vem com `Allow-Credentials`, então não há leitura privilegiada. Mexer nisso
+  arriscaria o carregamento de módulos e do worker do PDF.js sem resolver
+  nenhum risco real. **Confirmado que a API não o recebe**, e agora há teste.
+- **Estreitar `connect-src 'self' https://*.gov.br`: NÃO DÁ.** Os portais
+  estaduais variam (`nfce.sefaz.rs.gov.br`, `portalsped.fazenda.mg.gov.br`, ...)
+  e a CSP só aceita curinga no rótulo mais à esquerda. `https://*.gov.br` é a
+  forma mais estreita que a linguagem permite. Quem estreita de verdade é
+  `js/qrcode.js`, que exige rótulo `sefaz`/`fazenda` no host.
+- **`autoplay`, `web-share`, `fullscreen`, `publickey-credentials-*`: fora da
+  lista de negação, de propósito.** `navigator.share` é usado pelas telas;
+  `autoplay=()` poderia impedir o `<video>` do leitor de QR; e negar WebAuthn
+  hoje viraria armadilha para o M6, que vai mexer em autenticação.
+
+### Alterações
+
+| Arquivo | O quê |
+|---|---|
+| `vercel.json` | HSTS ganha `includeSubDomains`; `Referrer-Policy` vira `same-origin`; `Permissions-Policy` passa de 5 para 23 recursos; CSP ganha `frame-src 'none'` e `upgrade-insecure-requests` |
+| `scripts/serve.js` | passa a **ler** os cabeçalhos de `vercel.json` em vez de repetir a política à mão; duas exceções declaradas para o ambiente local (HSTS e `upgrade-insecure-requests`, ambas por causa do `http://`) |
+| `scripts/check-deploy.js` | confere na resposta real: `includeSubDomains`, `Referrer-Policy`, `Permissions-Policy`, as quatro diretivas novas da CSP e **os cabeçalhos da API** (política, `nosniff`, `no-store`, referrer, CORS não-`*`); passa a reaproveitar uma requisição em vez de duas |
+| `tests/test-security.js` | +26 asserções sobre `vercel.json` e sobre a ausência de segunda cópia da política |
+
+Nenhuma mudança em código de aplicação, contrato de API, banco, armazenamento
+local ou sincronização.
+
+### Motivo
+
+`includeSubDomains` era o único achado com efeito prático mensurável (o host
+canônico ficava fora do HSTS). O resto é o que o módulo pede: menor privilégio
+nos recursos do navegador e defesa em profundidade nas diretivas que o
+`default-src` herda frouxo. A leitura de `vercel.json` pelo servidor local não é
+estética: é a diferença entre um ambiente de desenvolvimento que valida e um que
+mente.
+
+### Compatibilidade
+
+- **`includeSubDomains` é reversível**, ao contrário de `preload`: servir
+  `max-age=0` limpa o registro nos navegadores. O levantamento de DNS feito
+  agora mostra que **só o ápice e `www` resolvem**, não há curinga e não há MX,
+  então nada que exista hoje pode cair. **A ressalva vale para o futuro:**
+  criar depois um subdomínio servido em HTTP (um `blog.`, um painel de terceiro)
+  será recusado pelos navegadores que já viram o cabeçalho.
+- **`upgrade-insecure-requests`** é rede de segurança, não mudança de
+  comportamento: o inventário de URLs do cliente tem apenas `https://*.gov.br`.
+  Nenhum subrecurso em `http://` existe para ser promovido.
+- **`frame-src 'none'`**: o app não tem nenhum `<iframe>` (varredura conferiu),
+  e o PDF.js roda por worker, não por moldura.
+- **`camera=(self)` preservado** e verificado em navegador: `getUserMedia`
+  responde `NotFoundError` (não há câmera na máquina de teste) e **não**
+  `NotAllowedError`, que é o que uma política bloqueando produziria.
+- **`Referrer-Policy: same-origin`**: navegação interna do app é por hash, e
+  fragmento nunca vai no `Referer`. Nada no app depende de referrer de saída.
+- O `Referrer-Policy: no-referrer` que as funções já punham por conta própria
+  continua valendo e é mais fechado; o teste aceita os dois.
+
+### Testes
+
+| Teste | Resultado |
+|---|---|
+| `node scripts/lint.js` | **PASSOU** — 0 erro, 0 aviso |
+| `node tests/run-all.js` | **PASSOU** — 52/52 arquivos |
+| `node tests/test-security.js` | **PASSOU** — **105 ok, 0 falha** (eram 79) |
+| `node scripts/build-app-module.js --check` | **PASSOU** |
+| `node scripts/check-release.js` | **PASSOU** (aviso conhecido dos campos legais) |
+| `node scripts/build-dist.js` | **PASSOU** — 38 arquivos (aviso conhecido de `SITE_URL`) |
+| **Teste de mutação (6 mutações)** | **PASSOU** — ver abaixo |
+| **Navegador local com os cabeçalhos NOVOS** | **PASSOU** — ver abaixo |
+| `node scripts/check-deploy.js` contra produção | **REPROVOU 10 asserções, como esperado**: produção ainda serve os cabeçalhos antigos. **Rodar de novo depois de publicar** — é o critério de fechamento em produção. |
+| `test:browser` (Playwright) | **NÃO VALIDADO** — indisponível localmente; roda na CI |
+
+**Teste de mutação.** Desfazendo cada mudança em `vercel.json` e rodando
+`test-security.js`: reprovam `frame-src 'none'`, `upgrade-insecure-requests`,
+`includeSubDomains`, `Referrer-Policy`, `usb=()` e `camera=(self)`. Seis de
+seis. Restaurado, 105/105.
+
+**Navegador local.** `scripts/serve.js` agora entrega em `http://127.0.0.1:4173`
+exatamente os cabeçalhos de produção (menos as duas exceções declaradas),
+confirmado por requisição. Com eles no ar:
+
+- App parte em `data-module-boot="ready"`.
+- **As 23 rotas percorridas com um ouvinte de `securitypolicyviolation`
+  instalado: 534 ícones, `violacoes: []`.** Nenhuma violação de CSP, nenhuma de
+  Permissions-Policy, nenhuma tela vazia.
+- **Página comercial** carregada e rolada até o fim (17.000 px, 18 seções):
+  `violacoes: []`. As animações continuam — elas passam por CSSOM
+  (`style.setProperty`), que `style-src-attr 'none'` não alcança, como o próprio
+  `js/landing.js:17` já registrava.
+- `getUserMedia` responde `NotFoundError`: a câmera continua **permitida** pela
+  política.
+- Únicos erros de console: `GET /api/account/session → 404` e a falha de
+  registro do Service Worker que vem dele. Pré-existentes e esperados sem
+  `vercel dev` (o próprio `serve.js` avisa na partida).
+
+### Funcionalidades preservadas
+
+Confirmado: aplicativo nas 23 rotas, página comercial com animações, leitor de
+QR (permissão de câmera), compartilhamento (`web-share` deliberadamente não
+negado), PDF.js por worker, formulário de login (é um `<form>` de verdade, mas
+interceptado por JS — `form-action 'none'` só age se o JS falhar, e aí impedir o
+envio é o comportamento desejado), API com seus próprios cabeçalhos.
+
+### Status
+
+**CONCLUÍDO no repositório. Pendente de publicação para valer em produção.**
+
+Critério de fechamento em produção, um comando:
+
+```
+node scripts/check-deploy.js https://www.financemanager.dev.br
+```
+
+Hoje ele reprova 10 asserções porque produção ainda serve os cabeçalhos
+anteriores. Depois de publicar, tem de passar. Nada além de publicar é
+necessário — não há migração, variável de ambiente nem passo manual.
+
+### Registrado para módulos seguintes
+
+- **M21**: `/.well-known/security.txt` e `/robots.txt` continuam **404**
+  (achado R3 do M0). São arquivos, não cabeçalhos; ficam no módulo que já os
+  reivindica.
+- **M6**: se entrar passkey/WebAuthn, `publickey-credentials-get` e
+  `publickey-credentials-create` foram deixados **fora** da lista de negação de
+  propósito. Nada a fazer.
+- **M22**: `<title>` de `landing.html` e de `index.html` são idênticos
+  (`Cofre | Organizador financeiro pessoal`) e diferentes do `og:title` da
+  landing. Notado de passagem, é matéria de marca.
+- **M38**: Trusted Types depende de o render deixar de depender de `innerHTML`.
+- **Decisão do dono**: `preload` no HSTS. Requisitos técnicos já atendidos.
+
+---
+
 ## Checklist de regressão
 
 Executar após **todo** módulo que toque no código. Marcar `OK` / `FALHOU` / `NÃO VALIDADO`.
@@ -1052,6 +1245,15 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
   navegador (exige `vercel dev` + chave). Os dois caminhos estão cobertos por
   teste de unidade; a confirmação visual fica para a próxima vez que o backend
   rodar localmente.
+- **M5 depende de PUBLICAÇÃO para valer.** Os cabeçalhos novos estão em
+  `vercel.json` e passam em todos os testes locais, mas produção só passa a
+  servi-los depois do próximo deploy. Conferir com
+  `node scripts/check-deploy.js https://www.financemanager.dev.br`.
+- **M5, ressalva de longo prazo:** com `includeSubDomains` no ar, criar depois
+  um subdomínio servido em **HTTP** (blog, painel de terceiro) será recusado
+  pelos navegadores que já viram o cabeçalho. Só ápice e `www` existem hoje,
+  sem curinga e sem MX. É reversível servindo `max-age=0`; `preload`, que não
+  seria, ficou de fora de propósito.
 - Itens 17 e 19 de `AUDIT_FIX_PROGRESS.md` e F-06/F-08 a F-17 de `docs/PROXIMA-SESSAO.md`
   continuam abertos e serão absorvidos pelos módulos correspondentes.
 - 7 campos legais do controlador ainda com marcador (`docs/LEGAL-LAUNCH.md`); o
