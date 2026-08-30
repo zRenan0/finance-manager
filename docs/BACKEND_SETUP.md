@@ -121,6 +121,13 @@ Defina estas variáveis somente no painel da Vercel (Settings → Environment Va
 - `SUPABASE_URL`: endereço HTTPS do projeto.
 - `SUPABASE_PUBLISHABLE_KEY`: chave pública do projeto.
 - `SUPABASE_SERVICE_ROLE_KEY`: usada exclusivamente para apagar uma conta após nova autenticação.
+- `LEAKED_PASSWORD_CHECK` (opcional): `off` desliga a consulta ao HaveIBeenPwned feita no
+  cadastro e na troca de senha. Ela é **ligada por padrão** e não precisa de chave nem de conta:
+  sai do servidor apenas o prefixo de cinco caracteres do SHA-1 da senha (k-anonimato), a senha
+  e o hash completo nunca saem, e o navegador do usuário não fala com o HIBP. Se o serviço
+  estiver fora do ar, a checagem **falha aberta** e o cadastro segue. Existe para o caso de a
+  consulta virar problema de latência ou de política, sem precisar publicar código novo.
+  Ver `netlify/functions/_shared/senha-vazada.js`.
 - `ALLOWED_ORIGIN`: origens permitidas, separadas por vírgula. Inclua produção e homologação.
   **A primeira da lista é a canônica.** Ela é o endereço que entra nos links dos emails de
   cadastro e de recuperação quando a requisição chega com um host que a lista não reconhece.

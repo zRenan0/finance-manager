@@ -14,7 +14,7 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 |---|---|
 | Módulo atual | **M8 — Armazenamento local e privacidade** (a iniciar) |
 | Status do M7 | **CONCLUÍDO** — "sair dos outros aparelhos" com reautenticação e duas camadas; data de entrada na lista |
-| Status do M6 | **CONCLUÍDO no repositório**, com **uma ação sua pendente**: ligar "Prevent use of leaked passwords" no painel do Supabase (passo a passo no M6; não tranca ninguém para fora) |
+| Status do M6 | **CONCLUÍDO, sem pendência.** A proteção contra senha vazada é do plano pago do Supabase (org confirmada no **free**), então foi implementada aqui por k-anonimato contra o HaveIBeenPwned, verificada ao vivo. Ver F6-04 |
 | Status do M5 | **CONCLUÍDO E CONFIRMADO EM PRODUÇÃO** (2026-08-30). `node scripts/check-deploy.js https://www.financemanager.dev.br` passa com **66 ok, 0 falhas**; antes da publicação reprovava 10 |
 | Status do M4 | **CONCLUÍDO** — 3 achados corrigidos (1 P1, 1 P2, 1 P3) + suíte de regressão nova |
 | Status do M3 | **CONCLUÍDO** — aplicado e confirmado no banco em 2026-08-28 |
@@ -1154,7 +1154,7 @@ Três coisas faltavam. Uma delas era um buraco de verdade.
 | **F6-01** | **P1** | **`POST /api/account/password` trocava a senha com o cookie de sessão e mais nada.** Nenhuma senha atual, nenhuma prova de recuperação. Quem chegasse a uma sessão viva — o celular destravado esquecido na mesa, um cookie capturado — trocava a senha, tomava a conta e trancava o dono do lado de fora **sem nunca ter sabido a senha**. O cookie prova que alguém entrou; não prova que é o dono, e trocar a senha é a ação que decide quem manda na conta daqui para frente. Nota: a interface só chega nesta rota pelo link de recuperação, mas a interface não é a fronteira — a rota aceitava qualquer sessão. | **CORRIGIDO** |
 | **F6-02** | P2 | Política de senha era só comprimento (10 a 128). `senha123456`, `1234567890`, `qwertyuiop` e o próprio email do usuário passavam. | **CORRIGIDO** |
 | **F6-03** | P2 | Nenhum retorno de força enquanto a pessoa escolhe a senha. | **CORRIGIDO** |
-| **F6-04** | P2 | `auth_leaked_password_protection` continua **desligado** (confirmado no advisor do Supabase agora, nível WARN). É chave de painel, não de código. | **PENDENTE DE AÇÃO SUA** — instruções abaixo |
+| **F6-04** | P2 | Proteção contra senha vazada ausente. A do Supabase é **do plano pago** e a organização está no **free**, então não havia chave a ligar: foi implementada aqui (HaveIBeenPwned por k-anonimato, do servidor, falhando aberta). O advisor vai **continuar** apontando o alerta, porque ele lê a chave do painel e não o comportamento do app. | **CORRIGIDO** — ver seção própria |
 | **F6-05** | P3 | Sem MFA. | **ARQUITETURA REGISTRADA**, não implementada |
 | — | — | Conferidos **sem achado**: enumeração de usuários (cadastro, recuperação e reenvio devolvem a mesma resposta para endereço existente e inexistente; `email_not_confirmed` só aparece **depois** de um login bem-sucedido, ou seja, para quem já tem a senha certa — não é sonda); teto de tentativas; exclusão de conta (já reautenticava com senha **e** exigia digitar "APAGAR CONTA"); cookies de sessão. | — |
 
@@ -1168,6 +1168,9 @@ Três coisas faltavam. Uma delas era um buraco de verdade.
 | `js/auth.js` | mensagem própria quando a marca de recuperação vence |
 | `css/screens/account.css` | estilo do medidor |
 | `tests/test-auth-password.js` | **novo**, 45 asserções em 6 blocos |
+| `netlify/functions/_shared/senha-vazada.js` | **novo**, checagem contra o HaveIBeenPwned por k-anonimato |
+| `tests/test-senha-vazada.js` | **novo**, 32 asserções em 5 blocos |
+| `docs/BACKEND_SETUP.md` | variável `LEAKED_PASSWORD_CHECK` documentada |
 | `tests/test-session-scope-backend.js` | a conferência do logout passa a ser por NOME de cookie, não por quantidade |
 | `js/modules/app.generated.js` | regerado |
 
@@ -1204,25 +1207,95 @@ lição do F5-02, onde a política de conteúdo estava copiada em dois arquivos.
 medidor dá retorno enquanto a senha ainda pode ser trocada sem custo; quem
 recusa é o servidor.
 
-### O QUE VOCÊ PRECISA FAZER (2 minutos, no painel do Supabase)
+### F6-04 — senha vazada: o plano não entregava, então foi implementado
 
-Projeto **Finance Manager** (`drmnezcjhfkxdksdpjyr`) → **Authentication** →
-**Sign In / Providers** → seção **Password**:
+**A primeira leitura estava errada e ficou registrada como tal.** Eu tinha
+escrito que bastava uma chave no painel. A proteção contra senha vazada do
+Supabase é **recurso do plano pago**, e a organização (`zRenan0's Org`) está no
+**plano free** — confirmado pela API. Não havia chave a ligar.
 
-1. Ligar **"Prevent use of leaked passwords"** (checagem contra o
-   HaveIBeenPwned). Resolve o alerta `auth_leaked_password_protection`.
-2. Opcional, defesa em profundidade: subir **Minimum password length** para
-   **10**, igualando o que o backend já exige.
+**Correção de uma segunda coisa que eu tinha escrito:** anotei que fazer a
+checagem por conta própria esbarraria na `connect-src` que o M5 acabou de
+fechar. Isso vale para uma chamada do **navegador**. A consulta sai do
+**servidor**, onde política de conteúdo não se aplica. Não havia conflito
+nenhum com o M5.
 
-**Isto não tranca ninguém para fora.** A checagem de senha vazada do Supabase
-roda no **cadastro e na troca de senha**, nunca no login. Quem já tem conta com
-uma senha que aparece em vazamento continua entrando normalmente; só será
-recusado se tentar **definir** essa senha de novo.
+**Implementado** em `netlify/functions/_shared/senha-vazada.js`, com o mesmo
+método que o Supabase pago usa por baixo: a API do HaveIBeenPwned por
+**k-anonimato**.
 
-Conferir depois de ligar: o advisor de segurança do projeto deve deixar de
-listar `auth_leaked_password_protection`. Os três `rls_enabled_no_policy` que
-sobram (`cofre_mutations`, `cofre_rate_limit`, `cofre_sync_config`) são nível
-INFO e **deliberados** — tabelas server-only, decisão registrada no M3.
+#### Como a senha não vaza na consulta
+
+Sai do servidor apenas o **prefixo de cinco caracteres** do SHA-1 da senha. O
+HIBP devolve todos os sufixos daquele prefixo (centenas de linhas) e a
+comparação acontece dentro da função. A senha não sai, o hash completo não sai,
+o email não sai, e do outro lado ninguém consegue dizer qual das centenas de
+senhas daquele balde foi consultada. O cabeçalho `Add-Padding: true` completa a
+resposta com registros falsos até um tamanho fixo — sem ele, o **tamanho** da
+resposta já é um sinal sobre qual prefixo foi pedido para quem observa a rede.
+
+A consulta parte do **servidor**, nunca do navegador: nenhum IP de usuário
+chega ao HIBP, e a `connect-src` do M5 continua intocada.
+
+#### Falha ABERTA, e isso é decisão, não descuido
+
+HIBP fora do ar, lento, bloqueado pela hospedagem ou desligado por variável
+devolve "não vazada, não consultada", e o cadastro segue. A alternativa seria
+impedir alguém de criar conta porque um terceiro caiu — trocar um risco de
+senha fraca por uma indisponibilidade certa. As regras locais de `senhaNovaOf`
+(lista de proibidas, sequências, só dígitos, email dentro da senha) continuam
+valendo em qualquer cenário: esta camada **acrescenta, não sustenta sozinha**.
+
+Ordem deliberada: **regras locais primeiro, rede depois.** Senha que já cai numa
+regra local não gasta ida à rede, e o prefixo dela nem chega a sair.
+
+#### Verificação ao vivo contra a API real
+
+| Senha | Prefixo | Resultado | Tempo |
+|---|---|---|---|
+| `Password1234` | `5B966` | **vazada, 321.223 ocorrências** | 410 ms |
+| `corinthians2010` | `9FBB7` | **vazada, 4.881 ocorrências** | 201 ms |
+| frase aleatória | `BF6CB` | limpa | 778 ms |
+
+Latência entre 200 e 800 ms, bem dentro do teto de 2.500 ms.
+
+#### Desligar sem publicar código
+
+`LEAKED_PASSWORD_CHECK=off` na hospedagem. Documentado em
+`docs/BACKEND_SETUP.md`. Ligada por padrão; não precisa de chave nem de conta
+no HIBP.
+
+#### O que o advisor do Supabase vai continuar dizendo
+
+O alerta `auth_leaked_password_protection` **continua listado**, porque ele
+verifica a chave do painel, não o comportamento do aplicativo. Isso é esperado
+e não é pendência: a proteção existe, só não é a do provedor. Se um dia o
+projeto for para o plano Pro, ligar a nativa e desligar esta com
+`LEAKED_PASSWORD_CHECK=off` remove a duplicidade.
+
+**Opcional que continua valendo, se um dia houver painel:** subir
+*Minimum password length* para 10, igualando o backend. Os três
+`rls_enabled_no_policy` que o advisor lista (`cofre_mutations`,
+`cofre_rate_limit`, `cofre_sync_config`) são nível INFO e **deliberados** —
+tabelas server-only, decisão registrada no M3.
+
+#### Testes (`tests/test-senha-vazada.js`, 32 asserções)
+
+Bloco 2 é o que mais importa: afirma que a senha em texto, o hash completo e o
+sufixo **não aparecem** na requisição, e que a URL é exatamente
+`.../range/<5 chars>`. Bloco 4 cobre os seis modos de falha (serviço fora do ar,
+erro HTTP, corpo ilegível, corpo vazio, lixo, tempo esgotado) e o desligamento
+por variável. Bloco 5 liga tudo ao handler e confirma que **uma senha vazada já
+em uso continua entrando** e que **o login não consulta o HIBP**.
+
+**Teste de mutação:** mandar o hash inteiro na URL reprova 5 asserções, entre
+elas "o hash completo não aparece na requisição". Fazer a checagem falhar
+fechada reprova 3, entre elas "serviço fora do ar: não bloqueia".
+
+**Achado do próprio teste:** a primeira versão do `fetch` de mentira ignorava o
+sinal de aborto, e o teste do tempo esgotado terminava em silêncio com código 0
+sem ter testado nada. O `fetch` real respeita o sinal; o falso passou a
+respeitar também.
 
 ### Arquitetura para MFA (F6-05, registrada, não implementada)
 
@@ -1315,7 +1388,15 @@ travados por teste. F6-05 registrado como arquitetura.
   **atual**, o que aplicaria o mínimo de 10 caracteres a uma senha antiga mais
   curta. Nenhum usuário conhecido está nessa faixa (o mínimo é 10 desde antes
   desta auditoria) e mexer nisso agora é risco sem ganho; fica anotado.
-- **M17 (observabilidade)**: `reauth_failed` e `weak_password` são os dois
+- **M19 (terceiros)**: o HaveIBeenPwned entra na lista de integrações. O que ele
+  recebe: cinco caracteres hexadecimais do SHA-1 de uma senha e o IP da função.
+  O que ele NÃO recebe: senha, hash completo, email, IP de usuário.
+- **M18 (LGPD)**: a consulta ao HIBP não gera dado novo guardado em lugar nenhum;
+  é uma chamada de ida e volta, sem persistência.
+- **Se o projeto for para o plano Pro do Supabase**: ligar a proteção nativa e
+  desligar esta com `LEAKED_PASSWORD_CHECK=off`, para não checar duas vezes.
+- **M17 (observabilidade)**: `reauth_failed`, `weak_password` e `leaked_password`
+  são os três
   códigos novos e são bons sinais de monitoramento — uma sequência de
   `reauth_failed` numa conta é tentativa de tomada de conta com sessão viva.
 
@@ -1469,7 +1550,7 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
 ### A. Automatizado (CI ou máquina com Node) — porta de entrada obrigatória
 
 - [ ] `npm run lint`
-- [ ] `npm test` (53 arquivos)
+- [ ] `npm test` (54 arquivos)
 - [ ] `npm run check:build` (o `app.generated.js` publicado corresponde às fontes)
 - [ ] `npm run check:release`
 - [ ] `npm run build:dist`
@@ -1577,9 +1658,6 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
   navegador (exige `vercel dev` + chave). Os dois caminhos estão cobertos por
   teste de unidade; a confirmação visual fica para a próxima vez que o backend
   rodar localmente.
-- **M6 depende de UMA CHAVE NO PAINEL do Supabase** para fechar: ligar
-  "Prevent use of leaked passwords" em Authentication > Sign In / Providers >
-  Password. Passo a passo e a garantia de que não tranca ninguém estão no M6.
 - **M5, ressalva de longo prazo:** com `includeSubDomains` no ar, criar depois
   um subdomínio servido em **HTTP** (blog, painel de terceiro) será recusado
   pelos navegadores que já viram o cabeçalho. Só ápice e `www` existem hoje,

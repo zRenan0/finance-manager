@@ -4,6 +4,7 @@ const crypto = require("crypto");
 const api = require("./_shared/supabase-rest");
 const { headersOf, cookiesOf, canonicalOrigin, assertSameOrigin, readJson, cookie, clearCookie, json, safeFailure, deviceIdOf } = require("./_shared/http");
 const rateLimit = require("./_shared/rate-limit");
+const { verificarSenhaVazada } = require("./_shared/senha-vazada");
 
 const ACCESS = "cofre_access";
 const REFRESH = "cofre_refresh";
@@ -95,9 +96,9 @@ function passwordOf(value) {
 // pior do que uma frase longa. O que ele recomenda é o que está aqui:
 // comprimento, lista de proibidas e palavras do contexto do usuário.
 //
-// Esta lista é o piso que continua valendo mesmo com a checagem contra
-// vazamentos (HaveIBeenPwned) do provedor DESLIGADA. Com ela ligada, o
-// provedor recusa muito mais; ver o M6 em FINANCEMANAGER_AUDIT_PROGRESS.md.
+// Esta lista é o piso, e continua valendo mesmo quando a consulta ao
+// HaveIBeenPwned não acontece (fora do ar, desligada, tempo esgotado). Ver
+// `_shared/senha-vazada.js` e `senhaNovaAceita` abaixo.
 const SENHAS_PROIBIDAS = new Set([
   "senha123456", "1234567890", "0123456789", "senhasenha", "password12",
   "password123", "qwertyuiop", "administrador", "admin123456", "123456789012",
@@ -130,6 +131,26 @@ function senhaNovaOf(value, email) {
   const local = String(email || "").split("@")[0].toLowerCase().replace(/[^a-z0-9]/g, "");
   if (local.length >= 4 && plana.replace(/[^a-z0-9]/g, "").includes(local)) {
     recusar("A senha não pode conter o seu email. Escolha outra.");
+  }
+  return senha;
+}
+
+// [M6] Regras locais PRIMEIRO, consulta externa depois.
+//
+// Uma senha que já cai numa das regras acima não precisa de ida à rede: a
+// ordem economiza a latência e, mais importante, evita mandar ao HIBP o
+// prefixo de senhas que já sabíamos recusar.
+//
+// A frase da recusa não diz "sua senha vazou", que seria assustador e
+// impreciso: o vazamento não foi daqui e não é da pessoa, é da senha como
+// sequência de caracteres. Ela diz o que importa para a decisão de agora.
+async function senhaNovaAceita(value, email) {
+  const senha = senhaNovaOf(value, email);
+  const resultado = await verificarSenhaVazada(senha);
+  if (resultado.vazada) {
+    throw Object.assign(new Error("Esta senha aparece em vazamentos públicos de outros sites e já é testada por quem invade contas. Escolha outra."), {
+      statusCode: 400, code: "leaked_password",
+    });
   }
   return senha;
 }
@@ -502,7 +523,7 @@ async function handler(event) {
       const body = readJson(event, 16 * 1024); const flow = pkce();
       const email = emailOf(body.email);
       await limitarPorEmail(event, email);
-      const result = await api.auth.signUp(email, senhaNovaOf(body.password, email), appCallbackUrl(event, "signup"), flow.challenge);
+      const result = await api.auth.signUp(email, await senhaNovaAceita(body.password, email), appCallbackUrl(event, "signup"), flow.challenge);
       const cookies = [cookie(VERIFIER, `signup:${flow.verifier}`, event, { maxAge: VERIFIER_MAX_AGE })];
       if (result.access_token) { const device = await authorizeDevice(result.user.id, event); cookies.push(...sessionCookies(event, result), ...device.cookies); }
       // `email` volta do que foi PEDIDO, não do que o Supabase devolveu: para
@@ -653,7 +674,7 @@ async function handler(event) {
           });
         }
       }
-      await api.auth.updateUser(session.token, { password: senhaNovaOf(body.password, session.user.email) });
+      await api.auth.updateUser(session.token, { password: await senhaNovaAceita(body.password, session.user.email) });
       // A marca de recuperação vale por UMA troca. Mantê-la viva deixaria a
       // janela de 15 minutos aberta para trocas seguintes sem nenhuma prova.
       return json(200, { ok: true }, { cookies: [...session.cookies, clearCookie(RECOVERY, event)] });
