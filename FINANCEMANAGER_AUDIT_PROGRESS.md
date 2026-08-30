@@ -15,7 +15,7 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 | Módulo atual | **M8 — Armazenamento local e privacidade** (a iniciar) |
 | Status do M7 | **CONCLUÍDO** — "sair dos outros aparelhos" com reautenticação e duas camadas; data de entrada na lista |
 | Status do M6 | **CONCLUÍDO no repositório**, com **uma ação sua pendente**: ligar "Prevent use of leaked passwords" no painel do Supabase (passo a passo no M6; não tranca ninguém para fora) |
-| Status do M5 | **CONCLUÍDO no repositório**; vale em produção **depois de publicar**. Critério: `node scripts/check-deploy.js https://www.financemanager.dev.br` passar (hoje reprova 10, de propósito) |
+| Status do M5 | **CONCLUÍDO E CONFIRMADO EM PRODUÇÃO** (2026-08-30). `node scripts/check-deploy.js https://www.financemanager.dev.br` passa com **66 ok, 0 falhas**; antes da publicação reprovava 10 |
 | Status do M4 | **CONCLUÍDO** — 3 achados corrigidos (1 P1, 1 P2, 1 P3) + suíte de regressão nova |
 | Status do M3 | **CONCLUÍDO** — aplicado e confirmado no banco em 2026-08-28 |
 | Status do M2 | **CONCLUÍDO** — nenhuma vulnerabilidade de autorização; invariantes travados por teste |
@@ -1104,17 +1104,17 @@ envio é o comportamento desejado), API com seus próprios cabeçalhos.
 
 ### Status
 
-**CONCLUÍDO no repositório. Pendente de publicação para valer em produção.**
+**CONCLUÍDO E CONFIRMADO EM PRODUÇÃO** (publicado em 2026-08-30, commit `6334fa1`).
 
-Critério de fechamento em produção, um comando:
+O comando de fechamento passou:
 
 ```
 node scripts/check-deploy.js https://www.financemanager.dev.br
 ```
 
-Hoje ele reprova 10 asserções porque produção ainda serve os cabeçalhos
-anteriores. Depois de publicar, tem de passar. Nada além de publicar é
-necessário — não há migração, variável de ambiente nem passo manual.
+Antes da publicação ele reprovava 10 asserções; depois dela fechou em **66 ok,
+0 falhas**, incluindo `includeSubDomains`, `Referrer-Policy: same-origin`, as
+quatro diretivas novas da política e os cabeçalhos da API.
 
 ### Registrado para módulos seguintes
 
@@ -1577,10 +1577,6 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
   navegador (exige `vercel dev` + chave). Os dois caminhos estão cobertos por
   teste de unidade; a confirmação visual fica para a próxima vez que o backend
   rodar localmente.
-- **M5 depende de PUBLICAÇÃO para valer.** Os cabeçalhos novos estão em
-  `vercel.json` e passam em todos os testes locais, mas produção só passa a
-  servi-los depois do próximo deploy. Conferir com
-  `node scripts/check-deploy.js https://www.financemanager.dev.br`.
 - **M6 depende de UMA CHAVE NO PAINEL do Supabase** para fechar: ligar
   "Prevent use of leaked passwords" em Authentication > Sign In / Providers >
   Password. Passo a passo e a garantia de que não tranca ninguém estão no M6.
