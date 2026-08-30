@@ -71,3 +71,6 @@ jobs:
 
       - name: Executar fluxos no navegador
         run: npm run test:browser
+
+      - name: Executar instalação e modo offline
+        run: npm run test:pwa

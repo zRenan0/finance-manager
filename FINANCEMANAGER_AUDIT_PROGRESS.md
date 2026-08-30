@@ -12,7 +12,8 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 
 | Campo | Valor |
 |---|---|
-| Módulo atual | **M9 - PWA, cache e atualização offline** (a iniciar) |
+| Módulo atual | **M9 - PWA, cache e atualização offline** (concluído) |
+| Status do M9 | **CONCLUÍDO** - pacote inteiro identificado por SHA-256, instalação atômica, primeiro quadro no HTML, reconciliação de controller, teste offline real e matriz Chromium/Firefox/WebKit |
 | Status do M8 | **CONCLUÍDO** - inventário completo de IndexedDB, localStorage, sessionStorage, CacheStorage e cookies; versões conferidas; fluxo corrigido na documentação; risco do espelho em JSON registrado |
 | Status do M7 | **CONCLUÍDO** — "sair dos outros aparelhos" com reautenticação e duas camadas; data de entrada na lista |
 | Status do M6 | **CONCLUÍDO, sem pendência.** A proteção contra senha vazada é do plano pago do Supabase (org confirmada no **free**), então foi implementada aqui por k-anonimato contra o HaveIBeenPwned, verificada ao vivo. Ver F6-04 |
@@ -21,14 +22,20 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 | Status do M3 | **CONCLUÍDO** — aplicado e confirmado no banco em 2026-08-28 |
 | Status do M2 | **CONCLUÍDO** — nenhuma vulnerabilidade de autorização; invariantes travados por teste |
 | Status do M1 | **CONCLUÍDO** — aplicado e confirmado; gatilho capturado e versionado |
-| Módulos concluídos | M0, M1, M2, M3, M4, M5, M6, M7, M8 |
-| Próximo módulo | M9 - PWA, cache e atualização offline (validar atualização atômica, shell offline, separação entre landing e app e pendências do item 19 da auditoria de beta) |
+| Módulos concluídos | M0, M1, M2, M3, M4, M5, M6, M7, M8, M9 |
+| Próximo módulo | M10, conforme o roteiro original; o título do M10 não foi copiado para esta memória |
 | Branch | `deploy-atualizado` (árvore limpa no início do M0) |
 | Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `scripts/check-deploy.js`, `scripts/serve.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/modules/app.generated.js` (regerado). Documentação do M8: `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `docs/ARCHITECTURE.md`, `README.md`. |
 | Migrations criadas até aqui | `20260828120000_rls_auto_enable_least_privilege.sql`, `20260828130000_rls_auto_enable_versionada.sql`, `20260828140000_menor_privilegio_tabelas.sql` (as três **aplicadas e confirmadas em 2026-08-28**), `20260828150000_rls_auto_enable_gatilho.sql` (**ainda não aplicada**; é no-op em produção, onde o gatilho já existe) |
 | Versão do app | `0.30.0` (package.json) |
 
 ### Ambiente de execução (RESOLVIDO)
+
+**Atualização do M9 em 2026-08-30:** o bloco histórico abaixo não descreve mais
+esta máquina. `node` v24.19.0, `npm` e as dependências do projeto estão no PATH.
+Chromium, Firefox e WebKit do Playwright estão instalados, `npm run test:browser`
+executa os três e `npm run test:pwa` executa o fluxo offline real. A cobertura e
+a recriação de `dist/` também funcionaram nesta árvore.
 
 Não há Node.js instalado nesta máquina (`node`/`npm`/`npx` fora do PATH; nada em
 `Program Files`, `AppData\Local` ou `AppData\Roaming`; máquina corporativa JSL SA).
@@ -99,7 +106,7 @@ foi feita neste módulo.
 | Backend | `netlify/functions/{account,sync,analyze}.js` (fonte única das duas plataformas) |
 | Banco | Supabase / PostgreSQL, 6 migrations versionadas |
 | Local | IndexedDB (fonte da UI) + espelho em localStorage + fila `outbox` |
-| PWA | `service-worker.js` v58, `manifest.webmanifest` |
+| PWA | `service-worker.js` v59, `manifest.webmanifest` |
 | IA | Anthropic Messages API (`claude-haiku-4-5`), chamada **só pelo backend** |
 | Testes | runner próprio (`tests/run-all.js`), 49 arquivos + Playwright (chromium/firefox/webkit) |
 | Node | 22.x (engines) |
@@ -148,7 +155,7 @@ Funções `security definer`, todas com `revoke all ... from public, anon, authe
 | LOCAL_SCHEMA_VERSION | `js/storage.js:267` (`SCHEMA_VERSION`) | `22` |
 | IndexedDB | `js/storage.js:21` (`DB_VERSION`) | `4` |
 | SYNC_PROTOCOL | `netlify/functions/sync.js` + tabela `cofre_sync_config` | `3` (mínimo de escrita: `2`) |
-| Service Worker | `service-worker.js:39` | `v58` |
+| Service Worker | `service-worker.js` | `v59` |
 | DATABASE_SCHEMA | — | **não existe versão explícita** |
 
 ### Armazenamento local (insumo do M8)
@@ -212,7 +219,7 @@ Piores: `js/actions.js` 0,2%, `js/screens/accounts.js` 1,3%, `js/screens/privacy
 | R7 | P3 | `financas_db_mirror` mantém a base financeira em texto claro no localStorage (decisão anti-perda deliberada; precisa ficar documentada, não removida). | M8/M18 |
 | R8 | P3 | Cobertura 21,9%; `js/actions.js` (110 KB, orquestra as ações das telas) praticamente sem teste. | M15 |
 | R9 | P3 | Achados de beta ainda abertos em `docs/PROXIMA-SESSAO.md`: F-06 (bundle sem minificação), F-08 a F-17 (UX/acessibilidade). Absorver nos módulos correspondentes em vez de duplicar. | M38/M39 |
-| — | — | Itens 17 e 19 de `AUDIT_FIX_PROGRESS.md` continuam PENDENTES (teclado/ARIA/contraste; HTML inicial/rota/paginação/SW). | M39/M9 |
+| — | — | Item 17 de `AUDIT_FIX_PROGRESS.md` continua PENDENTE (teclado/ARIA/contraste). O item 19 foi concluído no M9. | M39 |
 
 ### O que o prompt supunha e a auditoria **não** confirmou
 
@@ -1631,6 +1638,81 @@ sem prometer criptografia que o produto não oferece.
 
 ---
 
+## M9 - PWA, cache e atualização offline
+
+### Antes
+
+O worker já separava shell, páginas e fontes e já excluía `/api/` do cache. A
+landing também não contaminava a chave de `index.html`. Essas premissas do M0
+foram confirmadas e preservadas.
+
+O defeito central estava na identidade da publicação. O SHA-256 era apenas o do
+módulo `bootstrap.js`. Uma mudança isolada em HTML, CSS, manifesto, ícone,
+landing ou PDF.js não alterava o identificador, então instalações existentes
+podiam continuar com parte do pacote anterior. A instalação também aceitava
+falha de qualquer recurso fora de uma lista curta de cinco itens.
+
+### Achados
+
+| # | P | Achado | Situação |
+|---|---|---|---|
+| F9-01 | P1 | O identificador do pacote cobria apenas o bootstrap; mudanças em outros arquivos publicados podiam não criar um worker novo. | **CORRIGIDO.** O digest percorre todo `dist/`, com nomes ordenados e conteúdo. O worker entra antes de receber a identidade e a meta é retirada do cálculo para evitar referência circular. |
+| F9-02 | P1 | Um CSS, módulo auxiliar, ícone, landing ou PDF.js podia falhar no precache e ainda assim a versão chamar `skipWaiting()`. | **CORRIGIDO.** Todos os recursos declarados são obrigatórios; falha apaga os caches parciais e mantém a versão anterior. |
+| F9-03 | P2 | O listener de `controllerchange` só era ligado depois de IndexedDB e da chamada de conta. Uma promoção durante esse intervalo podia passar sem recarga. | **CORRIGIDO.** O listener entra antes de `init()` e o HTML é reconciliado com o controller depois que o armazenamento abre. |
+| F9-04 | P2 | O comando e a CI diziam cobrir três motores, mas `run-browser.js` importava e iniciava apenas Chromium. | **CORRIGIDO.** A matriz executa Chromium, Firefox e WebKit; os três passaram os 18 fluxos. |
+| F9-05 | P3 | `#app` vinha vazio no HTML e só recebia o esqueleto depois de baixar e avaliar o módulo grande. | **CORRIGIDO.** O mesmo desenho de carregamento já vem no documento inicial com `aria-busy`. |
+| F9-06 | P3 | A navegação HTML disparava `cache.put()` sem aguardar a gravação. O worker podia terminar antes de persistir a página. | **CORRIGIDO.** `handleNavigate()` aguarda a escrita antes de concluir a resposta. |
+
+### Alterações
+
+| Arquivo | Motivo |
+|---|---|
+| `service-worker.js` | v59, precache obrigatório inteiro, limpeza de pacote parcial e gravação de navegação aguardada |
+| `scripts/build-dist.js` | identidade SHA-256 de todo o pacote publicado |
+| `index.html` | primeiro quadro acessível sem depender do módulo |
+| `js/app.js` | listener antecipado, reconciliação HTML/controller e skip link explícito para WebKit |
+| `css/screens/notifications-onboarding.css` | margem de rolagem que mantém o foco dentro do corpo também no Firefox |
+| `tests/test-pwa-cache.js` | 15 testes executáveis do ciclo install/activate/fetch e da separação dos caches |
+| `tests/browser/run-pwa.js` | pacote real em Chromium, online e offline, com rota profunda, persistência e landing |
+| `tests/browser/run-browser-matrix.js` | execução real dos 18 fluxos nos três motores |
+| `.github/workflows/ci.yml` e `package.json` | comandos da matriz e do teste PWA real |
+
+### Compatibilidade
+
+Schema lógico 22, IndexedDB 4, protocolo de sincronização 3, cookies e dados
+persistidos não mudaram. O cache sobe de v58 para v59. Uma instalação existente
+baixa o conjunto novo em outro nome, só promove depois de completar tudo, faz
+flush e recarrega uma vez com a identidade integral do pacote.
+
+### Testes
+
+| Teste | Resultado |
+|---|---|
+| `npm run lint` | **PASSOU** - 157 arquivos, 0 erro, 0 aviso |
+| `npm test` | **PASSOU** - 56/56 arquivos |
+| `npm run check:build` | **PASSOU** - 70 fontes conferidas |
+| `npm run check:release` | **PASSOU** - publicação 0.30.0 verificada; permanece o aviso conhecido dos 7 campos legais |
+| `npm run build:dist` | **PASSOU** - 38 arquivos; identidade integral conferida; permanece o aviso local conhecido de `SITE_URL` |
+| `npm run test:coverage` | **PASSOU** - 22,5% global, acima do piso de 20% e da baseline de 21,9% |
+| `node tests/test-pwa-cache.js` | **PASSOU** - 15 ok, 0 falhas |
+| `node tests/test-service-worker-update.js` | **PASSOU** - 20 ok, 0 falhas |
+| `npm run test:pwa` | **PASSOU** - shell, landing, rota profunda, dados locais, limpeza seletiva e `/api/` fora do cache |
+| `npm run test:browser` | **PASSOU** - 18/18 no Chromium, 18/18 no Firefox e 18/18 no WebKit |
+| `npm run test:landing` | **PASSOU** - 18/18 no Chromium, com capturas para revisão visual |
+
+### Item 19 da auditoria beta
+
+**CONCLUÍDO.** O HTML inicial não vem mais vazio; as 23 rotas seguem cobertas
+pelos testes de roteamento e navegador; a revisão de extrato mantém paginação em
+blocos de 60; o pacote offline foi validado no worker executado e em navegador
+real. `AUDIT_FIX_PROGRESS.md` foi atualizado para não voltar a cobrar o item.
+
+### Status
+
+**CONCLUÍDO.** Nenhuma pendência conhecida ficou no M9.
+
+---
+
 ## Checklist de regressão
 
 Executar após **todo** módulo que toque no código. Marcar `OK` / `FALHOU` / `NÃO VALIDADO`.
@@ -1639,11 +1721,12 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
 ### A. Automatizado (CI ou máquina com Node) — porta de entrada obrigatória
 
 - [ ] `npm run lint`
-- [ ] `npm test` (55 arquivos)
+- [ ] `npm test` (56 arquivos)
 - [ ] `npm run check:build` (o `app.generated.js` publicado corresponde às fontes)
 - [ ] `npm run check:release`
 - [ ] `npm run build:dist`
 - [ ] `npm run test:browser` (chromium + firefox + webkit)
+- [ ] `npm run test:pwa` (pacote publicado online e offline no Chromium)
 - [ ] Cobertura não caiu abaixo da baseline **21,9%** (piso do script: 20%)
 
 ### B. Visitante (sem conta)

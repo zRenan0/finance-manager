@@ -92,10 +92,11 @@ const valorDoChip = (html) => (html.match(/hero-chip__value">([^<]+)</g) || [])
 
 /* ------------------------------------------------------------------ F-01 */
 function blocoF01() {
-  section("F-01. O service worker precisa ser registrado mesmo depois do `load`");
+  section("F-01. O service worker precisa ser observado antes do boot assíncrono");
   const fonte = readSrc("js/app.js");
-  const bloco = fonte.slice(fonte.indexOf('if ("serviceWorker" in navigator)'));
-  const trecho = bloco.slice(0, bloco.indexOf("controllerchange"));
+  const inicio = fonte.indexOf("function setupServiceWorker()");
+  const fim = fonte.indexOf("// A PRIMEIRA TOMADA DE CONTROLE", inicio);
+  const trecho = fonte.slice(inicio, fim);
 
   check("o registro cobre o caso de a página já ter carregado",
     /document\.readyState\s*===\s*"complete"/.test(trecho));
@@ -107,15 +108,10 @@ function blocoF01() {
     !/register\("service-worker\.js"\)\s*\.catch\(\(\)\s*=>\s*\{\}\)/.test(trecho));
   check("a falha de registro vai para o diagnóstico local",
     /sw_register_failed/.test(trecho));
-
-  // A raiz do defeito: `init()` é async e espera o IndexedDB, então quando esta
-  // linha executa o `load` já passou. Listener registrado depois do evento
-  // nunca roda, e nenhum service worker era criado. Se algum dia o `await`
-  // sair daqui, este teste deixa de fazer sentido e precisa ser revisto.
-  const init = fonte.slice(fonte.indexOf("async function init()"));
-  const antesDoSw = init.slice(0, init.indexOf('if ("serviceWorker" in navigator)'));
-  check("o bloco de fato vem depois de um `await` dentro de init()",
-    /await\s+initStorage\(\)/.test(antesDoSw));
+  check("o observador entra antes do pedido de registro",
+    trecho.indexOf("observeServiceWorkerControllerChanges") < trecho.indexOf("serviceWorker.register"));
+  check("a preparação acontece antes de chamar init",
+    fonte.lastIndexOf("setupServiceWorker();") < fonte.lastIndexOf("else init();"));
 }
 
 /* ------------------------------------------------------------------ F-02 */

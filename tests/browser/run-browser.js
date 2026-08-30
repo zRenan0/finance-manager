@@ -4,10 +4,13 @@ const fs = require("fs");
 const http = require("http");
 const os = require("os");
 const path = require("path");
-const { chromium } = require("playwright");
+const { chromium, firefox, webkit } = require("playwright");
 const PdfWriter = require(path.join(__dirname, "..", "..", "js", "pdf.js"));
 
 const root = path.resolve(__dirname, "..", "..");
+const browserName = String(process.env.COFRE_BROWSER || "chromium").toLowerCase();
+const browserType = { chromium, firefox, webkit }[browserName];
+if (!browserType) throw new Error(`Motor de navegador inválido: ${browserName}`);
 const mime = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json", ".webmanifest": "application/manifest+json", ".png": "image/png" };
 
 const server = http.createServer((request, response) => {
@@ -350,7 +353,8 @@ async function runOnboardingViewportM4(browser, scenario) {
 (async () => {
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   globalThis.baseUrl = `http://127.0.0.1:${server.address().port}/`;
-  const browser = await chromium.launch({ headless: true });
+  console.log(`\nMotor: ${browserName}`);
+  const browser = await browserType.launch({ headless: true });
   let shared;
 
   await test("onboarding grava objetivo, renda e conta", async () => {

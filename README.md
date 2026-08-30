@@ -25,7 +25,7 @@ npm run verify:release
 ```
 
 O processo de homologação, publicação e retorno está em `docs/RELEASE.md`. O schema
-de dados está na versão 22 e o cache offline na versão 58. O inventário técnico
+de dados está na versão 22 e o cache offline na versão 59. O inventário técnico
 do armazenamento está em `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`.
 
 ## Módulo 15 — revisão das referências financeiras

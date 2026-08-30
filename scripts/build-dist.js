@@ -127,6 +127,28 @@ function nomeComHash(arquivo, digest) {
   return `${arquivo.slice(0, -extensao.length)}.${digest}${extensao}`;
 }
 
+// A identidade cobre o pacote publicado inteiro, não só o módulo de entrada.
+// O worker entra antes de receber a própria identidade, evitando uma referência
+// circular. Assim qualquer mudança de arquivo cria outro conjunto de caches.
+function identidadeDoPacote() {
+  const arquivos = listarArquivos(DIST).sort();
+  const hash = crypto.createHash("sha256");
+  arquivos.forEach((arquivo) => {
+    let conteudo = fs.readFileSync(path.join(DIST, ...arquivo.split("/")));
+    if (arquivo === "app.html") {
+      conteudo = Buffer.from(
+        conteudo.toString("utf8").replace(/<meta\s+name="cofre-build"\s+content="sha256-[a-f0-9]{64}"\s*\/>\n?/g, ""),
+        "utf8"
+      );
+    }
+    hash.update(arquivo, "utf8");
+    hash.update("\0", "utf8");
+    hash.update(sha256(conteudo), "utf8");
+    hash.update("\n", "utf8");
+  });
+  return hash.digest("hex");
+}
+
 function reescreverImportacoes(conteudo, resolver) {
   const regras = [
     /(\bimport\s*\(\s*)(["'])(\.{1,2}\/[^"']+\.js)\2(\s*\))/g,
@@ -194,7 +216,10 @@ function reescreverPacoteVersionado(modulos) {
     throw new Error(`app.html não carrega ${bootstrapFonte}`);
   }
   html = html.replace(`src="${bootstrapFonte}"`, `src="${bootstrapPublicado}"`);
-  const buildId = `sha256-${bootstrap.digest}`;
+  fs.writeFileSync(htmlPath, normalizarLf(html), "utf8");
+
+  const pacoteDigest = identidadeDoPacote();
+  const buildId = `sha256-${pacoteDigest}`;
   if (!/<meta\s+name="cofre-build"\s/.test(html)) {
     html = html.replace("</head>", `<meta name="cofre-build" content="${buildId}" />\n</head>`);
   }
@@ -216,7 +241,7 @@ function reescreverPacoteVersionado(modulos) {
   if (!versaoFonte) throw new Error("service-worker.js não possui uma versão de cache válida");
   worker = worker.replace(
     `const VERSION = "${versaoFonte}";`,
-    `const VERSION = "${versaoFonte}-${bootstrap.digest}";`
+    `const VERSION = "${versaoFonte}-${pacoteDigest}";`
   );
 
   const semHash = Array.from(modulos.keys()).filter((fonte) => {
@@ -359,9 +384,8 @@ function main() {
   if (!fs.existsSync(gerado)) throw new Error("Rode `npm run build` antes: js/modules/app.generated.js não existe.");
 
   const modulos = versionarModulos();
-  const pacote = reescreverPacoteVersionado(modulos);
-
   absolutizar("landing.html");
+  const pacote = reescreverPacoteVersionado(modulos);
 
   console.log(`Pacote ${pacote.buildId} inicia em ${pacote.bootstrap}.`);
   console.log(`dist/ gerado com ${total} arquivo(s).`);

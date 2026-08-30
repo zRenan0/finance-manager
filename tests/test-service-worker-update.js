@@ -3,6 +3,7 @@
 const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
+const crypto = require("crypto");
 const { spawnSync } = require("child_process");
 
 const ROOT = path.join(__dirname, "..");
@@ -21,6 +22,32 @@ function functionSource(source, name) {
     }
   }
   return "";
+}
+
+function listar(dir, base = dir) {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const absolute = path.join(dir, entry.name);
+    return entry.isDirectory() ? listar(absolute, base) : [path.relative(base, absolute).replace(/\\/g, "/")];
+  });
+}
+
+function identidadePublicada() {
+  const dist = path.join(ROOT, "dist");
+  const hash = crypto.createHash("sha256");
+  listar(dist).sort().forEach((file) => {
+    let content = file === "service-worker.js"
+      ? fs.readFileSync(path.join(ROOT, "service-worker.js"))
+      : fs.readFileSync(path.join(dist, ...file.split("/")));
+    if (file === "app.html") {
+      content = Buffer.from(content.toString("utf8")
+        .replace(/<meta\s+name="cofre-build"\s+content="sha256-[a-f0-9]{64}"\s*\/>\n?/g, ""), "utf8");
+    }
+    hash.update(file, "utf8");
+    hash.update("\0", "utf8");
+    hash.update(crypto.createHash("sha256").update(content).digest("hex"), "utf8");
+    hash.update("\n", "utf8");
+  });
+  return hash.digest("hex");
 }
 
 let pass = 0;
@@ -57,7 +84,7 @@ function executarWorker(codigo) {
 console.log("\n1. Identidade do service worker");
 const workerFonte = read("service-worker.js");
 const versao = Number((workerFonte.match(/const VERSION = "v(\d+)";/) || [])[1]);
-check("a versão de cache foi promovida", versao >= 54, versao);
+check("a versão de cache foi promovida", versao >= 59, versao);
 check("o fonte usa a versão como identidade de desenvolvimento", /const BUILD_ID = VERSION;/.test(workerFonte));
 
 const handlersFonte = executarWorker(workerFonte);
@@ -79,6 +106,7 @@ if (build.status === 0) {
   const cacheId = (worker.match(/const VERSION = "(v\d+-[a-f0-9]{64})";/) || [])[1] || "";
   check("HTML publicado possui identidade SHA-256", !!buildId, buildId || "ausente");
   check("cache publicado inclui a identidade do pacote", !!buildId && cacheId.endsWith(buildId.slice(7)), cacheId || "ausente");
+  check("identidade cobre todos os arquivos publicados", buildId === `sha256-${identidadePublicada()}`, buildId);
 
   const handlers = executarWorker(worker);
   let resposta = null;
@@ -93,6 +121,8 @@ if (build.status === 0) {
 console.log("\n3. Recarga protegida no aplicativo");
 const appSource = read("js/app.js");
 check("aplicativo observa a troca de controller", /serviceWorker\.addEventListener\("controllerchange"/.test(appSource));
+check("observador é instalado antes do início assíncrono",
+  appSource.lastIndexOf("setupServiceWorker();") < appSource.lastIndexOf('document.addEventListener("DOMContentLoaded", init'));
 check("primeiro controle não é tratado como atualização", /let controllerAnterior = serviceWorker\.controller;/.test(appSource)
   && /controllerAnterior = serviceWorker\.controller;\s*if \(!anterior\) return;/.test(appSource));
 const observerSource = functionSource(appSource, "observeServiceWorkerControllerChanges");
@@ -123,6 +153,14 @@ check("aplicativo consulta a identidade ativa", /GET_BUILD/.test(appSource) && /
 check("gravações terminam antes da recarga", /FinanceStore\.flush\(\)/.test(appSource) && /location\.reload\(\)/.test(appSource));
 check("a guarda de recarga é separada por pacote", /sessionStorage\.getItem/.test(appSource) && /sessionStorage\.setItem/.test(appSource));
 check("falha mantém a página com aviso pendente", /Atualização pendente/.test(appSource));
+check("pacote ativo é comparado ao HTML após o armazenamento abrir",
+  /function documentBuildId\(/.test(appSource) && /reconcileActiveServiceWorkerBuild/.test(appSource)
+  && appSource.indexOf("reconcileActiveServiceWorkerBuild") > appSource.indexOf("await initStorage()"));
+
+const index = read("index.html");
+const appInicial = (index.match(/<div id="app">([\s\S]*?)<\/div>\s*\n\s*<script type="module"/) || [])[1] || "";
+check("HTML inicial já entrega uma região de carregamento",
+  /<main class="main-content"/.test(appInicial) && /aria-busy="true"/.test(appInicial));
 
 console.log(`\n${fail ? "FALHAS ENCONTRADAS" : "TODOS OS TESTES PASSARAM"}: ${pass} ok, ${fail} falha(s)`);
 process.exit(fail ? 1 : 0);

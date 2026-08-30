@@ -174,8 +174,9 @@
   /* O anel global ocupa 3px fora do controle. A folga interna impede que a
      borda da região rolável corte esse sinal no primeiro ou no último campo. */
   padding: 4px; margin: -4px;
-  scroll-padding-block: 4px;
+  scroll-padding-block: 16px;
 }
+.onb__body :is(input, select, button, summary, [tabindex]) { scroll-margin-block: 16px; }
 .onb__intro { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 8px; }
 .onb__icon {
   display: inline-flex; align-items: center; justify-content: center;

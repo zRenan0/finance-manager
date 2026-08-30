@@ -78,7 +78,10 @@ if (distBuild.status === 0) {
   const bootstrapRef = (appPublicado.match(/<script\s+type="module"\s+src="(js\/modules\/bootstrap\.[a-f0-9]{64}\.js)"/) || [])[1];
   const buildId = (appPublicado.match(/<meta\s+name="cofre-build"\s+content="(sha256-[a-f0-9]{64})"/) || [])[1];
   check("app.html aponta para o bootstrap versionado", !!bootstrapRef && fs.existsSync(path.join(ROOT, "dist", bootstrapRef)), bootstrapRef || "ausente");
-  check("app.html declara o identificador do pacote", !!buildId && bootstrapRef && buildId.slice(7) === (bootstrapRef.match(/\.([a-f0-9]{64})\.js$/) || [])[1], buildId || "ausente");
+  const bootstrapDigest = bootstrapRef && (bootstrapRef.match(/\.([a-f0-9]{64})\.js$/) || [])[1];
+  check("app.html declara o identificador do pacote", !!buildId, buildId || "ausente");
+  check("identidade do pacote não se limita ao bootstrap",
+    !!buildId && !!bootstrapDigest && buildId.slice(7) !== bootstrapDigest, `${buildId} / ${bootstrapDigest}`);
 
   const bootstrapPublicado = bootstrapRef ? read(path.posix.join("dist", bootstrapRef)) : "";
   const importados = Array.from(bootstrapPublicado.matchAll(/import\(["'](\.\/[^"']+\.js)["']\)/g)).map((m) => m[1]);

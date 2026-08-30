@@ -36,7 +36,9 @@
 // que entrava como receita), o extrato passou a sair em PDF e agora faturas e
 // extratos em PDF com texto também podem entrar. A leitura depende dos arquivos
 // locais do PDF.js, incluídos no mesmo balde de cache.
-const VERSION = "v58";
+// v59: a instalação só assume o controle depois de guardar o pacote inteiro.
+// Uma falha em CSS, módulo, ícone ou página mantém a versão anterior ativa.
+const VERSION = "v59";
 const BUILD_ID = VERSION;
 const CACHE_NAME = "financas-cache-" + VERSION;
 // A PÁGINA COMERCIAL TEM CACHE PRÓPRIO.
@@ -92,16 +94,6 @@ const APP_SHELL = [
   "icons/icon-512.png",
 ];
 
-// Sem estes arquivos o aplicativo NÃO ABRE. Se algum deles não entrar no
-// cache, a instalação falha de propósito (ver o handler de install).
-const CRITICAL_SHELL = [
-  "index.html",
-  "css/style.css",
-  "js/boot.js",
-  "js/modules/bootstrap.js",
-  "js/modules/app.generated.js",
-];
-
 // Os estáticos da página comercial entram no cache normal, cada um sob a
 // própria URL: eles são arquivos como quaisquer outros e não disputam chave
 // com nada do aplicativo. Não são críticos: se falharem, o aplicativo
@@ -117,6 +109,12 @@ const LANDING_ASSETS = [
 // o arquivo e continua respondendo para quem tiver o link antigo.
 const LANDING_PAGES = ["./", "landing.html"];
 
+// A promoção é atômica para tudo que prometemos abrir offline. Não basta o
+// bootstrap existir: um CSS, um módulo carregado dinamicamente ou a landing
+// ausente ainda produziria uma versão ativa pela metade. As listas continuam
+// separadas porque cada grupo vai para o próprio cache.
+const REQUIRED_PRECACHE = [...APP_SHELL, ...LANDING_ASSETS, ...LANDING_PAGES];
+
 // O cache de fontes de terceiros deixou de existir junto com a requisição a
 // `fonts.googleapis.com`. As fontes agora são locais (ver fonts/README.md) e
 // entram no cache do shell como qualquer outro arquivo do próprio site.
@@ -124,11 +122,8 @@ const FONT_HOSTS = [];
 
 /* ------------------------------------------------------------------ *
  * Instalação
- * Buscamos um a um (e não com `cache.addAll`, que é atômico e aborta tudo
- * por causa de um ícone com 404). A tolerância, porém, tem limite: os
- * arquivos de `CRITICAL_SHELL` são obrigatórios e a instalação falha sem
- * eles. O que é acessório ganha nova chance no primeiro fetch, via
- * stale-while-revalidate.
+ * Buscamos um a um para identificar todas as falhas e limpar o pacote parcial.
+ * A nova versão só assume quando cada item declarado acima foi armazenado.
  * ------------------------------------------------------------------ */
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -142,7 +137,7 @@ self.addEventListener("install", (event) => {
           // cache: "reload" evita reaproveitar uma versão velha do cache HTTP
           // do navegador na hora de popular o cache do service worker.
           const res = await fetch(new Request(path, { cache: "reload" }));
-          if (res && res.ok) await destino.put(path, res);
+          if (isCacheable(res)) await destino.put(path, res);
           else falhas.push(path);
         } catch (error) { falhas.push(path); }
       };
@@ -153,19 +148,12 @@ self.addEventListener("install", (event) => {
         ...LANDING_PAGES.map((path) => guardar(paginas, path)),
       ]);
 
-      // O SHELL CRÍTICO NÃO PODE FALTAR.
-      //
-      // Antes, `Promise.allSettled` engolia qualquer falha e a instalação era
-      // dada como bem-sucedida. O resultado era o pior estado possível: um
-      // service worker ATIVO servindo um shell incompleto. Offline, o app
-      // abria numa tela branca, e o próprio service worker impedia a rede de
-      // corrigir aquilo, porque respondia do cache.
-      //
-      // Falhar aqui mantém o service worker anterior no ar (ou nenhum), o que
-      // é sempre melhor: o navegador vai direto à rede.
-      const criticoQuebrado = falhas.filter((p) => CRITICAL_SHELL.indexOf(p) !== -1);
-      if (criticoQuebrado.length) {
-        throw new Error(`Shell crítico não armazenado: ${criticoQuebrado.join(", ")}`);
+      const obrigatoriosQuebrados = falhas.filter((p) => REQUIRED_PRECACHE.indexOf(p) !== -1);
+      if (obrigatoriosQuebrados.length) {
+        // Uma instalação reprovada não deixa um cache com nome atual e
+        // conteúdo parcial para a próxima tentativa encontrar.
+        await Promise.all([caches.delete(CACHE_NAME), caches.delete(PAGE_CACHE)]);
+        throw new Error(`Pacote offline não armazenado: ${obrigatoriosQuebrados.join(", ")}`);
       }
 
       await self.skipWaiting();
@@ -279,7 +267,9 @@ async function handleNavigate(event) {
   try {
     const preloaded = event.preloadResponse ? await event.preloadResponse : null;
     const res = preloaded || (await fetchWithTimeout(event.request, NAV_TIMEOUT_MS));
-    if (isCacheable(res)) cache.put(chave, res.clone());
+    // A gravação faz parte da resposta. Sem `await`, o navegador podia encerrar
+    // o worker depois de entregar o HTML e antes de concluir o cache.
+    if (isCacheable(res)) await cache.put(chave, res.clone());
     return res;
   } catch (_) {
     const guardada = await cache.match(chave);

@@ -35337,7 +35337,7 @@ function renderShell() {
   `;
   }
   return `
-    <a class="skip-link" href="#conteudo" data-action="skip-to-content">Ir para o conteúdo</a>
+    <a class="skip-link" href="#conteudo" data-action="skip-to-content" tabindex="0">Ir para o conteúdo</a>
     ${renderSideNav()}
     <main class="main-content" id="conteudo" tabindex="-1">
       ${(!state.booting && !state.storageOk && !state.storageWarningDismissed) ? renderStorageWarning() : ""}
@@ -36463,6 +36463,13 @@ async function init() {
   });
 
   render();
+  // Se a troca de worker aconteceu antes de o módulo conseguir assinar
+  // `controllerchange`, a identidade do HTML denuncia a mistura de pacotes.
+  // A conferência roda depois de o armazenamento abrir, para o flush poder
+  // concluir uma gravação real antes da eventual recarga.
+  if (typeof navigator !== "undefined" && navigator.serviceWorker) {
+    reconcileActiveServiceWorkerBuild(navigator.serviceWorker).catch(() => {});
+  }
 
   // [M6] Primeira sincronização SILENCIOSA. Quem já usava o app tem meses de
   // histórico e desbloquearia dezenas de medalhas de uma vez; um paredão de
@@ -36488,40 +36495,27 @@ async function init() {
     notify(urgent.length === 1 ? urgent[0].title : `${urgent.length} avisos precisam de atenção`, "danger");
   });
 
-  if ("serviceWorker" in navigator) {
-    // ESTE TRECHO RODA DEPOIS DO `load`, NÃO ANTES.
-    //
-    // `init()` é `async` e espera o IndexedDB abrir (`await initStorage()`) antes
-    // de chegar aqui. Quando a linha executa, o evento `load` já disparou, e um
-    // listener registrado depois do evento NUNCA roda. O resultado silencioso era
-    // o pior possível: nenhum service worker registrado, nenhum cache criado, e o
-    // aplicativo que se anuncia como offline abrindo em branco sem rede.
-    // O mesmo guard de `readyState` que a inicialização usa mais abaixo resolve.
-    // O `catch` vazio de antes era cúmplice do defeito: mesmo depois de
-    // corrigido o momento da chamada, uma falha de registro continuaria
-    // invisível e o aplicativo seguiria anunciando um modo offline que não
-    // existe. O diagnóstico local já tem lugar para isso.
-    const registrarServiceWorker = () => {
-      navigator.serviceWorker.register("service-worker.js").catch((error) => {
-        if (typeof reportSafeError === "function") reportSafeError("storage", error, "sw_register_failed");
-        console.error("Falha ao registrar o service worker:", error);
-      });
-    };
-    if (document.readyState === "complete") registrarServiceWorker();
-    else window.addEventListener("load", registrarServiceWorker, { once: true });
-    // DOIS PACOTES NA MESMA ABA É O PIOR CENÁRIO DA ATUALIZAÇÃO.
-    //
-    // Quando o service worker novo assume, o HTML que já está na tela continua
-    // pedindo módulos do pacote antigo, que o cache novo já não guarda. A
-    // aba passa a rodar metade de cada versão, e uma gravação em andamento pode
-    // terminar no meio da troca. Ao ver `controllerchange`, perguntamos ao
-    // worker QUAL pacote ele é, terminamos o que estava sendo salvo e só então
-    // recarregamos, uma única vez por pacote.
-    observeServiceWorkerControllerChanges(navigator.serviceWorker);
-  }
 }
 
 const APP_RELOAD_GUARD_KEY = "cofre_build_reload";
+
+// O observador precisa existir antes dos `await` de armazenamento e conta.
+// Caso contrário uma atualização rápida pode assumir o controle durante o
+// boot, antes de o app começar a ouvir `controllerchange`.
+function setupServiceWorker() {
+  if (typeof navigator === "undefined" || !navigator.serviceWorker) return;
+  const serviceWorker = navigator.serviceWorker;
+  observeServiceWorkerControllerChanges(serviceWorker);
+
+  const registrar = () => {
+    serviceWorker.register("service-worker.js").catch((error) => {
+      if (typeof reportSafeError === "function") reportSafeError("storage", error, "sw_register_failed");
+      console.error("Falha ao registrar o service worker:", error);
+    });
+  };
+  if (document.readyState === "complete") registrar();
+  else window.addEventListener("load", registrar, { once: true });
+}
 
 // A PRIMEIRA TOMADA DE CONTROLE NÃO É UMA ATUALIZAÇÃO.
 //
@@ -36558,6 +36552,18 @@ function activeBuildId(worker) {
     } catch (e) { concluir(""); }
     setTimeout(() => concluir(""), 3000);
   });
+}
+
+function documentBuildId() {
+  const meta = document.querySelector('meta[name="cofre-build"]');
+  return meta ? String(meta.getAttribute("content") || "") : "";
+}
+
+async function reconcileActiveServiceWorkerBuild(serviceWorker) {
+  const documento = documentBuildId();
+  if (!documento || !serviceWorker || !serviceWorker.controller) return;
+  const ativo = await activeBuildId(serviceWorker.controller);
+  if (ativo && ativo !== documento) await handleControllerChange();
 }
 
 async function handleControllerChange() {
@@ -36606,5 +36612,6 @@ if (window.CofreUI && window.CofreUI.test && window.CofreUI.test.enabled) {
   });
 }
 
+setupServiceWorker();
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init, { once: true });
 else init();

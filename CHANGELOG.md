@@ -2,6 +2,21 @@
 
 ## Não publicado
 
+### O pacote offline podia misturar duas versões
+
+- A identidade da publicação era calculada só pelo módulo de entrada. Uma mudança
+  isolada em CSS, HTML, manifesto, ícone ou landing não criava outro worker e
+  podia deixar instalações antigas presas ao arquivo anterior. O SHA-256 agora
+  cobre todo o pacote publicado.
+- A instalação aceitava um cache parcial quando falhava um recurso fora da lista
+  curta considerada crítica. Agora todos os itens declarados para uso offline
+  precisam ser armazenados antes de a nova versão assumir o controle.
+- O observador de atualização passou a ser ligado antes das leituras assíncronas
+  do boot. Uma conferência posterior entre HTML e controller cobre a troca que
+  tenha acontecido antes do listener.
+- O HTML inicial traz a silhueta do painel, o modo offline ganhou um fluxo real
+  no Chromium e a suíte principal passou a rodar também no Firefox e no WebKit.
+
 ### O app instalado na tela de início não era o mesmo app
 
 Adicionado à tela de início, o Cofre deixa de ter navegador em volta. Não havia

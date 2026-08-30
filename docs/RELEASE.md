@@ -133,6 +133,7 @@ Se a verificação após a publicação falhar, promova na Vercel a última publ
 - A página abre sem erro no console.
 - A atualização de uma instalação anterior termina sem tela vazia.
 - O modo offline carrega o app completo.
+- `npm run test:pwa` confirma shell, landing, dados locais, limpeza de cache e API fora do CacheStorage.
 - Backup e restauração funcionam com a versão anterior.
 - A função de IA recusa origem e sessão inválidas.
 - Uma alteração salva no aparelho A aparece no B em até 20 segundos, sem abrir a tela de sincronização.

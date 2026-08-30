@@ -58,7 +58,7 @@ npm run verify:release   # build + testes + checagem de publicação
 | 16 | Onboarding em telas baixas e zoom 200% | **CONCLUÍDO** |
 | 17 | Teclado, ARIA, foco, contraste AA | PENDENTE |
 | 18 | 320 px, rótulos, nome único do assistente | **CONCLUÍDO** |
-| 19 | HTML inicial, rota, paginação, service worker | PENDENTE |
+| 19 | HTML inicial, rota, paginação, service worker | **CONCLUÍDO** |
 | 20 | `npm start`, `dist/`, fontes locais | **CONCLUÍDO** |
 
 ## Decisões tomadas
@@ -248,6 +248,25 @@ npm run verify:release   # build + testes + checagem de publicação
 - Fora do módulo: onboarding em tela baixa continua no M4; foco, ARIA e
   contraste geral continuam no M5; carregamento inicial e paginação continuam
   no M6.
+
+### Item 19 (HTML inicial, rota, paginação e service worker)
+- `index.html` já entrega a silhueta acessível do painel antes de o módulo grande
+  terminar de carregar. O primeiro quadro não fica mais com `#app` vazio.
+- As rotas por hash foram percorridas no navegador e uma rota profunda também
+  abre offline. A revisão de importação continua paginada em blocos de 60 linhas.
+- A identidade SHA-256 agora cobre todo o conteúdo de `dist/`. O worker entra
+  antes de receber a própria identidade, evitando referência circular. Mudar
+  qualquer arquivo gera outro pacote sem depender de promover a versão manualmente.
+- A instalação só chama `skipWaiting()` depois de guardar todos os recursos do
+  app e da landing. Se qualquer item falhar, os caches parciais são apagados e a
+  versão anterior continua ativa.
+- O observador de `controllerchange` é instalado antes do boot assíncrono. Depois
+  de abrir o armazenamento, o app também compara a identidade do HTML com a do
+  controller, cobrindo uma troca que tenha ocorrido cedo demais para o evento.
+- O comando `npm run test:browser` executa Chromium, Firefox e WebKit de verdade.
+  `npm run test:pwa` abre o pacote publicado, fica offline e confirma shell,
+  landing, rota, persistência local, limpeza seletiva e ausência de `/api/` no
+  CacheStorage.
 
 ### Qualidade
 - CI: `npm ci`, análise estática (`scripts/lint.js`, sem dependência externa),

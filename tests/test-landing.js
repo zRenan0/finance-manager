@@ -227,7 +227,6 @@ if (trecho) {
 // verificação procura, e documentar a correção não pode reprová-la.
 const semNota = (trechoJs) => trechoJs.replace(/\/\/[^\r\n]*/g, "");
 const listaShell = semNota(sw.slice(sw.indexOf("const APP_SHELL"), sw.indexOf("];", sw.indexOf("const APP_SHELL"))));
-const listaCritica = semNota(sw.slice(sw.indexOf("const CRITICAL_SHELL"), sw.indexOf("];", sw.indexOf("const CRITICAL_SHELL"))));
 
 check("existe um cache separado para páginas que não são o shell", /const PAGE_CACHE = "financas-pages-"/.test(sw));
 check("a navegação escolhe o balde pelo tipo de página",
@@ -235,11 +234,14 @@ check("a navegação escolhe o balde pelo tipo de página",
 check("só o shell escreve na chave do shell",
   /const chave = shell \? "index\.html" : chaveDePagina\(event\.request\)/.test(sw));
 check("a raiz saiu da lista de pré-carga do aplicativo", !/"\.\/"/.test(listaShell));
-check("o shell crítico do aplicativo não inclui arquivo da landing", !/landing/.test(listaCritica));
+check("o shell do aplicativo não inclui arquivo da landing", !/landing/.test(listaShell));
 check("a página comercial é pré-carregada no balde de páginas",
   /const LANDING_PAGES = \["\.\/", "landing\.html"\]/.test(sw));
 check("os estáticos da landing entram no cache normal",
   /const LANDING_ASSETS = \[/.test(sw) && /"css\/landing\.css"/.test(sw));
+check("a promoção exige todo o pacote declarado",
+  /const REQUIRED_PRECACHE = \[\.\.\.APP_SHELL, \.\.\.LANDING_ASSETS, \.\.\.LANDING_PAGES\]/.test(sw)
+  && /obrigatoriosQuebrados/.test(sw) && /caches\.delete\(CACHE_NAME\)/.test(sw));
 check("a limpeza da ativação preserva os três baldes",
   /const manter = \[CACHE_NAME, PAGE_CACHE, FONT_CACHE\]/.test(sw));
 check("a versão do cache foi promovida",

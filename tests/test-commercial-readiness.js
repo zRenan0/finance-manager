@@ -184,6 +184,10 @@ async function main() {
     /npm run check:build/.test(ci) && /npm run check:release/.test(ci) && /npm run build:dist/.test(ci));
   check("integração contínua roda os três motores de navegador",
     /chromium firefox webkit/.test(ci), "playwright install");
+  const browserMatrix = read("tests/browser/run-browser-matrix.js");
+  check("o comando de navegador executa os três motores instalados",
+    pkg.scripts["test:browser"] === "node tests/browser/run-browser-matrix.js"
+    && /\["chromium", "firefox", "webkit"\]/.test(browserMatrix));
 
   const pkgScripts = pkg.scripts || {};
   check("existe comando para subir o app", pkgScripts.start === "node scripts/serve.js", pkgScripts.start);
