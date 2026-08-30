@@ -5,7 +5,7 @@ const ACCOUNT_DEVICE_KEY = "cofre_device_id";
 const ACCOUNT_REQUEST_TIMEOUT_MS = 12000;
 const ACCOUNT_RECOVERY_DEDUP_MS = 750;
 const ACCOUNT_RECOVERY_RETRY_MS = 30000;
-const ACCOUNT_SCOPED_ACTIONS = new Set(["password", "devices", "revoke-device", "delete", "logout"]);
+const ACCOUNT_SCOPED_ACTIONS = new Set(["password", "devices", "revoke-device", "revoke-others", "delete", "logout"]);
 const ACCOUNT_COOKIE_ACTIONS = new Set(["session", "login", "register", "recover", "resend", "verify", "exchange", "logout", "revoke-device", "delete"]);
 
 // Alguns modos privados permitem ler o localStorage, mas recusam a gravação.
@@ -86,7 +86,7 @@ function freshAccountState() {
     // Estado do vínculo entre os dados deste aparelho e a conta. Ver o bloco
     // "VÍNCULO DOS DADOS DESTE APARELHO COM A CONTA" mais abaixo.
     guestLink: freshGuestLink(),
-    form: { email: "", password: "", newPassword: "", deletePassword: "", deleteText: "" }, devices: [],
+    form: { email: "", password: "", newPassword: "", deletePassword: "", deleteText: "", revokeOthersPassword: "" }, devices: [],
     // Aviso do bloco de exclusão, desenhado dentro do próprio painel. Separado
     // de `error` porque aquele mora no rodapé da tela, longe do botão.
     deleteHint: "",
@@ -679,6 +679,7 @@ const AccountAPI = (() => {
     password: (password) => request("password", { method: "POST", body: { password } }),
     devices: (options) => request("devices", options),
     revokeDevice: (deviceId) => request("revoke-device", { method: "POST", body: { deviceId } }),
+    revokeOthers: (currentPassword) => request("revoke-others", { method: "POST", body: { currentPassword } }),
     deleteAccount: (password, confirmation) => request("delete", { method: "POST", body: { password, confirmation } }),
   };
 })();
@@ -1382,6 +1383,62 @@ async function accountRevoke(deviceId) {
     accountSetBusy(false, error.message);
   } finally {
     // Falha inesperada durante o refresh não pode deixar toda a seção travada.
+    if (state.account === accountState && state.account.busy) {
+      state.account.busy = false;
+      render();
+    }
+  }
+}
+
+// [M7] Encerrar o acesso dos outros aparelhos.
+//
+// A senha sai da memória em QUALQUER desfecho, como no login e na exclusão: o
+// render seguinte a recolocaria no DOM, e ela sobreviveria a um relatório de
+// erro e à extensão de navegador que lê formulário.
+async function accountRevokeOthers() {
+  const a = state.account;
+  const senha = a.form.revokeOthersPassword || "";
+  if (!senha) {
+    state.account.revokeOthersHint = "Digite sua senha para encerrar os outros acessos.";
+    render();
+    return;
+  }
+  const expectedAccount = accountExpectedUserId();
+  const accountState = state.account;
+  state.account.revokeOthersHint = "";
+  accountSetBusy(true, "");
+  try {
+    const result = await AccountAPI.revokeOthers(senha);
+    a.form.revokeOthersPassword = "";
+    if (state.account !== accountState || accountExpectedUserId() !== expectedAccount) return;
+    // A lista some sozinha dos outros: a resposta já confirmou a revogação, e a
+    // consulta seguinte só reconcilia. Manter as linhas até ela voltar deixaria
+    // a tela dizendo que os acessos continuam de pé.
+    state.account.devices = (state.account.devices || []).filter((device) => !!device.current);
+    state.accountRevokeOthersOpen = false;
+    await refreshAccountSession();
+    if (state.account !== accountState || accountExpectedUserId() !== expectedAccount) return;
+    state.account.devices = (state.account.devices || []).filter((device) => !!device.current);
+    state.account.busy = false;
+    // A segunda camada (invalidar as sessões no provedor) pode falhar sem que a
+    // primeira falhe. Quando isso acontece a tela precisa dizer o que sobrou,
+    // não anunciar uma limpeza inteira que não houve.
+    const quantos = Number(result && result.revoked) || 0;
+    state.account.message = result && result.sessionsEnded === false
+      ? `${quantos === 1 ? "Um aparelho perdeu" : `${quantos} aparelhos perderam`} o acesso aos seus dados. A sessão deles pode levar até uma hora para expirar; se puder, troque a senha para encerrar na hora.`
+      : `${quantos === 1 ? "Um outro acesso foi encerrado" : `${quantos} outros acessos foram encerrados`}.`;
+    render();
+    notify("Outros acessos encerrados");
+  } catch (error) {
+    a.form.revokeOthersPassword = "";
+    if (changedAccountScopeCode(error)) { await handleAccountScopeChanged(error); return; }
+    if (error.code === "reauth_failed" || error.code === "reauth_required" || error.code === "invalid_password") {
+      state.account.revokeOthersHint = error.message;
+      accountSetBusy(false, "");
+      return;
+    }
+    accountSetBusy(false, error.message);
+  } finally {
     if (state.account === accountState && state.account.busy) {
       state.account.busy = false;
       render();

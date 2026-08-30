@@ -7795,7 +7795,7 @@ const ACCOUNT_DEVICE_KEY = "cofre_device_id";
 const ACCOUNT_REQUEST_TIMEOUT_MS = 12000;
 const ACCOUNT_RECOVERY_DEDUP_MS = 750;
 const ACCOUNT_RECOVERY_RETRY_MS = 30000;
-const ACCOUNT_SCOPED_ACTIONS = new Set(["password", "devices", "revoke-device", "delete", "logout"]);
+const ACCOUNT_SCOPED_ACTIONS = new Set(["password", "devices", "revoke-device", "revoke-others", "delete", "logout"]);
 const ACCOUNT_COOKIE_ACTIONS = new Set(["session", "login", "register", "recover", "resend", "verify", "exchange", "logout", "revoke-device", "delete"]);
 
 // Alguns modos privados permitem ler o localStorage, mas recusam a gravação.
@@ -7876,7 +7876,7 @@ function freshAccountState() {
     // Estado do vínculo entre os dados deste aparelho e a conta. Ver o bloco
     // "VÍNCULO DOS DADOS DESTE APARELHO COM A CONTA" mais abaixo.
     guestLink: freshGuestLink(),
-    form: { email: "", password: "", newPassword: "", deletePassword: "", deleteText: "" }, devices: [],
+    form: { email: "", password: "", newPassword: "", deletePassword: "", deleteText: "", revokeOthersPassword: "" }, devices: [],
     // Aviso do bloco de exclusão, desenhado dentro do próprio painel. Separado
     // de `error` porque aquele mora no rodapé da tela, longe do botão.
     deleteHint: "",
@@ -8469,6 +8469,7 @@ const AccountAPI = (() => {
     password: (password) => request("password", { method: "POST", body: { password } }),
     devices: (options) => request("devices", options),
     revokeDevice: (deviceId) => request("revoke-device", { method: "POST", body: { deviceId } }),
+    revokeOthers: (currentPassword) => request("revoke-others", { method: "POST", body: { currentPassword } }),
     deleteAccount: (password, confirmation) => request("delete", { method: "POST", body: { password, confirmation } }),
   };
 })();
@@ -9172,6 +9173,62 @@ async function accountRevoke(deviceId) {
     accountSetBusy(false, error.message);
   } finally {
     // Falha inesperada durante o refresh não pode deixar toda a seção travada.
+    if (state.account === accountState && state.account.busy) {
+      state.account.busy = false;
+      render();
+    }
+  }
+}
+
+// [M7] Encerrar o acesso dos outros aparelhos.
+//
+// A senha sai da memória em QUALQUER desfecho, como no login e na exclusão: o
+// render seguinte a recolocaria no DOM, e ela sobreviveria a um relatório de
+// erro e à extensão de navegador que lê formulário.
+async function accountRevokeOthers() {
+  const a = state.account;
+  const senha = a.form.revokeOthersPassword || "";
+  if (!senha) {
+    state.account.revokeOthersHint = "Digite sua senha para encerrar os outros acessos.";
+    render();
+    return;
+  }
+  const expectedAccount = accountExpectedUserId();
+  const accountState = state.account;
+  state.account.revokeOthersHint = "";
+  accountSetBusy(true, "");
+  try {
+    const result = await AccountAPI.revokeOthers(senha);
+    a.form.revokeOthersPassword = "";
+    if (state.account !== accountState || accountExpectedUserId() !== expectedAccount) return;
+    // A lista some sozinha dos outros: a resposta já confirmou a revogação, e a
+    // consulta seguinte só reconcilia. Manter as linhas até ela voltar deixaria
+    // a tela dizendo que os acessos continuam de pé.
+    state.account.devices = (state.account.devices || []).filter((device) => !!device.current);
+    state.accountRevokeOthersOpen = false;
+    await refreshAccountSession();
+    if (state.account !== accountState || accountExpectedUserId() !== expectedAccount) return;
+    state.account.devices = (state.account.devices || []).filter((device) => !!device.current);
+    state.account.busy = false;
+    // A segunda camada (invalidar as sessões no provedor) pode falhar sem que a
+    // primeira falhe. Quando isso acontece a tela precisa dizer o que sobrou,
+    // não anunciar uma limpeza inteira que não houve.
+    const quantos = Number(result && result.revoked) || 0;
+    state.account.message = result && result.sessionsEnded === false
+      ? `${quantos === 1 ? "Um aparelho perdeu" : `${quantos} aparelhos perderam`} o acesso aos seus dados. A sessão deles pode levar até uma hora para expirar; se puder, troque a senha para encerrar na hora.`
+      : `${quantos === 1 ? "Um outro acesso foi encerrado" : `${quantos} outros acessos foram encerrados`}.`;
+    render();
+    notify("Outros acessos encerrados");
+  } catch (error) {
+    a.form.revokeOthersPassword = "";
+    if (changedAccountScopeCode(error)) { await handleAccountScopeChanged(error); return; }
+    if (error.code === "reauth_failed" || error.code === "reauth_required" || error.code === "invalid_password") {
+      state.account.revokeOthersHint = error.message;
+      accountSetBusy(false, "");
+      return;
+    }
+    accountSetBusy(false, error.message);
+  } finally {
     if (state.account === accountState && state.account.busy) {
       state.account.busy = false;
       render();
@@ -31381,6 +31438,16 @@ function accountDeviceLastSeen(value, current) {
   return date.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
 }
 
+// [M7] "Entrou pela primeira vez em" só precisa do DIA, e por isso não reutiliza
+// `accountDeviceDate` (que traz data E hora, e serve à última sincronização, que
+// é recente por natureza). A hora exata de meses atrás não ajuda ninguém a
+// reconhecer um acesso e polui a linha que precisa ser lida de relance.
+function accountDeviceFirstSeen(value) {
+  const date = new Date(value || "");
+  if (Number.isNaN(date.getTime())) return "data indisponível";
+  return date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
 // [M6] O medidor só aparece onde a senha está sendo ESCOLHIDA (cadastro e nova
 // senha). No campo de entrar ele seria ruído: a senha já existe, e comentar a
 // força dela ali não muda nada além de assustar.
@@ -31411,7 +31478,7 @@ function accountDevicesCard(account) {
       <span class="account-device__icon">${svgIcon(ACCOUNT_DEVICE_ICONS[type], 20)}</span>
       <span class="account-device__body">
         <span class="account-device__identity"><strong>${escapeHtml(device.label || "Navegador não identificado")}</strong>${current ? `<span class="account-device__badge">Este aparelho</span>` : ""}</span>
-        <small>${escapeHtml(accountDeviceLastSeen(device.lastSeenAt, current))}</small>
+        <small>${escapeHtml(accountDeviceLastSeen(device.lastSeenAt, current))}${device.firstSeenAt ? ` · entrou pela primeira vez em ${escapeHtml(accountDeviceFirstSeen(device.firstSeenAt))}` : ""}</small>
       </span>
       ${current ? "" : `<button class="btn btn--ghost btn--sm account-device__revoke" data-action="account-revoke" data-id="${escapeHtml(device.id)}" ${account.busy ? "disabled" : ""}>Revogar acesso</button>`}
     </div>`;
@@ -31430,7 +31497,38 @@ function accountDevicesCard(account) {
       </div>
     </div>
     <div class="account-device-list">${rows || `<p class="account-access__empty">Nenhum dispositivo com acesso.</p>`}</div>
+    ${accountRevokeOthersBlock(account, activeCount)}
   </section>`;
+}
+
+// [M7] SAIR DE TODOS OS OUTROS APARELHOS.
+//
+// Só aparece quando há OUTRO aparelho para encerrar: um botão que não tem o que
+// fazer é ruído numa tela de segurança, e ruído é o que faz as pessoas pararem
+// de ler exatamente a tela em que precisam prestar atenção.
+//
+// A senha é pedida aqui, e não em `revoke-device`, porque as duas ações têm
+// naturezas opostas. Cortar UM acesso estranho é defesa, e defesa precisa ser
+// rápida. Derrubar TODOS os outros é ação de dono: quem tomou uma sessão
+// emprestada não pode usá-la para expulsar o dono do próprio aparelho.
+function accountRevokeOthersBlock(a, ativos) {
+  if (ativos < 2) return "";
+  const aberto = !!state.accountRevokeOthersOpen;
+  const senha = a.form.revokeOthersPassword || "";
+  return `<div class="account-access__others">
+    <button type="button" class="btn btn--secondary btn--sm" data-action="account-revoke-others-toggle" aria-expanded="${aberto ? "true" : "false"}" aria-controls="account-revoke-others-body" ${a.busy ? "disabled" : ""}>
+      ${svgIcon("shieldCheck", 15)} Sair dos outros aparelhos
+    </button>
+    <div class="account-access__others-body" id="account-revoke-others-body" ${aberto ? "" : "hidden"}>
+      <p class="card-subtitle">Encerra o acesso dos outros ${ativos - 1 === 1 ? "aparelho" : `${ativos - 1} aparelhos`} e para a sincronização deles imediatamente. Este aparelho continua conectado. O que já estiver salvo nos outros não é apagado à distância.</p>
+      <div class="field">
+        <label class="field__label" for="account-revoke-others-password">Sua senha</label>
+        <input id="account-revoke-others-password" class="input" type="password" data-field="auth-revoke-others-password" maxlength="128" value="${escapeHtml(senha)}" autocomplete="current-password" />
+      </div>
+      ${a.revokeOthersHint ? `<p class="account-danger__hint" role="alert">${svgIcon("alertTriangle", 15)} ${escapeHtml(a.revokeOthersHint)}</p>` : ""}
+      <button class="btn btn--danger btn--sm" data-action="account-revoke-others" ${a.busy ? "disabled" : ""}>Encerrar os outros acessos</button>
+    </div>
+  </div>`;
 }
 
 // Estado da sincronização em linguagem de usuário. A regra de escrita aqui é
@@ -32374,6 +32472,20 @@ function onClick(e) {
     case "account-logout": accountLogout(); break;
     case "account-revoke":
       requestConfirmation({ title: "Revogar acesso deste dispositivo?", message: "Este dispositivo não poderá mais acessar nem sincronizar sua conta. Uma cópia já salva nele não será apagada à distância.", confirmLabel: "Revogar acesso", tone: "danger", onConfirm: () => accountRevoke(id) });
+      break;
+    case "account-revoke-others-toggle":
+      state.accountRevokeOthersOpen = !state.accountRevokeOthersOpen;
+      // Fechar esquece o que estava digitado, pelo mesmo motivo do painel de
+      // exclusão: senha não fica em memória depois que a pessoa desiste.
+      if (!state.accountRevokeOthersOpen) { state.account.form.revokeOthersPassword = ""; state.account.revokeOthersHint = ""; }
+      render();
+      break;
+    case "account-revoke-others":
+      requestConfirmation({
+        title: "Encerrar o acesso dos outros aparelhos?",
+        message: "Os outros aparelhos param de sincronizar imediatamente e precisarão entrar de novo. Este aparelho continua conectado, e o que já estiver salvo nos outros não é apagado à distância.",
+        confirmLabel: "Encerrar acessos", tone: "danger", onConfirm: () => accountRevokeOthers(),
+      });
       break;
     case "account-danger-toggle":
       state.accountDangerOpen = !state.accountDangerOpen;
@@ -35692,6 +35804,7 @@ function onInput(e) {
     // O aviso do painel de exclusão some assim que a pessoa volta a digitar:
     // ele descreve o que faltava, e o que faltava está sendo preenchido agora.
     case "auth-delete-password": state.account.form.deletePassword = val.slice(0, 128); state.account.deleteHint = ""; break;
+    case "auth-revoke-others-password": state.account.form.revokeOthersPassword = val.slice(0, 128); break;
     case "auth-delete-text": state.account.form.deleteText = val.toUpperCase().slice(0, 20); state.account.deleteHint = ""; if (e.target.value !== state.account.form.deleteText) e.target.value = state.account.form.deleteText; break;
     // Busca da tela "Recursos" e laboratório de regras: re-render a cada tecla é
     // aceitável porque as duas telas são listas curtas, e `restoreFocus` devolve

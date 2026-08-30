@@ -1682,6 +1682,7 @@ function onInput(e) {
     // O aviso do painel de exclusão some assim que a pessoa volta a digitar:
     // ele descreve o que faltava, e o que faltava está sendo preenchido agora.
     case "auth-delete-password": state.account.form.deletePassword = val.slice(0, 128); state.account.deleteHint = ""; break;
+    case "auth-revoke-others-password": state.account.form.revokeOthersPassword = val.slice(0, 128); break;
     case "auth-delete-text": state.account.form.deleteText = val.toUpperCase().slice(0, 20); state.account.deleteHint = ""; if (e.target.value !== state.account.form.deleteText) e.target.value = state.account.form.deleteText; break;
     // Busca da tela "Recursos" e laboratório de regras: re-render a cada tecla é
     // aceitável porque as duas telas são listas curtas, e `restoreFocus` devolve

@@ -12,17 +12,18 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 
 | Campo | Valor |
 |---|---|
-| Módulo atual | **M7 — Sessões e dispositivos** (a iniciar) |
+| Módulo atual | **M8 — Armazenamento local e privacidade** (a iniciar) |
+| Status do M7 | **CONCLUÍDO** — "sair dos outros aparelhos" com reautenticação e duas camadas; data de entrada na lista |
 | Status do M6 | **CONCLUÍDO no repositório**, com **uma ação sua pendente**: ligar "Prevent use of leaked passwords" no painel do Supabase (passo a passo no M6; não tranca ninguém para fora) |
 | Status do M5 | **CONCLUÍDO no repositório**; vale em produção **depois de publicar**. Critério: `node scripts/check-deploy.js https://www.financemanager.dev.br` passar (hoje reprova 10, de propósito) |
 | Status do M4 | **CONCLUÍDO** — 3 achados corrigidos (1 P1, 1 P2, 1 P3) + suíte de regressão nova |
 | Status do M3 | **CONCLUÍDO** — aplicado e confirmado no banco em 2026-08-28 |
 | Status do M2 | **CONCLUÍDO** — nenhuma vulnerabilidade de autorização; invariantes travados por teste |
 | Status do M1 | **CONCLUÍDO** — aplicado e confirmado; gatilho capturado e versionado |
-| Módulos concluídos | M0, M1, M2, M3, M4, M5, M6 |
-| Próximo módulo | M7 — Segurança > Dispositivos e sessões (a tela já existe e lista/revoga; falta "sair de todos os outros", que **precisa de reautenticação** — a prova já está pronta no M6) |
+| Módulos concluídos | M0, M1, M2, M3, M4, M5, M6, M7 |
+| Próximo módulo | M8 — Armazenamento local e privacidade (mapear localStorage/IndexedDB/Cache/cookies, versionar o schema local, documentar o fluxo de dados; insumos R7 e a lista do M0) |
 | Branch | `deploy-atualizado` (árvore limpa no início do M0) |
-| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js` (M1/M2/M3 + M5), `tests/test-service-role-scope.js`, `tests/test-xss-surface.js` (M4), `tests/test-auth-password.js` (M6), `tests/test-session-scope-backend.js` (M6), `scripts/check-deploy.js` e `scripts/serve.js` (M5). Produção: `js/screens/analytics.js` e `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `js/utils.js`, `js/auth.js`, `js/screens/account.js`, `css/screens/account.css` (M6), `js/modules/app.generated.js` (regerado). |
+| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-render.js`, `scripts/check-deploy.js`, `scripts/serve.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/modules/app.generated.js` (regerado). |
 | Migrations criadas até aqui | `20260828120000_rls_auto_enable_least_privilege.sql`, `20260828130000_rls_auto_enable_versionada.sql`, `20260828140000_menor_privilegio_tabelas.sql` (as três **aplicadas e confirmadas em 2026-08-28**), `20260828150000_rls_auto_enable_gatilho.sql` (**ainda não aplicada**; é no-op em produção, onde o gatilho já existe) |
 | Versão do app | `0.30.0` (package.json) |
 
@@ -1320,6 +1321,146 @@ travados por teste. F6-05 registrado como arquitetura.
 
 ---
 
+## M7 — Sessões e dispositivos
+
+### Antes (situação encontrada)
+
+A tela "Dispositivos com acesso" **já existia** e já era boa: lista os acessos
+ativos, marca o atual com selo, mostra ícone por tipo (computador, celular,
+tablet, desconhecido), diz o último acesso em linguagem de gente ("Hoje, 14:32",
+"Ontem, 09:10"), revoga um a um com confirmação, e some com o aparelho revogado
+sem esperar outra ida à rede. O rótulo já vem pronto do cliente como
+"Chrome no Windows" (`accountDeviceLabel`, js/auth.js), então **dispositivo e
+navegador já estavam cobertos**.
+
+Faltavam três coisas.
+
+### Achados
+
+| # | P | Achado | Situação |
+|---|---|---|---|
+| **F7-01** | P2 | **Não existia "sair de todos os outros aparelhos".** Quem visse um acesso que não reconhece só podia revogar um por vez, e não tinha como cortar tudo de uma vez depois de uma senha vazada. | **CORRIGIDO** |
+| **F7-02** | P3 | `firstSeenAt` **já vinha da API** e não era mostrado. É o campo que separa "é meu, entrei em maio" de "isto apareceu ontem" — exatamente a pergunta que a tela existe para responder. | **CORRIGIDO** |
+| **F7-03** | P3 | Nenhuma cobertura de render para a lista de dispositivos além do básico. | **COBERTO** |
+| — | — | Conferidos **sem achado**: a lista só traz acessos ativos (`revoked_at=is.null` na consulta **e** filtro no cliente); revogar o próprio aparelho já limpava a sessão; `revoke-device` já exigia alvo ativo e devolvia 404 em repetição. | — |
+
+### O desenho da saída em massa, e por que são duas camadas
+
+Revogar a linha em `cofre_devices` **corta a sincronização no ato**: toda
+chamada seguinte passa por `touchDevice`, que recusa aparelho revogado. Já o
+`logout?scope=others` do provedor **invalida os refresh tokens**, o que impede
+renovar a sessão — mas o access token que o outro aparelho já tem na mão
+continua valendo até vencer, perto de uma hora depois.
+
+Sozinha, cada uma deixa uma fresta:
+
+* só o provedor deixaria a janela do access token aberta;
+* só as linhas deixariam a sessão viva para renovar indefinidamente.
+
+Juntas não deixam. E é por isso que **a revogação das linhas vem primeiro**: se
+a chamada ao provedor falhar, o acesso aos dados já foi cortado, e a resposta
+devolve `sessionsEnded: false` para a tela contar o que sobrou em vez de
+anunciar uma limpeza que não aconteceu inteira. A mensagem, nesse caso, sugere
+trocar a senha — que é o que encerra tudo na hora.
+
+**Reautenticação, e por que só aqui.** Derrubar as outras sessões é ação de
+dono: quem tomou uma sessão emprestada não pode usá-la para expulsar o dono do
+próprio aparelho. A prova é a mesma que o M6 montou. **Revogar UM aparelho
+continua sem senha, de propósito**: é ação defensiva, e quem acabou de ver um
+acesso estranho na lista precisa conseguir cortá-lo em dois toques, não travado
+por um campo de senha que talvez ele nem lembre.
+
+### Decisões tomadas e NÃO implementadas (com o motivo)
+
+- **Localização aproximada: NÃO.** O prompt condiciona a "se houver forma
+  adequada e respeitando privacidade" — e não há, de forma proporcional. Exigiria
+  (a) **passar a guardar o IP**, que hoje o app não guarda em lugar nenhum e que
+  é dado pessoal sob a LGPD, com base legal, retenção e inventário próprios;
+  (b) um **serviço de geolocalização de terceiro**, ou seja, mais um operador
+  recebendo dados dos usuários (M19) e uma abertura na `connect-src` que o M5
+  acabou de fechar; e (c) aceitar a precisão real desse tipo de consulta, que em
+  CGNAT e rede móvel erra de cidade e às vezes de estado. Uma cidade errada ao
+  lado de um acesso legítimo produz exatamente o pânico que a tela deveria
+  evitar. **O que responde a mesma pergunta com o que já existe** é a data de
+  entrada do aparelho (F7-02), agora na tela.
+- **Coluna "status" explícita: NÃO.** A lista só mostra acesso **ativo** (o
+  filtro é do servidor e do cliente), e o atual tem selo. Uma coluna dizendo
+  "ativo" em todas as linhas seria ruído numa tela onde ruído faz parar de ler.
+- **Encerrar sessões sem revogar aparelho (só `logout?scope=others`): NÃO.**
+  Deixaria o aparelho autorizado a voltar a sincronizar no próximo login, o que
+  não é o que "sair dos outros aparelhos" promete.
+
+### Alterações
+
+| Arquivo | O quê |
+|---|---|
+| `netlify/functions/_shared/supabase-rest.js` | `auth.logoutOthers()` (`logout?scope=others`) |
+| `netlify/functions/account.js` | rota `revoke-others`: reautenticação, revogação em massa restrita à conta e excluindo o aparelho atual, depois as sessões do provedor; responde `{ revoked, sessionsEnded }` |
+| `js/auth.js` | `revoke-others` no escopo de conta, `AccountAPI.revokeOthers`, `accountRevokeOthers()`, campo `revokeOthersPassword` no estado |
+| `js/actions.js` | abrir/fechar o bloco (esquecendo a senha ao fechar) e a ação com confirmação |
+| `js/app.js` | campo `auth-revoke-others-password` |
+| `js/screens/account.js` | `accountDeviceFirstSeen()`, "entrou pela primeira vez em" na linha, `accountRevokeOthersBlock()` |
+| `css/screens/account.css` | separador e corpo do bloco |
+| `tests/test-device-revocation-backend.js` | +15 asserções (bloco 5) |
+| `tests/test-render.js` | +11 asserções na seção de conta |
+| `js/modules/app.generated.js` | regerado |
+
+### Compatibilidade
+
+- **Rota nova, nada alterado no que existia.** `revoke-device`, `devices`,
+  `logout` e `delete` não mudaram uma linha.
+- **`logoutOthers` é função nova** em `supabase-rest.js`; `logout` continua com
+  `scope=local` como sempre.
+- **A tela só ganha elementos.** Com um aparelho só, o bloco novo nem é
+  desenhado, e a tela fica idêntica à de antes.
+- **`firstSeenAt` é opcional na renderização**: aparelho antigo sem esse campo
+  no banco não ganha texto inventado (asserção no teste).
+- **Nenhum contrato de dados, banco, armazenamento local ou sincronização
+  tocado.** Nenhuma migração.
+- Um esbarro encontrado e corrigido durante o trabalho: `accountDeviceDate` **já
+  existia** (data + hora, usada em "última sincronização"). A função nova se
+  chama `accountDeviceFirstSeen` e formata só o dia; a antiga ficou intacta.
+
+### Testes
+
+| Teste | Resultado |
+|---|---|
+| `node scripts/lint.js` | **PASSOU** — 0 erro, 0 aviso |
+| `node tests/run-all.js` | **PASSOU** — **53/53** arquivos |
+| `node tests/test-device-revocation-backend.js` | **PASSOU** — **35 ok** (eram 20) |
+| `node tests/test-render.js` | **PASSOU** — seção de conta com as 11 asserções novas |
+| `node scripts/build-app-module.js --check` | **PASSOU** |
+| **Teste de mutação** | **PASSOU** — desligando a reautenticação da rota, reprovam **7** asserções, entre elas "sair dos outros exige reautenticação" e "nenhuma revogação em massa aconteceu sem senha" |
+| **Navegador local, 23 rotas** | **PASSOU** — 534 ícones, 0 problema, 0 violação de CSP, nenhum erro novo |
+| **CSS conferido no navegador** | **PASSOU** — os 5 seletores novos e o `.account-danger` antigo aparecem entre as 2.090 regras carregadas (ou seja, nada quebrou a cascata); o medidor rende três cores distintas por nível, o passo apagado usa o token de borda, o bloco recolhido tem `display: none` de verdade e o separador tem 1px |
+| Tela de dispositivos com sessão real em navegador | **NÃO VALIDADO** — sem `vercel dev` o app local considera o serviço de contas não configurado e não desenha a tela. O render está coberto por `test-render.js`, que monta cinco aparelhos (inclusive um revogado e um sem `firstSeenAt`) e confere marcação, contagem, textos e o recolhimento inicial |
+| Encerramento real de sessões no Supabase | **NÃO VALIDADO** — exige `vercel dev` e duas sessões de verdade. As duas camadas, a ordem entre elas e o caminho de falha parcial estão cobertos por teste de integração do handler |
+| `test:browser` (Playwright) | **NÃO VALIDADO** — indisponível localmente; roda na CI |
+
+### Funcionalidades preservadas
+
+Confirmado: lista de dispositivos, revogação individual (inclusive do próprio
+aparelho, que continua limpando a sessão), atualização da lista, cartão de
+sincronização, vínculo de dados do visitante, exclusão de conta, medidor de
+senha do M6. Nenhuma regressão conhecida.
+
+### Status
+
+**CONCLUÍDO.** F7-01, F7-02 e F7-03 fechados e travados por teste. Nada pendente
+neste módulo além da publicação, que é comum a M5, M6 e M7.
+
+### Registrado para módulos seguintes
+
+- **M17 (observabilidade)**: `sessionsEnded: false` é um sinal que merece
+  monitoramento — significa que o provedor recusou o encerramento e que existem
+  sessões vivas que o usuário acredita ter derrubado.
+- **Quando o MFA do M6 entrar**: a reautenticação de `revoke-others` deve passar
+  a exigir `aal2`, junto com `password` e `delete`.
+- **M18 (LGPD)**: a decisão de **não** guardar IP nem geolocalizar entra no
+  inventário de dados como escolha registrada, não como omissão.
+
+---
+
 ## Checklist de regressão
 
 Executar após **todo** módulo que toque no código. Marcar `OK` / `FALHOU` / `NÃO VALIDADO`.
@@ -1374,6 +1515,7 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
 - [ ] Troca de senha
 - [ ] Listagem de dispositivos
 - [ ] Revogar dispositivo → o dispositivo revogado recebe 403 e volta ao escopo visitante **sem perder a fila nem o banco local**
+- [ ] **Sair dos outros aparelhos**: pede senha, encerra só os OUTROS, este aparelho continua conectado e sincronizando
 - [ ] Exclusão de conta remove servidor e revoga todos os dispositivos
 
 ### F. Sincronização (o mais frágil — ver `docs/SYNC_PROTOCOL.md`)

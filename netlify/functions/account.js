@@ -692,6 +692,65 @@ async function handler(event) {
       const isCurrent = target === deviceIdOf(event);
       return json(200, { ok: true, currentRevoked: isCurrent }, { cookies: isCurrent ? clearSession(event) : session.cookies });
     }
+    // [M7] SAIR DE TODOS OS OUTROS APARELHOS.
+    //
+    // POR QUE SÃO DUAS CAMADAS, E POR QUE A ORDEM É ESTA.
+    //
+    // Revogar as linhas de `cofre_devices` corta a sincronização NO ATO: toda
+    // chamada seguinte passa por `touchDevice`, que recusa aparelho revogado.
+    // Já o `logout?scope=others` do provedor invalida os refresh tokens, o que
+    // impede renovar a sessão: mas o access token que o outro aparelho já tem
+    // na mão continua válido até vencer, perto de uma hora depois.
+    //
+    // Sozinha, cada uma deixa uma fresta: só o provedor deixaria a janela do
+    // access token, e só as linhas deixariam a sessão viva para renovar
+    // eternamente. Juntas não deixam. E é por isso que a revogação das linhas
+    // vem PRIMEIRO: se a chamada ao provedor falhar, o acesso aos dados já foi
+    // cortado, e a resposta conta isso em vez de fingir sucesso completo.
+    //
+    // REAUTENTICAÇÃO, pela mesma razão do M6: derrubar as outras sessões é
+    // ação de dono. Quem tomou uma sessão emprestada não pode usá-la para
+    // expulsar o dono do próprio aparelho.
+    //
+    // Revogar UM aparelho continua sem senha, de propósito: é ação defensiva, e
+    // quem acabou de ver um acesso estranho na lista precisa conseguir cortá-lo
+    // em dois toques.
+    if (action === "revoke-others" && method === "POST") {
+      const session = await requireSession(event, { accountScope: true });
+      await rateLimit.enforce(event, { bucket: "conta", limit: RATE_MAX_ATTEMPTS, windowSeconds: RATE_WINDOW_SECONDS });
+      const body = readJson(event, 16 * 1024);
+      const atual = String(body.currentPassword || "");
+      if (!atual) {
+        throw Object.assign(new Error("Digite sua senha para encerrar os outros acessos."), {
+          statusCode: 401, code: "reauth_required",
+        });
+      }
+      await limitarPorEmail(event, String(session.user.email || "").trim().toLowerCase());
+      try { await api.auth.signIn(session.user.email, passwordOf(atual)); }
+      catch (error) {
+        if (error && error.code === "invalid_password") throw error;
+        throw Object.assign(new Error("A senha não confere."), { statusCode: 401, code: "reauth_failed" });
+      }
+
+      const current = deviceIdOf(event);
+      const revoked = await api.db(
+        `cofre_devices?user_id=eq.${encodeURIComponent(session.user.id)}`
+          + `&device_id=neq.${encodeURIComponent(current)}&revoked_at=is.null&select=device_id`,
+        {
+          method: "PATCH", service: true,
+          body: { revoked_at: new Date().toISOString() },
+          headers: { Prefer: "return=representation" },
+        },
+      );
+      const total = Array.isArray(revoked) ? revoked.length : 0;
+      // A sessão do provedor é a segunda camada. Se ela falhar, os dados já
+      // estão fora de alcance; a tela recebe `sessionsEnded: false` e diz o que
+      // sobrou, em vez de anunciar uma limpeza que não aconteceu inteira.
+      let sessionsEnded = true;
+      try { await api.auth.logoutOthers(session.token); }
+      catch (_) { sessionsEnded = false; }
+      return json(200, { ok: true, revoked: total, sessionsEnded }, { cookies: session.cookies });
+    }
     if (action === "delete" && method === "POST") {
       const session = await requireSession(event, { accountScope: true });
       await rateLimit.enforce(event, { bucket: "conta", limit: RATE_MAX_ATTEMPTS, windowSeconds: RATE_WINDOW_SECONDS });

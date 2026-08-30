@@ -177,6 +177,11 @@ const auth = {
   user(token) { return request("/auth/v1/user", { token }); },
   updateUser(token, body) { return request("/auth/v1/user", { method: "PUT", token, body }); },
   logout(token) { return request("/auth/v1/logout?scope=local", { method: "POST", token, body: {} }); },
+  // [M7] `scope=others` invalida os refresh tokens de TODAS as outras sessões
+  // desta conta e preserva a atual. É o "sair dos outros aparelhos" do lado do
+  // provedor; o lado do aplicativo é a revogação das linhas de `cofre_devices`,
+  // que é o que corta a sincronização no mesmo instante.
+  logoutOthers(token) { return request("/auth/v1/logout?scope=others", { method: "POST", token, body: {} }); },
   deleteUser(userId) { return request(`/auth/v1/admin/users/${encodeURIComponent(userId)}`, { method: "DELETE", service: true }); },
 };
 

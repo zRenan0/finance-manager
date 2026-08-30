@@ -267,6 +267,74 @@ async function main() {
   check("análise não apaga cookies de sessão expirada",
     analyzeExpired.statusCode === 401 && cookiesOf(analyzeExpired).length === 0, `${analyzeExpired.statusCode} ${cookiesOf(analyzeExpired).length}`);
 
+  // ==========================================================================
+  console.log("\n5. [M7] Sair de todos os outros aparelhos");
+  // ==========================================================================
+  // Duas camadas, e a ordem importa: revogar as linhas corta a sincronização no
+  // ato; o `logout?scope=others` do provedor invalida os refresh tokens. Só a
+  // segunda deixaria o access token do outro aparelho valendo por até uma hora;
+  // só a primeira deixaria a sessão viva para renovar indefinidamente.
+  const SENHA = "cavalo-bateria-grampo";
+  let entradasNoProvedor = 0;
+  let saidaDosOutros = 0;
+  let rotaDaRevogacaoEmMassa = "";
+  api.auth.user = async () => ({ id: USER_ID, email: "pessoa@example.com", email_confirmed_at: "2026-08-01T12:00:00Z" });
+  api.auth.refresh = async () => { throw new Error("refresh não deveria ser usado"); };
+  api.auth.signIn = async (email, password) => {
+    entradasNoProvedor += 1;
+    if (password !== SENHA) throw Object.assign(new Error("Invalid login credentials"), { statusCode: 400, code: "invalid_credentials" });
+    return { access_token: "novo", refresh_token: "novo", expires_in: 3600, user: { id: USER_ID, email, email_confirmed_at: "2026-08-01T12:00:00Z" } };
+  };
+  api.auth.logoutOthers = async () => { saidaDosOutros += 1; return {}; };
+  stored = deviceRow();
+  api.db = async (route, options = {}) => {
+    if (route.startsWith("cofre_devices?user_id=") && !options.method && route.includes("select=device_id,secret_hash")) return [stored];
+    if (route.includes(`device_id=eq.${DEVICE_ID}`) && route.includes("secret_hash=eq.") && options.method === "PATCH") return [{ device_id: DEVICE_ID }];
+    if (route.includes("device_id=neq.") && options.method === "PATCH") {
+      rotaDaRevogacaoEmMassa = route;
+      return [{ device_id: OTHER_DEVICE_ID }, { device_id: "device-tablet-9999" }];
+    }
+    return null;
+  };
+
+  const semSenha = await account.handler(accountEvent("POST", "revoke-others", {}, { cookie: COOKIE }));
+  check("sair dos outros exige reautenticação",
+    semSenha.statusCode === 401 && JSON.parse(semSenha.body).code === "reauth_required", semSenha.body);
+  check("nenhuma revogação em massa aconteceu sem senha", rotaDaRevogacaoEmMassa === "", rotaDaRevogacaoEmMassa);
+  check("nenhuma sessão foi encerrada sem senha", saidaDosOutros === 0, `${saidaDosOutros}`);
+
+  const senhaErrada = await account.handler(accountEvent("POST", "revoke-others", { currentPassword: "chute-do-atacante" }, { cookie: COOKIE }));
+  check("senha errada não encerra nada",
+    senhaErrada.statusCode === 401 && JSON.parse(senhaErrada.body).code === "reauth_failed", senhaErrada.body);
+  check("nenhuma revogação em massa com senha errada", rotaDaRevogacaoEmMassa === "", rotaDaRevogacaoEmMassa);
+
+  const encerrou = await account.handler(accountEvent("POST", "revoke-others", { currentPassword: SENHA }, { cookie: COOKIE }));
+  const corpoEncerrou = JSON.parse(encerrou.body);
+  check("senha correta encerra os outros acessos", encerrou.statusCode === 200, `${encerrou.statusCode} ${encerrou.body}`);
+  check("a conta responde quantos acessos caíram", corpoEncerrou.revoked === 2, encerrou.body);
+  check("as sessões do provedor também foram encerradas",
+    corpoEncerrou.sessionsEnded === true && saidaDosOutros === 1, `${corpoEncerrou.sessionsEnded} ${saidaDosOutros}`);
+  // O ESTE APARELHO PRECISA SOBREVIVER. Uma revogação que se inclui na conta
+  // derruba justamente quem estava tentando se proteger.
+  check("o aparelho atual fica de fora da revogação",
+    rotaDaRevogacaoEmMassa.includes(`device_id=neq.${DEVICE_ID}`), rotaDaRevogacaoEmMassa);
+  check("só acessos ainda ativos são tocados",
+    rotaDaRevogacaoEmMassa.includes("revoked_at=is.null"), rotaDaRevogacaoEmMassa);
+  check("a revogação é restrita a esta conta",
+    rotaDaRevogacaoEmMassa.includes(`user_id=eq.${USER_ID}`), rotaDaRevogacaoEmMassa);
+  check("a sessão deste aparelho continua de pé", cookiesOf(encerrou).every((c) => !/Max-Age=0/.test(c)),
+    cookiesOf(encerrou).join(" | "));
+
+  // A segunda camada pode falhar sozinha. Quando falha, os dados JÁ estão fora
+  // de alcance e a resposta precisa dizer isso, não fingir limpeza completa.
+  api.auth.logoutOthers = async () => { throw new Error("provedor fora do ar"); };
+  const parcial = await account.handler(accountEvent("POST", "revoke-others", { currentPassword: SENHA }, { cookie: COOKIE }));
+  const corpoParcial = JSON.parse(parcial.body);
+  check("falha do provedor não derruba a revogação dos dados", parcial.statusCode === 200, `${parcial.statusCode}`);
+  check("a resposta admite que as sessões não foram encerradas",
+    corpoParcial.sessionsEnded === false && corpoParcial.revoked === 2, parcial.body);
+  check("a reautenticação foi cobrada em toda tentativa com senha", entradasNoProvedor === 3, `${entradasNoProvedor}`);
+
   api.db = originalDb;
   Object.assign(api.auth, originalAuth);
 

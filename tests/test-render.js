@@ -1101,8 +1101,8 @@ console.log("\n[Categorias] Central de categorias: estrutura, grupos e tetos");
 console.log("\n[Conta] Extrato de acessos e área destrutiva");
 {
   ctx.__devices = [
-    { id: "device-desktop", label: "Chrome no Windows", type: "desktop", current: true, lastSeenAt: new Date().toISOString() },
-    { id: "device-phone", label: "Safari no iPhone", type: "phone", current: false, lastSeenAt: "2026-08-24T20:55:00Z" },
+    { id: "device-desktop", label: "Chrome no Windows", type: "desktop", current: true, firstSeenAt: "2026-05-14T09:00:00Z", lastSeenAt: new Date().toISOString() },
+    { id: "device-phone", label: "Safari no iPhone", type: "phone", current: false, firstSeenAt: "2026-06-02T13:30:00Z", lastSeenAt: "2026-08-24T20:55:00Z" },
     { id: "device-tablet", label: "Safari no iPad", type: "tablet", current: false, lastSeenAt: "2026-08-24T17:16:00Z" },
     { id: "device-unknown", label: "Navegador desconhecido", type: "unknown", current: false, lastSeenAt: "2026-08-24T16:39:00Z" },
     { id: "device-revoked", label: "Acesso antigo", type: "phone", current: false, revokedAt: "2026-08-24T21:00:00Z", lastSeenAt: "2026-08-24T15:00:00Z" },
@@ -1128,6 +1128,40 @@ console.log("\n[Conta] Extrato de acessos e área destrutiva");
   check("somente os outros aparelhos podem ser revogados",
     (conta.match(/data-action="account-revoke"/g) || []).length === 3,
     String((conta.match(/data-action="account-revoke"/g) || []).length));
+
+  // [M7] Desde quando o acesso existe é o que separa "é meu, entrei em maio" de
+  // "isto apareceu ontem". O campo já vinha da API e não era mostrado.
+  check("a linha diz desde quando o acesso existe",
+    /entrou pela primeira vez em 14\/05\/2026/.test(conta) && /entrou pela primeira vez em 02\/06\/2026/.test(conta), conta.slice(0, 0) || "ausente");
+  check("aparelho sem essa data não inventa uma",
+    (conta.match(/entrou pela primeira vez/g) || []).length === 2,
+    String((conta.match(/entrou pela primeira vez/g) || []).length));
+  // A data de entrada é DIA, sem hora: a hora exata de meses atrás não ajuda a
+  // reconhecer um acesso e polui a linha.
+  check("a data de entrada não traz hora",
+    !/entrou pela primeira vez em \d{2}\/\d{2}\/\d{4},? \d{2}:\d{2}/.test(conta));
+
+  // [M7] Encerrar todos os outros acessos.
+  check("a tela oferece sair dos outros aparelhos",
+    /data-action="account-revoke-others-toggle"/.test(conta) && /Sair dos outros aparelhos/.test(conta));
+  check("o bloco começa recolhido",
+    /account-revoke-others-body[^>]*hidden/.test(conta));
+  check("ele diz quantos aparelhos serão encerrados", /outros 3 aparelhos/.test(conta), conta.match(/Encerra o acesso[^<]*/) || "ausente");
+  check("ele avisa que este aparelho continua conectado", /Este aparelho continua conectado/.test(conta));
+  check("ele não promete apagar dados dos outros à distância",
+    /não é apagado à distância/.test(conta));
+  check("a ação pede senha, ao contrário de revogar um aparelho",
+    /data-field="auth-revoke-others-password"/.test(conta) && /type="password"/.test(conta));
+
+  // COM UM APARELHO SÓ, O BOTÃO NÃO TEM O QUE FAZER. Botão inútil numa tela de
+  // segurança é ruído, e ruído é o que faz parar de ler justamente esta tela.
+  ctx.__soUm = [ctx.__devices[0]];
+  run("state.account.devices = __soUm;");
+  const contaSozinha = run("renderAccountScreen()");
+  check("com um aparelho só, sair dos outros nem aparece",
+    !/account-revoke-others-toggle/.test(contaSozinha));
+  check("a lista continua mostrando o aparelho atual", /Este aparelho/.test(contaSozinha));
+  run("state.account.devices = __devices;");
   check("a ação destrutiva diz exatamente o que faz", /Revogar acesso/.test(conta));
   const accountClickSrc = run("onClick.toString()");
   check("a confirmação explica o limite da revogação",

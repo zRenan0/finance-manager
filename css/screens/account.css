@@ -535,3 +535,20 @@
 @media (prefers-reduced-motion: reduce) {
   .pwd-meter__step { transition: none; }
 }
+
+/* [M7] Bloco de "sair dos outros aparelhos".
+   Fica separado da lista por uma linha: encerrar tudo é uma decisão de outra
+   natureza que revogar um item, e a separação visual diz isso antes do texto. */
+.account-access__others {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.account-access__others-body {
+  margin-top: 12px;
+}
+
+.account-access__others-body[hidden] {
+  display: none;
+}

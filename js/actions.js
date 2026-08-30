@@ -464,6 +464,20 @@ function onClick(e) {
     case "account-revoke":
       requestConfirmation({ title: "Revogar acesso deste dispositivo?", message: "Este dispositivo não poderá mais acessar nem sincronizar sua conta. Uma cópia já salva nele não será apagada à distância.", confirmLabel: "Revogar acesso", tone: "danger", onConfirm: () => accountRevoke(id) });
       break;
+    case "account-revoke-others-toggle":
+      state.accountRevokeOthersOpen = !state.accountRevokeOthersOpen;
+      // Fechar esquece o que estava digitado, pelo mesmo motivo do painel de
+      // exclusão: senha não fica em memória depois que a pessoa desiste.
+      if (!state.accountRevokeOthersOpen) { state.account.form.revokeOthersPassword = ""; state.account.revokeOthersHint = ""; }
+      render();
+      break;
+    case "account-revoke-others":
+      requestConfirmation({
+        title: "Encerrar o acesso dos outros aparelhos?",
+        message: "Os outros aparelhos param de sincronizar imediatamente e precisarão entrar de novo. Este aparelho continua conectado, e o que já estiver salvo nos outros não é apagado à distância.",
+        confirmLabel: "Encerrar acessos", tone: "danger", onConfirm: () => accountRevokeOthers(),
+      });
+      break;
     case "account-danger-toggle":
       state.accountDangerOpen = !state.accountDangerOpen;
       // Fechar o painel esquece o que estava digitado. Senha não fica em

@@ -92,6 +92,16 @@ function accountDeviceLastSeen(value, current) {
   return date.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
 }
 
+// [M7] "Entrou pela primeira vez em" só precisa do DIA, e por isso não reutiliza
+// `accountDeviceDate` (que traz data E hora, e serve à última sincronização, que
+// é recente por natureza). A hora exata de meses atrás não ajuda ninguém a
+// reconhecer um acesso e polui a linha que precisa ser lida de relance.
+function accountDeviceFirstSeen(value) {
+  const date = new Date(value || "");
+  if (Number.isNaN(date.getTime())) return "data indisponível";
+  return date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
 // [M6] O medidor só aparece onde a senha está sendo ESCOLHIDA (cadastro e nova
 // senha). No campo de entrar ele seria ruído: a senha já existe, e comentar a
 // força dela ali não muda nada além de assustar.
@@ -122,7 +132,7 @@ function accountDevicesCard(account) {
       <span class="account-device__icon">${svgIcon(ACCOUNT_DEVICE_ICONS[type], 20)}</span>
       <span class="account-device__body">
         <span class="account-device__identity"><strong>${escapeHtml(device.label || "Navegador não identificado")}</strong>${current ? `<span class="account-device__badge">Este aparelho</span>` : ""}</span>
-        <small>${escapeHtml(accountDeviceLastSeen(device.lastSeenAt, current))}</small>
+        <small>${escapeHtml(accountDeviceLastSeen(device.lastSeenAt, current))}${device.firstSeenAt ? ` · entrou pela primeira vez em ${escapeHtml(accountDeviceFirstSeen(device.firstSeenAt))}` : ""}</small>
       </span>
       ${current ? "" : `<button class="btn btn--ghost btn--sm account-device__revoke" data-action="account-revoke" data-id="${escapeHtml(device.id)}" ${account.busy ? "disabled" : ""}>Revogar acesso</button>`}
     </div>`;
@@ -141,7 +151,38 @@ function accountDevicesCard(account) {
       </div>
     </div>
     <div class="account-device-list">${rows || `<p class="account-access__empty">Nenhum dispositivo com acesso.</p>`}</div>
+    ${accountRevokeOthersBlock(account, activeCount)}
   </section>`;
+}
+
+// [M7] SAIR DE TODOS OS OUTROS APARELHOS.
+//
+// Só aparece quando há OUTRO aparelho para encerrar: um botão que não tem o que
+// fazer é ruído numa tela de segurança, e ruído é o que faz as pessoas pararem
+// de ler exatamente a tela em que precisam prestar atenção.
+//
+// A senha é pedida aqui, e não em `revoke-device`, porque as duas ações têm
+// naturezas opostas. Cortar UM acesso estranho é defesa, e defesa precisa ser
+// rápida. Derrubar TODOS os outros é ação de dono: quem tomou uma sessão
+// emprestada não pode usá-la para expulsar o dono do próprio aparelho.
+function accountRevokeOthersBlock(a, ativos) {
+  if (ativos < 2) return "";
+  const aberto = !!state.accountRevokeOthersOpen;
+  const senha = a.form.revokeOthersPassword || "";
+  return `<div class="account-access__others">
+    <button type="button" class="btn btn--secondary btn--sm" data-action="account-revoke-others-toggle" aria-expanded="${aberto ? "true" : "false"}" aria-controls="account-revoke-others-body" ${a.busy ? "disabled" : ""}>
+      ${svgIcon("shieldCheck", 15)} Sair dos outros aparelhos
+    </button>
+    <div class="account-access__others-body" id="account-revoke-others-body" ${aberto ? "" : "hidden"}>
+      <p class="card-subtitle">Encerra o acesso dos outros ${ativos - 1 === 1 ? "aparelho" : `${ativos - 1} aparelhos`} e para a sincronização deles imediatamente. Este aparelho continua conectado. O que já estiver salvo nos outros não é apagado à distância.</p>
+      <div class="field">
+        <label class="field__label" for="account-revoke-others-password">Sua senha</label>
+        <input id="account-revoke-others-password" class="input" type="password" data-field="auth-revoke-others-password" maxlength="128" value="${escapeHtml(senha)}" autocomplete="current-password" />
+      </div>
+      ${a.revokeOthersHint ? `<p class="account-danger__hint" role="alert">${svgIcon("alertTriangle", 15)} ${escapeHtml(a.revokeOthersHint)}</p>` : ""}
+      <button class="btn btn--danger btn--sm" data-action="account-revoke-others" ${a.busy ? "disabled" : ""}>Encerrar os outros acessos</button>
+    </div>
+  </div>`;
 }
 
 // Estado da sincronização em linguagem de usuário. A regra de escrita aqui é
