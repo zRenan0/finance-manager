@@ -383,6 +383,54 @@ function escapeHtml(str) {
 }
 function clamp(n, min, max) { return Math.max(min, Math.min(max, n)); }
 
+// [M6] MEDIDOR DE FORÇA DE SENHA: CONSELHO, NÃO REGRA.
+//
+// A REGRA vive só no servidor (`senhaNovaOf`, netlify/functions/account.js).
+// Isto aqui não repete a regra e não bloqueia nada: repetir a política em dois
+// lugares, em duas linguagens, é o começo garantido de uma divergir da outra, e
+// aí o navegador aprova o que o servidor recusa (ou pior, o contrário). O que
+// esta função faz é dar retorno enquanto a pessoa digita, que é onde uma senha
+// ruim ainda pode ser trocada sem custo.
+//
+// A conta é grosseira de propósito e não finge precisão: comprimento pesa mais
+// do que variedade (é o que a literatura mostra que importa), repetição e
+// sequência descontam, e o email no meio da senha zera o resto. Nenhum número
+// de bits é mostrado ao usuário; um "razoável" honesto vale mais do que uma
+// entropia inventada com três casas decimais.
+const SENHA_SEQUENCIAS = ["abcdefghijklmnopqrstuvwxyz", "01234567890", "qwertyuiop", "asdfghjkl", "zxcvbnm"];
+const SENHA_ROTULOS = ["muito fraca", "fraca", "razoável", "boa", "forte"];
+
+function passwordStrength(value, email) {
+  const senha = String(value || "");
+  if (!senha) return { score: 0, label: "", hint: "", empty: true };
+  const plana = senha.toLowerCase();
+  const classes = [/[a-z]/, /[A-Z]/, /[0-9]/, /[^A-Za-z0-9]/].filter((re) => re.test(senha)).length;
+  const distintos = new Set(senha).size;
+
+  let pontos = 0;
+  if (senha.length >= 10) pontos += 1;
+  if (senha.length >= 14) pontos += 1;
+  if (senha.length >= 20) pontos += 1;
+  if (classes >= 2) pontos += 1;
+  if (classes >= 3 && senha.length >= 12) pontos += 1;
+  // Pouca variedade de caracteres é o sinal mais barato de padrão repetido.
+  if (distintos <= Math.max(3, senha.length / 4)) pontos -= 2;
+  if (/^\d+$/.test(senha)) pontos -= 2;
+  if (SENHA_SEQUENCIAS.some((linha) => linha.includes(plana) || linha.split("").reverse().join("").includes(plana))) pontos -= 3;
+
+  const local = String(email || "").split("@")[0].toLowerCase().replace(/[^a-z0-9]/g, "");
+  const contemEmail = local.length >= 4 && plana.replace(/[^a-z0-9]/g, "").includes(local);
+  if (contemEmail) pontos = -1;
+
+  const score = clamp(pontos, 0, 4);
+  let hint = "";
+  if (contemEmail) hint = "Ela contém o seu email; o servidor vai recusar.";
+  else if (senha.length < 10) hint = "Faltam caracteres para o mínimo de 10.";
+  else if (score <= 1) hint = "Uma frase com três ou quatro palavras costuma ser mais forte e mais fácil de lembrar.";
+  else if (score === 2) hint = "Mais alguns caracteres já fazem diferença.";
+  return { score, label: SENHA_ROTULOS[score], hint, empty: false };
+}
+
 // Normalização de texto compartilhada (busca, categorização automática, NLP).
 // Fica aqui para que import.js, nlp.js e app.js usem exatamente a mesma regra.
 function normalizeText(str) {

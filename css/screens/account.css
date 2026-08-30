@@ -501,3 +501,37 @@
     padding: 0 16px 18px;
   }
 }
+
+/* [M6] Medidor de força de senha.
+   A cor sozinha não informa nada: o texto ao lado diz a força por extenso,
+   e é ele que o leitor de tela anuncia. A barra é reforço visual, não a
+   informação. */
+.pwd-meter {
+  margin-top: 8px;
+}
+
+.pwd-meter__track {
+  display: flex;
+  gap: 4px;
+}
+
+.pwd-meter__step {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+  transition: background 160ms ease;
+}
+
+.pwd-meter[data-score="1"] .pwd-meter__step.is-on { background: var(--negative); }
+.pwd-meter[data-score="2"] .pwd-meter__step.is-on { background: var(--goal); }
+.pwd-meter[data-score="3"] .pwd-meter__step.is-on,
+.pwd-meter[data-score="4"] .pwd-meter__step.is-on { background: var(--positive); }
+
+.pwd-meter__text {
+  margin-top: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pwd-meter__step { transition: none; }
+}

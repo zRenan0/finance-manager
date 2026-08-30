@@ -9,6 +9,23 @@ const ACCESS = "cofre_access";
 const REFRESH = "cofre_refresh";
 const VERIFIER = "cofre_pkce";
 const DEVICE_SECRET = "cofre_device";
+// [M6] MARCA DE QUE ESTA SESSÃO VEIO DE UM LINK DE RECUPERAÇÃO.
+//
+// Trocar a senha exige provar quem você é DE NOVO, e existem duas provas
+// possíveis: a senha atual, ou o link que só chega na caixa de entrada do dono
+// do endereço. O segundo caso é justamente aquele em que a senha atual não
+// pode ser exigida, porque quem pediu recuperação a esqueceu.
+//
+// Este cookie é a prova do segundo caso, emitida pelo servidor no momento em
+// que o link é consumido (`verify` e `exchange`), com validade curta. Ele não
+// carrega nada além da finalidade: é `HttpOnly`, o cliente não o lê nem o
+// escreve, e sem ele `/account/password` volta a exigir a senha atual.
+// A janela é menor que a da sessão de propósito, mas não apertada: quem clica
+// no link, se distrai e volta ainda precisa conseguir terminar. Trinta minutos
+// não afrouxam nada de verdade: quem tem esta marca já tem os cookies da
+// sessão de recuperação, que valem mais e duram mais.
+const RECOVERY = "cofre_recovery";
+const RECOVERY_MAX_AGE = 30 * 60;
 const RATE_WINDOW_SECONDS = 10 * 60;
 const RATE_MAX_ATTEMPTS = 30;
 const DEVICE_TYPES = new Set(["desktop", "phone", "tablet", "unknown"]);
@@ -62,6 +79,59 @@ function passwordOf(value) {
   const password = String(value || "");
   if (password.length < 10 || password.length > 128) throw Object.assign(new Error("A senha precisa ter entre 10 e 128 caracteres"), { statusCode: 400, code: "invalid_password" });
   return password;
+}
+
+// [M6] A REGRA DE SENHA NOVA É OUTRA FUNÇÃO, E ISSO NÃO É DETALHE.
+//
+// `passwordOf` é usada TAMBÉM no login e na reautenticação da exclusão. Se as
+// regras abaixo entrassem lá, todo mundo que já tem uma senha que não as
+// atende ficaria trancado para fora da própria conta no dia da publicação: a
+// checagem roda antes de falar com o provedor, então nem a senha certa passaria.
+// Regra nova vale para senha NOVA. Quem já entrou continua entrando.
+//
+// O QUE ESTAS REGRAS DELIBERADAMENTE NÃO FAZEM: exigir maiúscula, número e
+// símbolo. O NIST SP 800-63B recomenda contra isso desde 2017, e por um motivo
+// medido: composição obrigatória empurra as pessoas para `Senha@2024`, que é
+// pior do que uma frase longa. O que ele recomenda é o que está aqui:
+// comprimento, lista de proibidas e palavras do contexto do usuário.
+//
+// Esta lista é o piso que continua valendo mesmo com a checagem contra
+// vazamentos (HaveIBeenPwned) do provedor DESLIGADA. Com ela ligada, o
+// provedor recusa muito mais; ver o M6 em FINANCEMANAGER_AUDIT_PROGRESS.md.
+const SENHAS_PROIBIDAS = new Set([
+  "senha123456", "1234567890", "0123456789", "senhasenha", "password12",
+  "password123", "qwertyuiop", "administrador", "admin123456", "123456789012",
+  "minhasenha", "minhasenha1", "brasil123456", "corinthians", "flamengo123",
+  "financeiro1", "abcd123456", "aaaaaaaaaa", "1q2w3e4r5t", "!@#$%^&*()",
+  "iloveyou123", "senha123abc", "trocar123456", "mudar123456", "teste123456",
+]);
+const SEQUENCIAS = [
+  "abcdefghijklmnopqrstuvwxyz",
+  "01234567890",
+  "qwertyuiop", "asdfghjkl", "zxcvbnm",
+];
+function ehSequencia(texto) {
+  return SEQUENCIAS.some((linha) => {
+    const invertida = linha.split("").reverse().join("");
+    return linha.includes(texto) || invertida.includes(texto);
+  });
+}
+function senhaNovaOf(value, email) {
+  const senha = passwordOf(value);
+  const plana = senha.toLowerCase();
+  const recusar = (mensagem) => {
+    throw Object.assign(new Error(mensagem), { statusCode: 400, code: "weak_password" });
+  };
+  if (SENHAS_PROIBIDAS.has(plana)) recusar("Esta senha é conhecida demais. Escolha outra.");
+  if (/^(.)\1+$/.test(senha)) recusar("Uma senha de um caractere só repetido não protege nada. Escolha outra.");
+  if (/^\d+$/.test(senha)) recusar("Uma senha só de números é fácil de adivinhar. Misture letras ou use uma frase.");
+  if (ehSequencia(plana)) recusar("Esta senha é uma sequência do teclado. Escolha outra.");
+  // O nome do endereço de email é a primeira coisa que qualquer ataque tenta.
+  const local = String(email || "").split("@")[0].toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (local.length >= 4 && plana.replace(/[^a-z0-9]/g, "").includes(local)) {
+    recusar("A senha não pode conter o seu email. Escolha outra.");
+  }
+  return senha;
 }
 // Cobra do balde da CONTA. Vem sempre depois de `emailOf`, para o endereço já
 // estar normalizado: senão "Fulano@X.com" e "fulano@x.com" contariam separado e
@@ -160,7 +230,16 @@ function requireConfirmedEmail(user) {
 function sessionCookies(event, session) {
   return [cookie(ACCESS, session.access_token, event, { maxAge: Math.min(Number(session.expires_in) || 3600, 3600) }), cookie(REFRESH, session.refresh_token, event, { maxAge: 60 * 60 * 24 * 30 })];
 }
-function clearSession(event) { return [clearCookie(ACCESS, event), clearCookie(REFRESH, event), clearCookie(VERIFIER, event), clearCookie(DEVICE_SECRET, event)]; }
+function clearSession(event) { return [clearCookie(ACCESS, event), clearCookie(REFRESH, event), clearCookie(VERIFIER, event), clearCookie(DEVICE_SECRET, event), clearCookie(RECOVERY, event)]; }
+
+// A marca de recuperação vale para UM fluxo. Ou ela é emitida agora, porque o
+// link de recuperação acabou de ser consumido, ou é apagada, inclusive num
+// login comum, para que uma marca de meia hora atrás não sirva de passe livre.
+function recoveryCookies(event, purpose) {
+  return purpose === "recovery"
+    ? [cookie(RECOVERY, "1", event, { maxAge: RECOVERY_MAX_AGE })]
+    : [clearCookie(RECOVERY, event)];
+}
 
 function terminalSessionFailure(error) {
   return !!(error && TERMINAL_SESSION_CODES.has(error.code));
@@ -423,7 +502,7 @@ async function handler(event) {
       const body = readJson(event, 16 * 1024); const flow = pkce();
       const email = emailOf(body.email);
       await limitarPorEmail(event, email);
-      const result = await api.auth.signUp(email, passwordOf(body.password), appCallbackUrl(event, "signup"), flow.challenge);
+      const result = await api.auth.signUp(email, senhaNovaOf(body.password, email), appCallbackUrl(event, "signup"), flow.challenge);
       const cookies = [cookie(VERIFIER, `signup:${flow.verifier}`, event, { maxAge: VERIFIER_MAX_AGE })];
       if (result.access_token) { const device = await authorizeDevice(result.user.id, event); cookies.push(...sessionCookies(event, result), ...device.cookies); }
       // `email` volta do que foi PEDIDO, não do que o Supabase devolveu: para
@@ -486,10 +565,11 @@ async function handler(event) {
         throw Object.assign(new Error("Este link não vale mais. Entre com seu email e senha."), { statusCode: 400, code: "link_invalid" });
       }
       const device = await authorizeDevice(result.user.id, event);
+      const purpose = type === "recovery" ? "recovery" : "signup";
       return json(200, {
-        ok: true, authenticated: true, purpose: type === "recovery" ? "recovery" : "signup",
+        ok: true, authenticated: true, purpose,
         email: result.user.email || "", userId: result.user.id,
-      }, { cookies: [...sessionCookies(event, result), ...device.cookies, clearCookie(VERIFIER, event)] });
+      }, { cookies: [...sessionCookies(event, result), ...device.cookies, clearCookie(VERIFIER, event), ...recoveryCookies(event, purpose)] });
     }
     if (action === "exchange" && method === "POST") {
       const body = readJson(event, 16 * 1024); const stored = String(cookiesOf(event)[VERIFIER] || "");
@@ -506,7 +586,7 @@ async function handler(event) {
       if (at < 1) throw Object.assign(new Error("Este link foi aberto em outro navegador."), { statusCode: 400, code: "verifier_missing" });
       const purpose = stored.slice(0, at); const result = await api.auth.exchange(String(body.code).slice(0, 2048), stored.slice(at + 1));
       const device = await authorizeDevice(result.user.id, event);
-      return json(200, { ok: true, authenticated: true, purpose, email: result.user.email || "", userId: result.user.id }, { cookies: [...sessionCookies(event, result), ...device.cookies, clearCookie(VERIFIER, event)] });
+      return json(200, { ok: true, authenticated: true, purpose, email: result.user.email || "", userId: result.user.id }, { cookies: [...sessionCookies(event, result), ...device.cookies, clearCookie(VERIFIER, event), ...recoveryCookies(event, purpose)] });
     }
     if (action === "logout" && method === "POST") {
       const sessionValues = cookiesOf(event);
@@ -529,12 +609,54 @@ async function handler(event) {
       }
       return json(200, { ok: true, authenticated: false }, { cookies: clearSession(event) });
     }
+    // [M6] TROCAR A SENHA PRECISA DE UMA PROVA ALÉM DO COOKIE DE SESSÃO.
+    //
+    // Antes esta rota trocava a senha com o cookie e mais nada. Quem chegasse a
+    // uma sessão viva (o celular destravado que ficou na mesa, um cookie
+    // capturado) tomava a conta inteira e trancava o dono do lado de fora, sem
+    // nunca ter sabido a senha. O cookie de sessão prova que ALGUÉM entrou; não
+    // prova que é o dono, e trocar a senha é a ação que decide quem manda na
+    // conta daqui para frente.
+    //
+    // Duas provas são aceitas, e elas cobrem os dois motivos reais de trocar:
+    //
+    //   * a SENHA ATUAL, para quem se lembra dela e quer trocar por vontade;
+    //   * a MARCA DE RECUPERAÇÃO, para quem esqueceu e acabou de abrir o link
+    //     que só chega na caixa de entrada do dono do endereço. Exigir a senha
+    //     atual aqui seria exigir justamente o que a pessoa não tem.
+    //
+    // O limite de tentativas vem ANTES da verificação: senão esta rota vira um
+    // oráculo de senha para quem já tem a sessão, sem teto nenhum.
     if (action === "password" && method === "POST") {
       const session = await requireSession(event, { accountScope: true });
       await rateLimit.enforce(event, { bucket: "conta", limit: RATE_MAX_ATTEMPTS, windowSeconds: RATE_WINDOW_SECONDS });
       const body = readJson(event, 16 * 1024);
-      await api.auth.updateUser(session.token, { password: passwordOf(body.password) });
-      return json(200, { ok: true }, { cookies: session.cookies });
+      const porRecuperacao = String(cookiesOf(event)[RECOVERY] || "") === "1";
+      if (!porRecuperacao) {
+        const atual = String(body.currentPassword || "");
+        if (!atual) {
+          throw Object.assign(new Error("Digite sua senha atual para confirmar a troca."), {
+            statusCode: 401, code: "reauth_required",
+          });
+        }
+        // Normaliza sem VALIDAR: o endereço vem do provedor, já é válido, e um
+        // `emailOf` aqui trocaria "a senha atual não confere" por "informe um
+        // email válido" numa tela onde ninguém digitou email nenhum.
+        await limitarPorEmail(event, String(session.user.email || "").trim().toLowerCase());
+        try { await api.auth.signIn(session.user.email, passwordOf(atual)); }
+        catch (error) {
+          // A falha de reautenticação não pode virar "sessão inválida" na tela:
+          // a sessão está ótima, quem errou foi a senha digitada agora.
+          if (error && error.code === "invalid_password") throw error;
+          throw Object.assign(new Error("A senha atual não confere."), {
+            statusCode: 401, code: "reauth_failed",
+          });
+        }
+      }
+      await api.auth.updateUser(session.token, { password: senhaNovaOf(body.password, session.user.email) });
+      // A marca de recuperação vale por UMA troca. Mantê-la viva deixaria a
+      // janela de 15 minutos aberta para trocas seguintes sem nenhuma prova.
+      return json(200, { ok: true }, { cookies: [...session.cookies, clearCookie(RECOVERY, event)] });
     }
     if (action === "devices" && method === "GET") {
       const session = await requireSession(event, { accountScope: true });

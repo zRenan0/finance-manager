@@ -369,9 +369,17 @@ async function main() {
     httpMethod: "POST", path: "/api/account/logout", queryStringParameters: { action: "logout" },
     headers: { origin: "https://cofre.test", host: "cofre.test", "x-forwarded-proto": "https" },
   });
-  check("logout sem sessão continua idempotente e limpa seus cookies",
-    guestLogout.statusCode === 200 && cookiesOf(guestLogout).length === 4,
-    `${guestLogout.statusCode} ${cookiesOf(guestLogout).length}`);
+  // [M6] A conferência passou a ser pelo NOME de cada cookie, não pela
+  // quantidade. Um número era frágil nos dois sentidos: reprovava ao acrescentar
+  // um cookie (foi o que aconteceu com `cofre_recovery`) e, pior, APROVARIA
+  // trocar um cookie por outro sem limpar o que ficou para trás. Sair da conta
+  // tem de apagar tudo que identifica a sessão, item a item.
+  const limposNoLogout = cookiesOf(guestLogout).map((linha) => String(linha).split("=")[0]).sort();
+  check("logout sem sessão continua idempotente e limpa TODOS os cookies de sessão",
+    guestLogout.statusCode === 200
+      && ["cofre_access", "cofre_device", "cofre_pkce", "cofre_recovery", "cofre_refresh"]
+        .every((nome) => limposNoLogout.includes(nome)),
+    `${guestLogout.statusCode} ${limposNoLogout.join(", ")}`);
 
   global.fetch = originalFetch;
   api.db = originalDb;

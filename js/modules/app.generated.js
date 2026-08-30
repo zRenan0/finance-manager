@@ -386,6 +386,54 @@ function escapeHtml(str) {
 }
 function clamp(n, min, max) { return Math.max(min, Math.min(max, n)); }
 
+// [M6] MEDIDOR DE FORÇA DE SENHA: CONSELHO, NÃO REGRA.
+//
+// A REGRA vive só no servidor (`senhaNovaOf`, netlify/functions/account.js).
+// Isto aqui não repete a regra e não bloqueia nada: repetir a política em dois
+// lugares, em duas linguagens, é o começo garantido de uma divergir da outra, e
+// aí o navegador aprova o que o servidor recusa (ou pior, o contrário). O que
+// esta função faz é dar retorno enquanto a pessoa digita, que é onde uma senha
+// ruim ainda pode ser trocada sem custo.
+//
+// A conta é grosseira de propósito e não finge precisão: comprimento pesa mais
+// do que variedade (é o que a literatura mostra que importa), repetição e
+// sequência descontam, e o email no meio da senha zera o resto. Nenhum número
+// de bits é mostrado ao usuário; um "razoável" honesto vale mais do que uma
+// entropia inventada com três casas decimais.
+const SENHA_SEQUENCIAS = ["abcdefghijklmnopqrstuvwxyz", "01234567890", "qwertyuiop", "asdfghjkl", "zxcvbnm"];
+const SENHA_ROTULOS = ["muito fraca", "fraca", "razoável", "boa", "forte"];
+
+function passwordStrength(value, email) {
+  const senha = String(value || "");
+  if (!senha) return { score: 0, label: "", hint: "", empty: true };
+  const plana = senha.toLowerCase();
+  const classes = [/[a-z]/, /[A-Z]/, /[0-9]/, /[^A-Za-z0-9]/].filter((re) => re.test(senha)).length;
+  const distintos = new Set(senha).size;
+
+  let pontos = 0;
+  if (senha.length >= 10) pontos += 1;
+  if (senha.length >= 14) pontos += 1;
+  if (senha.length >= 20) pontos += 1;
+  if (classes >= 2) pontos += 1;
+  if (classes >= 3 && senha.length >= 12) pontos += 1;
+  // Pouca variedade de caracteres é o sinal mais barato de padrão repetido.
+  if (distintos <= Math.max(3, senha.length / 4)) pontos -= 2;
+  if (/^\d+$/.test(senha)) pontos -= 2;
+  if (SENHA_SEQUENCIAS.some((linha) => linha.includes(plana) || linha.split("").reverse().join("").includes(plana))) pontos -= 3;
+
+  const local = String(email || "").split("@")[0].toLowerCase().replace(/[^a-z0-9]/g, "");
+  const contemEmail = local.length >= 4 && plana.replace(/[^a-z0-9]/g, "").includes(local);
+  if (contemEmail) pontos = -1;
+
+  const score = clamp(pontos, 0, 4);
+  let hint = "";
+  if (contemEmail) hint = "Ela contém o seu email; o servidor vai recusar.";
+  else if (senha.length < 10) hint = "Faltam caracteres para o mínimo de 10.";
+  else if (score <= 1) hint = "Uma frase com três ou quatro palavras costuma ser mais forte e mais fácil de lembrar.";
+  else if (score === 2) hint = "Mais alguns caracteres já fazem diferença.";
+  return { score, label: SENHA_ROTULOS[score], hint, empty: false };
+}
+
 // Normalização de texto compartilhada (busca, categorização automática, NLP).
 // Fica aqui para que import.js, nlp.js e app.js usem exatamente a mesma regra.
 function normalizeText(str) {
@@ -8961,6 +9009,15 @@ async function accountSubmit(kind) {
     // Entrar com email não confirmado deixa de ser recusa muda: a tela passa a
     // mostrar o cartão de confirmação pendente, com o reenvio à mão.
     if (error.code === "email_not_confirmed") state.account.pendingEmail = form.email;
+    // [M6] A recusa do servidor é "digite a senha atual". Nesta tela ela não faz
+    // sentido: quem chegou aqui pelo link de recuperação está justamente sem a
+    // senha. O código só aparece se a marca de recuperação tiver vencido, e a
+    // saída é pedir um link novo, não digitar o que não se tem.
+    if (kind === "password" && error.code === "reauth_required") {
+      state.account.mode = "recover";
+      accountSetBusy(false, "O prazo para definir a nova senha terminou. Peça um novo link de recuperação.");
+      return;
+    }
     accountSetBusy(false, error.message);
   }
 }
@@ -31256,7 +31313,7 @@ function accountGuestForm() {
     <h2 class="card-title">${recover ? "Recuperar acesso" : register ? "Criar conta" : "Entrar"}</h2>
     <p class="card-subtitle">${recover ? "Enviaremos um link para o email informado." : "A conta prepara o acesso em outros dispositivos. O uso local continua disponível sem cadastro."}</p>
     <div class="field"><label class="field__label" for="account-email">Email</label><input id="account-email" class="input" type="email" name="email" data-field="auth-email" data-validate="email" maxlength="254" value="${escapeHtml(a.form.email)}" autocomplete="email" inputmode="email" /></div>
-    ${recover ? "" : `<div class="field"><label class="field__label" for="account-password">Senha</label><input id="account-password" class="input" type="password" name="password" data-field="auth-password" minlength="10" maxlength="128" value="${escapeHtml(a.form.password)}" autocomplete="${register ? "new-password" : "current-password"}" /><p class="field-hint">Mínimo de 10 caracteres.</p></div>`}
+    ${recover ? "" : `<div class="field"><label class="field__label" for="account-password">Senha</label><input id="account-password" class="input" type="password" name="password" data-field="auth-password" minlength="10" maxlength="128" value="${escapeHtml(a.form.password)}" autocomplete="${register ? "new-password" : "current-password"}" />${register ? renderPasswordStrength(a.form.password, a.form.email) : `<p class="field-hint">Mínimo de 10 caracteres.</p>`}</div>`}
     <button type="submit" class="btn btn--primary btn--block" data-action="account-submit" data-value="${recover ? "recover" : (register ? "register" : "login")}" ${a.busy ? "disabled" : ""}>${a.busy ? svgIcon("loader", 16) : svgIcon(register ? "plus" : (recover ? "refresh" : "shieldCheck"), 16)} ${recover ? "Enviar link" : (register ? "Criar conta" : "Entrar")}</button>
     <div class="account-auth-links">
       ${recover ? `<button type="button" class="link-btn" data-action="account-mode" data-value="login">Voltar para entrar</button>` : `<button type="button" class="link-btn" data-action="account-mode" data-value="${register ? "login" : "register"}">${register ? "Já tenho uma conta" : "Criar uma conta"}</button><button type="button" class="link-btn" data-action="account-mode" data-value="recover">Esqueci minha senha</button>`}
@@ -31322,6 +31379,23 @@ function accountDeviceLastSeen(value, current) {
   if (day === today) return `Hoje, ${time}`;
   if (day === yesterdayDate.getTime()) return `Ontem, ${time}`;
   return date.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+}
+
+// [M6] O medidor só aparece onde a senha está sendo ESCOLHIDA (cadastro e nova
+// senha). No campo de entrar ele seria ruído: a senha já existe, e comentar a
+// força dela ali não muda nada além de assustar.
+//
+// A barra é decorativa (`aria-hidden`); quem lê por leitor de tela recebe o
+// texto, que é onde a informação realmente está.
+function renderPasswordStrength(senha, email) {
+  const forca = passwordStrength(senha, email);
+  if (forca.empty) return `<p class="field-hint">Mínimo de 10 caracteres. Uma frase com três ou quatro palavras funciona bem.</p>`;
+  return `<div class="pwd-meter" data-score="${forca.score}">
+    <span class="pwd-meter__track" aria-hidden="true">
+      ${[0, 1, 2, 3].map((i) => `<i class="pwd-meter__step${i < forca.score ? " is-on" : ""}"></i>`).join("")}
+    </span>
+    <p class="field-hint pwd-meter__text" role="status">Força: <b>${escapeHtml(forca.label)}</b>${forca.hint ? ` · ${escapeHtml(forca.hint)}` : ""}</p>
+  </div>`;
 }
 
 function accountDevicesCard(account) {
@@ -31524,7 +31598,7 @@ function accountSignedIn() {
   </div>
   ${accountSyncCard()}
   ${accountGuestLinkCard()}
-  ${a.mode === "password" ? `<div class="card"><p class="card-title">Definir nova senha</p><div class="field"><label class="field__label" for="account-new-password">Nova senha</label><input id="account-new-password" class="input" type="password" data-field="auth-new-password" minlength="10" maxlength="128" value="${escapeHtml(a.form.newPassword)}" autocomplete="new-password" /></div><button class="btn btn--primary" data-action="account-submit" data-value="password" ${a.busy ? "disabled" : ""}>Salvar nova senha</button></div>` : ""}
+  ${a.mode === "password" ? `<div class="card"><p class="card-title">Definir nova senha</p><div class="field"><label class="field__label" for="account-new-password">Nova senha</label><input id="account-new-password" class="input" type="password" data-field="auth-new-password" minlength="10" maxlength="128" value="${escapeHtml(a.form.newPassword)}" autocomplete="new-password" />${renderPasswordStrength(a.form.newPassword, a.email)}</div><button class="btn btn--primary" data-action="account-submit" data-value="password" ${a.busy ? "disabled" : ""}>Salvar nova senha</button></div>` : ""}
   ${accountDevicesCard(a)}
   ${accountDangerCard(a)}`;
 }

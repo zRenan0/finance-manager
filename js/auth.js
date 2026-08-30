@@ -1219,6 +1219,15 @@ async function accountSubmit(kind) {
     // Entrar com email não confirmado deixa de ser recusa muda: a tela passa a
     // mostrar o cartão de confirmação pendente, com o reenvio à mão.
     if (error.code === "email_not_confirmed") state.account.pendingEmail = form.email;
+    // [M6] A recusa do servidor é "digite a senha atual". Nesta tela ela não faz
+    // sentido: quem chegou aqui pelo link de recuperação está justamente sem a
+    // senha. O código só aparece se a marca de recuperação tiver vencido, e a
+    // saída é pedir um link novo, não digitar o que não se tem.
+    if (kind === "password" && error.code === "reauth_required") {
+      state.account.mode = "recover";
+      accountSetBusy(false, "O prazo para definir a nova senha terminou. Peça um novo link de recuperação.");
+      return;
+    }
     accountSetBusy(false, error.message);
   }
 }

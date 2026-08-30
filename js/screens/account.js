@@ -24,7 +24,7 @@ function accountGuestForm() {
     <h2 class="card-title">${recover ? "Recuperar acesso" : register ? "Criar conta" : "Entrar"}</h2>
     <p class="card-subtitle">${recover ? "Enviaremos um link para o email informado." : "A conta prepara o acesso em outros dispositivos. O uso local continua disponível sem cadastro."}</p>
     <div class="field"><label class="field__label" for="account-email">Email</label><input id="account-email" class="input" type="email" name="email" data-field="auth-email" data-validate="email" maxlength="254" value="${escapeHtml(a.form.email)}" autocomplete="email" inputmode="email" /></div>
-    ${recover ? "" : `<div class="field"><label class="field__label" for="account-password">Senha</label><input id="account-password" class="input" type="password" name="password" data-field="auth-password" minlength="10" maxlength="128" value="${escapeHtml(a.form.password)}" autocomplete="${register ? "new-password" : "current-password"}" /><p class="field-hint">Mínimo de 10 caracteres.</p></div>`}
+    ${recover ? "" : `<div class="field"><label class="field__label" for="account-password">Senha</label><input id="account-password" class="input" type="password" name="password" data-field="auth-password" minlength="10" maxlength="128" value="${escapeHtml(a.form.password)}" autocomplete="${register ? "new-password" : "current-password"}" />${register ? renderPasswordStrength(a.form.password, a.form.email) : `<p class="field-hint">Mínimo de 10 caracteres.</p>`}</div>`}
     <button type="submit" class="btn btn--primary btn--block" data-action="account-submit" data-value="${recover ? "recover" : (register ? "register" : "login")}" ${a.busy ? "disabled" : ""}>${a.busy ? svgIcon("loader", 16) : svgIcon(register ? "plus" : (recover ? "refresh" : "shieldCheck"), 16)} ${recover ? "Enviar link" : (register ? "Criar conta" : "Entrar")}</button>
     <div class="account-auth-links">
       ${recover ? `<button type="button" class="link-btn" data-action="account-mode" data-value="login">Voltar para entrar</button>` : `<button type="button" class="link-btn" data-action="account-mode" data-value="${register ? "login" : "register"}">${register ? "Já tenho uma conta" : "Criar uma conta"}</button><button type="button" class="link-btn" data-action="account-mode" data-value="recover">Esqueci minha senha</button>`}
@@ -90,6 +90,23 @@ function accountDeviceLastSeen(value, current) {
   if (day === today) return `Hoje, ${time}`;
   if (day === yesterdayDate.getTime()) return `Ontem, ${time}`;
   return date.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+}
+
+// [M6] O medidor só aparece onde a senha está sendo ESCOLHIDA (cadastro e nova
+// senha). No campo de entrar ele seria ruído: a senha já existe, e comentar a
+// força dela ali não muda nada além de assustar.
+//
+// A barra é decorativa (`aria-hidden`); quem lê por leitor de tela recebe o
+// texto, que é onde a informação realmente está.
+function renderPasswordStrength(senha, email) {
+  const forca = passwordStrength(senha, email);
+  if (forca.empty) return `<p class="field-hint">Mínimo de 10 caracteres. Uma frase com três ou quatro palavras funciona bem.</p>`;
+  return `<div class="pwd-meter" data-score="${forca.score}">
+    <span class="pwd-meter__track" aria-hidden="true">
+      ${[0, 1, 2, 3].map((i) => `<i class="pwd-meter__step${i < forca.score ? " is-on" : ""}"></i>`).join("")}
+    </span>
+    <p class="field-hint pwd-meter__text" role="status">Força: <b>${escapeHtml(forca.label)}</b>${forca.hint ? ` · ${escapeHtml(forca.hint)}` : ""}</p>
+  </div>`;
 }
 
 function accountDevicesCard(account) {
@@ -292,7 +309,7 @@ function accountSignedIn() {
   </div>
   ${accountSyncCard()}
   ${accountGuestLinkCard()}
-  ${a.mode === "password" ? `<div class="card"><p class="card-title">Definir nova senha</p><div class="field"><label class="field__label" for="account-new-password">Nova senha</label><input id="account-new-password" class="input" type="password" data-field="auth-new-password" minlength="10" maxlength="128" value="${escapeHtml(a.form.newPassword)}" autocomplete="new-password" /></div><button class="btn btn--primary" data-action="account-submit" data-value="password" ${a.busy ? "disabled" : ""}>Salvar nova senha</button></div>` : ""}
+  ${a.mode === "password" ? `<div class="card"><p class="card-title">Definir nova senha</p><div class="field"><label class="field__label" for="account-new-password">Nova senha</label><input id="account-new-password" class="input" type="password" data-field="auth-new-password" minlength="10" maxlength="128" value="${escapeHtml(a.form.newPassword)}" autocomplete="new-password" />${renderPasswordStrength(a.form.newPassword, a.email)}</div><button class="btn btn--primary" data-action="account-submit" data-value="password" ${a.busy ? "disabled" : ""}>Salvar nova senha</button></div>` : ""}
   ${accountDevicesCard(a)}
   ${accountDangerCard(a)}`;
 }

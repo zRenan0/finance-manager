@@ -12,16 +12,17 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 
 | Campo | Valor |
 |---|---|
-| Módulo atual | **M6 — Autenticação e senhas** (a iniciar) |
+| Módulo atual | **M7 — Sessões e dispositivos** (a iniciar) |
+| Status do M6 | **CONCLUÍDO no repositório**, com **uma ação sua pendente**: ligar "Prevent use of leaked passwords" no painel do Supabase (passo a passo no M6; não tranca ninguém para fora) |
 | Status do M5 | **CONCLUÍDO no repositório**; vale em produção **depois de publicar**. Critério: `node scripts/check-deploy.js https://www.financemanager.dev.br` passar (hoje reprova 10, de propósito) |
 | Status do M4 | **CONCLUÍDO** — 3 achados corrigidos (1 P1, 1 P2, 1 P3) + suíte de regressão nova |
 | Status do M3 | **CONCLUÍDO** — aplicado e confirmado no banco em 2026-08-28 |
 | Status do M2 | **CONCLUÍDO** — nenhuma vulnerabilidade de autorização; invariantes travados por teste |
 | Status do M1 | **CONCLUÍDO** — aplicado e confirmado; gatilho capturado e versionado |
-| Módulos concluídos | M0, M1, M2, M3, M4, M5 |
-| Próximo módulo | M6 — Autenticação e senhas (senha forte, senha vazada, rate limit, reautenticação em ação crítica, arquitetura para MFA/TOTP) |
+| Módulos concluídos | M0, M1, M2, M3, M4, M5, M6 |
+| Próximo módulo | M7 — Segurança > Dispositivos e sessões (a tela já existe e lista/revoga; falta "sair de todos os outros", que **precisa de reautenticação** — a prova já está pronta no M6) |
 | Branch | `deploy-atualizado` (árvore limpa no início do M0) |
-| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js` (M1/M2/M3 + M5), `tests/test-service-role-scope.js` (novo), `tests/test-xss-surface.js` (novo, M4), `scripts/check-deploy.js` (M5), `scripts/serve.js` (M5). Produção: `js/screens/analytics.js`, `js/icons.js`, `js/modules/app.generated.js` (M4), `vercel.json` (M5). |
+| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js` (M1/M2/M3 + M5), `tests/test-service-role-scope.js`, `tests/test-xss-surface.js` (M4), `tests/test-auth-password.js` (M6), `tests/test-session-scope-backend.js` (M6), `scripts/check-deploy.js` e `scripts/serve.js` (M5). Produção: `js/screens/analytics.js` e `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `js/utils.js`, `js/auth.js`, `js/screens/account.js`, `css/screens/account.css` (M6), `js/modules/app.generated.js` (regerado). |
 | Migrations criadas até aqui | `20260828120000_rls_auto_enable_least_privilege.sql`, `20260828130000_rls_auto_enable_versionada.sql`, `20260828140000_menor_privilegio_tabelas.sql` (as três **aplicadas e confirmadas em 2026-08-28**), `20260828150000_rls_auto_enable_gatilho.sql` (**ainda não aplicada**; é no-op em produção, onde o gatilho já existe) |
 | Versão do app | `0.30.0` (package.json) |
 
@@ -1130,6 +1131,195 @@ necessário — não há migração, variável de ambiente nem passo manual.
 
 ---
 
+## M6 — Autenticação e senhas
+
+### Antes (situação encontrada)
+
+A autenticação é a parte mais bem construída do backend. Já existiam, sem
+nenhuma ajuda deste módulo: PKCE no fluxo de email, sessão só em cookie
+`HttpOnly; Secure; SameSite=Lax`, segredo por aparelho com HMAC, confirmação de
+email obrigatória inclusive em sessão já emitida, `assertSameOrigin` em todo
+POST, teto de tentativas em duas dimensões (30/10min por origem **e** 10/10min
+por endereço, com o email passando por HMAC antes de tocar o banco), respostas
+deliberadamente opacas para não revelar quem tem conta, e a senha apagada do
+estado do cliente em qualquer desfecho.
+
+Três coisas faltavam. Uma delas era um buraco de verdade.
+
+### Achados
+
+| # | P | Achado | Situação |
+|---|---|---|---|
+| **F6-01** | **P1** | **`POST /api/account/password` trocava a senha com o cookie de sessão e mais nada.** Nenhuma senha atual, nenhuma prova de recuperação. Quem chegasse a uma sessão viva — o celular destravado esquecido na mesa, um cookie capturado — trocava a senha, tomava a conta e trancava o dono do lado de fora **sem nunca ter sabido a senha**. O cookie prova que alguém entrou; não prova que é o dono, e trocar a senha é a ação que decide quem manda na conta daqui para frente. Nota: a interface só chega nesta rota pelo link de recuperação, mas a interface não é a fronteira — a rota aceitava qualquer sessão. | **CORRIGIDO** |
+| **F6-02** | P2 | Política de senha era só comprimento (10 a 128). `senha123456`, `1234567890`, `qwertyuiop` e o próprio email do usuário passavam. | **CORRIGIDO** |
+| **F6-03** | P2 | Nenhum retorno de força enquanto a pessoa escolhe a senha. | **CORRIGIDO** |
+| **F6-04** | P2 | `auth_leaked_password_protection` continua **desligado** (confirmado no advisor do Supabase agora, nível WARN). É chave de painel, não de código. | **PENDENTE DE AÇÃO SUA** — instruções abaixo |
+| **F6-05** | P3 | Sem MFA. | **ARQUITETURA REGISTRADA**, não implementada |
+| — | — | Conferidos **sem achado**: enumeração de usuários (cadastro, recuperação e reenvio devolvem a mesma resposta para endereço existente e inexistente; `email_not_confirmed` só aparece **depois** de um login bem-sucedido, ou seja, para quem já tem a senha certa — não é sonda); teto de tentativas; exclusão de conta (já reautenticava com senha **e** exigia digitar "APAGAR CONTA"); cookies de sessão. | — |
+
+### Alterações
+
+| Arquivo | O quê |
+|---|---|
+| `netlify/functions/account.js` | `senhaNovaOf()` (regra de senha nova, separada de `passwordOf`); cookie `cofre_recovery`; reautenticação em `/account/password`; `clearSession` limpa a marca nova |
+| `js/utils.js` | `passwordStrength()` — medidor, sem dependência |
+| `js/screens/account.js` | `renderPasswordStrength()` no campo de cadastro e no de nova senha |
+| `js/auth.js` | mensagem própria quando a marca de recuperação vence |
+| `css/screens/account.css` | estilo do medidor |
+| `tests/test-auth-password.js` | **novo**, 45 asserções em 6 blocos |
+| `tests/test-session-scope-backend.js` | a conferência do logout passa a ser por NOME de cookie, não por quantidade |
+| `js/modules/app.generated.js` | regerado |
+
+### Motivo, e a decisão de projeto que sustenta o módulo
+
+**A prova exigida para trocar a senha depende de por que se está trocando**, e
+os dois motivos são legítimos:
+
+* quem **lembra** a senha e quer trocar por vontade prova com a senha atual;
+* quem **esqueceu** não pode ser obrigado a digitar exatamente o que não tem.
+  A prova, aí, é o link que só chega na caixa de entrada do dono do endereço.
+
+O cookie `cofre_recovery` é a segunda prova, emitida pelo servidor no instante
+em que o link é consumido (`verify` e `exchange`), `HttpOnly`, com 30 minutos de
+validade e **consumida na primeira troca**. O cliente não a lê nem a escreve.
+Sem ela, `/account/password` volta a exigir a senha atual.
+
+**Por que a regra de senha nova é uma função separada.** `passwordOf` também é
+usada no **login** e na reautenticação da exclusão. Se as regras novas
+entrassem lá, todo usuário com uma senha que não as atende ficaria trancado
+para fora da própria conta no dia da publicação — e nem a senha **certa**
+passaria, porque a checagem roda antes de falar com o provedor. Regra nova vale
+para senha nova. É o bloco 3 do teste, e existe só para isso.
+
+**O que as regras deliberadamente NÃO fazem: exigir maiúscula, número e
+símbolo.** O NIST SP 800-63B recomenda contra composição obrigatória desde 2017,
+por um motivo medido: ela empurra as pessoas para `Senha@2024`, que é pior do
+que uma frase longa. O que ele recomenda é o que está implementado —
+comprimento, lista de proibidas e palavras do contexto do usuário (o email).
+
+**O medidor é conselho, não regra.** A política mora só no servidor. Repetir a
+regra em duas linguagens é o começo garantido de uma divergir da outra — a mesma
+lição do F5-02, onde a política de conteúdo estava copiada em dois arquivos. O
+medidor dá retorno enquanto a senha ainda pode ser trocada sem custo; quem
+recusa é o servidor.
+
+### O QUE VOCÊ PRECISA FAZER (2 minutos, no painel do Supabase)
+
+Projeto **Finance Manager** (`drmnezcjhfkxdksdpjyr`) → **Authentication** →
+**Sign In / Providers** → seção **Password**:
+
+1. Ligar **"Prevent use of leaked passwords"** (checagem contra o
+   HaveIBeenPwned). Resolve o alerta `auth_leaked_password_protection`.
+2. Opcional, defesa em profundidade: subir **Minimum password length** para
+   **10**, igualando o que o backend já exige.
+
+**Isto não tranca ninguém para fora.** A checagem de senha vazada do Supabase
+roda no **cadastro e na troca de senha**, nunca no login. Quem já tem conta com
+uma senha que aparece em vazamento continua entrando normalmente; só será
+recusado se tentar **definir** essa senha de novo.
+
+Conferir depois de ligar: o advisor de segurança do projeto deve deixar de
+listar `auth_leaked_password_protection`. Os três `rls_enabled_no_policy` que
+sobram (`cofre_mutations`, `cofre_rate_limit`, `cofre_sync_config`) são nível
+INFO e **deliberados** — tabelas server-only, decisão registrada no M3.
+
+### Arquitetura para MFA (F6-05, registrada, não implementada)
+
+O Supabase já traz TOTP; o trabalho é de integração, não de criptografia.
+Desenho que se encaixa no que existe, para quando o M7 ou uma sessão futura
+pegar isto:
+
+1. **Backend** — quatro rotas novas em `netlify/functions/account.js`, todas no
+   molde atual (`requireSession` + `assertSameOrigin` + `rateLimit.enforce`):
+   `mfa-enroll` (chama `POST /auth/v1/factors`), `mfa-challenge`, `mfa-verify`
+   (devolve token com `aal2`) e `mfa-unenroll` — esta última **exigindo
+   reautenticação**, porque desligar a segunda etapa é ação crítica.
+2. **Nível de garantia** — `requireSession` ganha `{ aal: "aal2" }` opcional,
+   lendo a reivindicação `aal` do JWT. As ações críticas passam a pedir `aal2`
+   em vez de senha: `delete`, `password`, e o "sair de todos os aparelhos"
+   que o M7 vai criar.
+3. **Segredo na tela sem dependência nova** — o app tem **leitor** de QR
+   (`js/qrcode.js`), não gerador. Mostrar o segredo em texto para digitação
+   manual evita puxar biblioteca de geração e evita a imagem do segredo; se um
+   QR for desejado depois, ele precisa ser desenhado **localmente**, nunca por
+   serviço externo (a `connect-src` do M5 já barraria, e é bom que barre).
+4. **Códigos de recuperação** — obrigatórios antes de concluir a ativação. Sem
+   eles, perder o telefone vira perder a conta, e o suporte vira o elo fraco.
+5. **Convivência com o modelo de aparelhos** — MFA entra no **login**; o
+   segredo por aparelho continua sendo o que autoriza a sincronização. São
+   camadas diferentes e não se substituem.
+6. **Permissions-Policy** — o M5 deixou `publickey-credentials-get` e
+   `publickey-credentials-create` **fora** da lista de negação exatamente para
+   não criar armadilha aqui, caso um dia entre passkey. Nada a mudar.
+
+### Compatibilidade
+
+- **Login não mudou em nada.** Nenhuma regra nova o alcança; travado por teste
+  (bloco 3: senha legada `1234567890` continua entrando e autenticando).
+- **Fluxo de recuperação por email não mudou** para quem o usa: o cookie chega
+  junto com a sessão, e a tela continua igual. Se a marca vencer (mais de 30
+  minutos entre abrir o link e salvar), a tela agora diz "peça um novo link" em
+  vez de repetir a recusa do servidor, que ali não faria sentido.
+- **Exclusão de conta não mudou**: já reautenticava.
+- **Nenhum contrato quebrado**: `/account/password` só ganhou um campo
+  **opcional** no corpo (`currentPassword`). Cliente antigo que não o envia e
+  esteja em fluxo de recuperação continua funcionando igual.
+- **Nenhuma senha existente ficou inválida.** As regras novas valem no cadastro
+  e na definição de senha nova.
+- Cookie novo, nenhum cookie renomeado ou removido; `clearSession` limpa os
+  cinco.
+
+### Testes
+
+| Teste | Resultado |
+|---|---|
+| `node scripts/lint.js` | **PASSOU** — 0 erro, 0 aviso |
+| `node tests/run-all.js` | **PASSOU** — **53/53** arquivos (52 + o novo) |
+| `node tests/test-auth-password.js` | **PASSOU** — **45 ok, 0 falha** |
+| `node scripts/build-app-module.js --check` | **PASSOU** |
+| `node scripts/check-release.js` / `build-dist.js` | **PASSOU** (avisos conhecidos) |
+| **Teste de mutação (2 mutações)** | **PASSOU** — ver abaixo |
+| **Navegador local, 23 rotas** | **PASSOU** — 534 ícones, 0 problema, 0 violação de CSP, nenhum erro novo de console |
+| Formulário de cadastro em navegador, com o medidor visível | **NÃO VALIDADO** — sem `vercel dev` o app local considera o serviço de contas não configurado e nem desenha o formulário. O render foi conferido chamando `renderPasswordStrength` direto (bloco 6): marcação, níveis, texto por extenso, `aria-hidden` na barra, `role="status"` no texto e escape de email hostil |
+| Fluxo real de recuperação ponta a ponta (email → link → nova senha) | **NÃO VALIDADO** — exige SMTP e `vercel dev`. As duas provas e o consumo da marca estão cobertos por teste de integração do handler |
+| `test:browser` (Playwright) | **NÃO VALIDADO** — indisponível localmente; roda na CI |
+
+**Teste de mutação.** Desligando a reautenticação (`porRecuperacao = true`
+fixo): reprovam 6 asserções, incluindo "sessão sozinha não troca a senha" e
+"nada foi gravado na recusa". Trocando `senhaNovaOf` de volta por `passwordOf`
+no cadastro: reprovam 10, uma por regra. Restaurado, 45/45.
+
+O teste usa **sessão de verdade**: entra pelo handler e reaproveita os cookies
+que o servidor devolveu, inclusive o segredo do aparelho, com uma tabela de
+aparelhos em memória que respeita o filtro por `secret_hash` da rota. Um mock
+que devolvesse linha fixa nunca casaria com o HMAC e todo pedido morreria em
+`device_unknown` antes de chegar à regra sob teste — o teste passaria a testar
+o mock.
+
+### Status
+
+**CONCLUÍDO no repositório**, com **uma ação sua pendente** (a chave de senha
+vazada no painel do Supabase, seção acima). F6-01, F6-02 e F6-03 corrigidos e
+travados por teste. F6-05 registrado como arquitetura.
+
+### Registrado para módulos seguintes
+
+- **M7 (dispositivos e sessões)**: "sair de todos os outros aparelhos" ainda não
+  existe. Quando existir, **precisa de reautenticação** — a prova já está pronta
+  e é a mesma de `/account/password`. **Revogar UM aparelho continua sem
+  reautenticação de propósito**: é ação defensiva, e quem acabou de ver um
+  acesso estranho precisa conseguir cortá-lo em dois toques, não travado por um
+  campo de senha.
+- **P3 registrado**: a exclusão de conta usa `passwordOf` para validar a senha
+  **atual**, o que aplicaria o mínimo de 10 caracteres a uma senha antiga mais
+  curta. Nenhum usuário conhecido está nessa faixa (o mínimo é 10 desde antes
+  desta auditoria) e mexer nisso agora é risco sem ganho; fica anotado.
+- **M17 (observabilidade)**: `reauth_failed` e `weak_password` são os dois
+  códigos novos e são bons sinais de monitoramento — uma sequência de
+  `reauth_failed` numa conta é tentativa de tomada de conta com sessão viva.
+
+---
+
 ## Checklist de regressão
 
 Executar após **todo** módulo que toque no código. Marcar `OK` / `FALHOU` / `NÃO VALIDADO`.
@@ -1138,7 +1328,7 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
 ### A. Automatizado (CI ou máquina com Node) — porta de entrada obrigatória
 
 - [ ] `npm run lint`
-- [ ] `npm test` (52 arquivos)
+- [ ] `npm test` (53 arquivos)
 - [ ] `npm run check:build` (o `app.generated.js` publicado corresponde às fontes)
 - [ ] `npm run check:release`
 - [ ] `npm run build:dist`
@@ -1249,6 +1439,9 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
   `vercel.json` e passam em todos os testes locais, mas produção só passa a
   servi-los depois do próximo deploy. Conferir com
   `node scripts/check-deploy.js https://www.financemanager.dev.br`.
+- **M6 depende de UMA CHAVE NO PAINEL do Supabase** para fechar: ligar
+  "Prevent use of leaked passwords" em Authentication > Sign In / Providers >
+  Password. Passo a passo e a garantia de que não tranca ninguém estão no M6.
 - **M5, ressalva de longo prazo:** com `includeSubDomains` no ar, criar depois
   um subdomínio servido em **HTTP** (blog, painel de terceiro) será recusado
   pelos navegadores que já viram o cabeçalho. Só ápice e `www` existem hoje,
