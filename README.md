@@ -25,7 +25,8 @@ npm run verify:release
 ```
 
 O processo de homologação, publicação e retorno está em `docs/RELEASE.md`. O schema
-de dados está na versão 22 e o cache offline na versão 55.
+de dados está na versão 22 e o cache offline na versão 58. O inventário técnico
+do armazenamento está em `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`.
 
 ## Módulo 15 — revisão das referências financeiras
 
@@ -1470,9 +1471,11 @@ serializadas entre abas.
 
 **3. Integração analítica (`netlify/functions/analyze.js` + `js/insights.js`)**
 
-- `js/insights.js` compila um JSON **anonimizado** a partir do IndexedDB: só
-  agregados numéricos e nomes de categoria. Descrições de lançamento, datas
-  individuais, estabelecimentos, ids e chaves de nota **nunca** saem do aparelho.
+- `js/insights.js` compila um JSON reduzido a partir do IndexedDB: só agregados
+  numéricos, nomes de categoria e dados de metas. Não é chamado de anônimo porque
+  nomes escolhidos pelo usuário podem revelar contexto pessoal. Descrições de
+  lançamento, datas individuais, estabelecimentos, ids e chaves de nota **nunca**
+  saem do aparelho.
 - `analyze.js` é um proxy seguro: a chave da API vive só na variável de ambiente da
   publicação. Ele ainda aplica uma faxina defensiva no payload (descarta qualquer campo
   fora do schema, trunca strings, limita listas) antes de falar com a LLM.
@@ -1670,15 +1673,20 @@ origem segura.
 
 ## Onde ficam os dados
 
-Tudo fica no **IndexedDB do seu navegador**, no seu próprio aparelho (com
-`localStorage` como fallback em navegadores antigos). Nada é enviado para servidor
-algum — nem os extratos importados, nem as fotos/QR codes lidos pela câmera.
+O IndexedDB é a fonte da tela, e o `localStorage` mantém o fallback e cópias de
+recuperação. Sem conta, os dados financeiros não são enviados para o servidor.
+Com conta ligada, os registros passam a ser sincronizados para aparecer em outros
+aparelhos. Extratos importados, PDFs e imagens lidas pela câmera são processados
+localmente e o arquivo original não é enviado.
 
-A única exceção, se você optar por usar os Insights com IA, é um **resumo agregado e
-anônimo** (renda, totais por grupo, gastos por nome de categoria, progresso das
-metas e o histórico de 6 meses). Descrições de lançamentos, datas individuais,
-estabelecimentos e identificadores nunca saem do aparelho. O aplicativo mostra
-uma confirmação com essa lista antes de cada envio.
+Se você optar pelos Insights com IA, sai o pacote mostrado na confirmação: renda,
+totais por grupo, gastos por nome de categoria, metas e histórico de 6 meses. O
+pacote é reduzido, mas não é anônimo porque nomes escolhidos pelo usuário podem
+revelar contexto pessoal. Descrições de lançamentos, datas individuais,
+estabelecimentos e identificadores não entram nesse pacote.
+
+O mapa completo de IndexedDB, localStorage, CacheStorage, cookies, retenção e
+exclusão está em `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`.
 
 Use "Ajustes → Exportar backup (JSON)" regularmente. Ao restaurar um backup, o banco
 é **substituído por inteiro** — nenhum registro antigo sobrevive ao restore.

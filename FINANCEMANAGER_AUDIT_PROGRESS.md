@@ -12,7 +12,8 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 
 | Campo | Valor |
 |---|---|
-| Módulo atual | **M8 — Armazenamento local e privacidade** (a iniciar) |
+| Módulo atual | **M9 - PWA, cache e atualização offline** (a iniciar) |
+| Status do M8 | **CONCLUÍDO** - inventário completo de IndexedDB, localStorage, sessionStorage, CacheStorage e cookies; versões conferidas; fluxo corrigido na documentação; risco do espelho em JSON registrado |
 | Status do M7 | **CONCLUÍDO** — "sair dos outros aparelhos" com reautenticação e duas camadas; data de entrada na lista |
 | Status do M6 | **CONCLUÍDO, sem pendência.** A proteção contra senha vazada é do plano pago do Supabase (org confirmada no **free**), então foi implementada aqui por k-anonimato contra o HaveIBeenPwned, verificada ao vivo. Ver F6-04 |
 | Status do M5 | **CONCLUÍDO E CONFIRMADO EM PRODUÇÃO** (2026-08-30). `node scripts/check-deploy.js https://www.financemanager.dev.br` passa com **66 ok, 0 falhas**; antes da publicação reprovava 10 |
@@ -20,10 +21,10 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 | Status do M3 | **CONCLUÍDO** — aplicado e confirmado no banco em 2026-08-28 |
 | Status do M2 | **CONCLUÍDO** — nenhuma vulnerabilidade de autorização; invariantes travados por teste |
 | Status do M1 | **CONCLUÍDO** — aplicado e confirmado; gatilho capturado e versionado |
-| Módulos concluídos | M0, M1, M2, M3, M4, M5, M6, M7 |
-| Próximo módulo | M8 — Armazenamento local e privacidade (mapear localStorage/IndexedDB/Cache/cookies, versionar o schema local, documentar o fluxo de dados; insumos R7 e a lista do M0) |
+| Módulos concluídos | M0, M1, M2, M3, M4, M5, M6, M7, M8 |
+| Próximo módulo | M9 - PWA, cache e atualização offline (validar atualização atômica, shell offline, separação entre landing e app e pendências do item 19 da auditoria de beta) |
 | Branch | `deploy-atualizado` (árvore limpa no início do M0) |
-| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-render.js`, `scripts/check-deploy.js`, `scripts/serve.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/modules/app.generated.js` (regerado). |
+| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `scripts/check-deploy.js`, `scripts/serve.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/modules/app.generated.js` (regerado). Documentação do M8: `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `docs/ARCHITECTURE.md`, `README.md`. |
 | Migrations criadas até aqui | `20260828120000_rls_auto_enable_least_privilege.sql`, `20260828130000_rls_auto_enable_versionada.sql`, `20260828140000_menor_privilegio_tabelas.sql` (as três **aplicadas e confirmadas em 2026-08-28**), `20260828150000_rls_auto_enable_gatilho.sql` (**ainda não aplicada**; é no-op em produção, onde o gatilho já existe) |
 | Versão do app | `0.30.0` (package.json) |
 
@@ -1542,6 +1543,94 @@ neste módulo além da publicação, que é comum a M5, M6 e M7.
 
 ---
 
+## M8 - Armazenamento local e privacidade
+
+### Antes
+
+O desenho local já tinha duas versões explícitas e corretas: schema lógico 22 e
+IndexedDB físico 4. O IndexedDB já era a fonte da interface, a fila já ficava no
+mesmo banco e tokens de sessão já estavam somente em cookies `HttpOnly`.
+
+O problema deste módulo era a documentação. A lista do M0 não era completa,
+misturava uma chave de `sessionStorage` com `localStorage`, não conhecia o cookie
+de recuperação criado no M6 e não registrava a cópia
+`financas_pro_v2_backup`. O README também contradizia o aplicativo ao afirmar
+que nada era enviado a servidor, mesmo com sincronização de conta ativa, e ainda
+chamava de anônimo um pacote de IA que leva nomes escolhidos pelo usuário.
+
+### Inventário confirmado
+
+| Camada | Situação confirmada |
+|---|---|
+| IndexedDB | `financas_db` no visitante e `financas_db__u_<id>` por conta, versão 4; stores `transactions`, `categories`, `goals`, `settings`, `assets`, `outbox` e `localMeta` |
+| Schema lógico | versão 22 no cliente e no validador do backend; também sai no backup; não houve mudança de formato neste módulo |
+| localStorage | 17 famílias de chave persistente mais o teste transitório; espelho, fallback, undo, outbox e cópias legadas podem conter JSON financeiro legível |
+| sessionStorage | somente `cofre_build_reload`, guarda da recarga do pacote nesta aba |
+| CacheStorage | shell, páginas e fontes separados em `v58`; apenas arquivos públicos; `/api/` nunca entra no cache e o backend responde `no-store` |
+| Cookies | `cofre_access`, `cofre_refresh`, `cofre_pkce`, `cofre_device` e `cofre_recovery`; todos `HttpOnly`, `SameSite=Lax`, `Path=/` e `Secure` em produção |
+| Exclusão | `purge()` limpa os sete stores e as cópias financeiras do escopo; preserva só a barreira de reset, que não contém registro e impede ressurreição |
+
+### Achados
+
+| # | P | Achado | Situação |
+|---|---|---|---|
+| F8-01 | P3 | O README dizia que nenhum dado ia para servidor, apesar de a conta sincronizar registros financeiros. | **CORRIGIDO.** O texto agora separa uso sem conta, sincronização, IA, Sefaz e exportação. |
+| F8-02 | P3 | O README chamava o pacote da IA de anônimo. Ele leva nomes de categorias e metas, que podem revelar contexto pessoal. | **CORRIGIDO.** Passou a ser descrito como pacote reduzido, não anônimo. |
+| F8-03 | P3 | O inventário do M0 omitia `financas_pro_v2_backup`, tratava `cofre_build_reload` como localStorage e não incluía o cookie `cofre_recovery`. | **CORRIGIDO** no inventário técnico e travado por teste. |
+| R7 | P3 | `financas_db_mirror` guarda a base financeira como JSON legível. Fallback, undo, outbox e backup legado também podem guardar conteúdo equivalente. | **ACEITO NO DESENHO ATUAL.** Criptografia sem um segredo externo só esconderia a chave no mesmo JavaScript. A cópia existe para evitar perda entre a escrita em memória e o commit assíncrono. O risco e a exclusão estão documentados; a redação legal para usuário permanece no M18. |
+| - | - | Tokens no Web Storage, dados financeiros no CacheStorage, API cacheada ou cookie acessível por JavaScript. | **NÃO ENCONTRADO.** |
+
+### Alterações
+
+| Arquivo | Motivo |
+|---|---|
+| `docs/ARMAZENAMENTO-E-PRIVACIDADE.md` | inventário das versões, escopos, stores, chaves, caches, cookies, fluxos de saída e exclusão |
+| `docs/ARCHITECTURE.md` | distingue schema lógico 22 de IndexedDB físico 4 e aponta para o inventário |
+| `README.md` | corrige cache para v58, sincronização com conta e a descrição do pacote de IA |
+| `tests/test-storage-privacy-inventory.js` | confere 69 invariantes entre código e documentação |
+
+### Compatibilidade
+
+Nenhum código de produção, dado persistido, cookie, schema, banco ou cache mudou.
+O schema continua 22, o IndexedDB continua 4, o protocolo continua 3 e o pacote
+offline continua v58. Não há migração nem alteração na sincronização.
+
+### Testes
+
+| Teste | Resultado |
+|---|---|
+| `node tests/test-storage-privacy-inventory.js` | **PASSOU** - 69 ok, 0 falhas |
+| `node scripts/lint.js` | **PASSOU** - 154 arquivos, 0 erro, 0 aviso |
+| `node tests/run-all.js` | **PASSOU** - 55/55 arquivos |
+| `node scripts/build-app-module.js --check` | **PASSOU** - 70 fontes conferidas |
+| `node scripts/check-release.js` | **PASSOU** - publicação 0.30.0 verificada; permanece o aviso conhecido dos 7 campos legais |
+| `node scripts/build-dist.js` | **PASSOU** - 38 arquivos; permanece o aviso local conhecido de `SITE_URL` |
+| `node scripts/coverage.js` | **PASSOU** - 22,4% global, acima do piso de 20% e da baseline de 21,9% |
+| `node tests/browser/run-browser.js` | **PASSOU** - 18 cenários no Chromium, 0 falha; inclui 320/390/768/1440 px, zoom de 200% e temas |
+
+### Status
+
+**CONCLUÍDO.** O armazenamento local está versionado, o fluxo de dados está
+documentado e as diferenças encontradas não alteram a base do usuário. O risco
+de dados locais legíveis fica registrado para a transparência jurídica do M18,
+sem prometer criptografia que o produto não oferece.
+
+### Registrado para módulos seguintes
+
+- **M9**: conferir no navegador a promoção de pacote, limpeza de caches antigos,
+  shell offline e separação entre landing e aplicativo. O inventário mostra que
+  nenhuma resposta de API deve aparecer no CacheStorage. O runner local atual
+  importa somente `chromium`, embora o checklist ainda diga Chromium, Firefox e
+  WebKit; essa divergência entra na validação do M9.
+- **M13**: há várias versões independentes no projeto. A auditoria de versão deve
+  impedir divergência entre cliente e backend e decidir como um cliente antigo
+  reage a um snapshot criado por schema futuro.
+- **M18**: levar para a política a informação de que as cópias locais financeiras
+  são legíveis no perfil do navegador, além de preencher os sete campos do
+  controlador. Este módulo só fechou o inventário técnico.
+
+---
+
 ## Checklist de regressão
 
 Executar após **todo** módulo que toque no código. Marcar `OK` / `FALHOU` / `NÃO VALIDADO`.
@@ -1550,7 +1639,7 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
 ### A. Automatizado (CI ou máquina com Node) — porta de entrada obrigatória
 
 - [ ] `npm run lint`
-- [ ] `npm test` (54 arquivos)
+- [ ] `npm test` (55 arquivos)
 - [ ] `npm run check:build` (o `app.generated.js` publicado corresponde às fontes)
 - [ ] `npm run check:release`
 - [ ] `npm run build:dist`
