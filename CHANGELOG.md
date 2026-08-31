@@ -2,6 +2,18 @@
 
 ## Não publicado
 
+### As recusas de segurança agora têm uma matriz executável
+
+- Uma nova suíte percorre usuário A contra usuário B, JWT inválido e expirado,
+  manipulação de `user_id`, RPC sem autenticação, aparelho revogado, replay,
+  entrada maliciosa e limite de requisições.
+- As 22 verificações usam os handlers reais e confirmam que a recusa acontece
+  antes de banco financeiro, RPC, refresh ou persistência quando o pedido não
+  deve avançar.
+- Uma consulta SQL somente leitura permite conferir em desenvolvimento ou
+  staging se RPC, RLS e policies continuam com o limite esperado. Nenhum teste
+  agressivo é disparado contra contas de produção.
+
 ### A cobertura agora mede a suíte inteira sem apagar execuções
 
 - O agregador considerava um trecho descoberto quando qualquer processo deixava

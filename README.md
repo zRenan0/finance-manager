@@ -35,8 +35,19 @@ node tests/test-critical-actions.js
 npm run test:coverage
 ```
 
+### Testes defensivos de segurança
+
+Os nove vetores do M16 são exercitados em uma matriz local contra os handlers
+reais. A conferência do PostgreSQL é somente leitura e deve ser executada em
+desenvolvimento ou staging.
+
+```bash
+node tests/test-security-adversarial.js
+psql <URL_DE_STAGING> -v ON_ERROR_STOP=1 -f supabase/tests/verify_security_boundary.sql
+```
+
 O processo de homologação, publicação e retorno está em `docs/RELEASE.md`. O schema
-de dados está na versão 22 e o cache offline na versão 59. O inventário técnico
+de dados está na versão 23 e o cache offline na versão 59. O inventário técnico
 do armazenamento está em `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`.
 
 ## Módulo 15 — revisão das referências financeiras

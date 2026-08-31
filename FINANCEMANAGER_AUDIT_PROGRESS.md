@@ -12,7 +12,8 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 
 | Campo | Valor |
 |---|---|
-| Módulo atual | **M15 - Testes automatizados** (concluído) |
+| Módulo atual | **M16 - Testes de segurança** (concluído) |
+| Status do M16 | **CONCLUÍDO** - os nove vetores do roteiro possuem prova defensiva; 22 verificações novas nos handlers reais e contrato SQL somente leitura para desenvolvimento ou staging; nenhuma falha de produção confirmada |
 | Status do M15 | **CONCLUÍDO** - ações financeiras críticas cobertas por comportamento; agregação V8 corrigida; cobertura real em 79,0% global e 41,7% em `js/actions.js`, com pisos de 75% e 35% |
 | Status do M14 | **CONCLUÍDO** - duplicidade passou a olhar a descrição e a ter quatro motivos distintos, o FITID do OFX é lido e guardado, e existe desfazer da última importação; schema local em 23 |
 | Status do M13 | **CONCLUÍDO** - seis versões inventariadas em `docs/VERSIONAMENTO.md` com matriz de compatibilidade conferida por teste; backup de schema futuro passou a avisar; banco passou a declarar a própria versão (**migração aplicada e confirmada em produção em 2026-08-31**) |
@@ -28,10 +29,10 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 | Status do M3 | **CONCLUÍDO** — aplicado e confirmado no banco em 2026-08-28 |
 | Status do M2 | **CONCLUÍDO** — nenhuma vulnerabilidade de autorização; invariantes travados por teste |
 | Status do M1 | **CONCLUÍDO** — aplicado e confirmado; gatilho capturado e versionado |
-| Módulos concluídos | M0, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15 |
-| Próximo módulo | M16 - Testes de Segurança |
+| Módulos concluídos | M0, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15, M16 |
+| Próximo módulo | M17 - Observabilidade |
 | Branch | `deploy-atualizado` (árvore limpa no início do M0) |
-| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `tests/test-cloud-sync.js`, `tests/test-account-backend.js`, `tests/test-critical-actions.js`, `tests/test-coverage.js`, `scripts/check-deploy.js`, `scripts/serve.js`, `scripts/coverage.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/storage.js`, `js/cloud-sync.js` (M10), `js/analytics.js`, `js/forecast.js`, `js/wrapped.js`, `js/screens/analytics.js` (M11), `js/backup-crypto.js` (**novo**), `js/app.js`, `js/actions.js`, `js/storage.js`, `js/screens/settings.js`, `css/components.css`, `scripts/build-app-module.js` (M12), `netlify/functions/sync.js` (M13), `js/import.js`, `netlify/functions/_shared/finance-schema.js` (M14), `js/modules/app.generated.js` (regerado). Documentação: inventário do M8, protocolo do M10, backup protegido do M12, `docs/VERSIONAMENTO.md` do M13 e desenho de testes do M15. |
+| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `tests/test-cloud-sync.js`, `tests/test-account-backend.js`, `tests/test-critical-actions.js`, `tests/test-coverage.js`, `tests/test-security-adversarial.js`, `supabase/tests/verify_security_boundary.sql`, `scripts/check-deploy.js`, `scripts/serve.js`, `scripts/coverage.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/storage.js`, `js/cloud-sync.js` (M10), `js/analytics.js`, `js/forecast.js`, `js/wrapped.js`, `js/screens/analytics.js` (M11), `js/backup-crypto.js` (**novo**), `js/app.js`, `js/actions.js`, `js/storage.js`, `js/screens/settings.js`, `css/components.css`, `scripts/build-app-module.js` (M12), `netlify/functions/sync.js` (M13), `js/import.js`, `netlify/functions/_shared/finance-schema.js` (M14), `js/modules/app.generated.js` (regerado). Documentação: inventário do M8, protocolo do M10, backup protegido do M12, `docs/VERSIONAMENTO.md` do M13 e desenhos dos testes M15/M16. |
 | Migration do M13 | `20260831120000_database_schema_version.sql` — **aplicada e confirmada em produção em 2026-08-31** (`database_schema_version = 1`; grants inalterados: só `service_role` e `postgres`). Reversível por `alter table public.cofre_sync_config drop column if exists database_schema_version;` |
 | Migrations criadas até aqui | `20260828120000_rls_auto_enable_least_privilege.sql`, `20260828130000_rls_auto_enable_versionada.sql`, `20260828140000_menor_privilegio_tabelas.sql` (as três **aplicadas e confirmadas em 2026-08-28**), `20260828150000_rls_auto_enable_gatilho.sql` (**ainda não aplicada**; é no-op em produção, onde o gatilho já existe) |
 | Versão do app | `0.30.0` (package.json) |
@@ -2211,6 +2212,70 @@ de medir o que eles executam e os pisos que barram regressões.
 
 ---
 
+## M16 - Testes de segurança
+
+### Antes (situação encontrada)
+
+As defesas pedidas pelo roteiro já existiam e eram conferidas em testes
+especializados, mas a leitura estava espalhada por autenticação, escopo,
+sincronização, revogação, XSS e banco. Faltava uma matriz única que percorresse
+os nove vetores nos handlers reais e deixasse explícita a ordem das recusas.
+
+### Resultado da auditoria
+
+| Vetor | Resultado |
+|---|---|
+| Usuário A contra usuário B | 403 antes de qualquer acesso ao banco |
+| JWT inválido | 401 e zero consulta financeira |
+| JWT expirado | renovação explícita, sem consumir o refresh na rota escopada |
+| Manipulação de `user_id` | o RPC recebe somente `session.user.id` |
+| RPC sem autenticação | nenhuma concessão de `EXECUTE` para `PUBLIC`, `anon` ou `authenticated` |
+| Aparelho revogado | 403 antes de configuração, revisão ou operações financeiras |
+| Replay | repetição idêntica não reaplica; conteúdo divergente recebe 409 |
+| Entrada maliciosa | aparelho e entidade hostis são recusados antes da consulta ou do RPC |
+| Rate limit | 429 com espera; falha do banco mantém o teto local fechado |
+
+Nenhum dos vetores confirmou uma falha no código de produção. O trabalho do
+módulo foi tornar as garantias existentes executáveis em conjunto e deixar uma
+consulta para conferir o estado real do PostgreSQL.
+
+### Alterações
+
+| Arquivo | Motivo |
+|---|---|
+| `tests/test-security-adversarial.js` | **novo** - 22 verificações contra `account.js`, `sync.js`, as guardas de aparelho e o limitador reais |
+| `supabase/tests/verify_security_boundary.sql` | **novo** - consulta somente leitura para RPC, RLS e policies no banco de desenvolvimento ou staging |
+| `docs/superpowers/specs/2026-08-31-m16-testes-seguranca-design.md` | escopo, método e critérios do módulo |
+
+### Compatibilidade e ambiente
+
+Nenhum código de produção, schema, policy, grant, protocolo ou dado foi
+alterado. Não havia Supabase local, `psql`, Docker ou credenciais de staging
+nesta máquina, por isso a consulta SQL não foi declarada como executada. Ela
+não foi apontada para produção: os testes de rate limit e replay não devem
+consumir limites nem criar operações em contas reais.
+
+### Testes
+
+| Teste | Resultado |
+|---|---|
+| `node tests/test-security-adversarial.js` | **PASSOU** - 22 ok, 0 falhas |
+| `npm run lint` | **PASSOU** - 0 erro, 0 aviso |
+| `npm test` | **PASSOU** - 63 arquivos |
+| `npm run test:coverage` | **PASSOU** - 79,0% global; `js/actions.js` em 41,7% |
+| `npm run check:build` / `check:release` / `build:dist` | **PASSOU** - módulo conferido em 71 fontes e pacote com 38 arquivos; avisos legais e de `SITE_URL` já conhecidos |
+| `npm run test:browser` | **PASSOU** - 18/18 em Chromium, Firefox e WebKit |
+| `npm run test:pwa` | **PASSOU** - shell, dados locais, limpeza e API fora do cache |
+| `npm run test:landing` | **PASSOU** - 18/18 |
+
+### Status
+
+**CONCLUÍDO.** Os nove vetores estão cobertos. Pendência externa: executar
+`supabase/tests/verify_security_boundary.sql` quando houver desenvolvimento ou
+staging conectado; isso não pede alteração no banco.
+
+---
+
 ## Checklist de regressão
 
 Executar após **todo** módulo que toque no código. Marcar `OK` / `FALHOU` / `NÃO VALIDADO`.
@@ -2219,13 +2284,14 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
 ### A. Automatizado (CI ou máquina com Node) — porta de entrada obrigatória
 
 - [ ] `npm run lint`
-- [ ] `npm test` (62 arquivos)
+- [ ] `npm test` (63 arquivos)
 - [ ] `node tests/test-accounting-integrity.js` (invariantes contábeis do M11)
 - [ ] `node tests/test-backup-restore.js` (backup, restauração e senha do M12)
 - [ ] `node tests/test-versioning.js` (versões e matriz de compatibilidade do M13)
 - [ ] `node tests/test-import-duplicates.js` (duplicidade e desfazer da importação do M14)
 - [ ] `node tests/test-critical-actions.js` (ações financeiras críticas do M15)
 - [ ] `node tests/test-coverage.js` (agregação de cobertura do M15)
+- [ ] `node tests/test-security-adversarial.js` (matriz defensiva do M16)
 - [ ] `npm run check:build` (o `app.generated.js` publicado corresponde às fontes)
 - [ ] `npm run check:release`
 - [ ] `npm run build:dist`
