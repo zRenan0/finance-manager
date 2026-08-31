@@ -20,7 +20,7 @@ ctx.__data = run(`migrate({ version:12, assets:[
   { id:"cara", class:"divida", name:"Cartão", value:5000, monthlyPayment:500, cetAnnualPct:120, balanceCheckedAt:"2026-08-01" },
   { id:"barata", class:"divida", name:"Consignado", value:12000, monthlyPayment:700, ratePct:1.2, ratePeriod:"month" }
 ], transactions:[{ id:"p1",type:"expense",amount:500,categoryId:"outros",date:"2026-08-02",debtId:"cara" }] })`);
-check("schema sobe para v22",ctx.__data.version === 22,ctx.__data.version);
+check("schema sobe para v23",ctx.__data.version === 23,ctx.__data.version);
 check("plano padrão é avalanche",ctx.__data.debtPlan.strategy === "avalanche");
 check("pagamento mantém vínculo válido",ctx.__data.transactions[0].debtId === "cara");
 check("as dívidas continuam na coleção assets",ctx.__data.assets.length === 2 && !ctx.__data.debts);

@@ -9,7 +9,7 @@ impede que as chaves principais e este inventário se afastem.
 
 | Contrato | Versão | Fonte |
 |---|---:|---|
-| Schema lógico dos dados | 22 | `SCHEMA_VERSION` em `js/storage.js` e `netlify/functions/_shared/finance-schema.js` |
+| Schema lógico dos dados | 23 | `SCHEMA_VERSION` em `js/storage.js` e `netlify/functions/_shared/finance-schema.js` |
 | Estrutura física do IndexedDB | 4 | `DB_VERSION` em `js/storage.js` |
 | Protocolo de sincronização | 3 | `CLOUD_SYNC_PROTOCOL` no cliente e `SYNC_PROTOCOL` no servidor |
 | Pacote do cache offline | v59 | `VERSION` em `service-worker.js` |
@@ -19,7 +19,7 @@ formato ou o significado dos dados muda. A versão física sobe somente quando u
 object store ou índice do IndexedDB precisa ser criado ou alterado. Uma mudança
 lógica pode usar os mesmos stores e, nesse caso, não deve promover o IndexedDB.
 
-Todo snapshot normalizado recebe `version: 22`. O backup JSON também leva a
+Todo snapshot normalizado recebe `version: 23`. O backup JSON também leva a
 versão no campo `schema`, e o servidor só aceita snapshots na mesma versão. As
 migrações lógicas ficam concentradas em `migrate()` e precisam continuar
 idempotentes. Nunca se reduz uma versão publicada.

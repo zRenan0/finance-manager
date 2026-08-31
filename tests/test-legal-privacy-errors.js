@@ -61,7 +61,7 @@ ctx.window = ctx; ctx.self = ctx; ctx.globalThis = ctx;
 vm.createContext(ctx);
 ["js/utils.js", "js/rules.js", "js/layout.js", "js/storage.js"].forEach((file) => vm.runInContext(read(file), ctx, { filename: file }));
 const run = (code) => vm.runInContext(code, ctx);
-check("schema corrente é 22", run("SCHEMA_VERSION") === 22);
+check("schema corrente é 23", run("SCHEMA_VERSION") === 23);
 check("base nova pergunta antes da IA", run("defaultData().privacy.aiSharing") === "ask");
 check("base nova não presume aceite", run("legalAccepted(defaultData().privacy)") === false);
 check("base antiga migra sem aceite", run("legalAccepted(migrate({ version:21 }).privacy)") === false);

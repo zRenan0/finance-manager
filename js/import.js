@@ -307,6 +307,10 @@ function parseOfxStatement(text) {
     const amtRaw = get("TRNAMT");
     const trnType = (get("TRNTYPE") || "").toUpperCase();
     const memo = get("MEMO") || get("NAME") || get("CHECKNUM") || "";
+    // [M14] `FITID` é o identificador que o BANCO dá ao movimento, e é o único
+    // sinal de duplicidade que não depende de data, valor ou texto. Sem ele, dois
+    // cafés de R$ 12 na mesma semana são indistinguíveis de uma reimportação.
+    const fitid = get("FITID");
     if (!dtRaw || amtRaw == null) { skipped++; continue; }
 
     const date = `${dtRaw.slice(0, 4)}-${dtRaw.slice(4, 6)}-${dtRaw.slice(6, 8)}`;
@@ -320,7 +324,7 @@ function parseOfxStatement(text) {
     // importação inteira justamente nos extratos que mais precisam do ajuste.
     if (amount > 0 && /^(DEBIT|PAYMENT|FEE|SRVCHG|ATM|CASH|DIRECTDEBIT)$/.test(trnType)) amount = -amount;
 
-    out.push({ date, amount, description: memo });
+    out.push({ date, amount, description: memo, externalId: fitid ? String(fitid).slice(0, 120) : null });
   }
   if (out.length === 0) throw new ImportError("NO_ROWS", "O OFX foi lido, mas nenhuma transação válida foi encontrada.");
   return { rows: out, skipped, format: "ofx" };
@@ -352,6 +356,10 @@ function parseStatementFile(text, filename) {
     amount: Math.abs(roundMoney(r.amount)),
     description: r.description,
     type: r.amount < 0 ? "expense" : "income",
+    // O identificador do banco atravessa a normalização. Esta função reconstrói
+    // a linha campo a campo, então o que não for listado aqui é descartado em
+    // silêncio; foi assim que o `externalId` sumiu entre o parser e a revisão.
+    externalId: r.externalId || null,
   }));
   return { rows, format: parsed.format, skipped: parsed.skipped };
 }
@@ -359,16 +367,60 @@ function parseStatementFile(text, filename) {
 // ------------------------------------------------------------------------------
 // DETECÇÃO DE DUPLICATAS; evita importar o mesmo extrato duas vezes
 // ------------------------------------------------------------------------------
+// [M14] Duplicidade tem GRAUS, e tratar todos como o mesmo aviso era o defeito.
+//
+// A regra anterior era só "mesmo valor, mesmo tipo, data a até três dias". Como
+// a linha marcada nasce DESMARCADA, dois cafés de R$ 12 na mesma semana viravam
+// um café só: o segundo era descartado sem que ninguém percebesse. Por outro
+// lado, reimportar o mesmo extrato precisa continuar sendo pego.
+//
+// Agora existem quatro sinais, do mais forte para o mais fraco:
+//
+//   external; o banco deu o mesmo identificador (FITID do OFX). É certeza.
+//   exata   ; mesmo valor, tipo, data E descrição. É praticamente certeza.
+//   arquivo ; a linha se repete DENTRO do próprio arquivo escolhido agora.
+//   parecida; mesmo valor e tipo, data próxima, descrição diferente. É SUSPEITA,
+//              e a tela precisa dizer que é suspeita e não fato consumado.
+//
+// Todas continuam nascendo desmarcadas, como antes: mudar isso importaria
+// duplicata de verdade por padrão. O que muda é a pessoa passar a saber QUAL
+// caso está diante dela para poder remarcar com conhecimento.
+function importDescriptionKey(value) {
+  return normalizeText(value || "").replace(/[^a-z0-9 ]/g, "").trim();
+}
+
+function importExactKey(row) {
+  return [row.date, row.type, moneyToCents(row.amount), importDescriptionKey(row.description)].join("|");
+}
+
 function markDuplicates(rows, existingTx) {
+  const anteriores = Array.isArray(existingTx) ? existingTx : [];
+  const externosGravados = new Set();
+  const exatasGravadas = new Set();
+  anteriores.forEach((t) => {
+    const externo = t && t.origin && t.origin.externalId;
+    if (externo) externosGravados.add(String(externo));
+    exatasGravadas.add(importExactKey(t));
+  });
+
+  const vistasNesteArquivo = new Set();
   return rows.map((r) => {
     const rd = new Date(r.date + "T00:00:00").getTime();
-    const dupe = existingTx.some((t) => {
+    const chave = importExactKey(r);
+    let kind = null;
+
+    if (r.externalId && externosGravados.has(String(r.externalId))) kind = "external";
+    else if (exatasGravadas.has(chave)) kind = "exata";
+    else if (vistasNesteArquivo.has(chave)) kind = "arquivo";
+    else if (anteriores.some((t) => {
       if (moneyToCents(t.amount) !== moneyToCents(r.amount)) return false;
       if (t.type !== r.type) return false;
       const td = new Date(t.date + "T00:00:00").getTime();
       return Math.abs(rd - td) / 86400000 <= DUPLICATE_WINDOW_DAYS;
-    });
-    return { ...r, duplicate: dupe };
+    })) kind = "parecida";
+
+    vistasNesteArquivo.add(chave);
+    return { ...r, duplicate: !!kind, duplicateKind: kind };
   });
 }
 
@@ -402,6 +454,9 @@ function prepareImportRows(rawFile, filename, data) {
     };
   }).sort((a, b) => (a.date < b.date ? 1 : -1));
   const roleCounts = prepared.reduce((count, r) => (r.role ? { ...count, [r.role]: (count[r.role] || 0) + 1 } : count), {});
+  const duplicateCounts = prepared.reduce((count, r) => (r.duplicateKind
+    ? { ...count, [r.duplicateKind]: (count[r.duplicateKind] || 0) + 1 }
+    : count), {});
   const filenameLooksLikeCard = /\b(fatura|cartao|card)\b/.test(normalizeForMatch(filename || ""));
   const documentKind = parsed.documentKind || (filenameLooksLikeCard || roleCounts.carryover ? "card" : "account");
   prepared.meta = {
@@ -411,6 +466,7 @@ function prepareImportRows(rawFile, filename, data) {
     confidence: parsed.confidence || "alta",
     pageCount: parsed.pageCount || null,
     roles: roleCounts,
+    duplicates: duplicateCounts,
   };
   return prepared;
 }
@@ -435,7 +491,10 @@ function buildTransactionsFromRows(rows, format, destination, filename) {
       payment: documentKind === "card" ? "Crédito" : (r.type === "expense" ? "Débito" : "Outro"),
       description: r.description,
       source,
-      origin: { channel: source, label, reference: filename || null, importedAt: new Date().toISOString() },
+      // `externalId` é o identificador do banco (FITID do OFX). Guardá-lo é o
+      // que permite reconhecer a mesma linha numa reimportação futura sem
+      // depender de valor, data e texto continuarem idênticos.
+      origin: { channel: source, label, reference: filename || null, externalId: r.externalId || null, importedAt: new Date().toISOString() },
       accountId: documentKind === "account" ? destinationId : null,
       creditCardId: documentKind === "card" ? destinationId : null,
       nature: r.nature || (documentKind === "card" && r.type === "income" ? "estorno" : null),

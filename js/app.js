@@ -155,6 +155,9 @@ let state = {
   // sequencial de qualquer jeito; o resto entra sob demanda.
   importVisible: IMPORT_PAGE_SIZE,
   importFilename: null,
+  // [M14] Recibo da última importação (só identificadores), hidratado do
+  // `localMeta` no boot. É o que permite oferecer "desfazer importação".
+  importUndo: null,
   importDocumentKind: "account",
   importDestinationId: "",
   importPendingFile: null,
@@ -1513,6 +1516,37 @@ function exportBackupJson() {
   notify(`Backup com ${plural(envelope.counts.transactions, "lançamento", "lançamentos")} exportado`);
 }
 
+// [M14] Recibo da última importação, para o botão de desfazer. Mora no
+// `localMeta`: pertence a este aparelho, não sai no backup e não sobe na
+// sincronização. Guarda só identificadores, data e nome do arquivo.
+//
+// As duas funções engolem falha de propósito. Não conseguir anotar (ou ler) o
+// recibo é perder o atalho de desfazer, e isso não pode derrubar a importação
+// nem o boot do aplicativo.
+function saveImportUndo(entry) {
+  try {
+    const salvar = entry
+      ? FinanceStore.localMetaPut(META_IMPORT_UNDO, entry)
+      : FinanceStore.localMetaDelete(META_IMPORT_UNDO);
+    if (salvar && typeof salvar.catch === "function") salvar.catch(() => {});
+  } catch (e) { /* sem recibo; a importação em si já aconteceu */ }
+}
+
+function hydrateImportUndo() {
+  try {
+    const leitura = FinanceStore.localMetaGet(META_IMPORT_UNDO);
+    if (!leitura || typeof leitura.then !== "function") return;
+    leitura.then((entry) => {
+      if (!entry || typeof entry !== "object") return;
+      const transactionIds = Array.isArray(entry.transactionIds) ? entry.transactionIds : [];
+      const transferIds = Array.isArray(entry.transferIds) ? entry.transferIds : [];
+      if (!transactionIds.length && !transferIds.length) return;
+      state.importUndo = { at: entry.at || null, filename: String(entry.filename || ""), transactionIds, transferIds };
+      if (state.tab === "import") render();
+    }).catch(() => {});
+  } catch (e) { /* nada a restaurar */ }
+}
+
 // Estado limpo do cartão de backup. Existe em função porque agora são oito
 // campos, e cada lugar que "zerava o backup" à mão esquecia um deles.
 function freshBackupState() {
@@ -2339,6 +2373,7 @@ async function init() {
   if (FinanceStore.scope() !== GUEST_SCOPE) holdOnboardingGate();
   else state.onboarding.open = !(state.data.onboarding && state.data.onboarding.done);
   state.backup.undoAvailable = !!FinanceStore.readUndoSnapshot();
+  hydrateImportUndo();
   FinanceStore.onError(() => {
     state.storageOk = false;
     notify("Não foi possível salvar os dados neste navegador");

@@ -12,7 +12,8 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 
 | Campo | Valor |
 |---|---|
-| Módulo atual | **M13 - Versionamento** (concluído) |
+| Módulo atual | **M14 - Importação de extratos** (concluído) |
+| Status do M14 | **CONCLUÍDO** - duplicidade passou a olhar a descrição e a ter quatro motivos distintos, o FITID do OFX é lido e guardado, e existe desfazer da última importação; schema local em 23 |
 | Status do M13 | **CONCLUÍDO** - seis versões inventariadas em `docs/VERSIONAMENTO.md` com matriz de compatibilidade conferida por teste; backup de schema futuro passou a avisar; banco passou a declarar a própria versão (**migração aplicada e confirmada em produção em 2026-08-31**) |
 | Status do M12 | **CONCLUÍDO** - aviso de privacidade no cartão, rótulo sem o formato em primeiro plano e backup opcionalmente protegido por senha (AES-GCM + PBKDF2), com ida e volta verificada em navegador real |
 | Status do M11 | **CONCLUÍDO** - numerador e denominador passaram a usar a mesma régua de natureza no ranking de categorias, no dia da semana, no mapa de calor, no relatório por período, na retrospectiva e na média da previsão; 41 invariantes contábeis travados em suíte nova |
@@ -26,10 +27,10 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 | Status do M3 | **CONCLUÍDO** — aplicado e confirmado no banco em 2026-08-28 |
 | Status do M2 | **CONCLUÍDO** — nenhuma vulnerabilidade de autorização; invariantes travados por teste |
 | Status do M1 | **CONCLUÍDO** — aplicado e confirmado; gatilho capturado e versionado |
-| Módulos concluídos | M0, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13 |
-| Próximo módulo | M14 - Importação de extratos (CSV, OFX e PDF) |
+| Módulos concluídos | M0, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14 |
+| Próximo módulo | M15 - Cobertura de testes e qualidade (`js/actions.js` continua o pior número da baseline) |
 | Branch | `deploy-atualizado` (árvore limpa no início do M0) |
-| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `tests/test-cloud-sync.js`, `tests/test-account-backend.js`, `scripts/check-deploy.js`, `scripts/serve.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/storage.js`, `js/cloud-sync.js` (M10), `js/analytics.js`, `js/forecast.js`, `js/wrapped.js`, `js/screens/analytics.js` (M11), `js/backup-crypto.js` (**novo**), `js/app.js`, `js/actions.js`, `js/storage.js`, `js/screens/settings.js`, `css/components.css`, `scripts/build-app-module.js` (M12), `js/modules/app.generated.js` (regerado). Documentação: inventário do M8, protocolo do M10 e backup protegido do M12. |
+| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `tests/test-cloud-sync.js`, `tests/test-account-backend.js`, `scripts/check-deploy.js`, `scripts/serve.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/storage.js`, `js/cloud-sync.js` (M10), `js/analytics.js`, `js/forecast.js`, `js/wrapped.js`, `js/screens/analytics.js` (M11), `js/backup-crypto.js` (**novo**), `js/app.js`, `js/actions.js`, `js/storage.js`, `js/screens/settings.js`, `css/components.css`, `scripts/build-app-module.js` (M12), `netlify/functions/sync.js` (M13), `js/import.js`, `netlify/functions/_shared/finance-schema.js` (M14), `js/modules/app.generated.js` (regerado). Documentação: inventário do M8, protocolo do M10, backup protegido do M12 e `docs/VERSIONAMENTO.md` do M13. |
 | Migration do M13 | `20260831120000_database_schema_version.sql` — **aplicada e confirmada em produção em 2026-08-31** (`database_schema_version = 1`; grants inalterados: só `service_role` e `postgres`). Reversível por `alter table public.cofre_sync_config drop column if exists database_schema_version;` |
 | Migrations criadas até aqui | `20260828120000_rls_auto_enable_least_privilege.sql`, `20260828130000_rls_auto_enable_versionada.sql`, `20260828140000_menor_privilegio_tabelas.sql` (as três **aplicadas e confirmadas em 2026-08-28**), `20260828150000_rls_auto_enable_gatilho.sql` (**ainda não aplicada**; é no-op em produção, onde o gatilho já existe) |
 | Versão do app | `0.30.0` (package.json) |
@@ -2069,6 +2070,97 @@ o motivo de não ser corrigido agora. R6 do M0 fechado.
 
 ---
 
+## M14 - Importação de extratos (CSV, OFX e PDF)
+
+### Antes (situação encontrada)
+
+O fluxo que o prompt pede **já existia inteiro**: escolher arquivo → parser →
+pré-visualização → validação → detecção de duplicidade → confirmação →
+importação. Nada é gravado antes do "Importar", e a revisão é boa: papel de cada
+linha (pagamento da própria fatura, saldo anterior), categoria sugerida com o
+motivo, conversão para transferência entre contas próprias, aviso de linha
+anterior à abertura da conta, teto de 12 MB e detecção de banco pelo conteúdo.
+
+Os dois buracos estavam nas pontas: **a régua de duplicidade** e **o que fazer
+depois de importar o arquivo errado**.
+
+### Achados
+
+| # | P | Achado | Situação |
+|---|---|---|---|
+| F14-01 | **P1** | A duplicidade comparava valor, tipo e proximidade de data, **sem olhar a descrição**. Como a linha marcada nasce DESMARCADA, dois gastos legítimos de mesmo valor na mesma semana viravam um só: o segundo era descartado em silêncio. Perda de dado do usuário, sem erro e sem aviso. | **CORRIGIDO** - a descrição entra na comparação e o caso vira "parecida", com rótulo próprio |
+| F14-02 | P2 | O `FITID` do OFX (identificador que o banco dá ao movimento) era lido e jogado fora. Sem ele, reimportar o mesmo extrato depois de o banco mudar data ou descrição não era reconhecido. | **CORRIGIDO** - lido, guardado em `origin.externalId` e usado como sinal mais forte |
+| F14-03 | P2 | Linha repetida DENTRO do próprio arquivo não era detectada: só se comparava com o que já estava gravado. | **CORRIGIDO** - motivo "repetida no arquivo" |
+| F14-04 | P2 | "possível duplicata" dizia a mesma coisa para casos opostos, e não havia como julgar se descartar era certo. | **CORRIGIDO** - quatro rótulos distintos, cada um com o motivo, e resumo que conta cada um |
+| F14-05 | P2 | **Não havia como desfazer uma importação.** O snapshot de desfazer só era escrito por restauração de backup e por limpeza; importar era um `setData` sem volta. Importar 200 linhas na conta errada exigia apagar uma a uma. | **CORRIGIDO** - "Desfazer importação" |
+| — | — | Conferidos **sem achado**: nada é gravado antes da confirmação; papéis de fatura; conversão em transferência; teto de tamanho; datas inválidas (já cobertas desde o M4); conteúdo hostil de CSV/OFX (coberto por `test-xss-surface.js`); o arquivo nunca sai do aparelho. | — |
+
+### Alterações
+
+| Arquivo | Motivo |
+|---|---|
+| `js/import.js` | `FITID` lido e propagado pela normalização; `markDuplicates` reescrita com quatro motivos e detecção dentro do arquivo; contagem por motivo no resumo |
+| `js/storage.js` | `origin.externalId` (v23) e a chave `META_IMPORT_UNDO` do recibo local |
+| `js/actions.js` | recibo gravado após importar e ação `import-undo`, que remove pelo identificador com lápide |
+| `js/app.js` | `state.importUndo`, gravação e hidratação do recibo no boot |
+| `js/screens/import.js` | rótulo por motivo com explicação, resumo por motivo e o convite para desfazer |
+| `netlify/functions/_shared/finance-schema.js` | schema 23, para cliente e servidor continuarem concordando |
+| `tests/test-import-duplicates.js` | **novo** - 31 verificações |
+| `tests/test-render.js`, `tests/test-account-backend.js`, `tests/test-accounts.js`, `tests/test-debts.js`, `tests/test-legal-privacy-errors.js`, `tests/test-router.js`, `tests/test-services.js`, `tests/browser/run-browser.js` | expectativa de schema 22 → 23 e a nova tela na não-regressão |
+| `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md` | schema 23 |
+
+### Motivo
+
+Importação é a única porta por onde entram centenas de lançamentos de uma vez, e
+errar nela custa nos dois sentidos. Marcar como duplicata o que não é apaga dado
+real em silêncio; não marcar o que é dobra o mês. A régua antiga só errava para o
+primeiro lado, que é o pior dos dois, porque não deixa rastro.
+
+### Compatibilidade
+
+- **`origin.externalId` nasce `null`** em toda base anterior e em todo lançamento
+  que não veio de extrato com identificador. Nenhum número muda.
+- A régua ficou mais **precisa**, não mais permissiva: tudo que era marcado por
+  valor e data próxima continua marcado (agora como "parecida") e continua
+  nascendo desmarcado. O que mudou é a pessoa saber qual caso tem diante de si.
+- O recibo do desfazer mora no `localMeta`, que não entra no backup nem na
+  sincronização, e é apagado junto no purge do escopo.
+- O desfazer remove **pelo identificador** dos registros criados por aquela
+  importação, com lápide; não toca no que foi lançado ou editado depois.
+- Schema local 22 → 23, com o backend subindo junto. A rota legada de snapshot é
+  somente leitura, então não há janela de `schema_mismatch` durante a publicação.
+  A disciplina do M13 funcionou: `tests/test-versioning.js` **reprovou** a
+  documentação desatualizada antes que ela chegasse ao commit.
+
+### Testes
+
+| Teste | Resultado |
+|---|---|
+| `node tests/test-import-duplicates.js` | **PASSOU** - 31 ok, 0 falhas |
+| `npm run lint` | **PASSOU** - 0 erro, 0 aviso |
+| `npm test` | **PASSOU** - 60 arquivos |
+| `npm run check:build` / `check:release` / `build:dist` | **PASSOU** (avisos conhecidos) |
+| `npm run test:coverage` | **PASSOU** - 22,5% |
+| `npm run test:browser` | **PASSOU** - 18/18 em Chromium, Firefox e WebKit |
+| `npm run test:pwa` | **PASSOU** |
+| Navegador real, ciclo completo | **PASSOU** - OFX com três linhas, duas de R$ 12,00 com descrições diferentes: **as duas entraram** (antes, uma sumiria). Reimportar o mesmo extrato com data e descrição alteradas marcou duas linhas como "já importado" pelo FITID e deixou a nova marcada; o resumo disse "2 já vieram deste mesmo extrato". "Desfazer importação" pediu confirmação declarando 3 lançamentos, removeu de 5 para 2 (os 2 anteriores intactos) e o convite sumiu. Nenhum 4xx fora da API |
+
+### Status
+
+**CONCLUÍDO.** F14-01 a F14-05 corrigidos. Pendência do módulo: nenhuma.
+
+### Registrado para módulos seguintes
+
+- **CSV e PDF não têm identificador de banco**, então continuam dependendo de
+  data, valor e descrição. É limitação do formato, não do código.
+- **M15**: `tests/test-import-duplicates.js` exercita o motor de importação de
+  ponta a ponta em Node; serve de molde para cobrir `js/actions.js`, que segue
+  sendo o pior número da cobertura.
+- O desfazer guarda **uma** importação, a última. Guardar uma pilha exigiria
+  decidir retenção e limite, e não havia achado que pedisse isso.
+
+---
+
 ## Checklist de regressão
 
 Executar após **todo** módulo que toque no código. Marcar `OK` / `FALHOU` / `NÃO VALIDADO`.
@@ -2077,10 +2169,11 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
 ### A. Automatizado (CI ou máquina com Node) — porta de entrada obrigatória
 
 - [ ] `npm run lint`
-- [ ] `npm test` (59 arquivos)
+- [ ] `npm test` (60 arquivos)
 - [ ] `node tests/test-accounting-integrity.js` (invariantes contábeis do M11)
 - [ ] `node tests/test-backup-restore.js` (backup, restauração e senha do M12)
 - [ ] `node tests/test-versioning.js` (versões e matriz de compatibilidade do M13)
+- [ ] `node tests/test-import-duplicates.js` (duplicidade e desfazer da importação do M14)
 - [ ] `npm run check:build` (o `app.generated.js` publicado corresponde às fontes)
 - [ ] `npm run check:release`
 - [ ] `npm run build:dist`
@@ -2118,6 +2211,9 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
 - [ ] PDF (extrato e fatura com texto) — caminho corrigido nos commits recentes
 - [ ] Safari/iPhone: selecionar arquivo mantém a escolha (regressão já corrigida, não reintroduzir)
 - [ ] Detecção de duplicidade não deixa passar lançamento repetido
+- [ ] **Dois gastos diferentes de mesmo valor na mesma semana continuam sendo dois** (não viram duplicata)
+- [ ] **Reimportar o mesmo OFX marca as linhas como "já importado" pelo identificador do banco**
+- [ ] **"Desfazer importação" remove só o que aquele arquivo criou**
 - [ ] "Pagamento recebido" de fatura **não** entra como receita
 
 ### E. Conta e autenticação

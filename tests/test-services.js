@@ -277,7 +277,7 @@ console.log("\n4. Sincronização, identidade e leitura");
 /* ============================================ 5. MIGRAÇÃO, BACKUP E MERGE */
 console.log("\n5. Persistência (schema corrente)");
 {
-  check("schema está na versão corrente", run("SCHEMA_VERSION") === 22);
+  check("schema está na versão corrente", run("SCHEMA_VERSION") === 23);
   check("base nova já nasce com o campo", run("!!migrate(defaultData()).notifications"));
   check("base antiga (sem o campo) é migrada sem erro",
     run("JSON.stringify(migrate({ version: 9, transactions: [], categories: [], goals: [] }).notifications.items)") === "[]");

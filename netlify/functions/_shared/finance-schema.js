@@ -1,6 +1,6 @@
 "use strict";
 
-const SCHEMA_VERSION = 22;
+const SCHEMA_VERSION = 23;
 const COLLECTIONS = ["transactions", "categories", "goals", "assets"];
 const RECORD_ENTITIES = ["accounts", "creditCards", "accountTransfers", "cardPayments", "accountAdjustments"];
 const ALL_RECORD_ENTITIES = [...COLLECTIONS, ...RECORD_ENTITIES];

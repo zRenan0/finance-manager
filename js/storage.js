@@ -264,7 +264,7 @@ function isLocalSyncWriter(value) {
   const baseLength = 80 - marker.length - SYNC_WRITER_TOKEN.length;
   return writer.startsWith(`${stable.slice(0, baseLength)}${marker}`);
 }
-const SCHEMA_VERSION = 22;  // v22; privacidade, consentimentos e controles do usuário
+const SCHEMA_VERSION = 23;  // v23; identificador do banco na origem do lançamento (FITID do OFX)
 const LEGAL_REVIEW_DATE = "2026-08-18";
 // A versão sobe quando o CONTEÚDO do texto muda, não quando muda a redação.
 // Esta subiu porque a política passou a declarar controlador, retenção,
@@ -443,6 +443,11 @@ const META_SYNC_BATCH = "syncBatchJournal";    // lote em voo; preserva mutation
 // deixou passar uma operação fica com números diferentes dos outros para sempre,
 // porque o servidor nunca reenvia o que ficou atrás do cursor.
 const META_RECONCILE_RECEIPT = "syncReconcileReceipt";
+// [M14] Última importação de extrato, para poder desfazê-la. Guarda SÓ os
+// identificadores criados, a data e o nome do arquivo; nenhum valor, descrição
+// ou categoria. Fica no `localMeta` de propósito: pertence a este aparelho, não
+// sai no backup nem sobe na sincronização.
+const META_IMPORT_UNDO = "importUndo";
 const COLLECTIONS = [STORE_TX, STORE_CAT, STORE_GOALS, STORE_ASSETS];
 const ALL_STORES = [STORE_TX, STORE_CAT, STORE_GOALS, STORE_ASSETS, STORE_SETTINGS];
 
@@ -648,6 +653,11 @@ function normalizeTransactionOrigin(raw, source, fallbackDate) {
     channel: transactionSourceOf(origin.channel || sourceId),
     label: String(origin.label || TRANSACTION_ORIGIN_LABELS[sourceId] || "Outra origem").trim().slice(0, 100),
     reference: origin.reference ? String(origin.reference).trim().slice(0, 160) : null,
+    // v23. Identificador dado pelo BANCO ao movimento (`FITID` do OFX), quando
+    // existe. É o que permite reconhecer a mesma linha numa reimportação sem
+    // depender de valor, data e texto continuarem idênticos. Nasce `null` em
+    // toda base anterior e em todo lançamento que não veio de extrato.
+    externalId: origin.externalId ? String(origin.externalId).trim().slice(0, 120) : null,
     importedAt: (origin.importedAt || sourceId !== "manual") ? normalizeTransactionTimestamp(origin.importedAt, fallbackDate) : null,
   };
 }

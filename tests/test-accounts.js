@@ -30,7 +30,7 @@ const near = (a, b) => Math.abs(a - b) <= 0.001;
 console.log("\n1. Schema e migração");
 {
   const fresh = run("defaultData()");
-  check("schema está na v22", fresh.version === 22, fresh.version);
+  check("schema está na v23", fresh.version === 23, fresh.version);
   check("base nova contém as cinco coleções", ["accounts", "creditCards", "accountTransfers", "cardPayments", "accountAdjustments"].every((k) => Array.isArray(fresh[k])));
 
   ctx.__legacy = {

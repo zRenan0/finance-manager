@@ -2019,6 +2019,49 @@ function onClick(e) {
     // próprio arquivo. O saldo inicial não é tocado: quem informou "saldo de
     // hoje" e recua a abertura está dizendo que aquele número era o do começo
     // do período; é exatamente a conta que a tela de conferência já explica.
+    // [M14] Desfazer a última importação. Remove exatamente os registros que
+    // ELA criou, pelo identificador, e por isso não toca em nada que a pessoa
+    // tenha lançado ou editado depois. A remoção passa pelo mesmo caminho de
+    // exclusão de sempre, com lápide, então a sincronização a propaga em vez de
+    // ressuscitar tudo no próximo ciclo.
+    case "import-undo": {
+      const undo = state.importUndo;
+      if (!undo) break;
+      const txIds = new Set(undo.transactionIds || []);
+      const transferIds = new Set(undo.transferIds || []);
+      const presentes = (state.data.transactions || []).filter((tx) => txIds.has(tx.id)).length;
+      const transferenciasPresentes = (state.data.accountTransfers || []).filter((t) => transferIds.has(t.id)).length;
+      if (!presentes && !transferenciasPresentes) {
+        state.importUndo = null;
+        saveImportUndo(null);
+        notify("Nada a desfazer: esses lançamentos já não estão aqui", "warn");
+        render();
+        break;
+      }
+      requestConfirmation({
+        title: "Desfazer a importação?",
+        message: `Serão removidos ${plural(presentes, "lançamento", "lançamentos")}${transferenciasPresentes ? ` e ${plural(transferenciasPresentes, "transferência", "transferências")}` : ""} criados por esta importação. O que você lançou ou editou depois não é tocado.`,
+        confirmLabel: "Desfazer importação",
+        tone: "danger",
+        onConfirm: () => {
+          setData((d) => {
+            const semLancamentos = removeTransactionsWithIntegrity(d, Array.from(txIds));
+            const transferenciasRestantes = (semLancamentos.accountTransfers || []).filter((t) => !transferIds.has(t.id));
+            const removidas = (semLancamentos.accountTransfers || []).filter((t) => transferIds.has(t.id)).map((t) => t.id);
+            return {
+              ...semLancamentos,
+              accountTransfers: transferenciasRestantes,
+              graveyard: removidas.length ? withTombstones(semLancamentos.graveyard, "accountTransfers", removidas) : semLancamentos.graveyard,
+            };
+          });
+          state.importUndo = null;
+          saveImportUndo(null);
+          notify("Importação desfeita");
+          render();
+        },
+      });
+      break;
+    }
     case "import-backdate-account": {
       const novaAbertura = String(id || "");
       if (!/^\d{4}-\d{2}-\d{2}$/.test(novaAbertura)) break;
@@ -2069,6 +2112,18 @@ function onClick(e) {
         transactions: [...d.transactions, ...newTx],
         accountTransfers: [...(d.accountTransfers || []), ...newTransfers],
       }));
+      // [M14] Registro para desfazer. Guarda só identificadores, a data e o nome
+      // do arquivo; nenhum valor, descrição ou categoria. Grava DEPOIS de
+      // `setData`: um recibo de importação que não aconteceu seria pior que
+      // recibo nenhum. A gravação é assíncrona e não bloqueia a tela, porque
+      // falhar em anotar o recibo não pode desfazer a importação que deu certo.
+      state.importUndo = {
+        at: new Date().toISOString(),
+        filename: state.importFilename || "",
+        transactionIds: newTx.map((tx) => tx.id),
+        transferIds: newTransfers.map((transfer) => transfer.id),
+      };
+      saveImportUndo(state.importUndo);
       state.importRows = null; state.importFilename = null; state.importDestinationId = ""; state.importVisible = IMPORT_PAGE_SIZE;
       const importedParts = [];
       if (newTx.length) importedParts.push(plural(newTx.length, "lançamento importado", "lançamentos importados"));

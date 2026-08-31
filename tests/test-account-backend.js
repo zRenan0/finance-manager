@@ -29,7 +29,7 @@ function event(method, action, body, extraHeaders) {
 async function main() {
   console.log("\n1. Validação financeira no servidor");
   const base = schema.emptySnapshot();
-  check("snapshot mínimo usa o schema atual", schema.validateSnapshot(base).version === 22);
+  check("snapshot mínimo usa o schema atual", schema.validateSnapshot(base).version === 23);
   const changed = schema.applyChanges(base, { puts: { transactions: [{ id: "tx-1", type: "expense", amount: 10, date: "2026-08-12" }] }, deletes: {}, settings: { theme: "dark" } });
   check("alteração aceita coleção e configuração conhecidas", changed.transactions.length === 1 && changed.theme === "dark");
   let unknown = null;
@@ -42,7 +42,7 @@ async function main() {
   try { schema.validateSnapshot({ ...base, transactions: [{ id: "tx-2", type: "expense", amount: "10", date: "2026-08-12" }] }); } catch (error) { badAmount = error.code; }
   check("valor financeiro com tipo errado é recusado", badAmount === "invalid_financial_data", badAmount);
   let polluted = null;
-  try { schema.validateSnapshot(JSON.parse('{"version":22,"transactions":[],"categories":[],"goals":[],"assets":[],"theme":{"constructor":{"x":1}}}')); } catch (error) { polluted = error.code; }
+  try { schema.validateSnapshot(JSON.parse('{"version":23,"transactions":[],"categories":[],"goals":[],"assets":[],"theme":{"constructor":{"x":1}}}')); } catch (error) { polluted = error.code; }
   check("chaves perigosas são recusadas", polluted === "invalid_financial_data", polluted);
 
   console.log("\n2. Sessão em cookie protegido");

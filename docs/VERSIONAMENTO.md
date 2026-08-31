@@ -14,7 +14,7 @@ do que documentação nenhuma.
 | Versão | Onde mora | Valor atual | Quem obriga |
 |---|---|---|---|
 | `APP_VERSION` | `package.json` e `js/safe-errors.js` (`SAFE_ERROR_APP_VERSION`) | `0.30.0` | `scripts/check-release.js` reprova a publicação se as duas divergirem ou se o CHANGELOG não citar a versão |
-| `LOCAL_SCHEMA_VERSION` | `js/storage.js` (`SCHEMA_VERSION`) | `22` | `migrate()` carimba em todo snapshot; o backup leva o número junto |
+| `LOCAL_SCHEMA_VERSION` | `js/storage.js` (`SCHEMA_VERSION`) | `23` | `migrate()` carimba em todo snapshot; o backup leva o número junto |
 | `INDEXEDDB_VERSION` | `js/storage.js` (`DB_VERSION`) | `4` | O próprio navegador, no `indexedDB.open()` |
 | `SYNC_PROTOCOL_VERSION` | `js/storage.js` (`CLOUD_SYNC_PROTOCOL`) e `netlify/functions/sync.js` (`PROTOCOL`) | `3` (mínimo de escrita `2`, leitura legada `1`) | O backend, pelo cabeçalho `X-Sync-Protocol` e pelo campo `protocol` do corpo |
 | `DATABASE_SCHEMA_VERSION` | `cofre_sync_config.database_schema_version` | `1` | Ninguém: é declarativa. Publicada em `/api/sync/health` |

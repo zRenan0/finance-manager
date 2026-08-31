@@ -2,6 +2,33 @@
 
 ## Não publicado
 
+### A importação deixava sumir gasto legítimo, e agora sabe por que desmarca
+
+- A regra de duplicidade olhava só valor, tipo e proximidade de data. Como a
+  linha marcada como duplicata nasce DESMARCADA, dois cafés de R$ 12 na mesma
+  semana viravam um só: o segundo era descartado sem que ninguém percebesse.
+  A descrição passou a entrar na comparação.
+- Agora existem quatro motivos, e a tela diz qual é cada um: **já importado**
+  (mesmo identificador do banco), **já lançado** (mesma data, valor e
+  descrição), **repetida no arquivo** e **parecida com um lançamento seu**
+  (mesmo valor em data próxima, com outra descrição). O resumo conta cada
+  motivo separadamente. Todas continuam nascendo desmarcadas, como antes.
+- O `FITID` do OFX (o identificador que o próprio banco dá ao movimento) passou
+  a ser lido e guardado na origem do lançamento. É o que faz reimportar o mesmo
+  extrato ser reconhecido mesmo quando o banco muda a data ou a descrição entre
+  duas exportações.
+- **Desfazer importação.** Depois de importar, a tela de importação oferece
+  remover de uma vez o que aquele arquivo criou. A remoção é pelo identificador
+  dos registros criados, então nada que você lançou ou editou depois é tocado, e
+  passa pelo caminho de exclusão de sempre, com lápide, para que a sincronização
+  propague em vez de ressuscitar tudo no ciclo seguinte.
+- O recibo dessa importação guarda só identificadores, data e nome do arquivo, e
+  mora no armazenamento local do aparelho: não sai no backup nem sobe para o
+  servidor.
+- Schema local na versão 23. Bases antigas não mudam de comportamento: o campo
+  novo nasce vazio em todo lançamento que não veio de um extrato com
+  identificador.
+
 ### Restaurar um backup de versão mais nova agora avisa antes
 
 - `migrate()` só sabe subir de versão. Um backup gerado por uma versão futura do

@@ -37,8 +37,47 @@ function renderImportScreen() {
           <span class="dropzone__title">Arraste o arquivo aqui</span>
           <span class="dropzone__subtitle">ou toque para escolher (.ofx, .csv, .pdf)</span>
         </label>`}
+        ${renderImportUndoLine()}
       </div>` : renderImportReview(rows)}
   </div>`;
+}
+
+// [M14] Desfazer a última importação. Aparece só na tela de escolher arquivo
+// (a de revisão já é o momento de decidir) e some depois de usada. Remove pelo
+// identificador exatamente o que aquela importação criou, então o que a pessoa
+// lançou ou editou depois não corre risco.
+function renderImportUndoLine() {
+  const undo = state.importUndo;
+  if (!undo) return "";
+  const total = (undo.transactionIds || []).length + (undo.transferIds || []).length;
+  if (!total) return "";
+  const quando = String(undo.at || "").slice(0, 10);
+  return `<div class="import-notice" data-ui-css="margin-top:12px">
+    ${svgIcon("refresh", 16)}
+    <div>
+      <b>Última importação: ${plural(total, "registro", "registros")}${undo.filename ? ` de ${escapeHtml(undo.filename)}` : ""}${isRealIsoDate(quando) ? ` em ${fmtDateFull(quando)}` : ""}.</b>
+      <span>Se importou o arquivo errado, dá para remover de uma vez o que ele criou. O que você lançou ou editou depois não é tocado.</span>
+      <button class="btn btn--ghost btn--sm" data-action="import-undo">${svgIcon("refresh", 15)} Desfazer importação</button>
+    </div>
+  </div>`;
+}
+
+// [M14] "Possível duplicata" dizia a mesma coisa para casos muito diferentes.
+// Reimportar o mesmo extrato e ter dois gastos iguais na mesma semana têm
+// consequências opostas, e quem decide precisa saber de qual se trata: as duas
+// nascem desmarcadas, mas só uma delas merece continuar desmarcada.
+const IMPORT_DUPLICATE_TAGS = Object.freeze({
+  external: { rotulo: "já importado", motivo: "O banco deu a este movimento o mesmo identificador de um lançamento que já está aqui. É a mesma linha, reimportada." },
+  exata: { rotulo: "já lançado", motivo: "Já existe um lançamento com a mesma data, o mesmo valor e a mesma descrição." },
+  arquivo: { rotulo: "repetida no arquivo", motivo: "Esta linha aparece mais de uma vez dentro do próprio arquivo escolhido." },
+  parecida: { rotulo: "parecida com um lançamento seu", motivo: "Mesmo valor e tipo, em data próxima, mas com descrição diferente. Pode ser outro movimento; confira antes de descartar." },
+});
+
+function importDuplicateTag(row) {
+  if (!row || !row.duplicate) return "";
+  const info = IMPORT_DUPLICATE_TAGS[row.duplicateKind];
+  if (!info) return `<span class="import-dup-tag">possível duplicata</span>`;
+  return `<span class="import-dup-tag" title="${escapeHtml(info.motivo)}">${escapeHtml(info.rotulo)}</span>`;
 }
 
 function renderImportReviewRow(row, idx, context) {
@@ -57,7 +96,7 @@ function renderImportReviewRow(row, idx, context) {
   return `<div class="import-row ${!row.include ? "import-row--off" : ""} ${transfer ? "import-row--transfer" : ""}" id="import-row-${idx}">
     <button class="checkbox ${row.include ? "checked" : ""}" data-action="import-toggle" data-id="${idx}" aria-label="${row.include ? "Não importar" : "Importar"} ${escapeHtml(row.description || "movimento")}">${row.include ? svgIcon("check", 13) : ""}</button>
     <div class="import-row__info">
-      <p class="import-row__desc">${escapeHtml(row.description || (row.type === "income" ? "Receita" : "Gasto"))} ${row.duplicate ? `<span class="import-dup-tag">possível duplicata</span>` : ""}${row.roleLabel ? `<span class="import-role-tag">${escapeHtml(row.roleLabel)}</span>` : ""}${recordedTag}</p>
+      <p class="import-row__desc">${escapeHtml(row.description || (row.type === "income" ? "Receita" : "Gasto"))} ${importDuplicateTag(row)}${row.roleLabel ? `<span class="import-role-tag">${escapeHtml(row.roleLabel)}</span>` : ""}${recordedTag}</p>
       <p class="import-row__meta">${fmtDateShort(row.date)} · ${typeLabel}${row.page ? ` · página ${row.page}` : ""}${reason ? ` · ${escapeHtml(reason)}` : ""}</p>
     </div>
     <span class="import-row__amount ${!transfer && row.type === "income" ? "tx-amount--income" : ""}">${row.type === "income" ? "+" : "-"}${fmtBRL(row.amount)}</span>
@@ -143,6 +182,17 @@ function importReviewSummary(rows, context) {
   sourceParts.push(documentLabel);
   if (meta.pageCount) sourceParts.push(plural(meta.pageCount, "página", "páginas"));
 
+  // [M14] Quantas linhas vieram desmarcadas e POR QUÊ. Só o número total não
+  // deixa ninguém julgar se é uma reimportação inteira (esperada) ou um punhado
+  // de linhas só parecidas (que merecem uma olhada antes de serem descartadas).
+  const dup = meta.duplicates || {};
+  const partesDup = [];
+  if (dup.external) partesDup.push(`${plural(dup.external, "já veio deste mesmo extrato", "já vieram deste mesmo extrato")}`);
+  if (dup.exata) partesDup.push(`${plural(dup.exata, "já está lançada", "já estão lançadas")}`);
+  if (dup.arquivo) partesDup.push(`${plural(dup.arquivo, "se repete dentro do arquivo", "se repetem dentro do arquivo")}`);
+  if (dup.parecida) partesDup.push(`${plural(dup.parecida, "é só parecida e merece conferência", "são só parecidas e merecem conferência")}`);
+  const resumoDuplicatas = partesDup.length ? ` Das desmarcadas: ${partesDup.join("; ")}.` : "";
+
   const invalidTransfer = includedTransfers.some((row) => !ctx.activeAccounts.some((account) => account.id === row.otherAccountId && account.id !== ctx.destinationId));
   const buttonParts = [];
   if (includedTransactions.length) buttonParts.push(plural(includedTransactions.length, "lançamento", "lançamentos"));
@@ -162,7 +212,7 @@ function importReviewSummary(rows, context) {
   ].join("");
 
   return {
-    subtitle: `${sourceParts.map(escapeHtml).join(" · ")} · ${plural(included.length, "selecionado para importar", "selecionados para importar")}${partesTotal.length ? ` · ${partesTotal.join(" e ")}` : ""}. Duplicados e transferências já registradas vêm desmarcados${meta.skipped ? ` · ${plural(meta.skipped, "linha ignorada", "linhas ignoradas")}` : ""}.`,
+    subtitle: `${sourceParts.map(escapeHtml).join(" · ")} · ${plural(included.length, "selecionado para importar", "selecionados para importar")}${partesTotal.length ? ` · ${partesTotal.join(" e ")}` : ""}. Duplicados e transferências já registradas vêm desmarcados${meta.skipped ? ` · ${plural(meta.skipped, "linha ignorada", "linhas ignoradas")}` : ""}.${resumoDuplicatas}`,
     notices,
     buttonLabel: `Importar ${buttonParts.join(" e ")}`,
     blocked: included.length === 0 || !ctx.destinationId || invalidTransfer,

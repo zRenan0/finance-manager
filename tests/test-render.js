@@ -711,6 +711,9 @@ console.log("\n6. Telas antigas continuam renderizando (não-regressão)");
     simulate: "renderSimulateScreen()",
     subscriptions: "renderSubscriptionsScreen()",
     import: "renderImportScreen()",
+    // [M14] O convite para desfazer a última importação só aparece com o recibo
+    // em memória; sem forçá-lo aqui, ninguém renderiza esse trecho.
+    "import/desfazer": "(state.importUndo = { at: '2026-08-30T10:00:00.000Z', filename: 'extrato.ofx', transactionIds: ['t1', 't2'], transferIds: [] }, renderImportScreen())",
     health: "renderHealthScreen()",
     wealth: "renderWealthScreen()",
     calendar: "renderCalendarScreen()",
@@ -733,6 +736,7 @@ console.log("\n6. Telas antigas continuam renderizando (não-regressão)");
   run("state.categoriesUi = { view: 'tree', search: '', collapsed: [], editor: null };");
   run("state.analyticsView = 'movements';");
   run("state.backup = freshBackupState();");
+  run("state.importUndo = null;");
 }
 
 /* ------------------------------------------- Privacidade: os dois estados do aceite */

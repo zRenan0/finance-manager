@@ -526,7 +526,7 @@ async function runOnboardingViewportM4(browser, scenario) {
     await page.waitForSelector('[data-action="backup-confirm"]');
     assert((await page.locator("body").textContent()).toLowerCase().includes("formato antigo"), "o arquivo antigo não foi reconhecido");
     await page.locator('[data-action="backup-confirm"]').click();
-    await page.waitForFunction(() => CofreUI.test.snapshot().version === 22);
+    await page.waitForFunction(() => CofreUI.test.snapshot().version === 23);
     fs.unlinkSync(backupPath); fs.unlinkSync(oldPath);
   });
 

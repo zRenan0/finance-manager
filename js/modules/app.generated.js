@@ -2221,7 +2221,7 @@ function isLocalSyncWriter(value) {
   const baseLength = 80 - marker.length - SYNC_WRITER_TOKEN.length;
   return writer.startsWith(`${stable.slice(0, baseLength)}${marker}`);
 }
-const SCHEMA_VERSION = 22;  // v22; privacidade, consentimentos e controles do usuário
+const SCHEMA_VERSION = 23;  // v23; identificador do banco na origem do lançamento (FITID do OFX)
 const LEGAL_REVIEW_DATE = "2026-08-18";
 // A versão sobe quando o CONTEÚDO do texto muda, não quando muda a redação.
 // Esta subiu porque a política passou a declarar controlador, retenção,
@@ -2400,6 +2400,11 @@ const META_SYNC_BATCH = "syncBatchJournal";    // lote em voo; preserva mutation
 // deixou passar uma operação fica com números diferentes dos outros para sempre,
 // porque o servidor nunca reenvia o que ficou atrás do cursor.
 const META_RECONCILE_RECEIPT = "syncReconcileReceipt";
+// [M14] Última importação de extrato, para poder desfazê-la. Guarda SÓ os
+// identificadores criados, a data e o nome do arquivo; nenhum valor, descrição
+// ou categoria. Fica no `localMeta` de propósito: pertence a este aparelho, não
+// sai no backup nem sobe na sincronização.
+const META_IMPORT_UNDO = "importUndo";
 const COLLECTIONS = [STORE_TX, STORE_CAT, STORE_GOALS, STORE_ASSETS];
 const ALL_STORES = [STORE_TX, STORE_CAT, STORE_GOALS, STORE_ASSETS, STORE_SETTINGS];
 
@@ -2605,6 +2610,11 @@ function normalizeTransactionOrigin(raw, source, fallbackDate) {
     channel: transactionSourceOf(origin.channel || sourceId),
     label: String(origin.label || TRANSACTION_ORIGIN_LABELS[sourceId] || "Outra origem").trim().slice(0, 100),
     reference: origin.reference ? String(origin.reference).trim().slice(0, 160) : null,
+    // v23. Identificador dado pelo BANCO ao movimento (`FITID` do OFX), quando
+    // existe. É o que permite reconhecer a mesma linha numa reimportação sem
+    // depender de valor, data e texto continuarem idênticos. Nasce `null` em
+    // toda base anterior e em todo lançamento que não veio de extrato.
+    externalId: origin.externalId ? String(origin.externalId).trim().slice(0, 120) : null,
     importedAt: (origin.importedAt || sourceId !== "manual") ? normalizeTransactionTimestamp(origin.importedAt, fallbackDate) : null,
   };
 }
@@ -13769,6 +13779,10 @@ function parseOfxStatement(text) {
     const amtRaw = get("TRNAMT");
     const trnType = (get("TRNTYPE") || "").toUpperCase();
     const memo = get("MEMO") || get("NAME") || get("CHECKNUM") || "";
+    // [M14] `FITID` é o identificador que o BANCO dá ao movimento, e é o único
+    // sinal de duplicidade que não depende de data, valor ou texto. Sem ele, dois
+    // cafés de R$ 12 na mesma semana são indistinguíveis de uma reimportação.
+    const fitid = get("FITID");
     if (!dtRaw || amtRaw == null) { skipped++; continue; }
 
     const date = `${dtRaw.slice(0, 4)}-${dtRaw.slice(4, 6)}-${dtRaw.slice(6, 8)}`;
@@ -13782,7 +13796,7 @@ function parseOfxStatement(text) {
     // importação inteira justamente nos extratos que mais precisam do ajuste.
     if (amount > 0 && /^(DEBIT|PAYMENT|FEE|SRVCHG|ATM|CASH|DIRECTDEBIT)$/.test(trnType)) amount = -amount;
 
-    out.push({ date, amount, description: memo });
+    out.push({ date, amount, description: memo, externalId: fitid ? String(fitid).slice(0, 120) : null });
   }
   if (out.length === 0) throw new ImportError("NO_ROWS", "O OFX foi lido, mas nenhuma transação válida foi encontrada.");
   return { rows: out, skipped, format: "ofx" };
@@ -13814,6 +13828,10 @@ function parseStatementFile(text, filename) {
     amount: Math.abs(roundMoney(r.amount)),
     description: r.description,
     type: r.amount < 0 ? "expense" : "income",
+    // O identificador do banco atravessa a normalização. Esta função reconstrói
+    // a linha campo a campo, então o que não for listado aqui é descartado em
+    // silêncio; foi assim que o `externalId` sumiu entre o parser e a revisão.
+    externalId: r.externalId || null,
   }));
   return { rows, format: parsed.format, skipped: parsed.skipped };
 }
@@ -13821,16 +13839,60 @@ function parseStatementFile(text, filename) {
 // ------------------------------------------------------------------------------
 // DETECÇÃO DE DUPLICATAS; evita importar o mesmo extrato duas vezes
 // ------------------------------------------------------------------------------
+// [M14] Duplicidade tem GRAUS, e tratar todos como o mesmo aviso era o defeito.
+//
+// A regra anterior era só "mesmo valor, mesmo tipo, data a até três dias". Como
+// a linha marcada nasce DESMARCADA, dois cafés de R$ 12 na mesma semana viravam
+// um café só: o segundo era descartado sem que ninguém percebesse. Por outro
+// lado, reimportar o mesmo extrato precisa continuar sendo pego.
+//
+// Agora existem quatro sinais, do mais forte para o mais fraco:
+//
+//   external; o banco deu o mesmo identificador (FITID do OFX). É certeza.
+//   exata   ; mesmo valor, tipo, data E descrição. É praticamente certeza.
+//   arquivo ; a linha se repete DENTRO do próprio arquivo escolhido agora.
+//   parecida; mesmo valor e tipo, data próxima, descrição diferente. É SUSPEITA,
+//              e a tela precisa dizer que é suspeita e não fato consumado.
+//
+// Todas continuam nascendo desmarcadas, como antes: mudar isso importaria
+// duplicata de verdade por padrão. O que muda é a pessoa passar a saber QUAL
+// caso está diante dela para poder remarcar com conhecimento.
+function importDescriptionKey(value) {
+  return normalizeText(value || "").replace(/[^a-z0-9 ]/g, "").trim();
+}
+
+function importExactKey(row) {
+  return [row.date, row.type, moneyToCents(row.amount), importDescriptionKey(row.description)].join("|");
+}
+
 function markDuplicates(rows, existingTx) {
+  const anteriores = Array.isArray(existingTx) ? existingTx : [];
+  const externosGravados = new Set();
+  const exatasGravadas = new Set();
+  anteriores.forEach((t) => {
+    const externo = t && t.origin && t.origin.externalId;
+    if (externo) externosGravados.add(String(externo));
+    exatasGravadas.add(importExactKey(t));
+  });
+
+  const vistasNesteArquivo = new Set();
   return rows.map((r) => {
     const rd = new Date(r.date + "T00:00:00").getTime();
-    const dupe = existingTx.some((t) => {
+    const chave = importExactKey(r);
+    let kind = null;
+
+    if (r.externalId && externosGravados.has(String(r.externalId))) kind = "external";
+    else if (exatasGravadas.has(chave)) kind = "exata";
+    else if (vistasNesteArquivo.has(chave)) kind = "arquivo";
+    else if (anteriores.some((t) => {
       if (moneyToCents(t.amount) !== moneyToCents(r.amount)) return false;
       if (t.type !== r.type) return false;
       const td = new Date(t.date + "T00:00:00").getTime();
       return Math.abs(rd - td) / 86400000 <= DUPLICATE_WINDOW_DAYS;
-    });
-    return { ...r, duplicate: dupe };
+    })) kind = "parecida";
+
+    vistasNesteArquivo.add(chave);
+    return { ...r, duplicate: !!kind, duplicateKind: kind };
   });
 }
 
@@ -13864,6 +13926,9 @@ function prepareImportRows(rawFile, filename, data) {
     };
   }).sort((a, b) => (a.date < b.date ? 1 : -1));
   const roleCounts = prepared.reduce((count, r) => (r.role ? { ...count, [r.role]: (count[r.role] || 0) + 1 } : count), {});
+  const duplicateCounts = prepared.reduce((count, r) => (r.duplicateKind
+    ? { ...count, [r.duplicateKind]: (count[r.duplicateKind] || 0) + 1 }
+    : count), {});
   const filenameLooksLikeCard = /\b(fatura|cartao|card)\b/.test(normalizeForMatch(filename || ""));
   const documentKind = parsed.documentKind || (filenameLooksLikeCard || roleCounts.carryover ? "card" : "account");
   prepared.meta = {
@@ -13873,6 +13938,7 @@ function prepareImportRows(rawFile, filename, data) {
     confidence: parsed.confidence || "alta",
     pageCount: parsed.pageCount || null,
     roles: roleCounts,
+    duplicates: duplicateCounts,
   };
   return prepared;
 }
@@ -13897,7 +13963,10 @@ function buildTransactionsFromRows(rows, format, destination, filename) {
       payment: documentKind === "card" ? "Crédito" : (r.type === "expense" ? "Débito" : "Outro"),
       description: r.description,
       source,
-      origin: { channel: source, label, reference: filename || null, importedAt: new Date().toISOString() },
+      // `externalId` é o identificador do banco (FITID do OFX). Guardá-lo é o
+      // que permite reconhecer a mesma linha numa reimportação futura sem
+      // depender de valor, data e texto continuarem idênticos.
+      origin: { channel: source, label, reference: filename || null, externalId: r.externalId || null, importedAt: new Date().toISOString() },
       accountId: documentKind === "account" ? destinationId : null,
       creditCardId: documentKind === "card" ? destinationId : null,
       nature: r.nature || (documentKind === "card" && r.type === "income" ? "estorno" : null),
@@ -29965,8 +30034,47 @@ function renderImportScreen() {
           <span class="dropzone__title">Arraste o arquivo aqui</span>
           <span class="dropzone__subtitle">ou toque para escolher (.ofx, .csv, .pdf)</span>
         </label>`}
+        ${renderImportUndoLine()}
       </div>` : renderImportReview(rows)}
   </div>`;
+}
+
+// [M14] Desfazer a última importação. Aparece só na tela de escolher arquivo
+// (a de revisão já é o momento de decidir) e some depois de usada. Remove pelo
+// identificador exatamente o que aquela importação criou, então o que a pessoa
+// lançou ou editou depois não corre risco.
+function renderImportUndoLine() {
+  const undo = state.importUndo;
+  if (!undo) return "";
+  const total = (undo.transactionIds || []).length + (undo.transferIds || []).length;
+  if (!total) return "";
+  const quando = String(undo.at || "").slice(0, 10);
+  return `<div class="import-notice" data-ui-css="margin-top:12px">
+    ${svgIcon("refresh", 16)}
+    <div>
+      <b>Última importação: ${plural(total, "registro", "registros")}${undo.filename ? ` de ${escapeHtml(undo.filename)}` : ""}${isRealIsoDate(quando) ? ` em ${fmtDateFull(quando)}` : ""}.</b>
+      <span>Se importou o arquivo errado, dá para remover de uma vez o que ele criou. O que você lançou ou editou depois não é tocado.</span>
+      <button class="btn btn--ghost btn--sm" data-action="import-undo">${svgIcon("refresh", 15)} Desfazer importação</button>
+    </div>
+  </div>`;
+}
+
+// [M14] "Possível duplicata" dizia a mesma coisa para casos muito diferentes.
+// Reimportar o mesmo extrato e ter dois gastos iguais na mesma semana têm
+// consequências opostas, e quem decide precisa saber de qual se trata: as duas
+// nascem desmarcadas, mas só uma delas merece continuar desmarcada.
+const IMPORT_DUPLICATE_TAGS = Object.freeze({
+  external: { rotulo: "já importado", motivo: "O banco deu a este movimento o mesmo identificador de um lançamento que já está aqui. É a mesma linha, reimportada." },
+  exata: { rotulo: "já lançado", motivo: "Já existe um lançamento com a mesma data, o mesmo valor e a mesma descrição." },
+  arquivo: { rotulo: "repetida no arquivo", motivo: "Esta linha aparece mais de uma vez dentro do próprio arquivo escolhido." },
+  parecida: { rotulo: "parecida com um lançamento seu", motivo: "Mesmo valor e tipo, em data próxima, mas com descrição diferente. Pode ser outro movimento; confira antes de descartar." },
+});
+
+function importDuplicateTag(row) {
+  if (!row || !row.duplicate) return "";
+  const info = IMPORT_DUPLICATE_TAGS[row.duplicateKind];
+  if (!info) return `<span class="import-dup-tag">possível duplicata</span>`;
+  return `<span class="import-dup-tag" title="${escapeHtml(info.motivo)}">${escapeHtml(info.rotulo)}</span>`;
 }
 
 function renderImportReviewRow(row, idx, context) {
@@ -29985,7 +30093,7 @@ function renderImportReviewRow(row, idx, context) {
   return `<div class="import-row ${!row.include ? "import-row--off" : ""} ${transfer ? "import-row--transfer" : ""}" id="import-row-${idx}">
     <button class="checkbox ${row.include ? "checked" : ""}" data-action="import-toggle" data-id="${idx}" aria-label="${row.include ? "Não importar" : "Importar"} ${escapeHtml(row.description || "movimento")}">${row.include ? svgIcon("check", 13) : ""}</button>
     <div class="import-row__info">
-      <p class="import-row__desc">${escapeHtml(row.description || (row.type === "income" ? "Receita" : "Gasto"))} ${row.duplicate ? `<span class="import-dup-tag">possível duplicata</span>` : ""}${row.roleLabel ? `<span class="import-role-tag">${escapeHtml(row.roleLabel)}</span>` : ""}${recordedTag}</p>
+      <p class="import-row__desc">${escapeHtml(row.description || (row.type === "income" ? "Receita" : "Gasto"))} ${importDuplicateTag(row)}${row.roleLabel ? `<span class="import-role-tag">${escapeHtml(row.roleLabel)}</span>` : ""}${recordedTag}</p>
       <p class="import-row__meta">${fmtDateShort(row.date)} · ${typeLabel}${row.page ? ` · página ${row.page}` : ""}${reason ? ` · ${escapeHtml(reason)}` : ""}</p>
     </div>
     <span class="import-row__amount ${!transfer && row.type === "income" ? "tx-amount--income" : ""}">${row.type === "income" ? "+" : "-"}${fmtBRL(row.amount)}</span>
@@ -30071,6 +30179,17 @@ function importReviewSummary(rows, context) {
   sourceParts.push(documentLabel);
   if (meta.pageCount) sourceParts.push(plural(meta.pageCount, "página", "páginas"));
 
+  // [M14] Quantas linhas vieram desmarcadas e POR QUÊ. Só o número total não
+  // deixa ninguém julgar se é uma reimportação inteira (esperada) ou um punhado
+  // de linhas só parecidas (que merecem uma olhada antes de serem descartadas).
+  const dup = meta.duplicates || {};
+  const partesDup = [];
+  if (dup.external) partesDup.push(`${plural(dup.external, "já veio deste mesmo extrato", "já vieram deste mesmo extrato")}`);
+  if (dup.exata) partesDup.push(`${plural(dup.exata, "já está lançada", "já estão lançadas")}`);
+  if (dup.arquivo) partesDup.push(`${plural(dup.arquivo, "se repete dentro do arquivo", "se repetem dentro do arquivo")}`);
+  if (dup.parecida) partesDup.push(`${plural(dup.parecida, "é só parecida e merece conferência", "são só parecidas e merecem conferência")}`);
+  const resumoDuplicatas = partesDup.length ? ` Das desmarcadas: ${partesDup.join("; ")}.` : "";
+
   const invalidTransfer = includedTransfers.some((row) => !ctx.activeAccounts.some((account) => account.id === row.otherAccountId && account.id !== ctx.destinationId));
   const buttonParts = [];
   if (includedTransactions.length) buttonParts.push(plural(includedTransactions.length, "lançamento", "lançamentos"));
@@ -30090,7 +30209,7 @@ function importReviewSummary(rows, context) {
   ].join("");
 
   return {
-    subtitle: `${sourceParts.map(escapeHtml).join(" · ")} · ${plural(included.length, "selecionado para importar", "selecionados para importar")}${partesTotal.length ? ` · ${partesTotal.join(" e ")}` : ""}. Duplicados e transferências já registradas vêm desmarcados${meta.skipped ? ` · ${plural(meta.skipped, "linha ignorada", "linhas ignoradas")}` : ""}.`,
+    subtitle: `${sourceParts.map(escapeHtml).join(" · ")} · ${plural(included.length, "selecionado para importar", "selecionados para importar")}${partesTotal.length ? ` · ${partesTotal.join(" e ")}` : ""}. Duplicados e transferências já registradas vêm desmarcados${meta.skipped ? ` · ${plural(meta.skipped, "linha ignorada", "linhas ignoradas")}` : ""}.${resumoDuplicatas}`,
     notices,
     buttonLabel: `Importar ${buttonParts.join(" e ")}`,
     blocked: included.length === 0 || !ctx.destinationId || invalidTransfer,
@@ -34449,6 +34568,49 @@ function onClick(e) {
     // próprio arquivo. O saldo inicial não é tocado: quem informou "saldo de
     // hoje" e recua a abertura está dizendo que aquele número era o do começo
     // do período; é exatamente a conta que a tela de conferência já explica.
+    // [M14] Desfazer a última importação. Remove exatamente os registros que
+    // ELA criou, pelo identificador, e por isso não toca em nada que a pessoa
+    // tenha lançado ou editado depois. A remoção passa pelo mesmo caminho de
+    // exclusão de sempre, com lápide, então a sincronização a propaga em vez de
+    // ressuscitar tudo no próximo ciclo.
+    case "import-undo": {
+      const undo = state.importUndo;
+      if (!undo) break;
+      const txIds = new Set(undo.transactionIds || []);
+      const transferIds = new Set(undo.transferIds || []);
+      const presentes = (state.data.transactions || []).filter((tx) => txIds.has(tx.id)).length;
+      const transferenciasPresentes = (state.data.accountTransfers || []).filter((t) => transferIds.has(t.id)).length;
+      if (!presentes && !transferenciasPresentes) {
+        state.importUndo = null;
+        saveImportUndo(null);
+        notify("Nada a desfazer: esses lançamentos já não estão aqui", "warn");
+        render();
+        break;
+      }
+      requestConfirmation({
+        title: "Desfazer a importação?",
+        message: `Serão removidos ${plural(presentes, "lançamento", "lançamentos")}${transferenciasPresentes ? ` e ${plural(transferenciasPresentes, "transferência", "transferências")}` : ""} criados por esta importação. O que você lançou ou editou depois não é tocado.`,
+        confirmLabel: "Desfazer importação",
+        tone: "danger",
+        onConfirm: () => {
+          setData((d) => {
+            const semLancamentos = removeTransactionsWithIntegrity(d, Array.from(txIds));
+            const transferenciasRestantes = (semLancamentos.accountTransfers || []).filter((t) => !transferIds.has(t.id));
+            const removidas = (semLancamentos.accountTransfers || []).filter((t) => transferIds.has(t.id)).map((t) => t.id);
+            return {
+              ...semLancamentos,
+              accountTransfers: transferenciasRestantes,
+              graveyard: removidas.length ? withTombstones(semLancamentos.graveyard, "accountTransfers", removidas) : semLancamentos.graveyard,
+            };
+          });
+          state.importUndo = null;
+          saveImportUndo(null);
+          notify("Importação desfeita");
+          render();
+        },
+      });
+      break;
+    }
     case "import-backdate-account": {
       const novaAbertura = String(id || "");
       if (!/^\d{4}-\d{2}-\d{2}$/.test(novaAbertura)) break;
@@ -34499,6 +34661,18 @@ function onClick(e) {
         transactions: [...d.transactions, ...newTx],
         accountTransfers: [...(d.accountTransfers || []), ...newTransfers],
       }));
+      // [M14] Registro para desfazer. Guarda só identificadores, a data e o nome
+      // do arquivo; nenhum valor, descrição ou categoria. Grava DEPOIS de
+      // `setData`: um recibo de importação que não aconteceu seria pior que
+      // recibo nenhum. A gravação é assíncrona e não bloqueia a tela, porque
+      // falhar em anotar o recibo não pode desfazer a importação que deu certo.
+      state.importUndo = {
+        at: new Date().toISOString(),
+        filename: state.importFilename || "",
+        transactionIds: newTx.map((tx) => tx.id),
+        transferIds: newTransfers.map((transfer) => transfer.id),
+      };
+      saveImportUndo(state.importUndo);
       state.importRows = null; state.importFilename = null; state.importDestinationId = ""; state.importVisible = IMPORT_PAGE_SIZE;
       const importedParts = [];
       if (newTx.length) importedParts.push(plural(newTx.length, "lançamento importado", "lançamentos importados"));
@@ -34715,6 +34889,9 @@ let state = {
   // sequencial de qualquer jeito; o resto entra sob demanda.
   importVisible: IMPORT_PAGE_SIZE,
   importFilename: null,
+  // [M14] Recibo da última importação (só identificadores), hidratado do
+  // `localMeta` no boot. É o que permite oferecer "desfazer importação".
+  importUndo: null,
   importDocumentKind: "account",
   importDestinationId: "",
   importPendingFile: null,
@@ -36073,6 +36250,37 @@ function exportBackupJson() {
   notify(`Backup com ${plural(envelope.counts.transactions, "lançamento", "lançamentos")} exportado`);
 }
 
+// [M14] Recibo da última importação, para o botão de desfazer. Mora no
+// `localMeta`: pertence a este aparelho, não sai no backup e não sobe na
+// sincronização. Guarda só identificadores, data e nome do arquivo.
+//
+// As duas funções engolem falha de propósito. Não conseguir anotar (ou ler) o
+// recibo é perder o atalho de desfazer, e isso não pode derrubar a importação
+// nem o boot do aplicativo.
+function saveImportUndo(entry) {
+  try {
+    const salvar = entry
+      ? FinanceStore.localMetaPut(META_IMPORT_UNDO, entry)
+      : FinanceStore.localMetaDelete(META_IMPORT_UNDO);
+    if (salvar && typeof salvar.catch === "function") salvar.catch(() => {});
+  } catch (e) { /* sem recibo; a importação em si já aconteceu */ }
+}
+
+function hydrateImportUndo() {
+  try {
+    const leitura = FinanceStore.localMetaGet(META_IMPORT_UNDO);
+    if (!leitura || typeof leitura.then !== "function") return;
+    leitura.then((entry) => {
+      if (!entry || typeof entry !== "object") return;
+      const transactionIds = Array.isArray(entry.transactionIds) ? entry.transactionIds : [];
+      const transferIds = Array.isArray(entry.transferIds) ? entry.transferIds : [];
+      if (!transactionIds.length && !transferIds.length) return;
+      state.importUndo = { at: entry.at || null, filename: String(entry.filename || ""), transactionIds, transferIds };
+      if (state.tab === "import") render();
+    }).catch(() => {});
+  } catch (e) { /* nada a restaurar */ }
+}
+
 // Estado limpo do cartão de backup. Existe em função porque agora são oito
 // campos, e cada lugar que "zerava o backup" à mão esquecia um deles.
 function freshBackupState() {
@@ -36899,6 +37107,7 @@ async function init() {
   if (FinanceStore.scope() !== GUEST_SCOPE) holdOnboardingGate();
   else state.onboarding.open = !(state.data.onboarding && state.data.onboarding.done);
   state.backup.undoAvailable = !!FinanceStore.readUndoSnapshot();
+  hydrateImportUndo();
   FinanceStore.onError(() => {
     state.storageOk = false;
     notify("Não foi possível salvar os dados neste navegador");

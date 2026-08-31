@@ -299,7 +299,7 @@ section("3. Lápides de exclusão (v14)");
 {
   const iso = (d) => new Date(d).toISOString();
 
-  check("schema subiu para 22", run("SCHEMA_VERSION") === 22);
+  check("schema subiu para 23", run("SCHEMA_VERSION") === 23);
   check("banco novo nasce com cemitério vazio",
     Object.keys(run("migrate(defaultData()).graveyard.transactions")).length === 0);
   check("cemitério cobre as nove entidades sincronizáveis",
