@@ -24,6 +24,17 @@ npm test
 npm run verify:release
 ```
 
+### Cobertura automatizada
+
+A suíte possui uma prova comportamental para os cliques financeiros críticos e
+uma regressão própria para o agregador de cobertura. O relatório exige 75% no
+total e 35% em `js/actions.js`.
+
+```bash
+node tests/test-critical-actions.js
+npm run test:coverage
+```
+
 O processo de homologação, publicação e retorno está em `docs/RELEASE.md`. O schema
 de dados está na versão 22 e o cache offline na versão 59. O inventário técnico
 do armazenamento está em `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`.

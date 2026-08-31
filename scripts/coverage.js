@@ -23,16 +23,18 @@ const TMP = path.join(OUT, "tmp");
 
 // PISO DE COBERTURA: é uma CATRACA, não uma meta.
 //
-// O valor está no nível medido hoje (21,8% global), arredondado para baixo. Ele
+// O valor está abaixo do nível medido no M15 (79,0% global). Ele
 // não existe para dizer que a cobertura é boa; existe para impedir que ela caia.
-// Colocar aqui um número aspiracional (55%, 80%) só faria a CI ficar vermelha
+// Colocar aqui um número aspiracional (90%, 100%) só faria a CI ficar vermelha
 // desde o primeiro dia, e uma CI cronicamente vermelha deixa de ser lida.
 //
-// A distribuição é conhecida e intencional: os motores de cálculo
-// (simulators, debts, portfolio, storage, metrics) têm cobertura alta, e as
-// telas têm cobertura baixa, porque a suíte testa comportamento e não pintura.
-// Subir este piso é trabalho de quem for escrever teste de tela.
-const MINIMO_GLOBAL = Number(process.env.COVERAGE_MIN) || 20;
+// A distribuição é conhecida: motores e telas carregados por mais de um teste
+// agora combinam cobertura entre processos, e arquivos críticos podem ter um
+// piso próprio quando a média global esconder uma regressão localizada.
+const MINIMO_GLOBAL = Number(process.env.COVERAGE_MIN) || 75;
+const MINIMOS_POR_ARQUIVO = Object.freeze({
+  "js/actions.js": Number(process.env.COVERAGE_ACTIONS_MIN) || 35,
+});
 
 function limpar() {
   if (fs.existsSync(OUT)) fs.rmSync(OUT, { recursive: true, force: true });
@@ -46,6 +48,38 @@ function rodarSuite() {
     env: { ...process.env, NODE_V8_COVERAGE: TMP },
   });
   return resultado.status === 0;
+}
+
+function unirIntervalos(intervalos) {
+  const ordenados = (intervalos || []).slice().sort((a, b) => a[0] - b[0]);
+  const unidos = [];
+  ordenados.forEach(([inicio, fim]) => {
+    if (!(fim > inicio)) return;
+    const ultimo = unidos[unidos.length - 1];
+    if (!ultimo || inicio > ultimo[1]) unidos.push([inicio, fim]);
+    else ultimo[1] = Math.max(ultimo[1], fim);
+  });
+  return unidos;
+}
+
+// Um byte só permanece não coberto quando TODAS as execuções do mesmo arquivo
+// deixaram de alcançá-lo. A implementação anterior juntava os intervalos mortos
+// de processos diferentes. Bastava um teste carregar `actions.js` sem clicar
+// para apagar do relatório a cobertura obtida por outro teste.
+function intersectarIntervalos(esquerda, direita) {
+  const a = unirIntervalos(esquerda);
+  const b = unirIntervalos(direita);
+  const resultado = [];
+  let i = 0;
+  let j = 0;
+  while (i < a.length && j < b.length) {
+    const inicio = Math.max(a[i][0], b[j][0]);
+    const fim = Math.min(a[i][1], b[j][1]);
+    if (fim > inicio) resultado.push([inicio, fim]);
+    if (a[i][1] < b[j][1]) i += 1;
+    else j += 1;
+  }
+  return resultado;
 }
 
 // Converte os intervalos de bytes do V8 em bytes cobertos por arquivo.
@@ -77,13 +111,22 @@ function resumir() {
       // tenha sido carregado, porque a extensão da função de topo cobre o
       // arquivo todo. O que mede de fato é o contrário: total menos a união
       // dos intervalos com `count === 0`.
-      const atual = porArquivo.get(limpo) || { naoCobertos: [], total: 0 };
+      const intervalosDaExecucao = [];
+      let totalDaExecucao = 0;
       (script.functions || []).forEach((fn) => {
         (fn.ranges || []).forEach((r) => {
-          atual.total = Math.max(atual.total, r.endOffset);
-          if (r.count === 0) atual.naoCobertos.push([r.startOffset, r.endOffset]);
+          totalDaExecucao = Math.max(totalDaExecucao, r.endOffset);
+          if (r.count === 0) intervalosDaExecucao.push([r.startOffset, r.endOffset]);
         });
       });
+      const mortosDaExecucao = unirIntervalos(intervalosDaExecucao);
+      const atual = porArquivo.get(limpo);
+      if (!atual) {
+        porArquivo.set(limpo, { naoCobertos: mortosDaExecucao, total: totalDaExecucao });
+        return;
+      }
+      atual.total = Math.max(atual.total, totalDaExecucao);
+      atual.naoCobertos = intersectarIntervalos(atual.naoCobertos, mortosDaExecucao);
       porArquivo.set(limpo, atual);
     });
   });
@@ -95,13 +138,8 @@ function resumir() {
   Array.from(porArquivo.entries()).sort((a, b) => a[0].localeCompare(b[0])).forEach(([arquivo, dados]) => {
     // União dos intervalos NÃO cobertos, para não contar duas vezes um bloco
     // que aparece dentro de outro bloco morto.
-    const intervalos = dados.naoCobertos.slice().sort((a, b) => a[0] - b[0]);
-    let morto = 0;
-    let fimAnterior = -1;
-    intervalos.forEach(([ini, fim]) => {
-      const inicio = Math.max(ini, fimAnterior);
-      if (fim > inicio) { morto += fim - inicio; fimAnterior = fim; }
-    });
+    const intervalos = unirIntervalos(dados.naoCobertos);
+    const morto = intervalos.reduce((total, [inicio, fim]) => total + (fim - inicio), 0);
     const total = dados.total || 0;
     if (!total) return;
     const coberto = Math.max(0, total - morto);
@@ -121,8 +159,10 @@ function main() {
 
   console.log("\n=============== COBERTURA ===============");
   resumo.linhas.forEach(({ arquivo, pct }) => {
-    const marca = pct >= MINIMO_GLOBAL ? " " : "!";
-    console.log(`${marca} ${pct.toFixed(1).padStart(6)}%  ${arquivo}`);
+    const piso = MINIMOS_POR_ARQUIVO[arquivo];
+    const marca = pct >= (piso == null ? MINIMO_GLOBAL : piso) ? " " : "!";
+    const detalhe = piso == null ? "" : ` (piso próprio: ${piso}%)`;
+    console.log(`${marca} ${pct.toFixed(1).padStart(6)}%  ${arquivo}${detalhe}`);
   });
   console.log("-----------------------------------------");
   console.log(`  ${resumo.global.toFixed(1).padStart(6)}%  GLOBAL (piso: ${MINIMO_GLOBAL}%)`);
@@ -138,6 +178,17 @@ function main() {
     console.error(`Cobertura global ${resumo.global.toFixed(1)}% abaixo do piso de ${MINIMO_GLOBAL}%.`);
     process.exit(1);
   }
+  const abaixoDoPiso = resumo.linhas.filter(({ arquivo, pct }) => (
+    MINIMOS_POR_ARQUIVO[arquivo] != null && pct < MINIMOS_POR_ARQUIVO[arquivo]
+  ));
+  if (abaixoDoPiso.length) {
+    abaixoDoPiso.forEach(({ arquivo, pct }) => {
+      console.error(`Cobertura de ${arquivo} em ${pct.toFixed(1)}%, abaixo do piso de ${MINIMOS_POR_ARQUIVO[arquivo]}%.`);
+    });
+    process.exit(1);
+  }
 }
 
-main();
+if (require.main === module) main();
+
+module.exports = { unirIntervalos, intersectarIntervalos };

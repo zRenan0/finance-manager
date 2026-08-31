@@ -2,6 +2,19 @@
 
 ## Não publicado
 
+### A cobertura agora mede a suíte inteira sem apagar execuções
+
+- O agregador considerava um trecho descoberto quando qualquer processo deixava
+  de executá-lo. Isso apagava a cobertura produzida pelos outros testes e
+  mostrava 22,5% no total e 0,9% em `js/actions.js`. Agora um trecho só fica
+  descoberto quando nenhum processo o executou.
+- A medição corrigida ficou em 79,0% global e 41,7% em `js/actions.js`. A suíte
+  passa a exigir pisos de 75% no total e 35% nesse arquivo.
+- Uma nova suíte percorre os cliques reais de criação, edição e exclusão de
+  transações, transferência, cartão, pagamento de fatura, meta, orçamento,
+  importação, conta, sincronização e restauração. São 29 verificações no limite
+  entre a interface e a persistência.
+
 ### A importação deixava sumir gasto legítimo, e agora sabe por que desmarca
 
 - A regra de duplicidade olhava só valor, tipo e proximidade de data. Como a

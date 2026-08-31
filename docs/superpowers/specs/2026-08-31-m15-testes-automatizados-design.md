@@ -39,10 +39,10 @@ duplica essas provas; ele cobre a passagem entre clique e regra de domínio.
 
 ## Catracas de cobertura
 
-O relatório continuará exigindo o piso global atual e passará a aceitar pisos por
-arquivo. `js/actions.js` deverá sair de 0,9% para pelo menos 15%, e a CI falhará se
-esse número cair depois. O valor mede somente caminhos críticos executados, sem
-testes que procuram texto no fonte para inflar o relatório.
+O relatório continuará exigindo um piso global e passará a aceitar pisos por
+arquivo. A medição correta do M15 fica protegida por 75% no total e 35% em
+`js/actions.js`; a CI falhará se qualquer um cair. O valor mede caminhos críticos
+executados, sem testes que procuram texto no fonte para inflar o relatório.
 
 ## Tratamento de falhas
 

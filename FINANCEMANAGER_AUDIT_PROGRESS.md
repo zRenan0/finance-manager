@@ -12,7 +12,8 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 
 | Campo | Valor |
 |---|---|
-| Módulo atual | **M14 - Importação de extratos** (concluído) |
+| Módulo atual | **M15 - Testes automatizados** (concluído) |
+| Status do M15 | **CONCLUÍDO** - ações financeiras críticas cobertas por comportamento; agregação V8 corrigida; cobertura real em 79,0% global e 41,7% em `js/actions.js`, com pisos de 75% e 35% |
 | Status do M14 | **CONCLUÍDO** - duplicidade passou a olhar a descrição e a ter quatro motivos distintos, o FITID do OFX é lido e guardado, e existe desfazer da última importação; schema local em 23 |
 | Status do M13 | **CONCLUÍDO** - seis versões inventariadas em `docs/VERSIONAMENTO.md` com matriz de compatibilidade conferida por teste; backup de schema futuro passou a avisar; banco passou a declarar a própria versão (**migração aplicada e confirmada em produção em 2026-08-31**) |
 | Status do M12 | **CONCLUÍDO** - aviso de privacidade no cartão, rótulo sem o formato em primeiro plano e backup opcionalmente protegido por senha (AES-GCM + PBKDF2), com ida e volta verificada em navegador real |
@@ -27,10 +28,10 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 | Status do M3 | **CONCLUÍDO** — aplicado e confirmado no banco em 2026-08-28 |
 | Status do M2 | **CONCLUÍDO** — nenhuma vulnerabilidade de autorização; invariantes travados por teste |
 | Status do M1 | **CONCLUÍDO** — aplicado e confirmado; gatilho capturado e versionado |
-| Módulos concluídos | M0, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14 |
-| Próximo módulo | M15 - Cobertura de testes e qualidade (`js/actions.js` continua o pior número da baseline) |
+| Módulos concluídos | M0, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15 |
+| Próximo módulo | M16 - Testes de Segurança |
 | Branch | `deploy-atualizado` (árvore limpa no início do M0) |
-| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `tests/test-cloud-sync.js`, `tests/test-account-backend.js`, `scripts/check-deploy.js`, `scripts/serve.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/storage.js`, `js/cloud-sync.js` (M10), `js/analytics.js`, `js/forecast.js`, `js/wrapped.js`, `js/screens/analytics.js` (M11), `js/backup-crypto.js` (**novo**), `js/app.js`, `js/actions.js`, `js/storage.js`, `js/screens/settings.js`, `css/components.css`, `scripts/build-app-module.js` (M12), `netlify/functions/sync.js` (M13), `js/import.js`, `netlify/functions/_shared/finance-schema.js` (M14), `js/modules/app.generated.js` (regerado). Documentação: inventário do M8, protocolo do M10, backup protegido do M12 e `docs/VERSIONAMENTO.md` do M13. |
+| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `tests/test-cloud-sync.js`, `tests/test-account-backend.js`, `tests/test-critical-actions.js`, `tests/test-coverage.js`, `scripts/check-deploy.js`, `scripts/serve.js`, `scripts/coverage.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/storage.js`, `js/cloud-sync.js` (M10), `js/analytics.js`, `js/forecast.js`, `js/wrapped.js`, `js/screens/analytics.js` (M11), `js/backup-crypto.js` (**novo**), `js/app.js`, `js/actions.js`, `js/storage.js`, `js/screens/settings.js`, `css/components.css`, `scripts/build-app-module.js` (M12), `netlify/functions/sync.js` (M13), `js/import.js`, `netlify/functions/_shared/finance-schema.js` (M14), `js/modules/app.generated.js` (regerado). Documentação: inventário do M8, protocolo do M10, backup protegido do M12, `docs/VERSIONAMENTO.md` do M13 e desenho de testes do M15. |
 | Migration do M13 | `20260831120000_database_schema_version.sql` — **aplicada e confirmada em produção em 2026-08-31** (`database_schema_version = 1`; grants inalterados: só `service_role` e `postgres`). Reversível por `alter table public.cofre_sync_config drop column if exists database_schema_version;` |
 | Migrations criadas até aqui | `20260828120000_rls_auto_enable_least_privilege.sql`, `20260828130000_rls_auto_enable_versionada.sql`, `20260828140000_menor_privilegio_tabelas.sql` (as três **aplicadas e confirmadas em 2026-08-28**), `20260828150000_rls_auto_enable_gatilho.sql` (**ainda não aplicada**; é no-op em produção, onde o gatilho já existe) |
 | Versão do app | `0.30.0` (package.json) |
@@ -223,7 +224,7 @@ Piores: `js/actions.js` 0,2%, `js/screens/accounts.js` 1,3%, `js/screens/privacy
 | R5 | P2 | **A marca "FinanceManager" não aparece em nenhum arquivo do projeto.** O produto se chama "Cofre" no `<title>`, no manifest, na landing (16 ocorrências) e na UI; "FinanceManager" existe apenas no domínio. Não é ambiguidade de marca — é ausência total de uma delas no código. | M22 |
 | R6 | P2 | `APP_VERSION` duplicada (`package.json` + `js/safe-errors.js`), sem amarração. | M13 |
 | R7 | P3 | `financas_db_mirror` mantém a base financeira em texto claro no localStorage (decisão anti-perda deliberada; precisa ficar documentada, não removida). | M8/M18 |
-| R8 | P3 | Cobertura 21,9%; `js/actions.js` (110 KB, orquestra as ações das telas) praticamente sem teste. | M15 |
+| R8 | ~~P3~~ **FECHADO** | A medição de 21,9% estava incorreta por um erro na agregação entre processos. O M15 corrigiu o cálculo e cobriu a orquestração crítica de `js/actions.js`: 79,0% global e 41,7% no arquivo. | M15 |
 | R9 | P3 | Achados de beta ainda abertos em `docs/PROXIMA-SESSAO.md`: F-06 (bundle sem minificação), F-08 a F-17 (UX/acessibilidade). Absorver nos módulos correspondentes em vez de duplicar. | M38/M39 |
 | — | — | Item 17 de `AUDIT_FIX_PROGRESS.md` continua PENDENTE (teclado/ARIA/contraste). O item 19 foi concluído no M9. | M39 |
 
@@ -2153,11 +2154,60 @@ primeiro lado, que é o pior dos dois, porque não deixa rastro.
 
 - **CSV e PDF não têm identificador de banco**, então continuam dependendo de
   data, valor e descrição. É limitação do formato, não do código.
-- **M15**: `tests/test-import-duplicates.js` exercita o motor de importação de
-  ponta a ponta em Node; serve de molde para cobrir `js/actions.js`, que segue
-  sendo o pior número da cobertura.
 - O desfazer guarda **uma** importação, a última. Guardar uma pilha exigiria
   decidir retenção e limite, e não havia achado que pedisse isso.
+
+---
+
+## M15 - Testes automatizados
+
+### Antes (situação encontrada)
+
+A suíte já conferia cálculos, telas, armazenamento, backend, sincronização e os
+fluxos principais em três navegadores. Faltava uma prova comportamental na
+fronteira mais sensível: o clique registrado em `data-action` chegando à
+mutação financeira real. O relatório também apontava 22,5% no total e 0,9% em
+`js/actions.js`, números incompatíveis com os caminhos que os testes executavam.
+
+### Achados
+
+| # | P | Achado | Situação |
+|---|---|---|---|
+| F15-01 | P2 | O agregador de cobertura fazia a união dos intervalos não executados de todos os processos. Se um teste carregasse `actions.js` sem clicar, ele anulava os trechos cobertos por outro teste. | **CORRIGIDO** - um trecho só fica descoberto quando permaneceu sem execução em todos os processos |
+| F15-02 | P2 | Criação, edição e exclusão de entidades críticas eram provadas em partes, mas não havia uma suíte dedicada ao caminho `data-action` até a persistência. | **CORRIGIDO** - 29 verificações comportamentais com os fontes reais na ordem do navegador |
+
+### Alterações
+
+| Arquivo | Motivo |
+|---|---|
+| `tests/test-critical-actions.js` | **novo** - transações offline, transferência, cartão e pagamento, meta, orçamento, importação, login, logout, sincronização, restauração e arquivo protegido |
+| `scripts/coverage.js` | interseção correta dos intervalos não executados e pisos de 75% global e 35% para `js/actions.js` |
+| `tests/test-coverage.js` | **novo** - regressão da união e da interseção dos intervalos de cobertura |
+| `docs/superpowers/specs/2026-08-31-m15-testes-automatizados-design.md` | escopo, fronteiras e critérios do módulo |
+
+### Compatibilidade
+
+Nenhum código de produção, schema, protocolo de sincronização, rota, formato de
+backup ou armazenamento foi alterado. O módulo muda somente os testes, a forma
+de medir o que eles executam e os pisos que barram regressões.
+
+### Testes
+
+| Teste | Resultado |
+|---|---|
+| `node tests/test-critical-actions.js` | **PASSOU** - 29 ok, 0 falhas |
+| `node tests/test-coverage.js` | **PASSOU** - 3 ok, 0 falhas |
+| `npm run lint` | **PASSOU** - 0 erro, 0 aviso |
+| `npm test` | **PASSOU** - 62 arquivos |
+| `npm run test:coverage` | **PASSOU** - 79,0% global; `js/actions.js` em 41,7% |
+| `npm run check:build` / `check:release` / `build:dist` | **PASSOU** - módulo conferido em 71 fontes e pacote com 38 arquivos; avisos legais e de `SITE_URL` já conhecidos |
+| `npm run test:browser` | **PASSOU** - 18/18 em Chromium, Firefox e WebKit |
+| `npm run test:pwa` | **PASSOU** - shell, dados locais, limpeza e API fora do cache |
+| `npm run test:landing` | **PASSOU** - 18/18 |
+
+### Status
+
+**CONCLUÍDO.** F15-01 e F15-02 corrigidos. Pendência do módulo: nenhuma.
 
 ---
 
@@ -2169,17 +2219,19 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
 ### A. Automatizado (CI ou máquina com Node) — porta de entrada obrigatória
 
 - [ ] `npm run lint`
-- [ ] `npm test` (60 arquivos)
+- [ ] `npm test` (62 arquivos)
 - [ ] `node tests/test-accounting-integrity.js` (invariantes contábeis do M11)
 - [ ] `node tests/test-backup-restore.js` (backup, restauração e senha do M12)
 - [ ] `node tests/test-versioning.js` (versões e matriz de compatibilidade do M13)
 - [ ] `node tests/test-import-duplicates.js` (duplicidade e desfazer da importação do M14)
+- [ ] `node tests/test-critical-actions.js` (ações financeiras críticas do M15)
+- [ ] `node tests/test-coverage.js` (agregação de cobertura do M15)
 - [ ] `npm run check:build` (o `app.generated.js` publicado corresponde às fontes)
 - [ ] `npm run check:release`
 - [ ] `npm run build:dist`
 - [ ] `npm run test:browser` (chromium + firefox + webkit)
 - [ ] `npm run test:pwa` (pacote publicado online e offline no Chromium)
-- [ ] Cobertura não caiu abaixo da baseline **21,9%** (piso do script: 20%)
+- [ ] Cobertura não caiu abaixo de **75% global** nem de **35% em `js/actions.js`**
 
 ### B. Visitante (sem conta)
 
