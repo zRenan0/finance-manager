@@ -5617,6 +5617,12 @@ function parseBackupFile(text) {
   if (!parsed || typeof parsed !== "object") {
     throw new BackupError("NOT_A_BACKUP", "O arquivo não parece ser um backup do app.");
   }
+  // [M12] Backup protegido por senha nunca chega aqui pelo caminho normal (a
+  // tela pede a senha antes). Esta guarda existe para que, se chegar por
+  // qualquer outro caminho, o erro diga o que fazer em vez de "não é um backup".
+  if (typeof BACKUP_ENC_KIND !== "undefined" && parsed.kind === BACKUP_ENC_KIND) {
+    throw new BackupError("ENCRYPTED", "Este backup está protegido por senha. Escolha o arquivo pela tela de Ajustes para informar a senha.");
+  }
 
   let payload = null;
   let meta = { exportedAt: null, legacy: false, checksumOk: true };

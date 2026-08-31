@@ -2,6 +2,32 @@
 
 ## Não publicado
 
+### O backup agora pode sair protegido por senha
+
+- O arquivo continua o mesmo: JSON, com checksum, e é ele que restaura o app por
+  inteiro. Nada mudou de formato e nenhum backup antigo deixou de abrir.
+- Ao lado dele, uma opção nova: **Proteger com senha**. O mesmo backup vai dentro
+  de um envelope AES-GCM 256, com a chave derivada por PBKDF2-SHA-256 e 310.000
+  iterações. O sal e o vetor de inicialização são sorteados a cada exportação, e o
+  número de iterações viaja no arquivo, para que subir o padrão amanhã não
+  invalide o que foi gerado hoje.
+- O cabeçalho do arquivo protegido não guarda contagem de lançamentos, nome nem
+  qualquer conteúdo: um arquivo "protegido" que anuncia o tamanho da vida
+  financeira de quem o gerou protegeria pela metade.
+- Ao escolher um arquivo protegido para restaurar, o app pede a senha antes de
+  interpretar qualquer byte do conteúdo. Depois de aberto, o caminho é o de
+  sempre: prévia, mesclar ou substituir, e desfazer.
+- **Não existe recuperação de senha**, e a tela diz isso antes da escolha, não
+  depois. A senha fica só em memória e some assim que o arquivo é gerado ou aberto.
+- Senha errada e arquivo adulterado dão a mesma mensagem de propósito.
+- O cartão de backup passou a avisar que o arquivo contém informações financeiras
+  privadas, e o botão principal virou "Baixar backup completo"; o formato saiu do
+  rótulo e foi para a explicação.
+- Nova suíte `tests/test-backup-restore.js`: ida e volta com lápides, backups de
+  formatos antigos, limites de tamanho e de registros, ida e volta cifrada, senha
+  errada, byte trocado, cifra desconhecida, proteção enfraquecida no arquivo e
+  ausência de vazamento em texto claro.
+
 ### Relatórios contavam como gasto o dinheiro que foi guardado
 
 - O total do mês já separava natureza — aporte, amortização, transferência e

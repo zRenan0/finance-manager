@@ -7574,6 +7574,12 @@ function parseBackupFile(text) {
   if (!parsed || typeof parsed !== "object") {
     throw new BackupError("NOT_A_BACKUP", "O arquivo não parece ser um backup do app.");
   }
+  // [M12] Backup protegido por senha nunca chega aqui pelo caminho normal (a
+  // tela pede a senha antes). Esta guarda existe para que, se chegar por
+  // qualquer outro caminho, o erro diga o que fazer em vez de "não é um backup".
+  if (typeof BACKUP_ENC_KIND !== "undefined" && parsed.kind === BACKUP_ENC_KIND) {
+    throw new BackupError("ENCRYPTED", "Este backup está protegido por senha. Escolha o arquivo pela tela de Ajustes para informar a senha.");
+  }
 
   let payload = null;
   let meta = { exportedAt: null, legacy: false, checksumOk: true };
@@ -7815,6 +7821,205 @@ function buildBudgetsCsv(data, monthKey) {
     ].join(CSV_SEP));
   });
   return "\uFEFF" + lines.join("\n");
+}
+
+// source: js/backup-crypto.js
+// backup-crypto.js. BACKUP PROTEGIDO POR SENHA (opcional, aditivo).
+// ------------------------------------------------------------------------------
+// O backup em JSON continua existindo, continua sendo o padrão e não muda de
+// formato. Este arquivo acrescenta UMA opção: gerar o mesmo backup dentro de um
+// envelope cifrado, para quem vai guardar a cópia em nuvem de terceiro, mandar
+// por e-mail ou deixar num pen drive.
+//
+// DECISÕES, e o porquê de cada uma:
+//
+//   • AES-GCM 256. Autenticado: um arquivo adulterado falha na decifragem em vez
+//     de devolver lixo plausível. É o que o WebCrypto oferece em todo navegador
+//     que este app suporta, sem biblioteca de terceiro.
+//   • PBKDF2-SHA-256. Argon2 seria melhor, mas não existe no WebCrypto; trazer
+//     uma implementação em WASM contradiz o princípio de não depender de terceiro
+//     no caminho dos dados financeiros. O número de iterações VIAJA DENTRO DO
+//     ARQUIVO: subir o padrão amanhã não invalida nenhum backup gerado hoje.
+//   • Sal de 16 bytes e IV de 12 bytes, sorteados a cada exportação. Dois backups
+//     da mesma base com a mesma senha não produzem o mesmo arquivo.
+//   • O cabeçalho não guarda contagem de lançamentos, nome, nem nada da base. Se
+//     guardasse, o arquivo "protegido" contaria em texto claro o tamanho da vida
+//     financeira de quem o gerou.
+//   • O `kind` entra como dado autenticado adicional: trocar o rótulo do envelope
+//     quebra a verificação, em vez de produzir um erro confuso mais adiante.
+//
+// NÃO HÁ RECUPERAÇÃO DE SENHA. É a consequência de a chave nascer só da senha:
+// ninguém, nem o app, nem o servidor, consegue abrir o arquivo sem ela. A tela
+// diz isso antes de o usuário escolher a senha, não depois.
+"use strict";
+
+const BACKUP_ENC_KIND = "cofre.backup.encrypted.v1";
+const BACKUP_ENC_ITERATIONS = 310000;
+const BACKUP_ENC_SALT_BYTES = 16;
+const BACKUP_ENC_IV_BYTES = 12;
+// Mesmo mínimo da senha de conta. Uma régua só evita a pergunta "por que ali são
+// dez e aqui são seis?" e evita a resposta errada.
+const BACKUP_ENC_MIN_PASSWORD = 10;
+
+function backupCryptoSubtle() {
+  const root = typeof globalThis !== "undefined" ? globalThis : null;
+  const api = root && root.crypto;
+  return api && api.subtle ? api.subtle : null;
+}
+
+function backupCryptoAvailable() {
+  return !!backupCryptoSubtle();
+}
+
+function backupRandomBytes(length) {
+  const out = new Uint8Array(length);
+  globalThis.crypto.getRandomValues(out);
+  return out;
+}
+
+// Base64 sem depender de Buffer (navegador) nem de atob em lote gigante: a
+// conversão é feita em blocos para não estourar o limite de argumentos de
+// `String.fromCharCode` com um backup de alguns megabytes.
+function bytesToBase64(bytes) {
+  const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  let texto = "";
+  const bloco = 0x8000;
+  for (let i = 0; i < view.length; i += bloco) {
+    texto += String.fromCharCode.apply(null, view.subarray(i, i + bloco));
+  }
+  return btoa(texto);
+}
+
+function base64ToBytes(value) {
+  const texto = atob(String(value || ""));
+  const out = new Uint8Array(texto.length);
+  for (let i = 0; i < texto.length; i++) out[i] = texto.charCodeAt(i);
+  return out;
+}
+
+async function backupDeriveKey(password, salt, iterations) {
+  const subtle = backupCryptoSubtle();
+  if (!subtle) throw new BackupError("CRYPTO_UNAVAILABLE", "Este navegador não oferece a criptografia necessária para abrir backups protegidos por senha.");
+  const material = await subtle.importKey("raw", new TextEncoder().encode(String(password)), "PBKDF2", false, ["deriveKey"]);
+  return subtle.deriveKey(
+    { name: "PBKDF2", salt, iterations, hash: "SHA-256" },
+    material,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"],
+  );
+}
+
+// Regra de senha do backup. Devolve a MENSAGEM do problema ou `null`; quem chama
+// decide onde mostrar.
+function backupPasswordIssue(password, confirmation) {
+  const senha = String(password == null ? "" : password);
+  if (senha.length < BACKUP_ENC_MIN_PASSWORD) {
+    return `A senha do backup precisa de pelo menos ${BACKUP_ENC_MIN_PASSWORD} caracteres.`;
+  }
+  if (confirmation !== undefined && senha !== String(confirmation == null ? "" : confirmation)) {
+    return "As duas senhas não são iguais.";
+  }
+  return null;
+}
+
+// Um arquivo é reconhecido como protegido pelo `kind`, sem decifrar nada. Serve
+// para a tela pedir a senha ANTES de tentar interpretar o conteúdo.
+function isEncryptedBackupText(text) {
+  const raw = String(text == null ? "" : text);
+  // Descarta cedo o arquivo grande e comum: só vale a pena tentar o JSON quando
+  // o rótulo aparece nos primeiros bytes.
+  if (raw.indexOf(BACKUP_ENC_KIND) === -1) return false;
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch (e) { return false; }
+  return !!(parsed && parsed.kind === BACKUP_ENC_KIND && typeof parsed.payload === "string");
+}
+
+// Cifra o TEXTO já pronto do backup comum. Assim o formato interno continua
+// sendo exatamente o mesmo do arquivo aberto: decifrar devolve um backup que o
+// `parseBackupFile` de sempre entende, sem caminho paralelo de leitura.
+async function encryptBackupText(plainText, password) {
+  const subtle = backupCryptoSubtle();
+  if (!subtle) throw new BackupError("CRYPTO_UNAVAILABLE", "Este navegador não oferece a criptografia necessária para proteger o backup com senha.");
+  const problema = backupPasswordIssue(password);
+  if (problema) throw new BackupError("WEAK_PASSWORD", problema);
+
+  const salt = backupRandomBytes(BACKUP_ENC_SALT_BYTES);
+  const iv = backupRandomBytes(BACKUP_ENC_IV_BYTES);
+  const key = await backupDeriveKey(password, salt, BACKUP_ENC_ITERATIONS);
+  const cifrado = await subtle.encrypt(
+    { name: "AES-GCM", iv, additionalData: new TextEncoder().encode(BACKUP_ENC_KIND) },
+    key,
+    new TextEncoder().encode(String(plainText)),
+  );
+
+  return {
+    kind: BACKUP_ENC_KIND,
+    app: "Cofre. Organizador financeiro pessoal",
+    exportedAt: new Date().toISOString(),
+    kdf: { name: "PBKDF2", hash: "SHA-256", iterations: BACKUP_ENC_ITERATIONS, salt: bytesToBase64(salt) },
+    cipher: { name: "AES-GCM", iv: bytesToBase64(iv) },
+    payload: bytesToBase64(new Uint8Array(cifrado)),
+  };
+}
+
+// Devolve o TEXTO do backup comum. Senha errada e arquivo adulterado dão o mesmo
+// erro de propósito: distinguir os dois casos entregaria ao atacante um oráculo
+// para saber quando acertou metade do problema.
+async function decryptBackupText(text, password) {
+  const subtle = backupCryptoSubtle();
+  if (!subtle) throw new BackupError("CRYPTO_UNAVAILABLE", "Este navegador não oferece a criptografia necessária para abrir backups protegidos por senha.");
+  let envelope;
+  try { envelope = JSON.parse(String(text == null ? "" : text)); }
+  catch (e) { throw new BackupError("INVALID_JSON", "O arquivo não é um JSON válido."); }
+  if (!envelope || envelope.kind !== BACKUP_ENC_KIND || typeof envelope.payload !== "string") {
+    throw new BackupError("NOT_A_BACKUP", "O arquivo não parece ser um backup protegido do app.");
+  }
+
+  const kdf = envelope.kdf || {};
+  const iteracoes = Number(kdf.iterations);
+  // Teto para que um arquivo hostil não peça dez milhões de iterações e trave a
+  // aba antes de qualquer verificação; piso para não aceitar um envelope
+  // enfraquecido de propósito.
+  if (!(iteracoes >= 100000 && iteracoes <= 2000000) || kdf.name !== "PBKDF2" || kdf.hash !== "SHA-256") {
+    throw new BackupError("UNSUPPORTED_KDF", "Este arquivo usa uma proteção que esta versão do app não conhece.");
+  }
+  if (!envelope.cipher || envelope.cipher.name !== "AES-GCM") {
+    throw new BackupError("UNSUPPORTED_CIPHER", "Este arquivo usa uma cifra que esta versão do app não conhece.");
+  }
+
+  let salt, iv, dados;
+  try {
+    salt = base64ToBytes(kdf.salt);
+    iv = base64ToBytes(envelope.cipher.iv);
+    dados = base64ToBytes(envelope.payload);
+  } catch (e) {
+    throw new BackupError("NOT_A_BACKUP", "O arquivo protegido está incompleto ou corrompido.");
+  }
+  if (salt.length !== BACKUP_ENC_SALT_BYTES || iv.length !== BACKUP_ENC_IV_BYTES || dados.length === 0) {
+    throw new BackupError("NOT_A_BACKUP", "O arquivo protegido está incompleto ou corrompido.");
+  }
+
+  const key = await backupDeriveKey(password, salt, iteracoes);
+  let aberto;
+  try {
+    aberto = await subtle.decrypt(
+      { name: "AES-GCM", iv, additionalData: new TextEncoder().encode(BACKUP_ENC_KIND) },
+      key,
+      dados,
+    );
+  } catch (e) {
+    throw new BackupError("WRONG_PASSWORD", "Senha incorreta ou arquivo alterado. Os seus dados atuais continuam intactos.");
+  }
+  return new TextDecoder().decode(aberto);
+}
+
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = {
+    BACKUP_ENC_KIND, BACKUP_ENC_MIN_PASSWORD, BACKUP_ENC_ITERATIONS,
+    backupCryptoAvailable, backupPasswordIssue, isEncryptedBackupText,
+    encryptBackupText, decryptBackupText,
+  };
 }
 
 // source: js/auth.js
@@ -31267,12 +31472,15 @@ function renderBackupCard() {
 
     <p class="field__label" data-ui-css="margin-top:14px">Exportar</p>
     <div class="settings-actions">
-      <button class="btn btn--primary btn--sm" data-action="export-json">${svgIcon("download", 15)} Backup completo (JSON)</button>
+      <button class="btn btn--primary btn--sm" data-action="export-json">${svgIcon("download", 15)} Baixar backup completo</button>
+      ${backupProtectionAvailable() ? `<button class="btn btn--secondary btn--sm" data-action="backup-protect-open">${svgIcon("shieldCheck", 15)} Proteger com senha</button>` : ""}
       <button class="btn btn--secondary btn--sm" data-action="export-csv">${svgIcon("download", 15)} Lançamentos (CSV)</button>
       <button class="btn btn--secondary btn--sm" data-action="export-statement-pdf">${svgIcon("download", 15)} Extrato (PDF)</button>
       <button class="btn btn--secondary btn--sm" data-action="export-budgets-csv">${svgIcon("download", 15)} Orçamentos (CSV)</button>
     </div>
-    <p class="field-hint">O JSON guarda tudo (lançamentos, categorias, tetos, metas e ajustes) e é o que restaura o app por completo. O CSV serve para abrir no Excel ou no Google Sheets. O PDF é o extrato pronto para imprimir ou enviar, com o período e os filtros escolhidos em Movimentações (por padrão, o mês atual).</p>
+    ${b.encryptOpen ? renderBackupProtectForm(b) : ""}
+    <p class="field-hint"><b>Este arquivo contém informações financeiras privadas. Guarde-o em local seguro.</b> Ele sai aberto, para que você consiga lê-lo em qualquer aparelho${backupProtectionAvailable() ? "; se for guardar em nuvem de terceiro ou enviar por e-mail, use “Proteger com senha”" : ""}.</p>
+    <p class="field-hint">O backup completo guarda tudo (lançamentos, categorias, tetos, metas e ajustes) e é o que restaura o app por inteiro. O CSV serve para abrir no Excel ou no Google Sheets. O PDF é o extrato pronto para imprimir ou enviar, com o período e os filtros escolhidos em Movimentações (por padrão, o mês atual). <span class="footnote">Formato do backup completo: JSON.</span></p>
     ${renderLastBackupLine()}
 
     <p class="field__label" data-ui-css="margin-top:14px">Importar</p>
@@ -31281,11 +31489,62 @@ function renderBackupCard() {
       <div><p class="inline-error__title">${escapeHtml(b.error)}</p><p class="inline-error__detail">Seus dados atuais continuam intactos.</p></div>
       <button class="icon-btn icon-btn--muted" data-action="backup-cancel" aria-label="Fechar erro de backup">${svgIcon("x", 14)}</button>
     </div>` : ""}
+    ${b.locked ? renderBackupUnlockForm(b) : ""}
     <div class="settings-actions">
       <button class="btn btn--secondary btn--sm" data-action="import-json-trigger" ${b.busy ? "disabled" : ""}>
         ${b.busy ? `<span class="spinner"></span>` : svgIcon("upload", 15)} Escolher arquivo de backup
       </button>
       ${b.undoAvailable ? `<button class="btn btn--ghost btn--sm" data-action="backup-undo">${svgIcon("refresh", 15)} Desfazer última restauração</button>` : ""}
+    </div>
+  </div>`;
+}
+
+// [M12] A criptografia do backup é opcional e depende do WebCrypto. Onde ele
+// não existir (contexto sem origem segura, navegador antigo), a opção some e o
+// backup comum continua inteiro; o cartão não pode quebrar por causa disso.
+function backupProtectionAvailable() {
+  return typeof backupCryptoAvailable === "function" && backupCryptoAvailable();
+}
+
+// [M12] Escolha da senha do backup protegido. Fica DENTRO do cartão, aberto sob
+// demanda: quem só quer o arquivo de sempre não passa por aqui.
+function renderBackupProtectForm(b) {
+  return `<div class="backup-protect" data-ui-css="margin-top:12px">
+    <p class="field__label">Proteger o backup com senha</p>
+    <p class="field-hint"><b>Não existe recuperação.</b> O arquivo é aberto só com esta senha; nem o app nem o servidor conseguem abri-lo sem ela. Guarde-a onde você já guarda suas outras senhas.</p>
+    <div class="field" data-ui-css="margin-top:10px">
+      <label class="field__label" for="backup-password">Senha do arquivo</label>
+      <input id="backup-password" class="input" type="password" data-field="backup-password" minlength="${BACKUP_ENC_MIN_PASSWORD}" maxlength="128" value="${escapeHtml(b.password || "")}" autocomplete="new-password" />
+      ${renderPasswordStrength(b.password || "", "")}
+    </div>
+    <div class="field">
+      <label class="field__label" for="backup-password-confirm">Repita a senha</label>
+      <input id="backup-password-confirm" class="input" type="password" data-field="backup-password-confirm" maxlength="128" value="${escapeHtml(b.passwordConfirm || "")}" autocomplete="new-password" />
+    </div>
+    <div class="settings-actions">
+      <button class="btn btn--ghost btn--sm" data-action="backup-protect-cancel">Cancelar</button>
+      <button class="btn btn--primary btn--sm" data-action="backup-protect-confirm" ${b.busy ? "disabled" : ""}>
+        ${b.busy ? `<span class="spinner"></span>` : svgIcon("shieldCheck", 15)} Baixar protegido
+      </button>
+    </div>
+  </div>`;
+}
+
+// [M12] O arquivo escolhido está cifrado: a senha vem antes de o conteúdo ser
+// interpretado. Até aqui, nada do arquivo foi lido além do rótulo do envelope.
+function renderBackupUnlockForm(b) {
+  return `<div class="backup-protect" data-ui-css="margin-top:12px">
+    <p class="field__label">${svgIcon("shieldCheck", 14)} Backup protegido por senha</p>
+    <p class="card-subtitle" data-ui-css="margin-top:2px">${escapeHtml(b.locked.filename)}</p>
+    <div class="field" data-ui-css="margin-top:10px">
+      <label class="field__label" for="backup-unlock-password">Senha do arquivo</label>
+      <input id="backup-unlock-password" class="input" type="password" data-field="backup-unlock-password" maxlength="128" value="${escapeHtml(b.unlockPassword || "")}" autocomplete="off" />
+    </div>
+    <div class="settings-actions">
+      <button class="btn btn--ghost btn--sm" data-action="backup-cancel">Cancelar</button>
+      <button class="btn btn--primary btn--sm" data-action="backup-unlock" ${b.busy ? "disabled" : ""}>
+        ${b.busy ? `<span class="spinner"></span>` : svgIcon("upload", 15)} Abrir backup
+      </button>
     </div>
   </div>`;
 }
@@ -34059,9 +34318,26 @@ function onClick(e) {
     case "export-statement-pdf": exportStatementPdf(); break;
     case "export-budgets-csv": exportBudgetsCsv(); break;
     case "export-json": exportBackupJson(); break;
+    // [M12] A proteção por senha é uma SEGUNDA porta para o mesmo backup. O
+    // botão só abre o formulário; nada é gerado antes de a senha ser confirmada.
+    case "backup-protect-open":
+      state.backup.encryptOpen = true;
+      state.backup.password = "";
+      state.backup.passwordConfirm = "";
+      state.backup.error = null;
+      render();
+      break;
+    case "backup-protect-cancel":
+      state.backup.encryptOpen = false;
+      state.backup.password = "";
+      state.backup.passwordConfirm = "";
+      render();
+      break;
+    case "backup-protect-confirm": exportBackupEncrypted(); break;
+    case "backup-unlock": unlockBackupFile(); break;
     case "import-json-trigger": openFilePicker("import-file-input"); break;
     case "backup-set-mode": state.backup.mode = value; render(); break;
-    case "backup-cancel": state.backup = { preview: null, error: null, mode: "merge", busy: false, undoAvailable: state.backup.undoAvailable }; render(); break;
+    case "backup-cancel": state.backup = { ...freshBackupState(), undoAvailable: state.backup.undoAvailable }; render(); break;
     case "backup-confirm": confirmBackupRestore(); break;
     case "backup-undo": undoBackupRestore(); break;
 
@@ -34436,7 +34712,10 @@ let state = {
   // ---- Feature 4: lançamento em linguagem natural ----
   nlp: { text: "", drafts: [], error: null, loading: false, touched: false },
   // ---- Feature 2: backup (exportar / importar) ----
-  backup: { preview: null, error: null, mode: "merge", busy: false, undoAvailable: false },
+  // `locked` guarda o TEXTO de um arquivo protegido enquanto a senha não vem;
+  // nada dele é interpretado antes de decifrar. As senhas moram só aqui, em
+  // memória, e são apagadas assim que o arquivo abre ou o usuário desiste.
+  backup: { preview: null, error: null, mode: "merge", busy: false, undoAvailable: false, encryptOpen: false, password: "", passwordConfirm: "", locked: null, unlockPassword: "" },
   // ---- Feature 3: painel de orçamentos ----
   budgetsExpanded: false,
   simulate: { mode: "vista", amount: "", goalId: "", finance: { valorBem: "", entrada: "", numParcelas: "", valorParcela: "" } },
@@ -35780,6 +36059,63 @@ function exportBackupJson() {
   notify(`Backup com ${plural(envelope.counts.transactions, "lançamento", "lançamentos")} exportado`);
 }
 
+// Estado limpo do cartão de backup. Existe em função porque agora são oito
+// campos, e cada lugar que "zerava o backup" à mão esquecia um deles.
+function freshBackupState() {
+  return { preview: null, error: null, mode: "merge", busy: false, undoAvailable: false, encryptOpen: false, password: "", passwordConfirm: "", locked: null, unlockPassword: "" };
+}
+
+// [M12] Mesmo backup, dentro de um envelope cifrado com a senha escolhida aqui.
+// O arquivo comum continua disponível e continua sendo o padrão.
+async function exportBackupEncrypted() {
+  const problema = backupPasswordIssue(state.backup.password, state.backup.passwordConfirm);
+  if (problema) { state.backup.error = problema; render(); return; }
+  state.backup.busy = true;
+  state.backup.error = null;
+  render();
+  try {
+    const envelope = buildBackupEnvelope(state.data);
+    const protegido = await encryptBackupText(JSON.stringify(envelope), state.backup.password);
+    downloadFile(backupFilename("json").replace(/\.json$/, "-protegido.json"), JSON.stringify(protegido, null, 2), "application/json");
+    // A senha some da memória assim que o arquivo é gerado.
+    state.backup = { ...freshBackupState(), undoAvailable: state.backup.undoAvailable };
+    setData((d) => ({ ...d, lastBackupAt: todayIso() }));
+    notify(`Backup protegido com ${plural(envelope.counts.transactions, "lançamento", "lançamentos")} exportado`);
+  } catch (err) {
+    state.backup.busy = false;
+    if (typeof reportSafeError === "function") reportSafeError("backup", err, "backup_read");
+    state.backup.error = err && err.message ? err.message : "Não foi possível proteger o backup com senha.";
+    render();
+  }
+}
+
+// Decifra o arquivo que está esperando senha e segue pelo MESMO caminho de
+// prévia do backup comum: depois de aberto, o conteúdo é idêntico.
+async function unlockBackupFile() {
+  const locked = state.backup.locked;
+  if (!locked) return;
+  state.backup.busy = true;
+  state.backup.error = null;
+  render();
+  try {
+    const texto = await decryptBackupText(locked.text, state.backup.unlockPassword);
+    const { data, meta } = parseBackupFile(texto);
+    if (meta.checksumOk === false) {
+      throw new BackupError("CHECKSUM", "O arquivo parece ter sido alterado depois de exportado (verificação de integridade falhou).");
+    }
+    state.backup.locked = null;
+    state.backup.unlockPassword = "";
+    state.backup.busy = false;
+    state.backup.preview = { data, meta: { ...meta, encrypted: true }, filename: locked.filename };
+    render();
+  } catch (err) {
+    state.backup.busy = false;
+    if (typeof reportSafeError === "function") reportSafeError("backup", err, "backup_read");
+    state.backup.error = err && err.message ? err.message : "Não foi possível abrir o backup protegido.";
+    render();
+  }
+}
+
 // Lê o arquivo escolhido e monta a PRÉVIA; nada é gravado antes do usuário
 // confirmar e escolher entre mesclar ou substituir.
 async function handleBackupFile(file) {
@@ -35790,9 +36126,20 @@ async function handleBackupFile(file) {
   state.backup.busy = true;
   state.backup.error = null;
   state.backup.preview = null;
+  state.backup.locked = null;
+  state.backup.unlockPassword = "";
   render();
   try {
     const text = await pending;
+    // [M12] Arquivo protegido: pede a senha antes de qualquer interpretação do
+    // conteúdo. O texto cifrado fica em memória só até a senha chegar.
+    if (isEncryptedBackupText(text)) {
+      state.backup.locked = { filename: file.name, text };
+      state.backup.unlockPassword = "";
+      state.backup.busy = false;
+      render();
+      return;
+    }
     const { data, meta } = parseBackupFile(text);
     if (meta.checksumOk === false) {
       throw new BackupError("CHECKSUM", "O arquivo parece ter sido alterado depois de exportado (verificação de integridade falhou).");
@@ -35828,7 +36175,7 @@ async function confirmBackupRestore() {
         : "Mesclagem feita em memória, mas não foi possível gravá-la";
     }
     state.data = FinanceStore.snapshot();
-    state.backup = { preview: null, error: null, mode: "merge", busy: false, undoAvailable: true };
+    state.backup = { ...freshBackupState(), undoAvailable: true };
     render();
     notify(message);
   } catch (err) {
@@ -35981,6 +36328,12 @@ function onInput(e) {
     case "qr-estab": if (state.qr.draft) state.qr.draft.description = val; break;
     case "nlp-text": state.nlp.text = val; state.nlp.touched = true; patchNlpButton(); break;
     case "import-password": state.importPassword = val; break;
+    // [M12] Senhas do backup protegido. Patch pontual, sem re-render: o mesmo
+    // tratamento das senhas da conta, para o campo não perder o teclado no meio
+    // da digitação. O medidor de força acompanha a próxima pintura.
+    case "backup-password": state.backup.password = val.slice(0, 128); break;
+    case "backup-password-confirm": state.backup.passwordConfirm = val.slice(0, 128); break;
+    case "backup-unlock-password": state.backup.unlockPassword = val.slice(0, 128); break;
     // O formulário pode ter sido fechado entre o keypress e o evento; guardas
     // baratas evitam um TypeError que derrubaria toda a delegação de eventos.
     case "wealth-name": if (state.wealth.form) state.wealth.form.name = val; break;
@@ -36358,6 +36711,19 @@ function onKeydown(e) {
   if (e.key === "Enter" && field === "import-password") {
     e.preventDefault();
     if (state.importPendingFile) handleStatementFile(state.importPendingFile, state.importPassword);
+    return;
+  }
+  // [M12] Enter abre o backup protegido, como em qualquer campo de senha.
+  if (e.key === "Enter" && field === "backup-unlock-password") {
+    e.preventDefault();
+    e.target.blur();
+    if (state.backup.locked && !state.backup.busy) unlockBackupFile();
+    return;
+  }
+  if (e.key === "Enter" && (field === "backup-password" || field === "backup-password-confirm")) {
+    e.preventDefault();
+    e.target.blur();
+    if (state.backup.encryptOpen && !state.backup.busy) exportBackupEncrypted();
     return;
   }
   // No editor de categoria o Enter confirma, como em qualquer formulário curto.

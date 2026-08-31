@@ -166,7 +166,10 @@ let state = {
   // ---- Feature 4: lançamento em linguagem natural ----
   nlp: { text: "", drafts: [], error: null, loading: false, touched: false },
   // ---- Feature 2: backup (exportar / importar) ----
-  backup: { preview: null, error: null, mode: "merge", busy: false, undoAvailable: false },
+  // `locked` guarda o TEXTO de um arquivo protegido enquanto a senha não vem;
+  // nada dele é interpretado antes de decifrar. As senhas moram só aqui, em
+  // memória, e são apagadas assim que o arquivo abre ou o usuário desiste.
+  backup: { preview: null, error: null, mode: "merge", busy: false, undoAvailable: false, encryptOpen: false, password: "", passwordConfirm: "", locked: null, unlockPassword: "" },
   // ---- Feature 3: painel de orçamentos ----
   budgetsExpanded: false,
   simulate: { mode: "vista", amount: "", goalId: "", finance: { valorBem: "", entrada: "", numParcelas: "", valorParcela: "" } },
@@ -1510,6 +1513,63 @@ function exportBackupJson() {
   notify(`Backup com ${plural(envelope.counts.transactions, "lançamento", "lançamentos")} exportado`);
 }
 
+// Estado limpo do cartão de backup. Existe em função porque agora são oito
+// campos, e cada lugar que "zerava o backup" à mão esquecia um deles.
+function freshBackupState() {
+  return { preview: null, error: null, mode: "merge", busy: false, undoAvailable: false, encryptOpen: false, password: "", passwordConfirm: "", locked: null, unlockPassword: "" };
+}
+
+// [M12] Mesmo backup, dentro de um envelope cifrado com a senha escolhida aqui.
+// O arquivo comum continua disponível e continua sendo o padrão.
+async function exportBackupEncrypted() {
+  const problema = backupPasswordIssue(state.backup.password, state.backup.passwordConfirm);
+  if (problema) { state.backup.error = problema; render(); return; }
+  state.backup.busy = true;
+  state.backup.error = null;
+  render();
+  try {
+    const envelope = buildBackupEnvelope(state.data);
+    const protegido = await encryptBackupText(JSON.stringify(envelope), state.backup.password);
+    downloadFile(backupFilename("json").replace(/\.json$/, "-protegido.json"), JSON.stringify(protegido, null, 2), "application/json");
+    // A senha some da memória assim que o arquivo é gerado.
+    state.backup = { ...freshBackupState(), undoAvailable: state.backup.undoAvailable };
+    setData((d) => ({ ...d, lastBackupAt: todayIso() }));
+    notify(`Backup protegido com ${plural(envelope.counts.transactions, "lançamento", "lançamentos")} exportado`);
+  } catch (err) {
+    state.backup.busy = false;
+    if (typeof reportSafeError === "function") reportSafeError("backup", err, "backup_read");
+    state.backup.error = err && err.message ? err.message : "Não foi possível proteger o backup com senha.";
+    render();
+  }
+}
+
+// Decifra o arquivo que está esperando senha e segue pelo MESMO caminho de
+// prévia do backup comum: depois de aberto, o conteúdo é idêntico.
+async function unlockBackupFile() {
+  const locked = state.backup.locked;
+  if (!locked) return;
+  state.backup.busy = true;
+  state.backup.error = null;
+  render();
+  try {
+    const texto = await decryptBackupText(locked.text, state.backup.unlockPassword);
+    const { data, meta } = parseBackupFile(texto);
+    if (meta.checksumOk === false) {
+      throw new BackupError("CHECKSUM", "O arquivo parece ter sido alterado depois de exportado (verificação de integridade falhou).");
+    }
+    state.backup.locked = null;
+    state.backup.unlockPassword = "";
+    state.backup.busy = false;
+    state.backup.preview = { data, meta: { ...meta, encrypted: true }, filename: locked.filename };
+    render();
+  } catch (err) {
+    state.backup.busy = false;
+    if (typeof reportSafeError === "function") reportSafeError("backup", err, "backup_read");
+    state.backup.error = err && err.message ? err.message : "Não foi possível abrir o backup protegido.";
+    render();
+  }
+}
+
 // Lê o arquivo escolhido e monta a PRÉVIA; nada é gravado antes do usuário
 // confirmar e escolher entre mesclar ou substituir.
 async function handleBackupFile(file) {
@@ -1520,9 +1580,20 @@ async function handleBackupFile(file) {
   state.backup.busy = true;
   state.backup.error = null;
   state.backup.preview = null;
+  state.backup.locked = null;
+  state.backup.unlockPassword = "";
   render();
   try {
     const text = await pending;
+    // [M12] Arquivo protegido: pede a senha antes de qualquer interpretação do
+    // conteúdo. O texto cifrado fica em memória só até a senha chegar.
+    if (isEncryptedBackupText(text)) {
+      state.backup.locked = { filename: file.name, text };
+      state.backup.unlockPassword = "";
+      state.backup.busy = false;
+      render();
+      return;
+    }
     const { data, meta } = parseBackupFile(text);
     if (meta.checksumOk === false) {
       throw new BackupError("CHECKSUM", "O arquivo parece ter sido alterado depois de exportado (verificação de integridade falhou).");
@@ -1558,7 +1629,7 @@ async function confirmBackupRestore() {
         : "Mesclagem feita em memória, mas não foi possível gravá-la";
     }
     state.data = FinanceStore.snapshot();
-    state.backup = { preview: null, error: null, mode: "merge", busy: false, undoAvailable: true };
+    state.backup = { ...freshBackupState(), undoAvailable: true };
     render();
     notify(message);
   } catch (err) {
@@ -1711,6 +1782,12 @@ function onInput(e) {
     case "qr-estab": if (state.qr.draft) state.qr.draft.description = val; break;
     case "nlp-text": state.nlp.text = val; state.nlp.touched = true; patchNlpButton(); break;
     case "import-password": state.importPassword = val; break;
+    // [M12] Senhas do backup protegido. Patch pontual, sem re-render: o mesmo
+    // tratamento das senhas da conta, para o campo não perder o teclado no meio
+    // da digitação. O medidor de força acompanha a próxima pintura.
+    case "backup-password": state.backup.password = val.slice(0, 128); break;
+    case "backup-password-confirm": state.backup.passwordConfirm = val.slice(0, 128); break;
+    case "backup-unlock-password": state.backup.unlockPassword = val.slice(0, 128); break;
     // O formulário pode ter sido fechado entre o keypress e o evento; guardas
     // baratas evitam um TypeError que derrubaria toda a delegação de eventos.
     case "wealth-name": if (state.wealth.form) state.wealth.form.name = val; break;
@@ -2088,6 +2165,19 @@ function onKeydown(e) {
   if (e.key === "Enter" && field === "import-password") {
     e.preventDefault();
     if (state.importPendingFile) handleStatementFile(state.importPendingFile, state.importPassword);
+    return;
+  }
+  // [M12] Enter abre o backup protegido, como em qualquer campo de senha.
+  if (e.key === "Enter" && field === "backup-unlock-password") {
+    e.preventDefault();
+    e.target.blur();
+    if (state.backup.locked && !state.backup.busy) unlockBackupFile();
+    return;
+  }
+  if (e.key === "Enter" && (field === "backup-password" || field === "backup-password-confirm")) {
+    e.preventDefault();
+    e.target.blur();
+    if (state.backup.encryptOpen && !state.backup.busy) exportBackupEncrypted();
     return;
   }
   // No editor de categoria o Enter confirma, como em qualquer formulário curto.

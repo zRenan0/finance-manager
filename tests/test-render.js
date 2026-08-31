@@ -94,6 +94,9 @@ const ctx = {
   setTimeout: agendarImediato, clearTimeout, setInterval, clearInterval, requestAnimationFrame: (fn) => setTimeout(fn, 0),
   requestIdleCallback: undefined,
   fetch: () => Promise.reject(new Error("offline")),
+  // [M12] WebCrypto real: o cartão de backup decide pela presença dele se
+  // oferece a proteção por senha.
+  crypto: require("node:crypto").webcrypto, TextEncoder, TextDecoder, btoa, atob,
   matchMedia: () => ({ matches: false, addEventListener() {}, addListener() {} }),
   indexedDB: undefined, localStorage: undefined,
   module: { exports: {} },
@@ -107,7 +110,7 @@ ctx.globalThis = ctx;
 vm.createContext(ctx);
 
 [
-  "js/utils.js", "js/perf.js", "js/router.js", "js/icons.js", "js/rules.js", "js/layout.js", "js/safe-errors.js", "js/storage.js", "js/accounts.js", "js/movements.js", "js/data-sources.js", "js/debts.js", "js/budgets.js", "js/charts.js",
+  "js/utils.js", "js/perf.js", "js/router.js", "js/icons.js", "js/rules.js", "js/layout.js", "js/safe-errors.js", "js/storage.js", "js/backup-crypto.js", "js/accounts.js", "js/movements.js", "js/data-sources.js", "js/debts.js", "js/budgets.js", "js/charts.js",
   "js/import.js", "js/nlp.js", "js/score.js", "js/metrics.js", "js/health.js", "js/wealth.js",
   "js/goals.js", "js/forecast.js", "js/transparency.js", "js/calendar.js",
   "js/recurring.js", "js/analytics.js",
@@ -697,6 +700,10 @@ console.log("\n6. Telas antigas continuam renderizando (não-regressão)");
     "analytics/relatórios": "(state.analyticsView = 'reports', renderAnalyticsScreen())",
     goals: "renderGoalsScreen()",
     settings: "renderSettingsScreen()",
+    // [M12] Os dois estados novos do cartão de backup. Sem forçá-los aqui, o
+    // formulário de senha só apareceria em produção.
+    "settings/proteger backup": "(state.settingsSection = 'dados', state.backup.encryptOpen = true, state.backup.password = 'senha-de-teste-longa', state.backup.passwordConfirm = 'senha-de-teste-longa', renderSettingsScreen())",
+    "settings/abrir backup protegido": "(state.backup.encryptOpen = false, state.backup.locked = { filename: 'financas-backup-protegido.json', text: '{}' }, renderSettingsScreen())",
     privacidade: "renderPrivacyScreen()",
     invest: "renderPortfolioScreen()",
     "juros compostos (legado)": "renderInvestScreen()",
@@ -725,6 +732,7 @@ console.log("\n6. Telas antigas continuam renderizando (não-regressão)");
   });
   run("state.categoriesUi = { view: 'tree', search: '', collapsed: [], editor: null };");
   run("state.analyticsView = 'movements';");
+  run("state.backup = freshBackupState();");
 }
 
 /* ------------------------------------------- Privacidade: os dois estados do aceite */

@@ -1902,9 +1902,26 @@ function onClick(e) {
     case "export-statement-pdf": exportStatementPdf(); break;
     case "export-budgets-csv": exportBudgetsCsv(); break;
     case "export-json": exportBackupJson(); break;
+    // [M12] A proteção por senha é uma SEGUNDA porta para o mesmo backup. O
+    // botão só abre o formulário; nada é gerado antes de a senha ser confirmada.
+    case "backup-protect-open":
+      state.backup.encryptOpen = true;
+      state.backup.password = "";
+      state.backup.passwordConfirm = "";
+      state.backup.error = null;
+      render();
+      break;
+    case "backup-protect-cancel":
+      state.backup.encryptOpen = false;
+      state.backup.password = "";
+      state.backup.passwordConfirm = "";
+      render();
+      break;
+    case "backup-protect-confirm": exportBackupEncrypted(); break;
+    case "backup-unlock": unlockBackupFile(); break;
     case "import-json-trigger": openFilePicker("import-file-input"); break;
     case "backup-set-mode": state.backup.mode = value; render(); break;
-    case "backup-cancel": state.backup = { preview: null, error: null, mode: "merge", busy: false, undoAvailable: state.backup.undoAvailable }; render(); break;
+    case "backup-cancel": state.backup = { ...freshBackupState(), undoAvailable: state.backup.undoAvailable }; render(); break;
     case "backup-confirm": confirmBackupRestore(); break;
     case "backup-undo": undoBackupRestore(); break;
 

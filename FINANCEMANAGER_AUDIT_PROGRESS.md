@@ -12,7 +12,8 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 
 | Campo | Valor |
 |---|---|
-| Módulo atual | **M11 - Integridade financeira** (concluído) |
+| Módulo atual | **M12 - Backup e restauração** (concluído) |
+| Status do M12 | **CONCLUÍDO** - aviso de privacidade no cartão, rótulo sem o formato em primeiro plano e backup opcionalmente protegido por senha (AES-GCM + PBKDF2), com ida e volta verificada em navegador real |
 | Status do M11 | **CONCLUÍDO** - numerador e denominador passaram a usar a mesma régua de natureza no ranking de categorias, no dia da semana, no mapa de calor, no relatório por período, na retrospectiva e na média da previsão; 41 invariantes contábeis travados em suíte nova |
 | Status do M10 | **CONCLUÍDO** - repetição idempotente sobrevive à perda da resposta e à recarga; HLC confirmada pelo servidor é absorvida; concorrência, volume e paginação ganharam regressão |
 | Status do M9 | **CONCLUÍDO** - pacote inteiro identificado por SHA-256, instalação atômica, primeiro quadro no HTML, reconciliação de controller, teste offline real e matriz Chromium/Firefox/WebKit |
@@ -24,10 +25,10 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 | Status do M3 | **CONCLUÍDO** — aplicado e confirmado no banco em 2026-08-28 |
 | Status do M2 | **CONCLUÍDO** — nenhuma vulnerabilidade de autorização; invariantes travados por teste |
 | Status do M1 | **CONCLUÍDO** — aplicado e confirmado; gatilho capturado e versionado |
-| Módulos concluídos | M0, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11 |
-| Próximo módulo | M12 - Backup, restauração e importação |
+| Módulos concluídos | M0, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12 |
+| Próximo módulo | M13 - Versionamento e matriz de compatibilidade |
 | Branch | `deploy-atualizado` (árvore limpa no início do M0) |
-| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `tests/test-cloud-sync.js`, `tests/test-account-backend.js`, `scripts/check-deploy.js`, `scripts/serve.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/storage.js`, `js/cloud-sync.js` (M10), `js/analytics.js`, `js/forecast.js`, `js/wrapped.js`, `js/screens/analytics.js` (M11), `js/modules/app.generated.js` (regerado). Documentação: inventário do M8 e protocolo do M10. |
+| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `tests/test-cloud-sync.js`, `tests/test-account-backend.js`, `scripts/check-deploy.js`, `scripts/serve.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/storage.js`, `js/cloud-sync.js` (M10), `js/analytics.js`, `js/forecast.js`, `js/wrapped.js`, `js/screens/analytics.js` (M11), `js/backup-crypto.js` (**novo**), `js/app.js`, `js/actions.js`, `js/storage.js`, `js/screens/settings.js`, `css/components.css`, `scripts/build-app-module.js` (M12), `js/modules/app.generated.js` (regerado). Documentação: inventário do M8, protocolo do M10 e backup protegido do M12. |
 | Migrations criadas até aqui | `20260828120000_rls_auto_enable_least_privilege.sql`, `20260828130000_rls_auto_enable_versionada.sql`, `20260828140000_menor_privilegio_tabelas.sql` (as três **aplicadas e confirmadas em 2026-08-28**), `20260828150000_rls_auto_enable_gatilho.sql` (**ainda não aplicada**; é no-op em produção, onde o gatilho já existe) |
 | Versão do app | `0.30.0` (package.json) |
 
@@ -1871,6 +1872,106 @@ pendência do módulo.
 
 ---
 
+## M12 - Backup, restauração e proteção do arquivo
+
+### Antes (situação encontrada)
+
+O melhor cartão da tela de Ajustes, e por larga margem. Já existia:
+
+- envelope versionado com `kind`, `schema`, `exportedAt`, contagens e **checksum**;
+- leitura do formato legado (snapshot cru, sem envelope), para não invalidar
+  arquivo antigo guardado pelo usuário;
+- teto de 32 MB e de 200.000 registros, com o motivo escrito no código
+  (`JSON.parse` é síncrono: um arquivo enorme congela a aba antes de qualquer
+  validação);
+- **prévia antes de gravar**, escolha entre mesclar e substituir, número final
+  calculado antes da decisão, e **desfazer a última restauração**;
+- lápides dentro do backup, sem as quais restaurar ressuscita o que foi apagado
+  depois que o arquivo foi gerado;
+- linha de "último backup" que fica vermelha quando não existe nenhum.
+
+O que faltava era o que o prompt pede: **o aviso de que o arquivo é sensível**, a
+ênfase no formato em vez do propósito, e uma alternativa para quem guarda a cópia
+fora do próprio aparelho.
+
+### Achados
+
+| # | P | Achado | Situação |
+|---|---|---|---|
+| F12-01 | P2 | O cartão não avisava em lugar nenhum que o arquivo exportado contém a vida financeira inteira em texto claro. Quem o joga no Drive ou manda por e-mail não é alertado. | **CORRIGIDO** - aviso em destaque no cartão |
+| F12-02 | P3 | O botão principal era "Backup completo (JSON)": o formato ocupava o mesmo peso do propósito. | **CORRIGIDO** - "Baixar backup completo"; o formato foi para a explicação |
+| F12-03 | P2 | Não havia alternativa para guardar o backup fora do aparelho com proteção. A única opção era um arquivo aberto. | **CORRIGIDO** - opção adicional de backup cifrado com senha |
+| — | — | Conferidos **sem achado**: checksum, prévia, desfazer, mesclagem por lápide, tetos de tamanho e de registros, leitura de formato legado, carimbo de `lastBackupAt` só depois do download. | — |
+
+### Alterações
+
+| Arquivo | Motivo |
+|---|---|
+| `js/backup-crypto.js` | **novo.** Envelope AES-GCM 256 com chave por PBKDF2-SHA-256 (310.000 iterações), sal e IV sorteados por exportação, `kind` como dado autenticado adicional, regra de senha e detecção de arquivo protegido |
+| `js/app.js` | `freshBackupState()`, exportação protegida, abertura do arquivo protegido, desvio na leitura do arquivo, campos de senha e Enter |
+| `js/actions.js` | ações `backup-protect-open`, `backup-protect-cancel`, `backup-protect-confirm` e `backup-unlock` |
+| `js/storage.js` | `parseBackupFile` reconhece um envelope protegido e explica o que fazer, em vez de dizer "não é um backup" |
+| `js/screens/settings.js` | aviso de privacidade, rótulo novo, formulário de senha na exportação e na restauração, degradação limpa onde o WebCrypto não existir |
+| `css/components.css` | moldura `.backup-protect` |
+| `scripts/build-app-module.js` | novo arquivo no pacote (71 fontes) |
+| `tests/test-backup-restore.js` | **novo** - 53 verificações |
+| `tests/test-render.js` | os dois estados novos do cartão entram na não-regressão de telas |
+
+### Motivo
+
+O app é offline-first: o backup é a única cópia que existe para quem não liga
+conta. Um backup que o usuário não faz não protege ninguém, e um backup que ele
+faz sem entender o que está no arquivo cria um risco novo no lugar do antigo. O
+aviso trata do segundo caso; a proteção por senha trata do primeiro, tirando o
+motivo para não guardar a cópia em algum lugar de fato seguro.
+
+### Compatibilidade
+
+Nada foi removido nem alterado no formato existente:
+
+- o backup comum continua idêntico, com o mesmo `kind`, o mesmo checksum e a
+  mesma leitura de formato legado;
+- o arquivo protegido é um formato **adicional**, com rótulo próprio
+  (`cofre.backup.encrypted.v1`); um app anterior a esta versão que receba um
+  arquivo protegido dá "não parece ser um backup", nunca corrompe dados;
+- não há migration, campo novo em `data`, mudança de schema local ou de
+  protocolo de sincronização;
+- onde o WebCrypto não existir, a opção some e o cartão continua inteiro.
+
+### Testes
+
+| Teste | Resultado |
+|---|---|
+| `node tests/test-backup-restore.js` | **PASSOU** - 53 ok, 0 falhas |
+| `npm run lint` | **PASSOU** - 0 erro, 0 aviso |
+| `npm test` | **PASSOU** - 58 arquivos |
+| `npm run check:build` | **PASSOU** - 71 fontes |
+| `npm run check:release` | **PASSOU** - aviso conhecido dos 7 campos legais |
+| `npm run build:dist` | **PASSOU** - 38 arquivos; o digest do pacote muda sozinho, então o Service Worker se atualiza sem bump manual |
+| `npm run test:coverage` | **PASSOU** - 22,5% global |
+| `npm run test:browser` | **PASSOU** - 18/18 em Chromium, Firefox e WebKit |
+| `npm run test:pwa` / `test:landing` | **PASSOU** |
+| Navegador real, ciclo completo | **PASSOU** - senha curta recusada com a frase certa; exportação gerou `financas-backup-...-protegido.json` de 7.993 bytes com o envelope correto e **sem** descrição, categoria ou nome em texto claro; o mesmo arquivo reimportado pediu senha antes de ler o conteúdo; senha errada deu "Senha incorreta ou arquivo alterado"; senha certa abriu a prévia normal e a mesclagem fechou em "0 novos, 2 já existiam". Nenhum erro de console; os únicos 404 são de `/api/account/session`, que o servidor estático local não serve |
+
+### Status
+
+**CONCLUÍDO.** F12-01, F12-02 e F12-03 corrigidos. Pendência do módulo: nenhuma.
+
+### Registrado para módulos seguintes
+
+- **M13**: o arquivo protegido carrega a própria versão no `kind`
+  (`cofre.backup.encrypted.v1`) e o número de iterações no corpo. Esse é o molde
+  para as demais versões: identidade no formato, parâmetro no dado.
+- **Decisão consciente, não achado:** PBKDF2 em vez de Argon2. Argon2 resiste
+  melhor a ataque com GPU, mas não existe no WebCrypto, e trazer uma
+  implementação WASM colocaria um terceiro no caminho dos dados financeiros. As
+  iterações estão no arquivo justamente para permitir subir o custo depois.
+- **P3 registrado:** a importação de CSV/OFX/PDF (prompt M13) já tem o fluxo de
+  prévia, validação e detecção de duplicidade que o prompt pede; ficou fora deste
+  módulo de propósito, porque não é backup e não tinha achado aberto.
+
+---
+
 ## Checklist de regressão
 
 Executar após **todo** módulo que toque no código. Marcar `OK` / `FALHOU` / `NÃO VALIDADO`.
@@ -1879,8 +1980,9 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
 ### A. Automatizado (CI ou máquina com Node) — porta de entrada obrigatória
 
 - [ ] `npm run lint`
-- [ ] `npm test` (57 arquivos)
+- [ ] `npm test` (58 arquivos)
 - [ ] `node tests/test-accounting-integrity.js` (invariantes contábeis do M11)
+- [ ] `node tests/test-backup-restore.js` (backup, restauração e senha do M12)
 - [ ] `npm run check:build` (o `app.generated.js` publicado corresponde às fontes)
 - [ ] `npm run check:release`
 - [ ] `npm run build:dist`
@@ -1946,6 +2048,7 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
 ### G. Backup, restauração e offline
 
 - [ ] Exportar backup (JSON) gera arquivo íntegro
+- [ ] **Exportar backup protegido por senha e reimportá-lo no mesmo aparelho** (senha errada recusa; senha certa abre a prévia normal)
 - [ ] Restaurar backup de versão antiga do schema funciona
 - [ ] Desfazer restauração (`financas_db_undo`) funciona
 - [ ] Checkpoints: listar e restaurar

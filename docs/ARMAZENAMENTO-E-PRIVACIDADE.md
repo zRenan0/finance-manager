@@ -156,9 +156,32 @@ da conta.
 | Pedir refinamento de lançamento | `/api/analyze` e provedor de IA | Frase digitada e nomes das categorias |
 | Consultar QR de nota fiscal | Portal oficial da Sefaz | Chave da nota, somente depois da ação do usuário |
 | Exportar backup | Arquivo escolhido pelo usuário | Snapshot financeiro versionado com checksum |
+| Exportar backup protegido | Arquivo escolhido pelo usuário | O mesmo snapshot dentro de um envelope AES-GCM; fora dele ficam apenas o rótulo do formato, os parâmetros do derivador e a data |
 
 Importações de OFX, CSV e PDF são processadas no navegador. O arquivo original
 não é enviado pelo fluxo de importação.
+
+## Backup protegido por senha
+
+O backup em JSON continua sendo o padrão e não mudou de formato. A proteção por
+senha é uma segunda porta para o mesmo conteúdo, pensada para quem vai guardar a
+cópia em nuvem de terceiro ou enviá-la por e-mail.
+
+| Item | Escolha | Motivo |
+|---|---|---|
+| Cifra | AES-GCM 256 | Autenticada: arquivo adulterado falha em vez de devolver conteúdo plausível |
+| Derivação | PBKDF2-SHA-256, 310.000 iterações | É o que o WebCrypto oferece sem biblioteca de terceiro no caminho dos dados |
+| Sal e IV | 16 e 12 bytes, sorteados a cada exportação | Dois backups da mesma base com a mesma senha não produzem o mesmo arquivo |
+| Cabeçalho | Rótulo, parâmetros do derivador, IV e data | Não guarda contagem de lançamentos, nome nem qualquer conteúdo da base |
+| Iterações | Gravadas dentro do arquivo | Subir o padrão amanhã não invalida arquivo gerado hoje |
+
+A chave nasce só da senha: **não existe recuperação**. A tela diz isso antes da
+escolha da senha. A senha vive apenas em memória, some assim que o arquivo é
+gerado ou aberto, e nunca é gravada em disco nem enviada para o servidor.
+
+Senha errada e arquivo adulterado produzem a mesma mensagem de propósito:
+distinguir os dois casos entregaria a quem tenta abrir o arquivo a informação de
+quando acertou metade do problema.
 
 ## Exclusão
 

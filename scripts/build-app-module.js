@@ -15,6 +15,7 @@ const SOURCES = Object.freeze([
   "js/layout.js",
   "js/safe-errors.js",
   "js/storage.js",
+  "js/backup-crypto.js",
   "js/auth.js",
   "js/cloud-sync.js",
   "js/accounts.js",

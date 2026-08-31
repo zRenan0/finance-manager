@@ -439,12 +439,15 @@ function renderBackupCard() {
 
     <p class="field__label" data-ui-css="margin-top:14px">Exportar</p>
     <div class="settings-actions">
-      <button class="btn btn--primary btn--sm" data-action="export-json">${svgIcon("download", 15)} Backup completo (JSON)</button>
+      <button class="btn btn--primary btn--sm" data-action="export-json">${svgIcon("download", 15)} Baixar backup completo</button>
+      ${backupProtectionAvailable() ? `<button class="btn btn--secondary btn--sm" data-action="backup-protect-open">${svgIcon("shieldCheck", 15)} Proteger com senha</button>` : ""}
       <button class="btn btn--secondary btn--sm" data-action="export-csv">${svgIcon("download", 15)} Lançamentos (CSV)</button>
       <button class="btn btn--secondary btn--sm" data-action="export-statement-pdf">${svgIcon("download", 15)} Extrato (PDF)</button>
       <button class="btn btn--secondary btn--sm" data-action="export-budgets-csv">${svgIcon("download", 15)} Orçamentos (CSV)</button>
     </div>
-    <p class="field-hint">O JSON guarda tudo (lançamentos, categorias, tetos, metas e ajustes) e é o que restaura o app por completo. O CSV serve para abrir no Excel ou no Google Sheets. O PDF é o extrato pronto para imprimir ou enviar, com o período e os filtros escolhidos em Movimentações (por padrão, o mês atual).</p>
+    ${b.encryptOpen ? renderBackupProtectForm(b) : ""}
+    <p class="field-hint"><b>Este arquivo contém informações financeiras privadas. Guarde-o em local seguro.</b> Ele sai aberto, para que você consiga lê-lo em qualquer aparelho${backupProtectionAvailable() ? "; se for guardar em nuvem de terceiro ou enviar por e-mail, use “Proteger com senha”" : ""}.</p>
+    <p class="field-hint">O backup completo guarda tudo (lançamentos, categorias, tetos, metas e ajustes) e é o que restaura o app por inteiro. O CSV serve para abrir no Excel ou no Google Sheets. O PDF é o extrato pronto para imprimir ou enviar, com o período e os filtros escolhidos em Movimentações (por padrão, o mês atual). <span class="footnote">Formato do backup completo: JSON.</span></p>
     ${renderLastBackupLine()}
 
     <p class="field__label" data-ui-css="margin-top:14px">Importar</p>
@@ -453,11 +456,62 @@ function renderBackupCard() {
       <div><p class="inline-error__title">${escapeHtml(b.error)}</p><p class="inline-error__detail">Seus dados atuais continuam intactos.</p></div>
       <button class="icon-btn icon-btn--muted" data-action="backup-cancel" aria-label="Fechar erro de backup">${svgIcon("x", 14)}</button>
     </div>` : ""}
+    ${b.locked ? renderBackupUnlockForm(b) : ""}
     <div class="settings-actions">
       <button class="btn btn--secondary btn--sm" data-action="import-json-trigger" ${b.busy ? "disabled" : ""}>
         ${b.busy ? `<span class="spinner"></span>` : svgIcon("upload", 15)} Escolher arquivo de backup
       </button>
       ${b.undoAvailable ? `<button class="btn btn--ghost btn--sm" data-action="backup-undo">${svgIcon("refresh", 15)} Desfazer última restauração</button>` : ""}
+    </div>
+  </div>`;
+}
+
+// [M12] A criptografia do backup é opcional e depende do WebCrypto. Onde ele
+// não existir (contexto sem origem segura, navegador antigo), a opção some e o
+// backup comum continua inteiro; o cartão não pode quebrar por causa disso.
+function backupProtectionAvailable() {
+  return typeof backupCryptoAvailable === "function" && backupCryptoAvailable();
+}
+
+// [M12] Escolha da senha do backup protegido. Fica DENTRO do cartão, aberto sob
+// demanda: quem só quer o arquivo de sempre não passa por aqui.
+function renderBackupProtectForm(b) {
+  return `<div class="backup-protect" data-ui-css="margin-top:12px">
+    <p class="field__label">Proteger o backup com senha</p>
+    <p class="field-hint"><b>Não existe recuperação.</b> O arquivo é aberto só com esta senha; nem o app nem o servidor conseguem abri-lo sem ela. Guarde-a onde você já guarda suas outras senhas.</p>
+    <div class="field" data-ui-css="margin-top:10px">
+      <label class="field__label" for="backup-password">Senha do arquivo</label>
+      <input id="backup-password" class="input" type="password" data-field="backup-password" minlength="${BACKUP_ENC_MIN_PASSWORD}" maxlength="128" value="${escapeHtml(b.password || "")}" autocomplete="new-password" />
+      ${renderPasswordStrength(b.password || "", "")}
+    </div>
+    <div class="field">
+      <label class="field__label" for="backup-password-confirm">Repita a senha</label>
+      <input id="backup-password-confirm" class="input" type="password" data-field="backup-password-confirm" maxlength="128" value="${escapeHtml(b.passwordConfirm || "")}" autocomplete="new-password" />
+    </div>
+    <div class="settings-actions">
+      <button class="btn btn--ghost btn--sm" data-action="backup-protect-cancel">Cancelar</button>
+      <button class="btn btn--primary btn--sm" data-action="backup-protect-confirm" ${b.busy ? "disabled" : ""}>
+        ${b.busy ? `<span class="spinner"></span>` : svgIcon("shieldCheck", 15)} Baixar protegido
+      </button>
+    </div>
+  </div>`;
+}
+
+// [M12] O arquivo escolhido está cifrado: a senha vem antes de o conteúdo ser
+// interpretado. Até aqui, nada do arquivo foi lido além do rótulo do envelope.
+function renderBackupUnlockForm(b) {
+  return `<div class="backup-protect" data-ui-css="margin-top:12px">
+    <p class="field__label">${svgIcon("shieldCheck", 14)} Backup protegido por senha</p>
+    <p class="card-subtitle" data-ui-css="margin-top:2px">${escapeHtml(b.locked.filename)}</p>
+    <div class="field" data-ui-css="margin-top:10px">
+      <label class="field__label" for="backup-unlock-password">Senha do arquivo</label>
+      <input id="backup-unlock-password" class="input" type="password" data-field="backup-unlock-password" maxlength="128" value="${escapeHtml(b.unlockPassword || "")}" autocomplete="off" />
+    </div>
+    <div class="settings-actions">
+      <button class="btn btn--ghost btn--sm" data-action="backup-cancel">Cancelar</button>
+      <button class="btn btn--primary btn--sm" data-action="backup-unlock" ${b.busy ? "disabled" : ""}>
+        ${b.busy ? `<span class="spinner"></span>` : svgIcon("upload", 15)} Abrir backup
+      </button>
     </div>
   </div>`;
 }

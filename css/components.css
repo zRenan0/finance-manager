@@ -676,6 +676,14 @@
 .backup-summary > div > b { display: block; font-size: 17px; font-weight: 600; margin-top: 4px; overflow-wrap: anywhere; }
 .backup-summary__delta { font-size: 11px; color: var(--positive); font-weight: 700; }
 
+/* [M12] Bloco de senha do backup protegido (escolher ao exportar, informar ao
+   restaurar). Mesma moldura do resumo acima para não parecer outra tela. */
+.backup-protect {
+  border: 1px solid var(--border-soft); border-radius: var(--radius-sm); padding: 14px;
+  background: var(--card-alt);
+}
+.backup-protect .field:last-of-type { margin-bottom: 4px; }
+
 .income-input-row { display: flex; align-items: center; gap: 11px; min-width: 0; }
 .income-input-row .input { flex: 1; min-width: 0; }
 .income-currency {
