@@ -12,7 +12,8 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 
 | Campo | Valor |
 |---|---|
-| Módulo atual | **M12 - Backup e restauração** (concluído) |
+| Módulo atual | **M13 - Versionamento** (concluído) |
+| Status do M13 | **CONCLUÍDO** - seis versões inventariadas em `docs/VERSIONAMENTO.md` com matriz de compatibilidade conferida por teste; backup de schema futuro passou a avisar; banco passou a declarar a própria versão (**migração aplicada e confirmada em produção em 2026-08-31**) |
 | Status do M12 | **CONCLUÍDO** - aviso de privacidade no cartão, rótulo sem o formato em primeiro plano e backup opcionalmente protegido por senha (AES-GCM + PBKDF2), com ida e volta verificada em navegador real |
 | Status do M11 | **CONCLUÍDO** - numerador e denominador passaram a usar a mesma régua de natureza no ranking de categorias, no dia da semana, no mapa de calor, no relatório por período, na retrospectiva e na média da previsão; 41 invariantes contábeis travados em suíte nova |
 | Status do M10 | **CONCLUÍDO** - repetição idempotente sobrevive à perda da resposta e à recarga; HLC confirmada pelo servidor é absorvida; concorrência, volume e paginação ganharam regressão |
@@ -25,10 +26,11 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 | Status do M3 | **CONCLUÍDO** — aplicado e confirmado no banco em 2026-08-28 |
 | Status do M2 | **CONCLUÍDO** — nenhuma vulnerabilidade de autorização; invariantes travados por teste |
 | Status do M1 | **CONCLUÍDO** — aplicado e confirmado; gatilho capturado e versionado |
-| Módulos concluídos | M0, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12 |
-| Próximo módulo | M13 - Versionamento e matriz de compatibilidade |
+| Módulos concluídos | M0, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13 |
+| Próximo módulo | M14 - Importação de extratos (CSV, OFX e PDF) |
 | Branch | `deploy-atualizado` (árvore limpa no início do M0) |
 | Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `tests/test-cloud-sync.js`, `tests/test-account-backend.js`, `scripts/check-deploy.js`, `scripts/serve.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/storage.js`, `js/cloud-sync.js` (M10), `js/analytics.js`, `js/forecast.js`, `js/wrapped.js`, `js/screens/analytics.js` (M11), `js/backup-crypto.js` (**novo**), `js/app.js`, `js/actions.js`, `js/storage.js`, `js/screens/settings.js`, `css/components.css`, `scripts/build-app-module.js` (M12), `js/modules/app.generated.js` (regerado). Documentação: inventário do M8, protocolo do M10 e backup protegido do M12. |
+| Migration do M13 | `20260831120000_database_schema_version.sql` — **aplicada e confirmada em produção em 2026-08-31** (`database_schema_version = 1`; grants inalterados: só `service_role` e `postgres`). Reversível por `alter table public.cofre_sync_config drop column if exists database_schema_version;` |
 | Migrations criadas até aqui | `20260828120000_rls_auto_enable_least_privilege.sql`, `20260828130000_rls_auto_enable_versionada.sql`, `20260828140000_menor_privilegio_tabelas.sql` (as três **aplicadas e confirmadas em 2026-08-28**), `20260828150000_rls_auto_enable_gatilho.sql` (**ainda não aplicada**; é no-op em produção, onde o gatilho já existe) |
 | Versão do app | `0.30.0` (package.json) |
 
@@ -1972,6 +1974,101 @@ Nada foi removido nem alterado no formato existente:
 
 ---
 
+## M13 - Versionamento e matriz de compatibilidade
+
+### Antes (situação encontrada)
+
+Cinco versões existiam e funcionavam, mas viviam espalhadas e sem documento que
+as reunisse. O que já estava bem resolvido, e não foi tocado:
+
+- **Protocolo de sincronização.** Negociação completa: cabeçalho `X-Sync-Protocol`
+  conferido contra o campo `protocol` do corpo (defesa contra corpo forjado),
+  **426** `protocol_upgrade_required` para cliente abaixo do mínimo de escrita
+  (e não 409, que faria o cliente descartar a fila), **400** para versão
+  desconhecida, **503** `schema_missing` quando a configuração não existe, e o
+  cliente detectando sozinho, antes de enviar, que o mínimo do servidor está
+  acima do que ele fala.
+- **`APP_VERSION` duplicada (R6 do M0).** Já estava resolvido: `check-release.js`
+  reprova a publicação quando `js/safe-errors.js` diverge do `package.json`.
+  **R6 fecha aqui, sem código novo.**
+- **IndexedDB.** `onupgradeneeded` usa `contains()` em todos os stores e índices,
+  então subir a versão não toca em dado gravado.
+- **Service Worker.** Desde o M9 a identidade é o SHA-256 do pacote inteiro,
+  injetado pela publicação; não depende de alguém lembrar de subir o `vNN`.
+
+### Achados
+
+| # | P | Achado | Situação |
+|---|---|---|---|
+| F13-01 | P2 | `migrate()` só sabe SUBIR de versão. Um backup gerado por versão futura abria em silêncio, e todo campo criado depois desta versão era descartado pelos normalizadores sem aviso. Quem restaurasse acharia que trouxe tudo. | **CORRIGIDO** - `parseBackupFile` reporta `meta.schema` e `meta.future`; a prévia avisa em destaque. O arquivo continua abrindo |
+| F13-02 | P2 | O banco não declarava versão nenhuma. Descobrir se produção tinha todas as migrações exigia inspecionar tabela por tabela — foi exatamente assim que o M1 achou `rls_auto_enable` fora do versionamento. | **CORRIGIDO** - `cofre_sync_config.database_schema_version`, publicada em `/api/sync/health` |
+| F13-03 | P3 | Não havia documento reunindo as versões nem dizendo o que acontece quando duas pontas discordam. | **CORRIGIDO** - `docs/VERSIONAMENTO.md`, com o conteúdo conferido por teste |
+| F13-04 | **P2, registrado e NÃO corrigido** | O protocolo trafega registros, não a versão do schema que os criou. Um aparelho novo grava um campo que um aparelho antigo não conhece; o antigo baixa, normaliza (perde o campo) e reenvia. Contido na prática pela origem única e pela atualização forçada do pacote, mas não impedido. Resolver pede lugar no protocolo para campo não reconhecido, o que é mudança de protocolo. | Registrado em `docs/VERSIONAMENTO.md`, "Limitações conhecidas" |
+
+### Alterações
+
+| Arquivo | Motivo |
+|---|---|
+| `docs/VERSIONAMENTO.md` | **novo.** Seis versões, onde moram, quem as obriga, quando subir, matriz de compatibilidade e limitações conhecidas |
+| `js/storage.js` | `parseBackupFile` passa a reportar `meta.schema` e `meta.future` |
+| `js/screens/settings.js` | aviso na prévia da restauração; o rótulo "protegido por senha" também aparece |
+| `css/components.css` | `.inline-error--warn` (aviso não é erro; pintar de vermelho diria que algo falhou) |
+| `netlify/functions/sync.js` | `syncConfig` lê a linha inteira (`select=*`) e devolve `databaseSchema`; `/api/sync/health` publica |
+| `supabase/migrations/20260831120000_database_schema_version.sql` | **nova**, aplicada |
+| `tests/test-versioning.js` | **novo** - 44 verificações |
+| `tests/test-account-backend.js` | comportamento real do banco sem a coluna, com a coluna e com valor inválido |
+
+### Motivo
+
+Versão que ninguém consegue ler não protege ninguém. O app roda em três lugares
+que não atualizam juntos (o pacote já baixado no navegador, o pacote publicado
+agora e o banco), e cada divergência entre eles tinha resposta — só que a
+resposta morava no código, espalhada. Reuni-las num documento **conferido por
+teste** é o que impede a matriz de virar ficção seis meses depois.
+
+### Compatibilidade
+
+- `select=*` em vez da lista de colunas foi escolha deliberada: pedir a coluna
+  nova pelo nome faria o PostgREST devolver **400 em todo banco sem a migração**,
+  ou seja, a correção derrubaria a sincronização até alguém aplicar o SQL.
+- Banco sem a coluna devolve `databaseSchema: null` e **continua atendendo**;
+  provado por teste de handler, não por leitura de código.
+- A migração é aditiva (`add column if not exists`, `default 1`), não toca em
+  dado, não mexe em grant nem em RLS, e a própria migração documenta como
+  reverter.
+- Backup de qualquer schema, antigo ou futuro, continua abrindo. Nada passou a
+  ser recusado.
+
+### Testes
+
+| Teste | Resultado |
+|---|---|
+| `node tests/test-versioning.js` | **PASSOU** - 44 ok, 0 falhas |
+| `node tests/test-account-backend.js` | **PASSOU** - 79 ok (era 74; cinco novos sobre a versão do banco) |
+| `npm run lint` | **PASSOU** - 0 erro, 0 aviso |
+| `npm test` | **PASSOU** - 59 arquivos |
+| `npm run check:build` / `check:release` / `build:dist` | **PASSOU** (avisos conhecidos: 7 campos legais e `SITE_URL` local) |
+| `npm run test:coverage` | **PASSOU** - 22,4% |
+| `npm run test:browser` / `test:pwa` | **PASSOU** - 18/18 nos três motores; PWA aprovado |
+| Migração em produção | **APLICADA E CONFERIDA** - `database_schema_version = 1`; grants seguem só `service_role` e `postgres`, sem `anon` nem `authenticated` |
+| Navegador real | **PASSOU** - backup declarando schema 99 mostra o aviso e ainda restaura (1 no arquivo, 2 no aparelho, 3 depois); backup de schema 22 **não** mostra aviso nenhum. Zero erros de console |
+
+### Status
+
+**CONCLUÍDO.** F13-01, F13-02 e F13-03 corrigidos; F13-04 registrado como P2 com
+o motivo de não ser corrigido agora. R6 do M0 fechado.
+
+### Registrado para módulos seguintes
+
+- **Toda migração daqui em diante sobe `database_schema_version` na mesma
+  migração que muda a forma do banco.** Está escrito em `docs/VERSIONAMENTO.md`.
+- **Todo módulo que subir uma versão precisa atualizar `docs/VERSIONAMENTO.md`**,
+  senão `tests/test-versioning.js` falha. É de propósito.
+- **F13-04** é candidato natural a um M-de-protocolo futuro, junto de qualquer
+  outra mudança que já exija subir o `SYNC_PROTOCOL_VERSION`.
+
+---
+
 ## Checklist de regressão
 
 Executar após **todo** módulo que toque no código. Marcar `OK` / `FALHOU` / `NÃO VALIDADO`.
@@ -1980,9 +2077,10 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
 ### A. Automatizado (CI ou máquina com Node) — porta de entrada obrigatória
 
 - [ ] `npm run lint`
-- [ ] `npm test` (58 arquivos)
+- [ ] `npm test` (59 arquivos)
 - [ ] `node tests/test-accounting-integrity.js` (invariantes contábeis do M11)
 - [ ] `node tests/test-backup-restore.js` (backup, restauração e senha do M12)
+- [ ] `node tests/test-versioning.js` (versões e matriz de compatibilidade do M13)
 - [ ] `npm run check:build` (o `app.generated.js` publicado corresponde às fontes)
 - [ ] `npm run check:release`
 - [ ] `npm run build:dist`
@@ -2050,6 +2148,7 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
 - [ ] Exportar backup (JSON) gera arquivo íntegro
 - [ ] **Exportar backup protegido por senha e reimportá-lo no mesmo aparelho** (senha errada recusa; senha certa abre a prévia normal)
 - [ ] Restaurar backup de versão antiga do schema funciona
+- [ ] **Restaurar backup de versão MAIS NOVA avisa antes e mesmo assim restaura o que é reconhecido**
 - [ ] Desfazer restauração (`financas_db_undo`) funciona
 - [ ] Checkpoints: listar e restaurar
 - [ ] Modo avião: app abre, navega e grava; ao voltar, sincroniza

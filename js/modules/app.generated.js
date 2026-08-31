@@ -7597,6 +7597,16 @@ function parseBackupFile(text) {
     throw new BackupError("NOT_A_BACKUP", "O arquivo não parece ser um backup do app.");
   }
 
+  // [M13] Arquivo gerado por uma versão MAIS NOVA do app. `migrate()` só sabe
+  // subir de versão: um campo que ainda não existe aqui é descartado pelos
+  // normalizadores, em silêncio. O arquivo continua abrindo (o que ele tem de
+  // conhecido entra inteiro), mas quem restaura precisa saber que pode haver
+  // conteúdo que este aplicativo não entende. Recusar seria pior: deixaria a
+  // pessoa sem nada em vez de com quase tudo.
+  const declarada = Number(payload && payload.version) || Number(parsed.schema) || 0;
+  meta.schema = declarada || null;
+  meta.future = declarada > SCHEMA_VERSION ? declarada : null;
+
   // Teto de registros, antes de normalizar: `migrate` percorre e reconstrói
   // cada item, então um arquivo com milhões de linhas trava a aba mesmo cabendo
   // no limite de bytes.
@@ -31561,7 +31571,11 @@ function renderBackupPreview(b) {
       <p class="card-title" data-ui-css="margin:0">Confirmar importação</p>
       <button class="icon-btn" data-action="backup-cancel" aria-label="Cancelar importação do backup">${svgIcon("x", 16)}</button>
     </div>
-    <p class="card-subtitle">${escapeHtml(p.filename)}${p.meta.exportedAt ? ` · exportado em ${fmtDateFull(p.meta.exportedAt.slice(0, 10))}` : ""}${p.meta.legacy ? " · formato antigo (será convertido)" : ""}</p>
+    <p class="card-subtitle">${escapeHtml(p.filename)}${p.meta.exportedAt ? ` · exportado em ${fmtDateFull(p.meta.exportedAt.slice(0, 10))}` : ""}${p.meta.legacy ? " · formato antigo (será convertido)" : ""}${p.meta.encrypted ? " · protegido por senha" : ""}</p>
+    ${p.meta.future ? `<div class="inline-error inline-error--warn">
+      ${svgIcon("alertTriangle", 16)}
+      <div><p class="inline-error__title">Este backup foi criado por uma versão mais nova do aplicativo.</p><p class="inline-error__detail">Tudo o que esta versão reconhece será restaurado. Campos introduzidos depois dela não são entendidos aqui e não entram. Se puder, atualize o aplicativo antes de restaurar.</p></div>
+    </div>` : ""}
 
     <div class="backup-summary">
       <div><span>No arquivo</span><b>${p.meta.counts.transactions}</b></div>

@@ -2,6 +2,25 @@
 
 ## Não publicado
 
+### Restaurar um backup de versão mais nova agora avisa antes
+
+- `migrate()` só sabe subir de versão. Um backup gerado por uma versão futura do
+  aplicativo abria em silêncio, e qualquer campo criado depois desta versão era
+  descartado pelos normalizadores sem que ninguém soubesse. Agora a prévia da
+  restauração diz, em destaque, que o arquivo veio de uma versão mais nova e o
+  que isso significa. O arquivo continua abrindo: recusar deixaria a pessoa sem
+  nada em vez de com quase tudo.
+- O banco passou a declarar a própria versão de schema
+  (`cofre_sync_config.database_schema_version`), publicada em `/api/sync/health`.
+  Ela é declarativa de propósito e não recusa atendimento: um portão
+  transformaria "esqueci de aplicar uma migração" em "o aplicativo parou para
+  todo mundo". O backend lê a linha inteira da configuração, então bancos ainda
+  sem a coluna continuam funcionando e reportam versão nula.
+- Novo `docs/VERSIONAMENTO.md`: as seis versões vivas do projeto, onde cada uma
+  mora, quem a obriga, quando subir e a matriz do que acontece quando duas
+  pontas discordam. `tests/test-versioning.js` confere os números do documento
+  contra o código, para que ele não envelheça em silêncio.
+
 ### O backup agora pode sair protegido por senha
 
 - O arquivo continua o mesmo: JSON, com checksum, e é ele que restaura o app por

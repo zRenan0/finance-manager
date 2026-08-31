@@ -528,7 +528,11 @@ function renderBackupPreview(b) {
       <p class="card-title" data-ui-css="margin:0">Confirmar importação</p>
       <button class="icon-btn" data-action="backup-cancel" aria-label="Cancelar importação do backup">${svgIcon("x", 16)}</button>
     </div>
-    <p class="card-subtitle">${escapeHtml(p.filename)}${p.meta.exportedAt ? ` · exportado em ${fmtDateFull(p.meta.exportedAt.slice(0, 10))}` : ""}${p.meta.legacy ? " · formato antigo (será convertido)" : ""}</p>
+    <p class="card-subtitle">${escapeHtml(p.filename)}${p.meta.exportedAt ? ` · exportado em ${fmtDateFull(p.meta.exportedAt.slice(0, 10))}` : ""}${p.meta.legacy ? " · formato antigo (será convertido)" : ""}${p.meta.encrypted ? " · protegido por senha" : ""}</p>
+    ${p.meta.future ? `<div class="inline-error inline-error--warn">
+      ${svgIcon("alertTriangle", 16)}
+      <div><p class="inline-error__title">Este backup foi criado por uma versão mais nova do aplicativo.</p><p class="inline-error__detail">Tudo o que esta versão reconhece será restaurado. Campos introduzidos depois dela não são entendidos aqui e não entram. Se puder, atualize o aplicativo antes de restaurar.</p></div>
+    </div>` : ""}
 
     <div class="backup-summary">
       <div><span>No arquivo</span><b>${p.meta.counts.transactions}</b></div>

@@ -5640,6 +5640,16 @@ function parseBackupFile(text) {
     throw new BackupError("NOT_A_BACKUP", "O arquivo não parece ser um backup do app.");
   }
 
+  // [M13] Arquivo gerado por uma versão MAIS NOVA do app. `migrate()` só sabe
+  // subir de versão: um campo que ainda não existe aqui é descartado pelos
+  // normalizadores, em silêncio. O arquivo continua abrindo (o que ele tem de
+  // conhecido entra inteiro), mas quem restaura precisa saber que pode haver
+  // conteúdo que este aplicativo não entende. Recusar seria pior: deixaria a
+  // pessoa sem nada em vez de com quase tudo.
+  const declarada = Number(payload && payload.version) || Number(parsed.schema) || 0;
+  meta.schema = declarada || null;
+  meta.future = declarada > SCHEMA_VERSION ? declarada : null;
+
   // Teto de registros, antes de normalizar: `migrate` percorre e reconstrói
   // cada item, então um arquivo com milhões de linhas trava a aba mesmo cabendo
   // no limite de bytes.

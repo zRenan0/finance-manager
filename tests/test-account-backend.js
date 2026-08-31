@@ -366,6 +366,28 @@ async function main() {
     check("configuração ausente vira schema_missing", semConfig.statusCode === 503 && JSON.parse(semConfig.body).code === "schema_missing", semConfig.body);
     syncConfigRow = { server_protocol: 3, minimum_write_protocol: 2 };
 
+    // [M13] Versão do schema do BANCO. Ela é declarativa: aparece em health e
+    // nunca recusa atendimento. O caso importante é o banco que ainda não
+    // recebeu a migração da coluna: a linha vem sem o campo, e isso não pode
+    // virar erro nem número inventado.
+    const health = () => sync.handler({
+      httpMethod: "GET", path: "/api/sync/health", queryStringParameters: { action: "health" },
+      headers: { host: "cofre.test", "x-forwarded-proto": "https", cookie: cookieHeader, "x-device-id": "device-test-1234", "x-account-id": USER_ID, "x-sync-protocol": "3" },
+    });
+    const semColuna = await health();
+    check("banco sem a coluna de versão continua atendendo", semColuna.statusCode === 200, semColuna.statusCode);
+    check("banco sem a coluna declara versão nula", JSON.parse(semColuna.body).databaseSchema === null, semColuna.body);
+
+    syncConfigRow = { server_protocol: 3, minimum_write_protocol: 2, database_schema_version: 1 };
+    const comColuna = await health();
+    check("a versão declarada pelo banco é publicada", JSON.parse(comColuna.body).databaseSchema === 1, comColuna.body);
+
+    syncConfigRow = { server_protocol: 3, minimum_write_protocol: 2, database_schema_version: "não é número" };
+    const versaoInvalida = await health();
+    check("versão inválida no banco não derruba o serviço", versaoInvalida.statusCode === 200, versaoInvalida.statusCode);
+    check("versão inválida no banco vira nula, não NaN", JSON.parse(versaoInvalida.body).databaseSchema === null, versaoInvalida.body);
+    syncConfigRow = { server_protocol: 3, minimum_write_protocol: 2, database_schema_version: 1 };
+
     // `remote_changed` é 409 com corpo próprio: o vínculo precisa distinguir
     // "a conta mudou" de "conflito de documento".
     rpcResult = { status: "remote_changed", revision: 9, applied: 0 };

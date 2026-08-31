@@ -145,6 +145,13 @@
   border-radius: var(--radius-sm); padding: 13px 14px; margin: 14px 0;
   color: var(--negative);
 }
+/* [M13] Mesma moldura, outro tom: aviso não é erro. Um backup de versão mais
+   nova pode ser restaurado; pintá-lo de vermelho diria que algo falhou. */
+.inline-error--warn {
+  background: color-mix(in srgb, var(--goal) 12%, transparent);
+  border-color: color-mix(in srgb, var(--goal) 30%, transparent);
+  color: var(--goal);
+}
 .inline-error > div { flex: 1; min-width: 0; }
 .inline-error__title { font-size: 13.5px; font-weight: 700; line-height: 1.4; margin: 0; }
 .inline-error__detail { font-size: 12.5px; font-weight: 500; color: var(--ink-soft); margin: 4px 0 0; line-height: 1.5; }

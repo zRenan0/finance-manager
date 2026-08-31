@@ -49,7 +49,11 @@ function protocolOf(event) {
 }
 
 async function syncConfig() {
-  const rows = await api.db("cofre_sync_config?select=server_protocol,minimum_write_protocol&id=eq.1&limit=1", { service: true });
+  // `select=*` de propósito, e não a lista de colunas: a versão do schema do
+  // banco (migração 20260831120000) é uma coluna nova, e pedi-la pelo nome faria
+  // o PostgREST devolver 400 em qualquer banco que ainda não recebeu a migração.
+  // Ler a linha inteira funciona antes e depois dela.
+  const rows = await api.db("cofre_sync_config?select=*&id=eq.1&limit=1", { service: true });
   const row = Array.isArray(rows) ? rows[0] : rows;
   if (!row) {
     throw Object.assign(new Error("A configuração do protocolo não foi encontrada"), { statusCode: 503, code: "schema_missing", exposeMessage: true });
@@ -60,7 +64,13 @@ async function syncConfig() {
     || minimumWriteProtocol < LEGACY_PROTOCOL || minimumWriteProtocol > serverProtocol) {
     throw Object.assign(new Error("A configuração do protocolo é inválida"), { statusCode: 503, code: "schema_missing", exposeMessage: true });
   }
-  return { serverProtocol, minimumWriteProtocol };
+  // Banco anterior à migração não tem a coluna: `null` diz "não declarada", que
+  // é diferente de "atrasada". Nem um nem outro recusa atendimento; a
+  // divergência aparece em /api/sync/health, para ser vista antes de virar
+  // incidente. Ver docs/VERSIONAMENTO.md.
+  const declared = Number(row.database_schema_version);
+  const databaseSchema = Number.isInteger(declared) && declared >= 1 ? declared : null;
+  return { serverProtocol, minimumWriteProtocol, databaseSchema };
 }
 
 function withProtocol(spoken, config, body) {
@@ -226,7 +236,15 @@ async function handler(event) {
 
     // ---- Estado ----
     if (route === "health" && method === "GET") {
-      return json(200, withProtocol(spoken, config, { status: "ok", revision: await revisionOf(session) }), { cookies: session.cookies });
+      // [M13] `databaseSchema` é a versão declarada pelo próprio banco. `null`
+      // significa banco anterior à migração que criou a coluna. Publicar aqui é
+      // o que permite descobrir "produção está atrás do repositório" com uma
+      // leitura, em vez de uma investigação tabela por tabela.
+      return json(200, withProtocol(spoken, config, {
+        status: "ok",
+        databaseSchema: config.databaseSchema,
+        revision: await revisionOf(session),
+      }), { cookies: session.cookies });
     }
 
     // ---- Leitura incremental (protocolo 2) ----
