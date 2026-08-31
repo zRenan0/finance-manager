@@ -2,6 +2,27 @@
 
 ## Não publicado
 
+### Relatórios contavam como gasto o dinheiro que foi guardado
+
+- O total do mês já separava natureza — aporte, amortização, transferência e
+  estorno ficam fora de "Despesas do mês" —, mas as somas por categoria, por dia
+  da semana e por dia do mês ainda classificavam por tipo de lançamento. Numerador
+  e denominador usavam réguas diferentes: quem guardou R$ 2.000 numa meta e gastou
+  R$ 300 no mercado via "Investimento" liderar o ranking de gastos, com participação
+  acima de 100% do próprio mês.
+- A régua agora é uma só (`consumptionCentsOf`) no ranking de categorias, na
+  categoria dominante, no perfil por dia da semana, no mapa de calor, no relatório
+  por período e na retrospectiva do mês. Estorno abate o gasto da própria categoria,
+  como já acontecia no orçamento; a intensidade do mapa de calor nunca fica negativa.
+- A média de gastos variáveis da previsão de fechamento deixou de contar
+  transferência entre contas próprias. A perna de saída inflava a projeção sem que
+  a perna de entrada compensasse, porque a média só olha o lado da despesa.
+- Nenhum número de saldo, patrimônio, fatura ou orçamento mudou: a correção é só
+  na leitura por categoria e no ritmo de gasto.
+- Nova suíte `tests/test-accounting-integrity.js` trava os invariantes contábeis:
+  transferência, pagamento de fatura, ajuste de saldo, aporte, amortização e
+  estorno, mais a regra de que toda soma por categoria fecha com a despesa do mês.
+
 ### A repetição de um envio agora sobrevive à perda da resposta
 
 - O lote exato, seu `mutationId` e a revisão remota esperada passam a ser gravados

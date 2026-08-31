@@ -692,6 +692,9 @@ console.log("\n6. Telas antigas continuam renderizando (não-regressão)");
     dashboard: "renderDashboardScreen()",
     add: "(state.form = freshTxForm(), renderAddScreen())",
     analytics: "renderAnalyticsScreen()",
+    // A visão de relatórios só aparece com `analyticsView`; sem esta linha o
+    // ranking de gastos por categoria não era renderizado por teste nenhum.
+    "analytics/relatórios": "(state.analyticsView = 'reports', renderAnalyticsScreen())",
     goals: "renderGoalsScreen()",
     settings: "renderSettingsScreen()",
     privacidade: "renderPrivacyScreen()",
@@ -721,6 +724,7 @@ console.log("\n6. Telas antigas continuam renderizando (não-regressão)");
     check(`tela "${nome}" renderiza`, !err && out.length > 200, err || `${out.length} chars`);
   });
   run("state.categoriesUi = { view: 'tree', search: '', collapsed: [], editor: null };");
+  run("state.analyticsView = 'movements';");
 }
 
 /* ------------------------------------------- Privacidade: os dois estados do aceite */

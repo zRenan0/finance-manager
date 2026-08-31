@@ -180,10 +180,16 @@ function renderTxHistorySection() {
 
 function renderAnalyticsReportsScreen() {
   const filtered = filteredTransactionsForPeriod();
-  const expenses = filtered.filter((t) => t.type === "expense");
+  // Só consumo entra no relatório de gastos por categoria; o total logo abaixo
+  // compara com `realizedMonthTotals`, que usa a mesma régua.
+  const expenses = filtered.filter(isConsumptionTx);
   const total = sumMoney(expenses, (t) => t.amount);
   const byCategory = {};
-  expenses.forEach((t) => { byCategory[t.categoryId] = (byCategory[t.categoryId] || 0) + moneyToCents(t.amount); });
+  filtered.forEach((t) => {
+    const cents = consumptionCentsOf(t);
+    if (!cents) return;
+    byCategory[t.categoryId] = (byCategory[t.categoryId] || 0) + cents;
+  });
   const catRows = Object.entries(byCategory)
     .map(([id, cents]) => { const c = categoryById(state.data, id); return { id, value: moneyFromCents(cents), name: c.name, color: c.color }; })
     .sort((a, b) => b.value - a.value);

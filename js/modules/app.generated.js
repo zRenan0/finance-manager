@@ -16960,6 +16960,18 @@ function incomeDayOf(data) {
   return best;
 }
 
+// Transferência entre contas próprias não é gasto: a perna de saída tem uma
+// perna de entrada do mesmo valor, e o caixa somado das contas não se move.
+// Contá-la aqui inflava a média de gastos variáveis (e, por tabela, a projeção
+// de fechamento) sem que a entrada correspondente compensasse, porque a
+// baseline só olha a ponta de despesa. Bases antigas gravavam a transferência
+// como lançamento; hoje ela é uma entidade própria (`accountTransfers`).
+function isTransferTx(t) {
+  if (!t) return false;
+  const nature = t.nature || (typeof deriveTransactionNature === "function" ? deriveTransactionNature(t) : "");
+  return nature === "transferencia";
+}
+
 // Média mensal dos gastos que NÃO chegam por outro caminho da projeção.
 
 function variableBaseline(data, refIso) {
@@ -16975,6 +16987,7 @@ function variableBaseline(data, refIso) {
     tx.forEach((t) => {
       if (t.type !== "expense") return;
       if (t.recurring || t.installmentGroupId || t.goalId) return;
+      if (isTransferTx(t)) return;
       cents += moneyToCents(t.amount);
     });
   });
@@ -16989,6 +17002,7 @@ function variableSpentInMonth(data, monthKey) {
   realizedTxForMonth(data, monthKey).forEach((t) => {
     if (t.type !== "expense") return;
     if (t.recurring || t.installmentGroupId || t.goalId) return;
+    if (isTransferTx(t)) return;
     cents += moneyToCents(t.amount);
   });
   return moneyFromCents(cents);
@@ -18255,9 +18269,16 @@ function anRootCategory(data, id) {
 function anExpenseByRoot(data, monthKey) {
   const out = new Map();
   realizedTxForMonth(data, monthKey).forEach((t) => {
-    if (t.type !== "expense") return;
+    // MESMA RÉGUA de "Despesas do mês" (`realizedMonthTotals`): só consumo e
+    // encargos de dívida entram, estorno entra negativo, e aporte, amortização
+    // e transferência ficam de fora. Enquanto esta soma classificava por
+    // `type`, o denominador era por natureza e o numerador não: um aporte de
+    // meta maior que o consumo fazia a categoria dominante passar de 100% do
+    // mês e liderar o ranking de gastos sem ser gasto.
+    const cents = consumptionCentsOf(t);
+    if (!cents) return;
     const root = anRootCategory(data, t.categoryId);
-    out.set(root.id, (out.get(root.id) || 0) + moneyToCents(t.amount));
+    out.set(root.id, (out.get(root.id) || 0) + cents);
   });
   return out;
 }
@@ -18429,9 +18450,10 @@ function anWeekdayProfile(data, monthKey) {
 
   let lastDayWithTx = 0;
   realizedTxForMonth(data, monthKey).forEach((t) => {
-    if (t.type !== "expense") return;
+    const c = consumptionCentsOf(t);          // mesma régua do total do mês
+    if (!c) return;
     const w = dateFromIso(t.date).getDay();
-    cents[w] += moneyToCents(t.amount);
+    cents[w] += c;
     counts[w]++;
     const d = Number(String(t.date).slice(8, 10)) || 0;
     if (d > lastDayWithTx) lastDayWithTx = d;
@@ -18553,12 +18575,16 @@ function anHeatmap(data, monthKey) {
   const counts = new Array(total + 1).fill(0);
 
   realizedTxForMonth(data, monthKey).forEach((t) => {
-    if (t.type !== "expense") return;
+    const c = consumptionCentsOf(t);          // mesma régua do total do mês
+    if (!c) return;
     const d = Number(String(t.date).slice(8, 10));
-    if (d >= 1 && d <= total) { cents[d] += moneyToCents(t.amount); counts[d]++; }
+    if (d >= 1 && d <= total) { cents[d] += c; counts[d]++; }
   });
 
-  const max = Math.max(...cents.slice(1));
+  // Um dia pode fechar negativo quando o estorno supera o consumo. O valor sai
+  // como está, porque é a verdade do dia; a intensidade da cor é que nunca
+  // pode ser negativa, sob pena de inverter a escala do mapa inteiro.
+  const max = Math.max(0, ...cents.slice(1));
   const days = [];
   for (let d = 1; d <= total; d++) {
     const date = new Date(y, m - 1, d);
@@ -18568,7 +18594,7 @@ function anHeatmap(data, monthKey) {
       weekday: date.getDay(),
       value: moneyFromCents(cents[d]),
       count: counts[d],
-      intensity: max > 0 ? Math.round((cents[d] / max) * 100) / 100 : 0,
+      intensity: max > 0 ? Math.round((Math.max(0, cents[d]) / max) * 100) / 100 : 0,
       future: elapsed > 0 && d > elapsed,
       weekend: date.getDay() === 0 || date.getDay() === 6,
     });
@@ -22551,7 +22577,13 @@ function buildWrappedData(data) {
   const mKey = keyOfDate(now);
   const { income, expense, tx } = realizedMonthTotals(data, mKey);
   const byCategory = {};
-  tx.filter((t) => t.type === "expense").forEach((t) => { byCategory[t.categoryId] = (byCategory[t.categoryId] || 0) + t.amount; });
+  // Mesma régua do `expense` acima: aporte, amortização e transferência não
+  // são gasto e não podem liderar a retrospectiva do mês.
+  tx.forEach((t) => {
+    const cents = consumptionCentsOf(t);
+    if (!cents) return;
+    byCategory[t.categoryId] = addMoney(byCategory[t.categoryId] || 0, moneyFromCents(cents));
+  });
   const topEntries = Object.entries(byCategory).sort((a, b) => b[1] - a[1]);
   const top = topEntries[0] ? categoryById(data, topEntries[0][0]) : null;
   const topValue = topEntries[0] ? topEntries[0][1] : 0;
@@ -26002,10 +26034,16 @@ function renderTxHistorySection() {
 
 function renderAnalyticsReportsScreen() {
   const filtered = filteredTransactionsForPeriod();
-  const expenses = filtered.filter((t) => t.type === "expense");
+  // Só consumo entra no relatório de gastos por categoria; o total logo abaixo
+  // compara com `realizedMonthTotals`, que usa a mesma régua.
+  const expenses = filtered.filter(isConsumptionTx);
   const total = sumMoney(expenses, (t) => t.amount);
   const byCategory = {};
-  expenses.forEach((t) => { byCategory[t.categoryId] = (byCategory[t.categoryId] || 0) + moneyToCents(t.amount); });
+  filtered.forEach((t) => {
+    const cents = consumptionCentsOf(t);
+    if (!cents) return;
+    byCategory[t.categoryId] = (byCategory[t.categoryId] || 0) + cents;
+  });
   const catRows = Object.entries(byCategory)
     .map(([id, cents]) => { const c = categoryById(state.data, id); return { id, value: moneyFromCents(cents), name: c.name, color: c.color }; })
     .sort((a, b) => b.value - a.value);

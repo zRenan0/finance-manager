@@ -80,6 +80,18 @@ function incomeDayOf(data) {
   return best;
 }
 
+// Transferência entre contas próprias não é gasto: a perna de saída tem uma
+// perna de entrada do mesmo valor, e o caixa somado das contas não se move.
+// Contá-la aqui inflava a média de gastos variáveis (e, por tabela, a projeção
+// de fechamento) sem que a entrada correspondente compensasse, porque a
+// baseline só olha a ponta de despesa. Bases antigas gravavam a transferência
+// como lançamento; hoje ela é uma entidade própria (`accountTransfers`).
+function isTransferTx(t) {
+  if (!t) return false;
+  const nature = t.nature || (typeof deriveTransactionNature === "function" ? deriveTransactionNature(t) : "");
+  return nature === "transferencia";
+}
+
 // Média mensal dos gastos que NÃO chegam por outro caminho da projeção.
 
 function variableBaseline(data, refIso) {
@@ -95,6 +107,7 @@ function variableBaseline(data, refIso) {
     tx.forEach((t) => {
       if (t.type !== "expense") return;
       if (t.recurring || t.installmentGroupId || t.goalId) return;
+      if (isTransferTx(t)) return;
       cents += moneyToCents(t.amount);
     });
   });
@@ -109,6 +122,7 @@ function variableSpentInMonth(data, monthKey) {
   realizedTxForMonth(data, monthKey).forEach((t) => {
     if (t.type !== "expense") return;
     if (t.recurring || t.installmentGroupId || t.goalId) return;
+    if (isTransferTx(t)) return;
     cents += moneyToCents(t.amount);
   });
   return moneyFromCents(cents);

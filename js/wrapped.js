@@ -8,7 +8,13 @@ function buildWrappedData(data) {
   const mKey = keyOfDate(now);
   const { income, expense, tx } = realizedMonthTotals(data, mKey);
   const byCategory = {};
-  tx.filter((t) => t.type === "expense").forEach((t) => { byCategory[t.categoryId] = (byCategory[t.categoryId] || 0) + t.amount; });
+  // Mesma régua do `expense` acima: aporte, amortização e transferência não
+  // são gasto e não podem liderar a retrospectiva do mês.
+  tx.forEach((t) => {
+    const cents = consumptionCentsOf(t);
+    if (!cents) return;
+    byCategory[t.categoryId] = addMoney(byCategory[t.categoryId] || 0, moneyFromCents(cents));
+  });
   const topEntries = Object.entries(byCategory).sort((a, b) => b[1] - a[1]);
   const top = topEntries[0] ? categoryById(data, topEntries[0][0]) : null;
   const topValue = topEntries[0] ? topEntries[0][1] : 0;

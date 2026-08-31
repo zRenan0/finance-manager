@@ -81,9 +81,16 @@ function anRootCategory(data, id) {
 function anExpenseByRoot(data, monthKey) {
   const out = new Map();
   realizedTxForMonth(data, monthKey).forEach((t) => {
-    if (t.type !== "expense") return;
+    // MESMA RÉGUA de "Despesas do mês" (`realizedMonthTotals`): só consumo e
+    // encargos de dívida entram, estorno entra negativo, e aporte, amortização
+    // e transferência ficam de fora. Enquanto esta soma classificava por
+    // `type`, o denominador era por natureza e o numerador não: um aporte de
+    // meta maior que o consumo fazia a categoria dominante passar de 100% do
+    // mês e liderar o ranking de gastos sem ser gasto.
+    const cents = consumptionCentsOf(t);
+    if (!cents) return;
     const root = anRootCategory(data, t.categoryId);
-    out.set(root.id, (out.get(root.id) || 0) + moneyToCents(t.amount));
+    out.set(root.id, (out.get(root.id) || 0) + cents);
   });
   return out;
 }
@@ -255,9 +262,10 @@ function anWeekdayProfile(data, monthKey) {
 
   let lastDayWithTx = 0;
   realizedTxForMonth(data, monthKey).forEach((t) => {
-    if (t.type !== "expense") return;
+    const c = consumptionCentsOf(t);          // mesma régua do total do mês
+    if (!c) return;
     const w = dateFromIso(t.date).getDay();
-    cents[w] += moneyToCents(t.amount);
+    cents[w] += c;
     counts[w]++;
     const d = Number(String(t.date).slice(8, 10)) || 0;
     if (d > lastDayWithTx) lastDayWithTx = d;
@@ -379,12 +387,16 @@ function anHeatmap(data, monthKey) {
   const counts = new Array(total + 1).fill(0);
 
   realizedTxForMonth(data, monthKey).forEach((t) => {
-    if (t.type !== "expense") return;
+    const c = consumptionCentsOf(t);          // mesma régua do total do mês
+    if (!c) return;
     const d = Number(String(t.date).slice(8, 10));
-    if (d >= 1 && d <= total) { cents[d] += moneyToCents(t.amount); counts[d]++; }
+    if (d >= 1 && d <= total) { cents[d] += c; counts[d]++; }
   });
 
-  const max = Math.max(...cents.slice(1));
+  // Um dia pode fechar negativo quando o estorno supera o consumo. O valor sai
+  // como está, porque é a verdade do dia; a intensidade da cor é que nunca
+  // pode ser negativa, sob pena de inverter a escala do mapa inteiro.
+  const max = Math.max(0, ...cents.slice(1));
   const days = [];
   for (let d = 1; d <= total; d++) {
     const date = new Date(y, m - 1, d);
@@ -394,7 +406,7 @@ function anHeatmap(data, monthKey) {
       weekday: date.getDay(),
       value: moneyFromCents(cents[d]),
       count: counts[d],
-      intensity: max > 0 ? Math.round((cents[d] / max) * 100) / 100 : 0,
+      intensity: max > 0 ? Math.round((Math.max(0, cents[d]) / max) * 100) / 100 : 0,
       future: elapsed > 0 && d > elapsed,
       weekend: date.getDay() === 0 || date.getDay() === 6,
     });

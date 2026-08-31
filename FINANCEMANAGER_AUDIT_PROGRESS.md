@@ -12,7 +12,8 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 
 | Campo | Valor |
 |---|---|
-| Módulo atual | **M10 - Protocolo de sincronização** (concluído) |
+| Módulo atual | **M11 - Integridade financeira** (concluído) |
+| Status do M11 | **CONCLUÍDO** - numerador e denominador passaram a usar a mesma régua de natureza no ranking de categorias, no dia da semana, no mapa de calor, no relatório por período, na retrospectiva e na média da previsão; 41 invariantes contábeis travados em suíte nova |
 | Status do M10 | **CONCLUÍDO** - repetição idempotente sobrevive à perda da resposta e à recarga; HLC confirmada pelo servidor é absorvida; concorrência, volume e paginação ganharam regressão |
 | Status do M9 | **CONCLUÍDO** - pacote inteiro identificado por SHA-256, instalação atômica, primeiro quadro no HTML, reconciliação de controller, teste offline real e matriz Chromium/Firefox/WebKit |
 | Status do M8 | **CONCLUÍDO** - inventário completo de IndexedDB, localStorage, sessionStorage, CacheStorage e cookies; versões conferidas; fluxo corrigido na documentação; risco do espelho em JSON registrado |
@@ -23,10 +24,10 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 | Status do M3 | **CONCLUÍDO** — aplicado e confirmado no banco em 2026-08-28 |
 | Status do M2 | **CONCLUÍDO** — nenhuma vulnerabilidade de autorização; invariantes travados por teste |
 | Status do M1 | **CONCLUÍDO** — aplicado e confirmado; gatilho capturado e versionado |
-| Módulos concluídos | M0, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10 |
-| Próximo módulo | M11 - Integridade Financeira |
+| Módulos concluídos | M0, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11 |
+| Próximo módulo | M12 - Backup, restauração e importação |
 | Branch | `deploy-atualizado` (árvore limpa no início do M0) |
-| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `tests/test-cloud-sync.js`, `tests/test-account-backend.js`, `scripts/check-deploy.js`, `scripts/serve.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/storage.js`, `js/cloud-sync.js` (M10), `js/modules/app.generated.js` (regerado). Documentação: inventário do M8 e protocolo do M10. |
+| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `tests/test-cloud-sync.js`, `tests/test-account-backend.js`, `scripts/check-deploy.js`, `scripts/serve.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/storage.js`, `js/cloud-sync.js` (M10), `js/analytics.js`, `js/forecast.js`, `js/wrapped.js`, `js/screens/analytics.js` (M11), `js/modules/app.generated.js` (regerado). Documentação: inventário do M8 e protocolo do M10. |
 | Migrations criadas até aqui | `20260828120000_rls_auto_enable_least_privilege.sql`, `20260828130000_rls_auto_enable_versionada.sql`, `20260828140000_menor_privilegio_tabelas.sql` (as três **aplicadas e confirmadas em 2026-08-28**), `20260828150000_rls_auto_enable_gatilho.sql` (**ainda não aplicada**; é no-op em produção, onde o gatilho já existe) |
 | Versão do app | `0.30.0` (package.json) |
 
@@ -1774,6 +1775,102 @@ marca remota válida. Nenhuma pendência conhecida ficou no M10.
 
 ---
 
+## M11 - Integridade financeira (dupla contagem)
+
+### Antes (situação encontrada)
+
+O modelo já era bom e a maior parte da doutrina já estava implementada:
+
+- Transferência, pagamento de fatura e ajuste de saldo **não são lançamentos**.
+  São entidades próprias (`accountTransfers`, `cardPayments`, `accountAdjustments`),
+  o que impede por construção que virem receita ou despesa.
+- Existe um campo `nature` por lançamento (`consumo`, `aporte`, `divida-principal`,
+  `divida-encargos`, `transferencia`, `renda`, `resgate`, `estorno`) com dedução
+  retroativa para bases antigas, e `realizedMonthTotals()` respeita todos eles.
+- Compra no crédito não sai do caixa na data da compra; sai no pagamento da fatura.
+  A previsão de fechamento marca a compra com `cashEffect: false` e desconta a
+  fatura no vencimento, o que já evita a dupla contagem que o prompt teme.
+
+O que a auditoria procurou foi o inverso: **onde a régua da natureza não chegou.**
+
+### Achados
+
+| # | P | Achado | Situação |
+|---|---|---|---|
+| F11-01 | P1 | Nas telas de análise, o **denominador** era por natureza (`realizedMonthTotals().expense`) e o **numerador** era por tipo (`t.type === "expense"`). `anExpenseByRoot`, `anWeekdayProfile` e `anHeatmap` somavam aporte de meta, investimento livre, amortização de dívida e transferência legada como se fossem gasto. Efeito visível: guardar R$ 2.000 e gastar R$ 300 fazia "Investimento" liderar o ranking com participação **acima de 100% do mês** e ser marcado como concentração. O mesmo valia para o relatório por período e para a retrospectiva mensal. | **CORRIGIDO** |
+| F11-02 | P2 | `variableBaseline()` e `variableSpentInMonth()` (previsão de fechamento) contavam a perna de saída de uma transferência legada como gasto variável. A perna de entrada não compensa, porque a média só olha despesa: a projeção ficava mais pessimista a cada transferência entre contas próprias. | **CORRIGIDO** |
+| — | — | Conferidos **sem achado**: `monthGroupSpend` (orçamento 50/30/20), `anExtremes`, `anHourProfile`, `insights.js` inteiro, `metrics.js` (patrimônio, série histórica, contas a pagar), `health.js`, `budgets.js`, `accounts.js` (saldo, faturas, efeito pré-abertura), `netWorth` (sobreposição meta/investimento/carteira já tratada) e o modelo de caixa da previsão. `layout.js:100` usa `type` só para decidir se um cartão do painel é relevante — não soma dinheiro. | — |
+
+### Alterações
+
+| Arquivo | Motivo |
+|---|---|
+| `js/analytics.js` | `anExpenseByRoot`, `anWeekdayProfile` e `anHeatmap` passam a usar `consumptionCentsOf()`, a mesma função do orçamento e do total do mês. Intensidade do mapa de calor protegida contra dia negativo por estorno |
+| `js/forecast.js` | `isTransferTx()` novo e local; a média de gastos variáveis e o gasto variável do mês corrente ignoram transferência |
+| `js/wrapped.js` | ranking da retrospectiva pela mesma régua do `expense` que ela já exibia |
+| `js/screens/analytics.js` | relatório "Gastos por categoria" por período com a mesma régua |
+| `tests/test-accounting-integrity.js` | **novo** — 41 invariantes contábeis |
+| `tests/test-render.js` | a visão "Relatórios" não era renderizada por teste nenhum; entrou na não-regressão de telas |
+
+### Motivo
+
+A regra do prompt ("transferência não é receita nem despesa; pagamento de fatura
+não é despesa nova") já valia no total do mês, mas **não valia nas partes**. Um
+painel em que o todo e as partes discordam é pior do que um painel errado de forma
+consistente: o usuário confere a conta, não fecha, e perde a confiança no número
+certo junto com o errado.
+
+### Compatibilidade
+
+Nenhum dado muda. Não há migration, não há campo novo, não há alteração de contrato
+de armazenamento, de sincronização ou de API. `consumptionCentsOf()` já existia e já
+deduz a natureza de lançamentos antigos sem o campo, então bases anteriores são lidas
+com a mesma regra sem conversão. Saldo, patrimônio, faturas, metas e orçamento
+continuam exatamente com os mesmos números; o que muda é a composição por categoria,
+por dia e a média usada na projeção.
+
+### Testes
+
+| Teste | Resultado |
+|---|---|
+| `node tests/test-accounting-integrity.js` | **PASSOU** - 41 ok, 0 falhas (9 blocos: transferência, cartão + fatura, ajuste, aporte, dívida, estorno, transferência legada, mês corrente, previsão) |
+| `npm run lint` | **PASSOU** - 0 erro, 0 aviso |
+| `npm test` | **PASSOU** - 57 arquivos |
+| `npm run check:build` | **PASSOU** - 70 fontes conferidas |
+| `npm run check:release` | **PASSOU** - 0.30.0; permanece o aviso conhecido dos 7 campos legais |
+| `npm run build:dist` | **PASSOU** - 38 arquivos; permanece o aviso local de `SITE_URL` |
+| `npm run test:coverage` | **PASSOU** - 22,4% global (piso 20%, baseline 21,9%) |
+| `npm run test:browser` | **PASSOU** - 18/18 em Chromium, Firefox e WebKit |
+| `npm run test:pwa` | **PASSOU** |
+| `npm run test:landing` | **PASSOU** - 18/18 |
+| Navegador real (`localhost:4173`, dados semeados pela própria interface) | **PASSOU** - com R$ 200.000 em "Investimentos" e R$ 30.000 em "Transporte", o painel mostra `DESPESAS DO MÊS R$ 30.000,00` e a tela Relatórios mostra `TOTAL 30.000,00 / Transporte 100%`. Antes da correção o mesmo cenário somava R$ 230.000 e dava 87% a "Investimentos". Nenhum 4xx e nenhum erro de console na página do aplicativo |
+
+Uma execução isolada de `scripts/coverage.js` reportou "a suíte falhou" sem listar
+teste algum; a re-execução e a execução direta com `NODE_V8_COVERAGE` fecharam em
+zero. É a falha esporádica de EPERM do OneDrive já registrada em R2, não regressão.
+
+### Status
+
+**CONCLUÍDO.** F11-01 e F11-02 corrigidos e cobertos por regressão. Nenhuma
+pendência do módulo.
+
+### Registrado para módulos seguintes
+
+- **M13 (versionamento)**: R6 já está resolvido na prática — `scripts/check-release.js:23`
+  falha a publicação quando `SAFE_ERROR_APP_VERSION` diverge de `package.json`.
+  O que falta no M13 é o resto: `DATABASE_SCHEMA_VERSION` não existe e não há matriz
+  de compatibilidade escrita entre cliente antigo e schema/protocolo novo.
+- **M19/M20 (saúde financeira e limite diário)**: agora podem confiar em
+  `consumptionCentsOf()` como régua única de "gasto". Qualquer indicador novo que
+  volte a classificar por `t.type` reintroduz F11-01.
+- **P3 registrado, não corrigido:** `variableBaseline()` exclui aporte com `goalId`
+  mas inclui investimento livre e amortização de dívida. As três saem do caixa, então
+  incluir é defensável numa projeção de caixa; o que não é defensável é tratar duas
+  delas de um jeito e a terceira de outro. Mexer nisso muda saldos projetados e pede
+  decisão de produto, não correção de bug.
+
+---
+
 ## Checklist de regressão
 
 Executar após **todo** módulo que toque no código. Marcar `OK` / `FALHOU` / `NÃO VALIDADO`.
@@ -1782,7 +1879,8 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
 ### A. Automatizado (CI ou máquina com Node) — porta de entrada obrigatória
 
 - [ ] `npm run lint`
-- [ ] `npm test` (56 arquivos)
+- [ ] `npm test` (57 arquivos)
+- [ ] `node tests/test-accounting-integrity.js` (invariantes contábeis do M11)
 - [ ] `npm run check:build` (o `app.generated.js` publicado corresponde às fontes)
 - [ ] `npm run check:release`
 - [ ] `npm run build:dist`
@@ -1806,6 +1904,7 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
 - [ ] Criar conta; criar cartão
 - [ ] **Transferência entre contas não altera receita nem despesa do período**
 - [ ] **Pagamento de fatura não vira nova despesa quando as compras já foram lançadas**
+- [ ] **A soma das categorias em Relatórios fecha com "Despesas do mês"** (aporte, amortização e transferência ficam fora dos dois lados)
 - [ ] Ajuste de saldo de conta
 - [ ] Criar meta; criar item de patrimônio; criar dívida
 - [ ] Criar recorrência e ver o lançamento previsto aparecer
