@@ -59,7 +59,12 @@ function memoSize(data) {
 // atrasar o próximo quadro. `idleTask` empurra para o tempo livre do navegador
 // e degrada para `setTimeout` onde `requestIdleCallback` não existe (Safari).
 function idleTask(fn, timeout) {
-  const run = () => { try { fn(); } catch (e) { console.error(e); } };
+  const run = () => {
+    try { fn(); }
+    catch (error) {
+      if (typeof reportSafeError === "function") reportSafeError("app", error, "idle_task");
+    }
+  };
   if (typeof requestIdleCallback === "function") {
     requestIdleCallback(run, { timeout: timeout || 600 });
   } else {

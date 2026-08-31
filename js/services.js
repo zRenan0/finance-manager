@@ -97,12 +97,16 @@ const EventBus = (function createEventBus() {
     direct.forEach((fn) => {
       delivered++;
       try { fn(payload, event); }
-      catch (e) { if (typeof console !== "undefined") console.warn(`[EventBus] handler de "${event}" falhou:`, e); }
+      catch (error) {
+        if (typeof reportSafeError === "function") reportSafeError("events", error, "event_handler");
+      }
     });
     wildcard.forEach((fn) => {
       delivered++;
       try { fn(payload, event); }
-      catch (e) { if (typeof console !== "undefined") console.warn("[EventBus] handler curinga falhou:", e); }
+      catch (error) {
+        if (typeof reportSafeError === "function") reportSafeError("events", error, "event_handler");
+      }
     });
     return delivered;
   }
@@ -592,8 +596,8 @@ function buildNotificationCandidates(data, opts) {
     if (muted[rule.id]) return;
     let list = [];
     try { list = rule.run(ctx) || []; }
-    catch (e) {
-      if (typeof console !== "undefined") console.warn(`[NotificationService] regra "${rule.id}" falhou:`, e);
+    catch (error) {
+      if (typeof reportSafeError === "function") reportSafeError("app", error, "notification_rule");
       list = [];
     }
     list.forEach((c) => { if (c && c.key && c.title) out.push(c); });

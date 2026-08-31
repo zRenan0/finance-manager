@@ -38,7 +38,9 @@
 // locais do PDF.js, incluídos no mesmo balde de cache.
 // v59: a instalação só assume o controle depois de guardar o pacote inteiro.
 // Uma falha em CSS, módulo, ícone ou página mantém a versão anterior ativa.
-const VERSION = "v59";
+// v60: falhas fechadas do pacote e da leitura chegam ao diagnóstico local sem
+// levar URL, requisição ou resposta na mensagem enviada à página.
+const VERSION = "v60";
 const BUILD_ID = VERSION;
 const CACHE_NAME = "financas-cache-" + VERSION;
 // A PÁGINA COMERCIAL TEM CACHE PRÓPRIO.
@@ -153,6 +155,7 @@ self.addEventListener("install", (event) => {
         // Uma instalação reprovada não deixa um cache com nome atual e
         // conteúdo parcial para a próxima tentativa encontrar.
         await Promise.all([caches.delete(CACHE_NAME), caches.delete(PAGE_CACHE)]);
+        await notifyClients("sw_install_failed");
         throw new Error(`Pacote offline não armazenado: ${obrigatoriosQuebrados.join(", ")}`);
       }
 
@@ -208,6 +211,17 @@ function isCacheable(res) {
 
 function isFontRequest(url) {
   return FONT_HOSTS.indexOf(url.hostname) !== -1;
+}
+
+async function notifyClients(code) {
+  if (code !== "sw_install_failed" && code !== "sw_fetch_failed") return;
+  if (!self.clients || typeof self.clients.matchAll !== "function") return;
+  const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+  clients.forEach((client) => client.postMessage({
+    type: "COFRE_OBSERVATION",
+    area: "service_worker",
+    code,
+  }));
 }
 
 // Corrida entre a rede e um relógio. Sem isto, uma conexão que aceita a
@@ -281,6 +295,7 @@ async function handleNavigate(event) {
       const raiz = await cache.match("./");
       if (raiz) return raiz;
     }
+    await notifyClients("sw_fetch_failed");
     return new Response(
       "<!doctype html><meta charset='utf-8'><p>Página indisponível offline. Abra novamente com conexão.</p>",
       { headers: { "Content-Type": "text/html; charset=utf-8" }, status: 503 }
@@ -326,7 +341,9 @@ async function handleAsset(event) {
     return cached;
   }
   const res = await network;
-  return res || Response.error();
+  if (res) return res;
+  await notifyClients("sw_fetch_failed");
+  return Response.error();
 }
 
 /* ------------------------------------------------------------------ *

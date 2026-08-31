@@ -47,8 +47,18 @@ psql <URL_DE_STAGING> -v ON_ERROR_STOP=1 -f supabase/tests/verify_security_bound
 ```
 
 O processo de homologação, publicação e retorno está em `docs/RELEASE.md`. O schema
-de dados está na versão 23 e o cache offline na versão 59. O inventário técnico
+de dados está na versão 23 e o cache offline na versão 60. O inventário técnico
 do armazenamento está em `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`.
+
+### Observabilidade segura
+
+As funções de conta, sincronização e análise emitem eventos estruturados com
+status, duração, código controlado e `X-Request-Id`. Corpo, cabeçalhos, cookies,
+identificadores pessoais, mensagens, pilhas e valores financeiros ficam fora dos
+logs. No navegador, o diagnóstico continua local, limitado e sem envio automático.
+
+O contrato dos eventos e o procedimento de consulta estão em
+`docs/OBSERVABILIDADE.md`.
 
 ## Módulo 15 — revisão das referências financeiras
 

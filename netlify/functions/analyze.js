@@ -17,6 +17,7 @@
 const api = require("./_shared/supabase-rest");
 const { requireSession } = require("./account");
 const rateLimit = require("./_shared/rate-limit");
+const { observeHandler } = require("./_shared/observability");
 
 const MODEL = process.env.ANALYZE_MODEL || "claude-haiku-4-5-20251001";
 const MAX_CATEGORIES = 24;
@@ -481,7 +482,7 @@ async function route(event, session) {
   }
 }
 
-exports.handler = async (event) => {
+async function handler(event) {
   const origin = resolveOrigin(event);
 
   if (event.httpMethod === "OPTIONS") {
@@ -520,4 +521,6 @@ exports.handler = async (event) => {
   }
   // A resposta ecoa a origem que passou na allowlist, nunca `*` quando há lista.
   return { ...res, headers: { ...(res.headers || CORS), ...corsHeaders(origin.value) } };
-};
+}
+
+exports.handler = observeHandler({ area: "analyze", operation: "analyze" }, handler);

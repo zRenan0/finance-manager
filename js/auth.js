@@ -7,6 +7,10 @@ const ACCOUNT_RECOVERY_DEDUP_MS = 750;
 const ACCOUNT_RECOVERY_RETRY_MS = 30000;
 const ACCOUNT_SCOPED_ACTIONS = new Set(["password", "devices", "revoke-device", "revoke-others", "delete", "logout"]);
 const ACCOUNT_COOKIE_ACTIONS = new Set(["session", "login", "register", "recover", "resend", "verify", "exchange", "logout", "revoke-device", "delete"]);
+const ACCOUNT_OPERATIONAL_ERROR_CODES = new Set([
+  "network_error", "timeout", "account_unavailable", "not_configured", "server_error",
+  "request_timeout", "upstream_unavailable", "device_authorization_failed", "purge_failed",
+]);
 
 // Alguns modos privados permitem ler o localStorage, mas recusam a gravação.
 // Sem uma cópia em memória, cada chamada criava outro id e o mesmo navegador
@@ -664,6 +668,10 @@ const AccountAPI = (() => {
         if (refreshed && refreshed.status === "active" && accountExpectedUserId() === o.expectedAccountId) {
           return request(path, { ...o, sessionRetried: true });
         }
+      }
+      if (ACCOUNT_OPERATIONAL_ERROR_CODES.has(String(error && error.code || ""))
+        && typeof reportSafeError === "function") {
+        reportSafeError("auth", error, "auth_request");
       }
       throw error;
     }

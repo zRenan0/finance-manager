@@ -2938,7 +2938,6 @@ const FinanceStore = (() => {
   function emitError(err) {
     healthy = false;
     if (typeof reportSafeError === "function") reportSafeError("storage", err, "storage_write");
-    console.error("[storage]", err);
     errorListeners.forEach((fn) => { try { fn(err); } catch (e) {} });
   }
 

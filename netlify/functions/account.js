@@ -3,6 +3,7 @@
 const crypto = require("crypto");
 const api = require("./_shared/supabase-rest");
 const { headersOf, cookiesOf, canonicalOrigin, assertSameOrigin, readJson, cookie, clearCookie, json, safeFailure, deviceIdOf } = require("./_shared/http");
+const { observeHandler } = require("./_shared/observability");
 const rateLimit = require("./_shared/rate-limit");
 const { verificarSenhaVazada } = require("./_shared/senha-vazada");
 
@@ -36,6 +37,10 @@ const TERMINAL_SESSION_CODES = new Set([
   "session_not_found", "session_expired",
 ]);
 const ACCOUNT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const OBSERVED_ACCOUNT_ACTIONS = new Set([
+  "session", "register", "login", "recover", "resend", "verify", "exchange",
+  "logout", "password", "devices", "revoke-device", "revoke-others", "delete",
+]);
 
 // TETO POR CONTA, ALÉM DO TETO POR ENDEREÇO.
 //
@@ -70,6 +75,10 @@ function actionOf(event) {
   if (fromQuery) return String(fromQuery).split("/")[0];
   const path = String(event.path || event.rawPath || "").replace(/\/+$/, "");
   return path.split("/").pop() || "session";
+}
+function observedActionOf(event) {
+  const action = actionOf(event);
+  return OBSERVED_ACCOUNT_ACTIONS.has(action) ? action : "unknown";
 }
 function emailOf(value) {
   const email = String(value || "").trim().toLowerCase();
@@ -817,4 +826,6 @@ async function handler(event) {
   }
 }
 
-module.exports = { handler, sessionOf, requireSession, requireAccountScope, clearSession };
+const observedHandler = observeHandler({ area: "account", operation: observedActionOf }, handler);
+
+module.exports = { handler: observedHandler, sessionOf, requireSession, requireAccountScope, clearSession };

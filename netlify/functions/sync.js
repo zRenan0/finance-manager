@@ -19,6 +19,7 @@ const crypto = require("crypto");
 const api = require("./_shared/supabase-rest");
 const { requireSession } = require("./account");
 const { headersOf, assertSameOrigin, readJson, json, safeFailure, deviceIdOf } = require("./_shared/http");
+const { observeHandler } = require("./_shared/observability");
 const { validateOps, foldOps, emptySnapshot, MAX_OPS_PER_BATCH, OP_ENTITIES } = require("./_shared/finance-schema");
 
 const PROTOCOL = 3;
@@ -29,12 +30,17 @@ const PAGE_DEFAULT = 500;
 const PAGE_MAX = 1000;
 const CHECKPOINT_KEEP = 5;
 const HLC_PATTERN = /^\d{15}\.\d{6}\.[A-Za-z0-9][A-Za-z0-9:_-]{0,79}$/;
+const OBSERVED_SYNC_ROUTES = new Set(["health", "changes", "reset", "checkpoints", "checkpoint", "snapshot"]);
 
 function routeOf(event) {
   const fromQuery = event && event.queryStringParameters && event.queryStringParameters.action;
   if (fromQuery) return String(fromQuery).split("/")[0];
   const path = String(event.path || event.rawPath || "").replace(/\/+$/, "");
   return path.split("/").pop() || "health";
+}
+function observedRouteOf(event) {
+  const route = routeOf(event);
+  return OBSERVED_SYNC_ROUTES.has(route) ? route : "unknown";
 }
 
 // O aparelho declara a versão do protocolo que fala. Aceitar as duas é o que
@@ -413,4 +419,6 @@ async function handler(event) {
   }
 }
 
-module.exports = { handler, PROTOCOL, MINIMUM_WRITE_PROTOCOL, MAX_OPS_PER_BATCH };
+const observedHandler = observeHandler({ area: "sync", operation: observedRouteOf }, handler);
+
+module.exports = { handler: observedHandler, PROTOCOL, MINIMUM_WRITE_PROTOCOL, MAX_OPS_PER_BATCH };

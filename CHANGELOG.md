@@ -2,6 +2,18 @@
 
 ## Não publicado
 
+### O M17 passou a observar falhas sem registrar conteúdo financeiro
+
+- Conta, sincronização e análise agora devolvem `X-Request-Id` e produzem um
+  evento JSON com área, operação, status, código e duração nos logs da plataforma.
+- Corpo, cabeçalhos, cookies, IP, email, usuário, aparelho, mensagem, pilha e
+  valores financeiros não entram no evento.
+- O diagnóstico local ganhou áreas próprias para autenticação, API e Service
+  Worker. Falhas de importação e sincronização conservam códigos controlados, e
+  nenhum diagnóstico do navegador é enviado automaticamente.
+- O Service Worker informa à página apenas falhas fechadas de instalação ou
+  leitura. O cache offline subiu para `v60`.
+
 ### As recusas de segurança agora têm uma matriz executável
 
 - Uma nova suíte percorre usuário A contra usuário B, JWT inválido e expirado,

@@ -5,11 +5,19 @@ const SAFE_ERROR_STORAGE_KEY = "financas_safe_errors_v1";
 const SAFE_ERROR_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const SAFE_ERROR_LIMIT = 50;
 const SAFE_ERROR_APP_VERSION = "0.30.0";
-const SAFE_ERROR_AREAS = new Set(["app", "storage", "backup", "import", "sync", "ai", "qr", "events"]);
+const SAFE_ERROR_AREAS = new Set(["app", "storage", "backup", "import", "sync", "auth", "api", "service_worker", "ai", "qr", "events"]);
 const SAFE_ERROR_CODES = new Set([
   "unexpected", "app_init", "storage_init", "storage_read", "storage_write", "storage_delete",
   "backup_read", "backup_restore", "import_read", "sync_read", "sync_write", "ai_request",
-  "qr_camera", "qr_lookup", "global_error", "unhandled_rejection",
+  "qr_camera", "qr_lookup", "global_error", "unhandled_rejection", "account_bootstrap",
+  "auth_request", "api_request", "sw_register_failed", "sw_update_failed", "sw_install_failed",
+  "sw_fetch_failed", "bootstrap_gate_release", "account_recover_retry", "account_recover_online",
+  "account_recover_pageshow", "account_recover_focus", "account_recover_visible", "session_invalid_flush",
+  "invalid_session_scope", "scope_switch", "privacy_disconnect_scope", "sync_session_refresh_hook",
+  "sync_account_scope_hook", "sync_auth_invalid_hook", "guest_link_block", "sync_cycle", "sync_reset",
+  "lifecycle_flush", "lifecycle_flush_start", "analyze_account_scope", "reset_rev_observe_failed",
+  "outbox_clear_failed", "cursor_write_failed", "lock_unavailable", "notification_sync",
+  "notification_rule", "event_handler", "idle_task",
 ]);
 
 function safeErrorArea(value) {

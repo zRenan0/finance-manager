@@ -723,7 +723,12 @@ function memoSize(data) {
 // atrasar o próximo quadro. `idleTask` empurra para o tempo livre do navegador
 // e degrada para `setTimeout` onde `requestIdleCallback` não existe (Safari).
 function idleTask(fn, timeout) {
-  const run = () => { try { fn(); } catch (e) { console.error(e); } };
+  const run = () => {
+    try { fn(); }
+    catch (error) {
+      if (typeof reportSafeError === "function") reportSafeError("app", error, "idle_task");
+    }
+  };
   if (typeof requestIdleCallback === "function") {
     requestIdleCallback(run, { timeout: timeout || 600 });
   } else {
@@ -1853,11 +1858,19 @@ const SAFE_ERROR_STORAGE_KEY = "financas_safe_errors_v1";
 const SAFE_ERROR_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const SAFE_ERROR_LIMIT = 50;
 const SAFE_ERROR_APP_VERSION = "0.30.0";
-const SAFE_ERROR_AREAS = new Set(["app", "storage", "backup", "import", "sync", "ai", "qr", "events"]);
+const SAFE_ERROR_AREAS = new Set(["app", "storage", "backup", "import", "sync", "auth", "api", "service_worker", "ai", "qr", "events"]);
 const SAFE_ERROR_CODES = new Set([
   "unexpected", "app_init", "storage_init", "storage_read", "storage_write", "storage_delete",
   "backup_read", "backup_restore", "import_read", "sync_read", "sync_write", "ai_request",
-  "qr_camera", "qr_lookup", "global_error", "unhandled_rejection",
+  "qr_camera", "qr_lookup", "global_error", "unhandled_rejection", "account_bootstrap",
+  "auth_request", "api_request", "sw_register_failed", "sw_update_failed", "sw_install_failed",
+  "sw_fetch_failed", "bootstrap_gate_release", "account_recover_retry", "account_recover_online",
+  "account_recover_pageshow", "account_recover_focus", "account_recover_visible", "session_invalid_flush",
+  "invalid_session_scope", "scope_switch", "privacy_disconnect_scope", "sync_session_refresh_hook",
+  "sync_account_scope_hook", "sync_auth_invalid_hook", "guest_link_block", "sync_cycle", "sync_reset",
+  "lifecycle_flush", "lifecycle_flush_start", "analyze_account_scope", "reset_rev_observe_failed",
+  "outbox_clear_failed", "cursor_write_failed", "lock_unavailable", "notification_sync",
+  "notification_rule", "event_handler", "idle_task",
 ]);
 
 function safeErrorArea(value) {
@@ -4895,7 +4908,6 @@ const FinanceStore = (() => {
   function emitError(err) {
     healthy = false;
     if (typeof reportSafeError === "function") reportSafeError("storage", err, "storage_write");
-    console.error("[storage]", err);
     errorListeners.forEach((fn) => { try { fn(err); } catch (e) {} });
   }
 
@@ -8052,6 +8064,10 @@ const ACCOUNT_RECOVERY_DEDUP_MS = 750;
 const ACCOUNT_RECOVERY_RETRY_MS = 30000;
 const ACCOUNT_SCOPED_ACTIONS = new Set(["password", "devices", "revoke-device", "revoke-others", "delete", "logout"]);
 const ACCOUNT_COOKIE_ACTIONS = new Set(["session", "login", "register", "recover", "resend", "verify", "exchange", "logout", "revoke-device", "delete"]);
+const ACCOUNT_OPERATIONAL_ERROR_CODES = new Set([
+  "network_error", "timeout", "account_unavailable", "not_configured", "server_error",
+  "request_timeout", "upstream_unavailable", "device_authorization_failed", "purge_failed",
+]);
 
 // Alguns modos privados permitem ler o localStorage, mas recusam a gravação.
 // Sem uma cópia em memória, cada chamada criava outro id e o mesmo navegador
@@ -8709,6 +8725,10 @@ const AccountAPI = (() => {
         if (refreshed && refreshed.status === "active" && accountExpectedUserId() === o.expectedAccountId) {
           return request(path, { ...o, sessionRetried: true });
         }
+      }
+      if (ACCOUNT_OPERATIONAL_ERROR_CODES.has(String(error && error.code || ""))
+        && typeof reportSafeError === "function") {
+        reportSafeError("auth", error, "auth_request");
       }
       throw error;
     }
@@ -23083,12 +23103,16 @@ const EventBus = (function createEventBus() {
     direct.forEach((fn) => {
       delivered++;
       try { fn(payload, event); }
-      catch (e) { if (typeof console !== "undefined") console.warn(`[EventBus] handler de "${event}" falhou:`, e); }
+      catch (error) {
+        if (typeof reportSafeError === "function") reportSafeError("events", error, "event_handler");
+      }
     });
     wildcard.forEach((fn) => {
       delivered++;
       try { fn(payload, event); }
-      catch (e) { if (typeof console !== "undefined") console.warn("[EventBus] handler curinga falhou:", e); }
+      catch (error) {
+        if (typeof reportSafeError === "function") reportSafeError("events", error, "event_handler");
+      }
     });
     return delivered;
   }
@@ -23578,8 +23602,8 @@ function buildNotificationCandidates(data, opts) {
     if (muted[rule.id]) return;
     let list = [];
     try { list = rule.run(ctx) || []; }
-    catch (e) {
-      if (typeof console !== "undefined") console.warn(`[NotificationService] regra "${rule.id}" falhou:`, e);
+    catch (error) {
+      if (typeof reportSafeError === "function") reportSafeError("app", error, "notification_rule");
       list = [];
     }
     list.forEach((c) => { if (c && c.key && c.title) out.push(c); });
@@ -35380,7 +35404,7 @@ function syncNotifications(opts) {
     });
     result = NotificationService.sync(current, candidates, { silent });
   } catch (e) {
-    console.warn("[M8] Falha ao sincronizar notificações:", e);
+    if (typeof reportSafeError === "function") reportSafeError("app", e, "notification_sync");
     return;
   }
 
@@ -37084,7 +37108,6 @@ async function init() {
     state.data = await initStorage();
   } catch (e) {
     if (typeof reportSafeError === "function") reportSafeError("storage", e, "storage_init");
-    console.error("Falha ao inicializar o armazenamento:", e);
     state.data = loadData();
   }
   state.booting = false;
@@ -37215,7 +37238,7 @@ async function init() {
   try {
     await bootstrapAccount();
   } catch (error) {
-    if (typeof reportSafeError === "function") reportSafeError("sync", error, "account_bootstrap");
+    if (typeof reportSafeError === "function") reportSafeError("auth", error, "account_bootstrap");
     state.account.loading = !!state.account.knownAccount && !state.account.authenticated;
     state.account.sessionStatus = "unknown";
     render();
@@ -37243,12 +37266,21 @@ function setupServiceWorker() {
   if (typeof navigator === "undefined" || !navigator.serviceWorker) return;
   const serviceWorker = navigator.serviceWorker;
   observeServiceWorkerControllerChanges(serviceWorker);
+  serviceWorker.addEventListener("message", (event) => {
+    const data = event && event.data;
+    if (!data || data.type !== "COFRE_OBSERVATION" || data.area !== "service_worker") return;
+    if (data.code !== "sw_install_failed" && data.code !== "sw_fetch_failed") return;
+    if (typeof reportSafeError === "function") reportSafeError("service_worker", null, data.code);
+  });
 
   const registrar = () => {
-    serviceWorker.register("service-worker.js").catch((error) => {
-      if (typeof reportSafeError === "function") reportSafeError("storage", error, "sw_register_failed");
-      console.error("Falha ao registrar o service worker:", error);
-    });
+    serviceWorker.register("service-worker.js")
+      .then((registration) => registration.update().catch((error) => {
+        if (typeof reportSafeError === "function") reportSafeError("service_worker", error, "sw_update_failed");
+      }))
+      .catch((error) => {
+        if (typeof reportSafeError === "function") reportSafeError("service_worker", error, "sw_register_failed");
+      });
   };
   if (document.readyState === "complete") registrar();
   else window.addEventListener("load", registrar, { once: true });

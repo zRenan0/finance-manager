@@ -646,7 +646,7 @@ function syncNotifications(opts) {
     });
     result = NotificationService.sync(current, candidates, { silent });
   } catch (e) {
-    console.warn("[M8] Falha ao sincronizar notificações:", e);
+    if (typeof reportSafeError === "function") reportSafeError("app", e, "notification_sync");
     return;
   }
 
@@ -2350,7 +2350,6 @@ async function init() {
     state.data = await initStorage();
   } catch (e) {
     if (typeof reportSafeError === "function") reportSafeError("storage", e, "storage_init");
-    console.error("Falha ao inicializar o armazenamento:", e);
     state.data = loadData();
   }
   state.booting = false;
@@ -2481,7 +2480,7 @@ async function init() {
   try {
     await bootstrapAccount();
   } catch (error) {
-    if (typeof reportSafeError === "function") reportSafeError("sync", error, "account_bootstrap");
+    if (typeof reportSafeError === "function") reportSafeError("auth", error, "account_bootstrap");
     state.account.loading = !!state.account.knownAccount && !state.account.authenticated;
     state.account.sessionStatus = "unknown";
     render();
@@ -2509,12 +2508,21 @@ function setupServiceWorker() {
   if (typeof navigator === "undefined" || !navigator.serviceWorker) return;
   const serviceWorker = navigator.serviceWorker;
   observeServiceWorkerControllerChanges(serviceWorker);
+  serviceWorker.addEventListener("message", (event) => {
+    const data = event && event.data;
+    if (!data || data.type !== "COFRE_OBSERVATION" || data.area !== "service_worker") return;
+    if (data.code !== "sw_install_failed" && data.code !== "sw_fetch_failed") return;
+    if (typeof reportSafeError === "function") reportSafeError("service_worker", null, data.code);
+  });
 
   const registrar = () => {
-    serviceWorker.register("service-worker.js").catch((error) => {
-      if (typeof reportSafeError === "function") reportSafeError("storage", error, "sw_register_failed");
-      console.error("Falha ao registrar o service worker:", error);
-    });
+    serviceWorker.register("service-worker.js")
+      .then((registration) => registration.update().catch((error) => {
+        if (typeof reportSafeError === "function") reportSafeError("service_worker", error, "sw_update_failed");
+      }))
+      .catch((error) => {
+        if (typeof reportSafeError === "function") reportSafeError("service_worker", error, "sw_register_failed");
+      });
   };
   if (document.readyState === "complete") registrar();
   else window.addEventListener("load", registrar, { once: true });

@@ -26,7 +26,7 @@ try {
   document.documentElement.setAttribute('data-module-boot', 'ready');
 } catch (error) {
   document.documentElement.setAttribute('data-module-boot', 'failed');
-  console.error('Falha ao iniciar o aplicativo', error);
+  console.error('Falha ao iniciar o aplicativo');
   const root = document.getElementById('app');
   if (root) {
     root.innerHTML = `

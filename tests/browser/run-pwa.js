@@ -8,6 +8,8 @@ const { chromium } = require("playwright");
 
 const root = path.resolve(__dirname, "..", "..");
 const dist = path.join(root, "dist");
+const workerSource = fs.readFileSync(path.join(root, "service-worker.js"), "utf8");
+const cacheVersion = (workerSource.match(/const VERSION = "(v\d+)";/) || [])[1];
 const mime = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -108,8 +110,8 @@ async function completeOnboarding(page) {
       }
       return { names, entries };
     });
-    const shellName = onlineCaches.names.find((name) => name.startsWith("financas-cache-v59-"));
-    const pageName = onlineCaches.names.find((name) => name.startsWith("financas-pages-v59-"));
+    const shellName = onlineCaches.names.find((name) => name.startsWith(`financas-cache-${cacheVersion}-`));
+    const pageName = onlineCaches.names.find((name) => name.startsWith(`financas-pages-${cacheVersion}-`));
     assert(shellName && pageName, `caches versionados ausentes: ${onlineCaches.names.join(", ")}`);
     assert(!onlineCaches.names.includes("financas-cache-v0"), "cache antigo não foi removido na ativação");
     assert(onlineCaches.names.includes("cache-externo-preservado"), "cache sem prefixo do Cofre foi removido");
