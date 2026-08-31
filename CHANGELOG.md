@@ -2,6 +2,21 @@
 
 ## Não publicado
 
+### A repetição de um envio agora sobrevive à perda da resposta
+
+- O lote exato, seu `mutationId` e a revisão remota esperada passam a ser gravados
+  antes da chamada. Se o servidor confirmar e a resposta se perder, inclusive
+  com recarga do aplicativo, a tentativa seguinte recebe o replay idempotente em
+  vez de publicar a mesma alteração como outra mutação.
+- A confirmação remove o diário junto das entradas correspondentes da fila.
+  Novas edições e importações feitas durante a chamada ficam para o lote seguinte.
+- Um aparelho vários dias atrasado agora absorve a HLC das operações confirmadas
+  pelo servidor antes de criar outra edição. O limite de 24 horas continua valendo
+  para relógios locais, backups e estado ainda não confirmado.
+- A regressão cobre resposta perdida com recarga e nova edição do mesmo registro,
+  colisão de identidade, duas escritas simultâneas, importação concorrente com 120
+  operações e paginação integral de 2.001 registros no handler de produção.
+
 ### O pacote offline podia misturar duas versões
 
 - A identidade da publicação era calculada só pelo módulo de entrada. Uma mudança

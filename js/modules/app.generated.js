@@ -2394,6 +2394,7 @@ const META_SEED_RECEIPT = "syncSeedReceipt";   // semeadura confirmada pelo serv
 const META_SEED_JOURNAL = "syncSeedJournal";   // semeadura em andamento
 const META_LINK_JOURNAL = "guestLinkJournal";  // vínculo em andamento, com as marcas já cunhadas
 const META_LINK_RECEIPT = "guestLinkReceipt";  // decisão registrada pela impressão do conteúdo
+const META_SYNC_BATCH = "syncBatchJournal";    // lote em voo; preserva mutationId após resposta perdida
 // Reconciliação completa já executada neste aparelho, para esta conta. Ver o
 // bloco "RECONCILIAÇÃO COMPLETA" em js/cloud-sync.js: sem ela, um aparelho que
 // deixou passar uma operação fica com números diferentes dos outros para sempre,
@@ -4463,6 +4464,11 @@ function cloudMutationId() {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
+function validCloudMutationId(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+    .test(String(value || ""));
+}
+
 // Corpo de erro do próprio servidor, lido sem confiar em nada: uma resposta de
 // erro pode não ser JSON (página de erro da hospedagem, por exemplo), e uma
 // falha ao ler não pode virar outra falha por cima da primeira.
@@ -4619,6 +4625,13 @@ class CloudAdapter extends StorageAdapter {
             erro.revision = detalhe.revision != null ? String(detalhe.revision) : null;
             throw erro;
           }
+          if (detalhe.code === "idempotency_mismatch") {
+            throw new CloudSyncError(
+              detalhe.message || "A repetição não corresponde ao envio original.",
+              "idempotency_mismatch",
+              res.status,
+            );
+          }
           throw new CloudSyncConflictError(res.headers && res.headers.get ? res.headers.get("x-sync-revision") : null);
         }
         if (res.status === 401 || res.status === 403) {
@@ -4697,7 +4710,11 @@ class CloudAdapter extends StorageAdapter {
   // mais nada.
   async push(ops, since, options) {
     this._requireReady(false);
-    const mutationId = cloudMutationId();
+    // O motor persiste este id junto da composição do lote antes de tocar na
+    // rede. Se o servidor confirmar e a resposta se perder, a próxima tentativa
+    // precisa repetir o mesmo par mutationId/conteúdo para receber `replayed`.
+    const requestedMutationId = options && options.mutationId;
+    const mutationId = validCloudMutationId(requestedMutationId) ? String(requestedMutationId) : cloudMutationId();
     const result = await this._call("/changes", {
       method: "POST",
       headers: { "Idempotency-Key": mutationId },
@@ -5167,7 +5184,12 @@ const FinanceStore = (() => {
         return retryAfterStorageChange(error);
       }
       assertStoreScope(targetScope, targetAdapter, targetGeneration);
-      observedRevs.forEach((rev) => SyncClock.observe(rev));
+      // Estas marcas vieram do servidor autenticado. Se uma delas estiver mais
+      // de 24 h à frente, ela já domina o estado remoto; apenas ignorá-la no
+      // relógio faria a próxima edição local nascer menor e nunca chegar aos
+      // outros aparelhos. O teto continua valendo para estado local, backup e
+      // restauração do relógio, que não têm esta confirmação remota.
+      observedRevs.forEach((rev) => SyncClock.absorb(rev));
       saveClockState();
       if (outboxAdds.length) markHealthy();
       return { changed: false, data: snapshot, applied: 0 };
@@ -5214,7 +5236,7 @@ const FinanceStore = (() => {
       Object.keys((localChanges && localChanges.settings) || {}).forEach((key) => {
         delete remoteSettingEcho[key];
       });
-      observedRevs.forEach((rev) => SyncClock.observe(rev));
+      observedRevs.forEach((rev) => SyncClock.absorb(rev));
       let rebasedSnapshot = overlayChangeSet(next, localChanges);
       // A lápide pode ter nascido antes de observarmos a revisão remota que
       // estava em voo. Recarimbá-la agora garante que uma exclusão feita depois
@@ -5234,7 +5256,7 @@ const FinanceStore = (() => {
     lastPersisted = shallowSnapshot(next);
     settingRevs = nextSettingRevs;
     remoteSettingEcho = nextSettingEcho;
-    observedRevs.forEach((rev) => SyncClock.observe(rev));
+    observedRevs.forEach((rev) => SyncClock.absorb(rev));
     // Guarda a impressão do registro JÁ NORMALIZADO. É com ela que a gravação
     // seguinte reconhece o eco e não devolve ao servidor a alteração alheia.
     SYNC_ENTITY_FIELDS.forEach((field) => {
@@ -6668,6 +6690,11 @@ const FinanceStore = (() => {
         .filter((id) => !remaining.some((entry) => entry.seedId === id));
       const metaPuts = {};
       const metaDeletes = [];
+      const batchJournal = await targetAdapter.localMetaGet(META_SYNC_BATCH);
+      if (batchJournal && serverAck && validCloudMutationId(serverAck.mutationId)
+        && String(batchJournal.mutationId || "") === String(serverAck.mutationId)) {
+        metaDeletes.push(META_SYNC_BATCH);
+      }
       for (const linkId of linkIds) {
         const journal = await targetAdapter.localMetaGet(META_LINK_JOURNAL);
         if (!journal || journal.linkId !== linkId) continue;
@@ -6688,7 +6715,10 @@ const FinanceStore = (() => {
         metaDeletes.push(META_SEED_JOURNAL);
       }
       assertStoreScope(targetScope, targetAdapter, targetGeneration);
-      await targetAdapter.writeChanges(null, { outboxDrops: Array.from(drop), metaPuts, metaDeletes });
+      await targetAdapter.writeChanges(null, {
+        outboxDrops: Array.from(drop), metaPuts,
+        metaDeletes: Array.from(new Set(metaDeletes)),
+      });
       assertStoreScope(targetScope, targetAdapter, targetGeneration);
       markHealthy();
       return { dropped: removed.length, linkIds, seedIds };
@@ -9334,8 +9364,8 @@ const CLOUD_SYNC_POLL_MS = 15000;         // volta periódica enquanto o app est
 // importar o progresso de quem já usava o app; a partir daí o cursor e o recibo
 // moram no banco local, na mesma transação que grava os dados.
 // As chaves do `localMeta` (META_CURSOR, META_SEED_RECEIPT, META_SEED_JOURNAL,
-// META_LINK_JOURNAL e META_RECONCILE_RECEIPT) são declaradas em `js/storage.js`,
-// que é quem as grava.
+// META_LINK_JOURNAL, META_SYNC_BATCH e META_RECONCILE_RECEIPT) são declaradas
+// em `js/storage.js`, que é quem as grava.
 const CLOUD_CURSOR_KEY = "cofre_sync_cursor";
 
 // Versão do REPARO, não do formato do recibo. Subir este número faz a
@@ -9663,6 +9693,66 @@ const CloudSync = (() => {
     return op;
   }
 
+  function expectedRevisionFrom(options) {
+    return options && options.expectedRemoteRevision != null
+      ? String(options.expectedRemoteRevision)
+      : null;
+  }
+
+  // O mutationId só oferece idempotência quando sobrevive à perda da resposta.
+  // O diário congela a composição exata do lote antes do fetch. Uma alteração
+  // nova pode entrar na fila enquanto a requisição viaja, mas fica para o lote
+  // seguinte e não muda o hash associado ao envio que já pode ter sido aplicado.
+  async function prepareUploadBatch(entries, linkJournal, context) {
+    let journal = await FinanceStore.localMetaGet(META_SYNC_BATCH, context.scope);
+    assertCurrentCycle(context);
+    const byEntryKey = new Map(entries.map((entry) => [String(entry && entry.entryKey || ""), entry]));
+    const keys = journal && Array.isArray(journal.entryKeys) ? journal.entryKeys.map(String) : [];
+    const storedBatch = keys.map((key) => byEntryKey.get(key));
+    const storedOptions = storedBatch.every(Boolean) && storedBatch.length
+      ? pushOptions(storedBatch, linkJournal)
+      : null;
+    const storedExpected = journal && journal.expectedRemoteRevision != null
+      ? String(journal.expectedRemoteRevision)
+      : null;
+    const validJournal = !!journal
+      && Number(journal.version) === 1
+      && validCloudMutationId(journal.mutationId)
+      && keys.length > 0 && keys.length <= CLOUD_SYNC_BATCH
+      && new Set(keys).size === keys.length
+      && storedBatch.every(Boolean)
+      && storedBatch.every((entry) => entry && entry.entity && entry.entityId && entry.rev)
+      && expectedRevisionFrom(storedOptions) === storedExpected;
+
+    if (validJournal) {
+      return {
+        batch: storedBatch,
+        mutationId: String(journal.mutationId),
+        options: storedExpected == null ? null : { expectedRemoteRevision: storedExpected },
+      };
+    }
+
+    if (journal) {
+      await FinanceStore.localMetaDelete(META_SYNC_BATCH, context.scope);
+      assertCurrentCycle(context);
+    }
+
+    const batch = compactOutbox(entries).slice(0, CLOUD_SYNC_BATCH);
+    if (!batch.length) throw syncError("A fila contém uma operação inválida.", "invalid_outbox");
+    const options = pushOptions(batch, linkJournal);
+    const mutationId = cloudMutationId();
+    journal = {
+      version: 1,
+      mutationId,
+      entryKeys: batch.map((entry) => String(entry.entryKey)),
+      expectedRemoteRevision: expectedRevisionFrom(options),
+      createdAt: new Date().toISOString(),
+    };
+    await FinanceStore.localMetaPut(META_SYNC_BATCH, journal, context.scope);
+    assertCurrentCycle(context);
+    return { batch, mutationId, options };
+  }
+
   // ---------------------------------------------------------------------------
   // Ciclo
   // ---------------------------------------------------------------------------
@@ -9712,10 +9802,25 @@ const CloudSync = (() => {
         throw syncError("A fila de sincronização não terminou dentro do limite de lotes.", "batch_limit");
       }
 
-      const compact = compactOutbox(enviaveis);
-      const batch = compact.slice(0, CLOUD_SYNC_BATCH);
+      const prepared = await prepareUploadBatch(enviaveis, diarioVinculo, context);
+      const { batch, mutationId } = prepared;
       if (batch.length) cicloMexeu = true;
-      const result = await context.adapter.push(batch.map(toWireOp), cursor, pushOptions(batch, diarioVinculo));
+      let result;
+      try {
+        result = await context.adapter.push(batch.map(toWireOp), cursor, {
+          ...(prepared.options || {}), mutationId,
+        });
+      } catch (error) {
+        // O servidor conhece este UUID com outro hash. A requisição foi
+        // recusada, então não há commit desconhecido para repetir. Descartar só
+        // o diário permite cunhar outro UUID na tentativa seguinte sem tocar na
+        // fila financeira.
+        if (error && error.code === "idempotency_mismatch") {
+          await FinanceStore.localMetaDelete(META_SYNC_BATCH, context.scope);
+          assertCurrentCycle(context);
+        }
+        throw error;
+      }
       // O servidor valida a conta antes de devolver operações. Mesmo assim, a
       // aba pode ter trocado de escopo enquanto a resposta viajava.
       assertCurrentCycle(context);
@@ -9737,13 +9842,18 @@ const CloudSync = (() => {
       // Confirmar é gravar: a remoção da fila e a promoção do recibo de vínculo
       // ou de semeadura acontecem na mesma transação.
       assertCurrentCycle(context);
-      await FinanceStore.acknowledgeOutbox(seqs, { revision: result.revision }, context.scope);
+      await FinanceStore.acknowledgeOutbox(seqs, {
+        revision: result.revision, mutationId,
+      }, context.scope);
       assertCurrentCycle(context);
 
       // O cursor só avança depois de tudo acima ter chegado ao disco.
       cursor = result.cursor;
       await writeCursor(cursor, context);
-      if (batch.length >= compact.length && !result.hasMore) break;
+      // Volta ao início mesmo quando este lote esvaziou a fotografia anterior.
+      // Uma edição pode ter entrado na fila enquanto a resposta viajava, até do
+      // mesmo registro que o diário acabou de confirmar. A nova leitura decide
+      // se há outro lote; se não houver, o laço termina no portão acima.
     }
     return cursor;
   }

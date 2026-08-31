@@ -56,8 +56,8 @@ const CLOUD_SYNC_POLL_MS = 15000;         // volta periódica enquanto o app est
 // importar o progresso de quem já usava o app; a partir daí o cursor e o recibo
 // moram no banco local, na mesma transação que grava os dados.
 // As chaves do `localMeta` (META_CURSOR, META_SEED_RECEIPT, META_SEED_JOURNAL,
-// META_LINK_JOURNAL e META_RECONCILE_RECEIPT) são declaradas em `js/storage.js`,
-// que é quem as grava.
+// META_LINK_JOURNAL, META_SYNC_BATCH e META_RECONCILE_RECEIPT) são declaradas
+// em `js/storage.js`, que é quem as grava.
 const CLOUD_CURSOR_KEY = "cofre_sync_cursor";
 
 // Versão do REPARO, não do formato do recibo. Subir este número faz a
@@ -385,6 +385,66 @@ const CloudSync = (() => {
     return op;
   }
 
+  function expectedRevisionFrom(options) {
+    return options && options.expectedRemoteRevision != null
+      ? String(options.expectedRemoteRevision)
+      : null;
+  }
+
+  // O mutationId só oferece idempotência quando sobrevive à perda da resposta.
+  // O diário congela a composição exata do lote antes do fetch. Uma alteração
+  // nova pode entrar na fila enquanto a requisição viaja, mas fica para o lote
+  // seguinte e não muda o hash associado ao envio que já pode ter sido aplicado.
+  async function prepareUploadBatch(entries, linkJournal, context) {
+    let journal = await FinanceStore.localMetaGet(META_SYNC_BATCH, context.scope);
+    assertCurrentCycle(context);
+    const byEntryKey = new Map(entries.map((entry) => [String(entry && entry.entryKey || ""), entry]));
+    const keys = journal && Array.isArray(journal.entryKeys) ? journal.entryKeys.map(String) : [];
+    const storedBatch = keys.map((key) => byEntryKey.get(key));
+    const storedOptions = storedBatch.every(Boolean) && storedBatch.length
+      ? pushOptions(storedBatch, linkJournal)
+      : null;
+    const storedExpected = journal && journal.expectedRemoteRevision != null
+      ? String(journal.expectedRemoteRevision)
+      : null;
+    const validJournal = !!journal
+      && Number(journal.version) === 1
+      && validCloudMutationId(journal.mutationId)
+      && keys.length > 0 && keys.length <= CLOUD_SYNC_BATCH
+      && new Set(keys).size === keys.length
+      && storedBatch.every(Boolean)
+      && storedBatch.every((entry) => entry && entry.entity && entry.entityId && entry.rev)
+      && expectedRevisionFrom(storedOptions) === storedExpected;
+
+    if (validJournal) {
+      return {
+        batch: storedBatch,
+        mutationId: String(journal.mutationId),
+        options: storedExpected == null ? null : { expectedRemoteRevision: storedExpected },
+      };
+    }
+
+    if (journal) {
+      await FinanceStore.localMetaDelete(META_SYNC_BATCH, context.scope);
+      assertCurrentCycle(context);
+    }
+
+    const batch = compactOutbox(entries).slice(0, CLOUD_SYNC_BATCH);
+    if (!batch.length) throw syncError("A fila contém uma operação inválida.", "invalid_outbox");
+    const options = pushOptions(batch, linkJournal);
+    const mutationId = cloudMutationId();
+    journal = {
+      version: 1,
+      mutationId,
+      entryKeys: batch.map((entry) => String(entry.entryKey)),
+      expectedRemoteRevision: expectedRevisionFrom(options),
+      createdAt: new Date().toISOString(),
+    };
+    await FinanceStore.localMetaPut(META_SYNC_BATCH, journal, context.scope);
+    assertCurrentCycle(context);
+    return { batch, mutationId, options };
+  }
+
   // ---------------------------------------------------------------------------
   // Ciclo
   // ---------------------------------------------------------------------------
@@ -434,10 +494,25 @@ const CloudSync = (() => {
         throw syncError("A fila de sincronização não terminou dentro do limite de lotes.", "batch_limit");
       }
 
-      const compact = compactOutbox(enviaveis);
-      const batch = compact.slice(0, CLOUD_SYNC_BATCH);
+      const prepared = await prepareUploadBatch(enviaveis, diarioVinculo, context);
+      const { batch, mutationId } = prepared;
       if (batch.length) cicloMexeu = true;
-      const result = await context.adapter.push(batch.map(toWireOp), cursor, pushOptions(batch, diarioVinculo));
+      let result;
+      try {
+        result = await context.adapter.push(batch.map(toWireOp), cursor, {
+          ...(prepared.options || {}), mutationId,
+        });
+      } catch (error) {
+        // O servidor conhece este UUID com outro hash. A requisição foi
+        // recusada, então não há commit desconhecido para repetir. Descartar só
+        // o diário permite cunhar outro UUID na tentativa seguinte sem tocar na
+        // fila financeira.
+        if (error && error.code === "idempotency_mismatch") {
+          await FinanceStore.localMetaDelete(META_SYNC_BATCH, context.scope);
+          assertCurrentCycle(context);
+        }
+        throw error;
+      }
       // O servidor valida a conta antes de devolver operações. Mesmo assim, a
       // aba pode ter trocado de escopo enquanto a resposta viajava.
       assertCurrentCycle(context);
@@ -459,13 +534,18 @@ const CloudSync = (() => {
       // Confirmar é gravar: a remoção da fila e a promoção do recibo de vínculo
       // ou de semeadura acontecem na mesma transação.
       assertCurrentCycle(context);
-      await FinanceStore.acknowledgeOutbox(seqs, { revision: result.revision }, context.scope);
+      await FinanceStore.acknowledgeOutbox(seqs, {
+        revision: result.revision, mutationId,
+      }, context.scope);
       assertCurrentCycle(context);
 
       // O cursor só avança depois de tudo acima ter chegado ao disco.
       cursor = result.cursor;
       await writeCursor(cursor, context);
-      if (batch.length >= compact.length && !result.hasMore) break;
+      // Volta ao início mesmo quando este lote esvaziou a fotografia anterior.
+      // Uma edição pode ter entrado na fila enquanto a resposta viajava, até do
+      // mesmo registro que o diário acabou de confirmar. A nova leitura decide
+      // se há outro lote; se não houver, o laço termina no portão acima.
     }
     return cursor;
   }

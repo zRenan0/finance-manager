@@ -1448,6 +1448,11 @@ sincronização. Uma falha preserva a fila e só então mostra a ação de tenta
 novamente. A consulta da sessão limita cabeçalhos e corpo a 12 segundos, libera
 pedidos pendurados e tenta recuperar sem transformar falta de rede em logout.
 
+Cada lote de envio recebe uma identidade persistida antes de tocar na rede. Se o
+servidor confirmar e a resposta se perder, a recarga repete o mesmo lote com o
+mesmo `mutationId`, recebe o replay idempotente e só então limpa aquelas entradas.
+Alterações feitas durante a chamada permanecem na fila para o lote seguinte.
+
 Cada chamada remota também leva a identidade esperada em `X-Account-Id`. O
 backend confere esse valor contra a sessão antes de tocar em dispositivo, dados
 financeiros ou análise. Trocar de conta em outra aba cancela o ciclo antigo,

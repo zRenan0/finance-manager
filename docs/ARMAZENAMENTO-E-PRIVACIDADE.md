@@ -71,7 +71,7 @@ Versão física atual: 4.
 | `assets` | Bens, investimentos e dívidas | Sim | Sim |
 | `settings` | Renda, contas, cartões, movimentos internos, preferências, avisos, consentimentos, lápides e versão lógica | Sim, com seleção explícita de campos | Parcialmente |
 | `outbox` | Operações ainda não confirmadas pelo servidor, inclusive o registro completo em operações de gravação | Não | É a fila de envio |
-| `localMeta` | Cursor, recibos e diários de semeadura, vínculo e reconciliação | Não | Não |
+| `localMeta` | Cursor, recibos e diários de semeadura, vínculo, reconciliação e lote de envio em voo | Não | Não |
 
 Índices financeiros existem apenas onde há consulta local: lançamentos por mês,
 data, categoria, tipo e meta; categorias por pai; bens por natureza e classe. A
@@ -94,7 +94,7 @@ conta recebe uma chave própria.
 | `financas_db_mirror[__u_<id>]` | Espelho financeiro completo, síncrono, com teto de 3 MB | Reescrito a cada gravação; removido no purge do escopo |
 | `financas_db_undo[__u_<id>]` | Snapshot anterior a uma restauração ou limpeza reversível | Substituído pela próxima operação desse tipo; removido no purge do escopo |
 | `financas_db_outbox[__u_<id>]` | Fila com operações e payloads quando o fallback está ativo | Esvaziada após confirmação; removida no purge do escopo |
-| `financas_db_meta[__u_<id>]` | Cursor, recibos e diários quando o fallback está ativo | Atualizado pelo ciclo; removido no purge do escopo |
+| `financas_db_meta[__u_<id>]` | Cursor, recibos e diários quando o fallback está ativo, inclusive a identidade do lote de envio em voo | Atualizado pelo ciclo; removido no purge do escopo |
 | `financas_db_recovery[__u_<id>]` | Diário temporário com base, fila e metadados durante um commit do fallback | Removido ao confirmar; reaplicado no próximo boot depois de interrupção |
 | `financas_db_clock[__u_<id>]` | Relógio lógico e revisões de configurações deste aparelho | Removido no purge do escopo |
 | `financas_db_reset_barrier[__u_<id>]` | Maior marca de uma exclusão remota confirmada | Preservado no purge para impedir que um item novo nasça abaixo das lápides |
@@ -105,6 +105,10 @@ conta recebe uma chave própria.
 O `sessionStorage` contém apenas `cofre_build_reload`, a versão do pacote que já
 provocou recarga nesta aba. Ele evita um laço durante a troca do service worker,
 some ao fechar a aba e não contém dado financeiro.
+
+O diário `syncBatchJournal` não duplica os dados financeiros da fila. Ele guarda
+as chaves exatas das entradas, o `mutationId` e a revisão remota esperada para
+repetir com segurança uma chamada cuja resposta possa ter se perdido.
 
 ## CacheStorage e service worker
 

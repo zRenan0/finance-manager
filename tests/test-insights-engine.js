@@ -172,7 +172,12 @@ console.log("\n7. Decisão 2 — média diária usa os dias já decorridos");
   check("mês corrente reconhecido", an.averages.isCurrentMonth === true);
   check("divide pelos dias vividos", near(an.averages.daily, 900 / now.getDate(), 0.02), an.averages.daily);
   check("média semanal é 7x a diária", near(an.averages.weekly, an.averages.daily * 7, 0.05));
-  check("projeção do mês usa o total de dias", an.averages.projected >= an.totals.expense);
+  const daysInCurrentMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  check(
+    "projeção do mês usa o total de dias",
+    near(an.averages.projected, an.averages.daily * daysInCurrentMonth, 0.02),
+    an.averages.projected
+  );
 
   const past = buildAnalyticsModel(data, lastKey);
   check("mês passado divide pelo mês inteiro", past.averages.isCurrentMonth === false);

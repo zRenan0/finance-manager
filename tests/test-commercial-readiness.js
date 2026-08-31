@@ -158,7 +158,7 @@ async function main() {
   await conflictCloud.init();
   let conflictCode = null;
   try { await conflictCloud.push([], "0"); } catch (error) { conflictCode = error.code; }
-  check("recusa do servidor não é engolida", conflictCode === "conflict", conflictCode);
+  check("colisão de idempotência não é engolida", conflictCode === "idempotency_mismatch", conflictCode);
 
   ctx.__timeoutOptions = {
     ...ctx.__cloudOptions,

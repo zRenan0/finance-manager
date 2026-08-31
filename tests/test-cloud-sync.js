@@ -1,4 +1,4 @@
-// test-cloud-sync.js; ciclo de sincronização incremental (protocolo 2).
+// test-cloud-sync.js; ciclo de sincronização incremental (protocolo 3).
 // ------------------------------------------------------------------------------
 // O que este teste protege, em ordem de gravidade:
 //
@@ -13,6 +13,9 @@
 //      duplicar quando a rede falha no meio.
 //   5. Parada em sessão morta. Sem isso o app entra em fila infinita de 401.
 //   6. Uma aba por vez. Duas abas não podem enviar a mesma fila duas vezes.
+//   7. Uma resposta perdida repete o mesmo mutationId e o mesmo lote.
+//   8. Uma revisão confirmada pelo servidor continua editável mesmo quando o
+//      relógio deste aparelho está vários dias atrasado.
 "use strict";
 
 const fs = require("fs");
@@ -1024,6 +1027,232 @@ const lancar = (a, tx) => a.run(`FinanceStore.persist({ ...FinanceStore.snapshot
     const opPos = (enviado.ops || []).find((op) => op.entityId === "tx-pos-reset");
     check("o lancamento criado depois do reset sobe com marca maior que a barreira",
       !!opPos && opPos.rev > barreira, JSON.stringify(opPos));
+  }
+
+  console.log("\n25. Resposta perdida repete a mesma mutação persistida");
+  {
+    const servidor = servidorFalso();
+    const original = servidor.handler(servidor);
+    const mutationIds = [];
+    let perderPrimeiraResposta = true;
+    const storage = fakeLocalStorage({ cofre_device_id: "device-idempotente-01" });
+    let ctx;
+    ctx = carregar(async (url, options) => {
+      if ((options && options.method) !== "POST" || !String(url).includes("/changes")) {
+        return original(url, options);
+      }
+      const body = JSON.parse(options.body);
+      const carriesTarget = (body.ops || []).some((op) => op.entityId === "tx-resposta-perdida");
+      if (carriesTarget) mutationIds.push(options.headers["Idempotency-Key"]);
+      const response = await original(url, options);
+      if (carriesTarget && perderPrimeiraResposta) {
+        perderPrimeiraResposta = false;
+        // Impede o timer de recuperação de consumir o diário antes das
+        // verificações. A tentativa seguinte é disparada explicitamente.
+        ctx.navigator.onLine = false;
+        throw new TypeError("resposta perdida depois do commit");
+      }
+      return response;
+    }, storage);
+    ctx.run(`accountDeviceId = () => "device-idempotente-01";`);
+    await ctx.run(`FinanceStore.init(new LocalStorageAdapter("u_ana"), { scope: "u_ana" })`);
+    ctx.run(`CloudSync.configure({ applyRemote: () => {}, onStatus: () => {} })`);
+    await ctx.run("CloudSync.enable()");
+
+    ctx.run(`FinanceStore.persist({ ...FinanceStore.snapshot(), transactions: [{
+      id: "tx-resposta-perdida", type: "expense", amount: 31,
+      date: "2026-08-31", categoryId: "lazer"
+    }] })`);
+    await ctx.run("FinanceStore.flush()");
+    await ctx.run("CloudSync.syncNow()");
+
+    const filaDepoisDaQueda = await ctx.run("FinanceStore.outboxRead(0)");
+    const diarioDepoisDaQueda = await ctx.run("FinanceStore.localMetaGet(META_SYNC_BATCH)");
+    check("o commit remoto não apaga a fila sem resposta",
+      servidor.linhas.has("transactions tx-resposta-perdida")
+        && filaDepoisDaQueda.some((entry) => entry.entityId === "tx-resposta-perdida"),
+      JSON.stringify(filaDepoisDaQueda));
+    check("o lote desconhecido fica registrado no aparelho",
+      diarioDepoisDaQueda && diarioDepoisDaQueda.mutationId === mutationIds[0],
+      JSON.stringify(diarioDepoisDaQueda));
+
+    ctx.run(`FinanceStore.persist({ ...FinanceStore.snapshot(), transactions:
+      FinanceStore.snapshot().transactions.map((tx) => tx.id === "tx-resposta-perdida"
+        ? { ...tx, description: "edição posterior à queda" } : tx) })`);
+    await ctx.run("FinanceStore.flush()");
+    await ctx.run("CloudSync.disable()");
+    const reloaded = carregar(ctx.fetch, storage);
+    reloaded.run(`accountDeviceId = () => "device-idempotente-01";`);
+    await reloaded.run(`FinanceStore.init(new LocalStorageAdapter("u_ana"), { scope: "u_ana" })`);
+    reloaded.run(`CloudSync.configure({ applyRemote: () => {}, onStatus: () => {} })`);
+    reloaded.navigator.onLine = true;
+    await reloaded.run("CloudSync.enable()");
+    const filaConfirmada = await reloaded.run("FinanceStore.outboxRead(0)");
+    const diarioConfirmado = await reloaded.run("FinanceStore.localMetaGet(META_SYNC_BATCH)");
+    check("a nova tentativa usa o mesmo mutationId",
+      mutationIds.length === 3 && mutationIds[0] === mutationIds[1]
+        && mutationIds[2] !== mutationIds[1], JSON.stringify(mutationIds));
+    check("a edição feita durante a resposta perdida sobe em outro lote",
+      servidor.linhas.get("transactions tx-resposta-perdida").payload.description === "edição posterior à queda",
+      JSON.stringify(servidor.linhas.get("transactions tx-resposta-perdida")));
+    check("a confirmação limpa fila e diário juntos",
+      filaConfirmada.length === 0 && diarioConfirmado == null,
+      JSON.stringify({ fila: filaConfirmada, diario: diarioConfirmado }));
+  }
+
+  console.log("\n26. Aparelho atrasado ainda supera a revisão que recebeu");
+  {
+    const storage = fakeLocalStorage({ cofre_device_id: "device-atrasado-001" });
+    const ctx = carregar(async () => json({ protocol: 3, status: "ok", revision: "0" }), storage);
+    ctx.run(`accountDeviceId = () => "device-atrasado-001";`);
+    await ctx.run(`FinanceStore.init(new LocalStorageAdapter("u_ana"), { scope: "u_ana" })`);
+    ctx.run("FinanceStore.setOutboxEnabled(true)");
+
+    const serverMillis = Date.now();
+    const remoteRev = `${String(serverMillis).padStart(15, "0")}.000123.device-servidor`;
+    ctx.__remoteRev = remoteRev;
+    ctx.run(`Date.now = () => ${serverMillis - (7 * 24 * 60 * 60 * 1000)};`);
+    await ctx.run(`FinanceStore.applyRemoteOps([{
+      entity: "transactions", entityId: "tx-relogio-atrasado", op: "put", rev: __remoteRev,
+      payload: { id: "tx-relogio-atrasado", type: "expense", amount: 20,
+        date: "2026-08-31", categoryId: "lazer", description: "remoto" }
+    }], "u_ana")`);
+    ctx.run(`FinanceStore.persist({ ...FinanceStore.snapshot(), transactions:
+      FinanceStore.snapshot().transactions.map((tx) => tx.id === "tx-relogio-atrasado"
+        ? { ...tx, description: "editado depois" } : tx) })`);
+    await ctx.run("FinanceStore.flush()");
+    const queued = await ctx.run("FinanceStore.outboxRead(0)");
+    const edit = queued.find((entry) => entry.entityId === "tx-relogio-atrasado");
+    check("a edição posterior recebe revisão maior que a remota",
+      !!edit && edit.rev > remoteRev, JSON.stringify({ remoteRev, edit }));
+  }
+
+  console.log("\n27. Dois dispositivos convergem após alterações simultâneas");
+  {
+    const servidor = servidorFalso();
+    const a = await ligarAparelho(servidor, "device-concorrente-a");
+    const b = await ligarAparelho(servidor, "device-concorrente-b");
+    lancar(a, { id: "tx-simultanea-a", type: "expense", amount: 10, date: "2026-08-31", categoryId: "lazer" });
+    lancar(b, { id: "tx-simultanea-b", type: "expense", amount: 20, date: "2026-08-31", categoryId: "lazer" });
+    await Promise.all([flush(a), flush(b)]);
+    await Promise.all([a.run("CloudSync.syncNow()"), b.run("CloudSync.syncNow()")]);
+    await Promise.all([a.run("CloudSync.syncNow()"), b.run("CloudSync.syncNow()")]);
+    const idsA = a.run("FinanceStore.snapshot().transactions.map((tx) => tx.id).sort() ");
+    const idsB = b.run("FinanceStore.snapshot().transactions.map((tx) => tx.id).sort() ");
+    check("registros diferentes sobrevivem nos dois aparelhos",
+      JSON.stringify(idsA) === JSON.stringify(["tx-simultanea-a", "tx-simultanea-b"])
+        && JSON.stringify(idsB) === JSON.stringify(idsA),
+      JSON.stringify({ idsA, idsB }));
+
+    const instante = Date.now();
+    a.run(`Date.now = () => ${instante}; FinanceStore.persist({ ...FinanceStore.snapshot(),
+      transactions: FinanceStore.snapshot().transactions.map((tx) => tx.id === "tx-simultanea-a"
+        ? { ...tx, description: "versão A" } : tx) })`);
+    b.run(`Date.now = () => ${instante}; FinanceStore.persist({ ...FinanceStore.snapshot(),
+      transactions: FinanceStore.snapshot().transactions.map((tx) => tx.id === "tx-simultanea-a"
+        ? { ...tx, description: "versão B" } : tx) })`);
+    await Promise.all([flush(a), flush(b)]);
+    await Promise.all([a.run("CloudSync.syncNow()"), b.run("CloudSync.syncNow()")]);
+    await Promise.all([a.run("CloudSync.syncNow()"), b.run("CloudSync.syncNow()")]);
+    const winner = servidor.linhas.get("transactions tx-simultanea-a").payload.description;
+    const descriptionA = a.run(`FinanceStore.snapshot().transactions.find((tx) => tx.id === "tx-simultanea-a").description`);
+    const descriptionB = b.run(`FinanceStore.snapshot().transactions.find((tx) => tx.id === "tx-simultanea-a").description`);
+    check("o mesmo registro converge para o vencedor da HLC",
+      descriptionA === winner && descriptionB === winner,
+      JSON.stringify({ winner, descriptionA, descriptionB }));
+  }
+
+  console.log("\n28. Importação grande feita durante o envio não perde registros");
+  {
+    const servidor = servidorFalso();
+    const a = await ligarAparelho(servidor, "device-importacao-01");
+    const original = servidor.handler(servidor);
+    let liberarPrimeiroPost;
+    let avisarPrimeiroPost;
+    let primeiroPost = true;
+    const bloqueio = new Promise((resolve) => { liberarPrimeiroPost = resolve; });
+    const iniciou = new Promise((resolve) => { avisarPrimeiroPost = resolve; });
+    a.ctx.fetch = async (url, options) => {
+      if (primeiroPost && (options && options.method) === "POST" && String(url).includes("/changes")) {
+        primeiroPost = false;
+        avisarPrimeiroPost();
+        await bloqueio;
+      }
+      return original(url, options);
+    };
+
+    a.run(`FinanceStore.persist({ ...FinanceStore.snapshot(), transactions: [{
+      id: "tx-antes-importacao", type: "expense", amount: 1,
+      date: "2026-08-31", categoryId: "lazer"
+    }] })`);
+    await flush(a);
+    const cicloEmCurso = a.run("CloudSync.syncNow()");
+    await iniciou;
+
+    a.ctx.__imported = Array.from({ length: 120 }, (_, index) => ({
+      id: `tx-importada-${String(index).padStart(4, "0")}`,
+      type: "expense", amount: index + 1, date: "2026-08-31", categoryId: "lazer",
+    }));
+    a.run("FinanceStore.persist({ ...FinanceStore.snapshot(), transactions: __imported })");
+    await flush(a);
+    const novaVolta = a.run("CloudSync.syncNow()");
+    liberarPrimeiroPost();
+    await Promise.all([cicloEmCurso, novaVolta]);
+
+    const importadasNoServidor = Array.from(servidor.linhas.values())
+      .filter((row) => row.op === "put" && row.entityId.startsWith("tx-importada-")).length;
+    const lotes = servidor.recebidos.map((body) => (body.ops || []).length);
+    const fila = await a.run("FinanceStore.outboxRead(0)");
+    check("as 120 operações concorrentes chegam ao servidor", importadasNoServidor === 120, String(importadasNoServidor));
+    check("nenhum lote ultrapassa 400 operações", lotes.length >= 2 && lotes.every((size) => size <= 400), JSON.stringify(lotes));
+    check("a fila termina vazia depois da importação concorrente", fila.length === 0, String(fila.length));
+  }
+
+  console.log("\n29. Colisão de mutationId troca somente o diário do lote");
+  {
+    const servidor = servidorFalso();
+    const original = servidor.handler(servidor);
+    const ids = [];
+    let recusar = true;
+    const ctx = carregar(async (url, options) => {
+      if ((options && options.method) === "POST" && String(url).includes("/changes")) {
+        const body = JSON.parse(options.body);
+        if ((body.ops || []).some((op) => op.entityId === "tx-colisao-id")) {
+          ids.push(options.headers["Idempotency-Key"]);
+          if (recusar) {
+            recusar = false;
+            return json({
+              protocol: 3, serverProtocol: 3, minimumWriteProtocol: 2,
+              status: "error", code: "idempotency_mismatch",
+              message: "Identificador já usado com outro conteúdo.",
+            }, 409);
+          }
+        }
+      }
+      return original(url, options);
+    }, fakeLocalStorage({ cofre_device_id: "device-colisao-001" }));
+    ctx.run(`accountDeviceId = () => "device-colisao-001";`);
+    await ctx.run(`FinanceStore.init(new LocalStorageAdapter("u_ana"), { scope: "u_ana" })`);
+    ctx.run(`CloudSync.configure({ applyRemote: () => {}, onStatus: () => {} })`);
+    await ctx.run("CloudSync.enable()");
+    ctx.run(`FinanceStore.persist({ ...FinanceStore.snapshot(), transactions: [{
+      id: "tx-colisao-id", type: "expense", amount: 9,
+      date: "2026-08-31", categoryId: "lazer"
+    }] })`);
+    await ctx.run("FinanceStore.flush()");
+    await ctx.run("CloudSync.syncNow()");
+    const journalAfterMismatch = await ctx.run("FinanceStore.localMetaGet(META_SYNC_BATCH)");
+    const queuedAfterMismatch = await ctx.run("FinanceStore.outboxRead(0)");
+    check("o 409 mantém a operação e descarta apenas o mutationId recusado",
+      journalAfterMismatch == null && queuedAfterMismatch.some((entry) => entry.entityId === "tx-colisao-id"),
+      JSON.stringify({ journalAfterMismatch, queuedAfterMismatch }));
+
+    await ctx.run("CloudSync.syncNow()");
+    check("a tentativa seguinte usa outro mutationId e conclui",
+      ids.length === 2 && ids[0] !== ids[1]
+        && servidor.linhas.has("transactions tx-colisao-id")
+        && (await ctx.run("FinanceStore.outboxRead(0)")).length === 0,
+      JSON.stringify(ids));
   }
 
   await espera(10);

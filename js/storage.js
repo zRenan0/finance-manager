@@ -437,6 +437,7 @@ const META_SEED_RECEIPT = "syncSeedReceipt";   // semeadura confirmada pelo serv
 const META_SEED_JOURNAL = "syncSeedJournal";   // semeadura em andamento
 const META_LINK_JOURNAL = "guestLinkJournal";  // vínculo em andamento, com as marcas já cunhadas
 const META_LINK_RECEIPT = "guestLinkReceipt";  // decisão registrada pela impressão do conteúdo
+const META_SYNC_BATCH = "syncBatchJournal";    // lote em voo; preserva mutationId após resposta perdida
 // Reconciliação completa já executada neste aparelho, para esta conta. Ver o
 // bloco "RECONCILIAÇÃO COMPLETA" em js/cloud-sync.js: sem ela, um aparelho que
 // deixou passar uma operação fica com números diferentes dos outros para sempre,
@@ -2506,6 +2507,11 @@ function cloudMutationId() {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
+function validCloudMutationId(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+    .test(String(value || ""));
+}
+
 // Corpo de erro do próprio servidor, lido sem confiar em nada: uma resposta de
 // erro pode não ser JSON (página de erro da hospedagem, por exemplo), e uma
 // falha ao ler não pode virar outra falha por cima da primeira.
@@ -2662,6 +2668,13 @@ class CloudAdapter extends StorageAdapter {
             erro.revision = detalhe.revision != null ? String(detalhe.revision) : null;
             throw erro;
           }
+          if (detalhe.code === "idempotency_mismatch") {
+            throw new CloudSyncError(
+              detalhe.message || "A repetição não corresponde ao envio original.",
+              "idempotency_mismatch",
+              res.status,
+            );
+          }
           throw new CloudSyncConflictError(res.headers && res.headers.get ? res.headers.get("x-sync-revision") : null);
         }
         if (res.status === 401 || res.status === 403) {
@@ -2740,7 +2753,11 @@ class CloudAdapter extends StorageAdapter {
   // mais nada.
   async push(ops, since, options) {
     this._requireReady(false);
-    const mutationId = cloudMutationId();
+    // O motor persiste este id junto da composição do lote antes de tocar na
+    // rede. Se o servidor confirmar e a resposta se perder, a próxima tentativa
+    // precisa repetir o mesmo par mutationId/conteúdo para receber `replayed`.
+    const requestedMutationId = options && options.mutationId;
+    const mutationId = validCloudMutationId(requestedMutationId) ? String(requestedMutationId) : cloudMutationId();
     const result = await this._call("/changes", {
       method: "POST",
       headers: { "Idempotency-Key": mutationId },
@@ -3210,7 +3227,12 @@ const FinanceStore = (() => {
         return retryAfterStorageChange(error);
       }
       assertStoreScope(targetScope, targetAdapter, targetGeneration);
-      observedRevs.forEach((rev) => SyncClock.observe(rev));
+      // Estas marcas vieram do servidor autenticado. Se uma delas estiver mais
+      // de 24 h à frente, ela já domina o estado remoto; apenas ignorá-la no
+      // relógio faria a próxima edição local nascer menor e nunca chegar aos
+      // outros aparelhos. O teto continua valendo para estado local, backup e
+      // restauração do relógio, que não têm esta confirmação remota.
+      observedRevs.forEach((rev) => SyncClock.absorb(rev));
       saveClockState();
       if (outboxAdds.length) markHealthy();
       return { changed: false, data: snapshot, applied: 0 };
@@ -3257,7 +3279,7 @@ const FinanceStore = (() => {
       Object.keys((localChanges && localChanges.settings) || {}).forEach((key) => {
         delete remoteSettingEcho[key];
       });
-      observedRevs.forEach((rev) => SyncClock.observe(rev));
+      observedRevs.forEach((rev) => SyncClock.absorb(rev));
       let rebasedSnapshot = overlayChangeSet(next, localChanges);
       // A lápide pode ter nascido antes de observarmos a revisão remota que
       // estava em voo. Recarimbá-la agora garante que uma exclusão feita depois
@@ -3277,7 +3299,7 @@ const FinanceStore = (() => {
     lastPersisted = shallowSnapshot(next);
     settingRevs = nextSettingRevs;
     remoteSettingEcho = nextSettingEcho;
-    observedRevs.forEach((rev) => SyncClock.observe(rev));
+    observedRevs.forEach((rev) => SyncClock.absorb(rev));
     // Guarda a impressão do registro JÁ NORMALIZADO. É com ela que a gravação
     // seguinte reconhece o eco e não devolve ao servidor a alteração alheia.
     SYNC_ENTITY_FIELDS.forEach((field) => {
@@ -4711,6 +4733,11 @@ const FinanceStore = (() => {
         .filter((id) => !remaining.some((entry) => entry.seedId === id));
       const metaPuts = {};
       const metaDeletes = [];
+      const batchJournal = await targetAdapter.localMetaGet(META_SYNC_BATCH);
+      if (batchJournal && serverAck && validCloudMutationId(serverAck.mutationId)
+        && String(batchJournal.mutationId || "") === String(serverAck.mutationId)) {
+        metaDeletes.push(META_SYNC_BATCH);
+      }
       for (const linkId of linkIds) {
         const journal = await targetAdapter.localMetaGet(META_LINK_JOURNAL);
         if (!journal || journal.linkId !== linkId) continue;
@@ -4731,7 +4758,10 @@ const FinanceStore = (() => {
         metaDeletes.push(META_SEED_JOURNAL);
       }
       assertStoreScope(targetScope, targetAdapter, targetGeneration);
-      await targetAdapter.writeChanges(null, { outboxDrops: Array.from(drop), metaPuts, metaDeletes });
+      await targetAdapter.writeChanges(null, {
+        outboxDrops: Array.from(drop), metaPuts,
+        metaDeletes: Array.from(new Set(metaDeletes)),
+      });
       assertStoreScope(targetScope, targetAdapter, targetGeneration);
       markHealthy();
       return { dropped: removed.length, linkIds, seedIds };

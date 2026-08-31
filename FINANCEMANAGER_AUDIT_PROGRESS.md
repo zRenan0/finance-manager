@@ -12,7 +12,8 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 
 | Campo | Valor |
 |---|---|
-| Módulo atual | **M9 - PWA, cache e atualização offline** (concluído) |
+| Módulo atual | **M10 - Protocolo de sincronização** (concluído) |
+| Status do M10 | **CONCLUÍDO** - repetição idempotente sobrevive à perda da resposta e à recarga; HLC confirmada pelo servidor é absorvida; concorrência, volume e paginação ganharam regressão |
 | Status do M9 | **CONCLUÍDO** - pacote inteiro identificado por SHA-256, instalação atômica, primeiro quadro no HTML, reconciliação de controller, teste offline real e matriz Chromium/Firefox/WebKit |
 | Status do M8 | **CONCLUÍDO** - inventário completo de IndexedDB, localStorage, sessionStorage, CacheStorage e cookies; versões conferidas; fluxo corrigido na documentação; risco do espelho em JSON registrado |
 | Status do M7 | **CONCLUÍDO** — "sair dos outros aparelhos" com reautenticação e duas camadas; data de entrada na lista |
@@ -22,10 +23,10 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 | Status do M3 | **CONCLUÍDO** — aplicado e confirmado no banco em 2026-08-28 |
 | Status do M2 | **CONCLUÍDO** — nenhuma vulnerabilidade de autorização; invariantes travados por teste |
 | Status do M1 | **CONCLUÍDO** — aplicado e confirmado; gatilho capturado e versionado |
-| Módulos concluídos | M0, M1, M2, M3, M4, M5, M6, M7, M8, M9 |
-| Próximo módulo | M10, conforme o roteiro original; o título do M10 não foi copiado para esta memória |
+| Módulos concluídos | M0, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10 |
+| Próximo módulo | M11 - Integridade Financeira |
 | Branch | `deploy-atualizado` (árvore limpa no início do M0) |
-| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `scripts/check-deploy.js`, `scripts/serve.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/modules/app.generated.js` (regerado). Documentação do M8: `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `docs/ARCHITECTURE.md`, `README.md`. |
+| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `tests/test-cloud-sync.js`, `tests/test-account-backend.js`, `scripts/check-deploy.js`, `scripts/serve.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/storage.js`, `js/cloud-sync.js` (M10), `js/modules/app.generated.js` (regerado). Documentação: inventário do M8 e protocolo do M10. |
 | Migrations criadas até aqui | `20260828120000_rls_auto_enable_least_privilege.sql`, `20260828130000_rls_auto_enable_versionada.sql`, `20260828140000_menor_privilegio_tabelas.sql` (as três **aplicadas e confirmadas em 2026-08-28**), `20260828150000_rls_auto_enable_gatilho.sql` (**ainda não aplicada**; é no-op em produção, onde o gatilho já existe) |
 | Versão do app | `0.30.0` (package.json) |
 
@@ -1713,6 +1714,66 @@ real. `AUDIT_FIX_PROGRESS.md` foi atualizado para não voltar a cobrar o item.
 
 ---
 
+## M10 - Protocolo de sincronização
+
+### Escopo revisado
+
+O protocolo 3 já tinha identidade de aparelho, HLC, revisão remota, lápides,
+checkpoints, reconciliação, vínculo condicionado à revisão, revogação e
+compatibilidade de leitura. A auditoria percorreu cliente, armazenamento local,
+handler de produção e regressões para perda de conexão, concorrência, relógio
+incorreto, repetição, volume e clientes incompatíveis.
+
+### Achados
+
+| # | P | Achado | Situação |
+|---|---|---|---|
+| F10-01 | P1 | `CloudAdapter.push()` criava outro `mutationId` em cada tentativa. Se o servidor confirmasse e a resposta se perdesse, a fila sobrevivia, mas a recarga publicava o mesmo conteúdo como uma mutação nova. | **CORRIGIDO.** O lote exato, o `mutationId` e a revisão esperada são persistidos antes da rede e repetidos até a confirmação. |
+| F10-02 | P1 | Operações já confirmadas pelo servidor eram aplicadas ao conteúdo, mas uma HLC mais de 24 horas à frente não entrava no relógio local. Um aparelho atrasado podia criar a edição seguinte abaixo da vencedora remota e nunca conseguir publicá-la. | **CORRIGIDO.** Operações vindas do servidor autenticado usam `SyncClock.absorb`; o teto permanece para estado local, backup e outras origens não confirmadas. |
+
+### Alterações
+
+| Arquivo | Motivo |
+|---|---|
+| `js/cloud-sync.js` | diário persistente do lote em voo, repetição exata após recarga, nova leitura da fila depois de cada confirmação e recuperação de colisão de identidade sem apagar operações |
+| `js/storage.js` | `mutationId` fornecido pelo ciclo, código próprio para `idempotency_mismatch`, confirmação atômica da fila e do diário, absorção de HLC confirmada pelo servidor |
+| `tests/test-cloud-sync.js` | resposta perdida, recarga, nova edição do mesmo registro, relógio atrasado, dois aparelhos, importação concorrente e colisão de identidade |
+| `tests/test-account-backend.js` | paginação real de 2.001 registros em cinco páginas, sem corte nem repetição |
+| `tests/test-commercial-readiness.js` | contrato explícito do novo código de colisão de idempotência |
+| `tests/test-insights-engine.js` | expectativa de projeção estável no último dia do mês, necessária para a suíte não depender da data de execução |
+| `docs/SYNC_PROTOCOL.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `README.md` e `CHANGELOG.md` | contrato, inventário local e comportamento de recuperação documentados |
+
+### Compatibilidade
+
+Protocolo 3, schema lógico 22 e IndexedDB 4 permanecem. Não há migration de banco,
+mudança de endpoint nem alteração no formato financeiro. O `localMeta` recebe apenas
+um diário local sem cópia do payload: chaves da fila, identidade da mutação e revisão
+esperada. Instalações anteriores começam a usá-lo no primeiro lote novo.
+
+### Testes
+
+| Teste | Resultado |
+|---|---|
+| `npm run lint` | **PASSOU** - 157 arquivos, 0 erro, 0 aviso |
+| `npm test` | **PASSOU** - 56/56 arquivos |
+| `node tests/test-cloud-sync.js` | **PASSOU** - 103 ok, 0 falhas |
+| `node tests/test-account-backend.js` | **PASSOU** - 74 ok, 0 falhas |
+| `npm run check:build` | **PASSOU** - 70 fontes conferidas |
+| `npm run check:release` | **PASSOU** - publicação 0.30.0 verificada; permanece o aviso conhecido dos 7 campos legais |
+| `npm run build:dist` | **PASSOU** - 38 arquivos; permanece o aviso local conhecido de `SITE_URL` |
+| `npm run test:coverage` | **PASSOU** - 22,4% global, acima do piso de 20% e da baseline de 21,9% |
+| `npm run test:browser` | **PASSOU** - 18/18 no Chromium, 18/18 no Firefox e 18/18 no WebKit |
+| `npm run test:pwa` | **PASSOU** - shell, landing, dados locais, limpeza e API fora do cache |
+| `npm run test:landing` | **PASSOU** - 18/18 no Chromium, com capturas para revisão visual |
+
+### Status
+
+**CONCLUÍDO.** A repetição agora é idempotente também quando a confirmação se
+perde, e o relógio do aparelho continua capaz de editar depois de receber uma
+marca remota válida. Nenhuma pendência conhecida ficou no M10.
+
+---
+
 ## Checklist de regressão
 
 Executar após **todo** módulo que toque no código. Marcar `OK` / `FALHOU` / `NÃO VALIDADO`.
@@ -1835,7 +1896,8 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
   pelos navegadores que já viram o cabeçalho. Só ápice e `www` existem hoje,
   sem curinga e sem MX. É reversível servindo `max-age=0`; `preload`, que não
   seria, ficou de fora de propósito.
-- Itens 17 e 19 de `AUDIT_FIX_PROGRESS.md` e F-06/F-08 a F-17 de `docs/PROXIMA-SESSAO.md`
-  continuam abertos e serão absorvidos pelos módulos correspondentes.
+- Item 17 de `AUDIT_FIX_PROGRESS.md` e F-06/F-08 a F-17 de `docs/PROXIMA-SESSAO.md`
+  continuam abertos e serão absorvidos pelos módulos correspondentes. O item 19
+  foi concluído no M9.
 - 7 campos legais do controlador ainda com marcador (`docs/LEGAL-LAUNCH.md`); o
   `check-release.js` avisa a cada execução. Decisão externa, entra no M18.

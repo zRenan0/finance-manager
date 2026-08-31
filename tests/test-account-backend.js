@@ -116,7 +116,15 @@ async function main() {
       const requested = Math.max(0, Number(query.get("limit")) || 0);
       return rows.slice(0, requested);
     }
-    if (route.startsWith("cofre_sync_ops?")) return opsRows;
+    if (route.startsWith("cofre_sync_ops?")) {
+      const query = new URLSearchParams(route.split("?")[1] || "");
+      const sinceMatch = String(query.get("seq") || "").match(/^gt\.(\d+)$/);
+      const since = sinceMatch ? Number(sinceMatch[1]) : 0;
+      const requested = Math.max(0, Number(query.get("limit")) || opsRows.length);
+      return opsRows.filter((row) => Number(row.seq) > since)
+        .sort((left, right) => Number(left.seq) - Number(right.seq))
+        .slice(0, requested);
+    }
     if (route === "rpc/cofre_apply_ops") { rpcOptions = options; return [rpcResult]; }
     if (route === "rpc/cofre_reset_data") { resetRpcOptions = options; return [resetRpcResult]; }
     return null;
@@ -216,6 +224,35 @@ async function main() {
   check("leitura incremental devolve as operações do cursor", pull.statusCode === 200 && pullBody.ops.length === 2, pull.body);
   check("exclusão viaja como operação própria", pullBody.ops[1].op === "delete" && pullBody.ops[1].payload === undefined);
   check("cursor avança para a última seq lida", pullBody.cursor === "9", pullBody.cursor);
+
+  opsRows = Array.from({ length: 2001 }, (_, index) => ({
+    seq: index + 1,
+    entity: "transactions",
+    entity_id: `tx-volume-${String(index).padStart(4, "0")}`,
+    op: "put",
+    rev,
+    payload: { id: `tx-volume-${String(index).padStart(4, "0")}`, type: "expense", amount: 1, date: "2026-08-31" },
+  }));
+  let volumeCursor = "0";
+  let volumeRows = 0;
+  let volumePages = 0;
+  for (; volumePages < 10; volumePages++) {
+    const response = await sync.handler({
+      httpMethod: "GET", path: "/api/sync/changes",
+      queryStringParameters: { action: "changes", since: volumeCursor, limit: "500" },
+      headers: {
+        host: "cofre.test", "x-forwarded-proto": "https", cookie: cookieHeader,
+        "x-device-id": "device-test-1234", "x-account-id": USER_ID, "x-sync-protocol": "3",
+      },
+    });
+    const body = JSON.parse(response.body);
+    volumeRows += body.ops.length;
+    volumeCursor = body.cursor;
+    if (!body.hasMore) { volumePages += 1; break; }
+  }
+  check("mais de dois mil registros descem sem corte ou repetição",
+    volumeRows === 2001 && volumeCursor === "2001" && volumePages === 5,
+    JSON.stringify({ volumeRows, volumeCursor, volumePages }));
 
   const cursorInvalido = await sync.handler({
     httpMethod: "GET", path: "/api/sync/changes", queryStringParameters: { action: "changes", since: "-1" },

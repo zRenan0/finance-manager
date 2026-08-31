@@ -60,20 +60,23 @@ ordem correta. As regras:
 
 - escrita local: se `agora > último`, `último = agora` e contador zera; senão o
   contador incrementa;
-- leitura remota: o aparelho **absorve** a marca recebida, de modo que a próxima
-  escrita dele seja necessariamente maior que ela;
-- marcas mais de 24 h à frente do relógio local são ignoradas, para que um
-  aparelho quebrado não empurre o relógio de todos;
+- leitura confirmada pelo servidor autenticado: o aparelho **absorve** a marca
+  recebida, de modo que a próxima escrita dele seja necessariamente maior que
+  ela, mesmo quando o aparelho ficou dias atrasado;
+- marcas locais, restauradas ou ainda não confirmadas que estejam mais de 24 h à
+  frente do relógio local são ignoradas, para que um aparelho quebrado não
+  empurre o relógio de todos;
 - o contador **vira**: cheio em `999999`, ele zera e o milissegundo avança um.
   Somar um sem virar produziria sete dígitos, largura fora do padrão, e o
   registro passaria a ser lido como se não tivesse marca. É a mesma regra do
   `cofre_hlc_successor` no servidor.
 
-O teto de 24 h tem **uma exceção declarada**: a barreira de reset confirmada
-pelo servidor (ver "Exclusão"). Ela nasce acima de toda marca da conta e, se
-algum aparelho escreveu com o relógio muito adiantado, pode passar do teto.
-Recusá-la faria a primeira criação depois de apagar perder para as lápides.
-Nenhuma outra operação remota escapa do limite.
+O teto de 24 h separa origem confiável de estado ainda não confirmado. Operações
+devolvidas pelo servidor autenticado e a barreira de reset confirmada por ele
+escapam do limite, pois já venceram na conta. Recusá-las faria o aparelho aceitar
+o conteúdo remoto, mas cunhar a edição seguinte abaixo dele, sem conseguir
+publicá-la. Backup, relógio restaurado e estado recebido de outra origem continuam
+sob o teto.
 
 O escritor usa o id persistente do aparelho com um sufixo por aba
 (`:tab_<id>`). Isso impede duas abas do mesmo navegador, com o mesmo
@@ -382,6 +385,16 @@ para a pessoa como confirmação de mesclagem.
   (`status: "replayed"`).
 - Repetir o mesmo `mutationId` com conteúdo diferente devolve `409`
   (`idempotency_mismatch`).
+- Antes da chamada, o cliente grava em `localMeta/syncBatchJournal` a composição
+  exata do lote, o `mutationId` e a revisão remota esperada. Se o servidor gravar
+  e a resposta se perder, inclusive com recarga do aplicativo, a tentativa
+  seguinte repete as mesmas operações com a mesma identidade. O diário só é
+  removido junto da confirmação que retira aquelas entradas da fila.
+- Um `idempotency_mismatch` remove apenas o diário inválido. A fila financeira é
+  preservada e a tentativa seguinte recebe outra identidade.
+- Depois de cada confirmação, o cliente relê a fila. Edições e importações feitas
+  enquanto uma chamada estava em voo entram no lote seguinte, inclusive quando
+  alteram de novo um registro que já fazia parte do lote confirmado.
 - Operação com marca menor ou igual à gravada é ignorada: o servidor guarda a
   **vencedora**, não a última que chegou.
 - Aparelho revogado recebe `403` (`device_revoked`) e o cliente volta ao escopo
