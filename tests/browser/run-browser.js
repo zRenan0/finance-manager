@@ -1105,6 +1105,16 @@ async function runOnboardingViewportM4(browser, scenario) {
     assert(await firstInventoryItem.getAttribute("open") !== null, "o item do inventário não abriu");
     assert(await firstInventoryItem.locator("dt").count() === 6, "o item não mostrou as seis dimensões do tratamento");
 
+    const thirdParties = page.locator(".legal-third-parties");
+    assert(await thirdParties.locator(".legal-third-parties__group").count() === 3, "o registro não separou infraestrutura, serviços acionados e pendência");
+    assert(await thirdParties.locator(".legal-third-party").count() === 6, "o registro não mostrou os cinco serviços e o SMTP pendente");
+    assert(await thirdParties.locator(".legal-third-party--pending").count() === 1, "o fornecedor de email não apareceu como única pendência");
+    const anthropic = thirdParties.locator(".legal-third-party").filter({ hasText: "Anthropic" }).first();
+    await anthropic.locator("summary").click();
+    assert(await anthropic.getAttribute("open") !== null, "o detalhe da Anthropic não abriu");
+    assert(await anthropic.locator("dt").count() === 6, "o serviço não mostrou uso, dados, retenção, exclusão e transferência");
+    assert(await anthropic.locator(".source-links a").count() === 2, "o serviço não mostrou política e fonte oficial");
+
     const blocked = page.locator('[data-action="privacy-ai-mode"][data-value="blocked"]');
     await blocked.click();
     assert(await blocked.getAttribute("aria-checked") === "true", "o bloqueio da IA não foi gravado");

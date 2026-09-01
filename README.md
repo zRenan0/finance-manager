@@ -47,9 +47,10 @@ psql <URL_DE_STAGING> -v ON_ERROR_STOP=1 -f supabase/tests/verify_security_bound
 ```
 
 O processo de homologação, publicação e retorno está em `docs/RELEASE.md`. O schema
-de dados está na versão 23 e o cache offline na versão 61. O inventário técnico
+de dados está na versão 23 e o cache offline na versão 62. O inventário técnico
 do armazenamento está em `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`; o inventário de
-tratamento da LGPD está em `docs/INVENTARIO-DE-DADOS.md`.
+tratamento da LGPD está em `docs/INVENTARIO-DE-DADOS.md`; e o registro dos
+serviços externos está em `docs/TERCEIROS-E-OPERADORES.md`.
 
 ### Inventário de dados e LGPD
 
@@ -59,9 +60,11 @@ cópias de recuperação em JSON legível, conta sincronizada, sessão, aparelho
 limite de tentativas, consentimentos, diagnósticos, IA, senha vazada, nota fiscal,
 importações e arquivos exportados.
 
-Prazos que dependem da hospedagem ou do contrato do provedor de IA continuam
-marcados como pendência, sem estimativa presumida. A identificação do controlador
-também continua vazia e impede a oferta pública até receber dados reais.
+Vercel, Supabase, Anthropic, Have I Been Pwned e portais fiscais são mostrados
+separadamente, com o momento de uso e os dados recebidos. A retenção pública da
+Vercel e da Anthropic aparece com seus limites, sem presumir o plano ou contrato
+do projeto. O fornecedor SMTP e a identificação do controlador continuam vazios
+e impedem a oferta pública até receberem dados reais.
 
 ### Observabilidade segura
 

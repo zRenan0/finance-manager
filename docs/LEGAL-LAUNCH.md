@@ -25,14 +25,16 @@ Isso não torna o produto pronto para oferta pública. Falta preencher os campos
 ## Bloqueadores de lançamento que continuam abertos
 
 1. Preencher os sete campos da tabela acima com dados reais e verificáveis.
-2. Contratar ou formalizar operadores e serviços externos usados hoje (hospedagem, banco de dados, provedor de IA) com cláusula de tratamento de dados. O provedor de IA recebe dados quando há envio confirmado; a infraestrutura recebe dados quando uma conta ou função de rede é usada.
-3. Documentar o prazo e o procedimento de exclusão do provedor de IA sobre o conteúdo enviado. A retenção do provedor de IA ainda não está declarada porque depende do contrato, não do código do app.
-4. Definir o prazo e o procedimento de exclusão dos eventos técnicos nos logs da hospedagem. O código limita os campos, mas não controla a retenção da plataforma.
-5. Registrar internamente as finalidades e bases legais por operação. As finalidades técnicas estão no inventário, mas a escolha jurídica da base continua pendente.
-6. Definir o processo interno de incidentes: quem detecta, quem decide, em quanto tempo comunica o titular e a ANPD, e onde fica o registro.
-7. Revisar os termos comerciais, preço, renovação, cancelamento, suporte, disponibilidade, propriedade intelectual e foro com assessoria jurídica. O texto atual foi escrito para uma versão gratuita e local.
-8. Conferir publicidade, simuladores e conteúdos com profissional habilitado antes de apresentar qualquer resultado como orientação individual.
-9. Fazer nova revisão da política e dos termos sempre que mudar a coleta, a infraestrutura ou a versão comercial, subindo `LEGAL_TEXT_VERSION` quando o conteúdo mudar.
+2. Formalizar Vercel, Supabase e Anthropic com as cláusulas de tratamento aplicáveis. O registro completo dos serviços e dos dados recebidos está em `LEGAL_THIRD_PARTIES` e em `docs/TERCEIROS-E-OPERADORES.md`.
+3. Confirmar o contrato efetivo da Anthropic. A política pública informa exclusão padrão das entradas e saídas da API em até 30 dias, mas admite acordo diferente, retenção para aplicação da política de uso e obrigação legal.
+4. Confirmar o plano da Vercel e registrar o prazo efetivo. A documentação pública informa 1 hora no Hobby, 1 dia no Pro, 3 dias no Enterprise e 30 dias com Observability Plus, mas o repositório não identifica o plano contratado.
+5. Identificar e registrar o provedor SMTP de produção, sua política, retenção, exclusão, país e contrato. O Supabase exige SMTP próprio para produção, mas o fornecedor não aparece no repositório.
+6. Registrar a região de Vercel e Supabase, os países de processamento e as salvaguardas de transferência internacional aplicáveis às contas efetivas.
+7. Registrar internamente as finalidades e bases legais por operação. As finalidades técnicas estão no inventário, mas a escolha jurídica da base continua pendente.
+8. Definir o processo interno de incidentes: quem detecta, quem decide, em quanto tempo comunica o titular e a ANPD, e onde fica o registro.
+9. Revisar os termos comerciais, preço, renovação, cancelamento, suporte, disponibilidade, propriedade intelectual e foro com assessoria jurídica. O texto atual foi escrito para uma versão gratuita e local.
+10. Conferir publicidade, simuladores e conteúdos com profissional habilitado antes de apresentar qualquer resultado como orientação individual.
+11. Fazer nova revisão da política e dos termos sempre que mudar a coleta, a infraestrutura ou a versão comercial, subindo `LEGAL_TEXT_VERSION` quando o conteúdo mudar.
 
 ## O que saiu da lista
 
@@ -40,6 +42,7 @@ Isso não torna o produto pronto para oferta pública. Falta preencher os campos
 - Prazos de retenção deixaram de ser pendência: estão declarados em `LEGAL_RETENTION`, lidos do código que os aplica.
 - Direitos do titular e canal de incidentes deixaram de ser pendência: estão na tela, com o que o app resolve sozinho separado do que depende de pedido.
 - O inventário técnico deixou de ser pendência: as classes e suas seis dimensões estão em `LEGAL_DATA_INVENTORY` e em `docs/INVENTARIO-DE-DADOS.md`. Prazos externos que ainda dependem de contrato continuam abertos, sem estimativa inventada.
+- A lista de terceiros deixou de ser uma descrição solta. Vercel, Supabase, Anthropic, Have I Been Pwned e portais fiscais estão em `LEGAL_THIRD_PARTIES`, com momento de uso, dados recebidos, retenção, exclusão, transferência e fonte oficial. O SMTP de produção continua marcado como fornecedor não definido.
 
 ## Como subir a versão do texto
 

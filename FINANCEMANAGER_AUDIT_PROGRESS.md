@@ -12,7 +12,8 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 
 | Campo | Valor |
 |---|---|
-| Módulo atual | **M18 - Inventário de dados e LGPD** (concluído) |
+| Módulo atual | **M19 - Transparência de terceiros** (concluído) |
+| Status do M19 | **CONCLUÍDO** - Vercel, Supabase, Anthropic, Have I Been Pwned e portais fiscais registrados com dados recebidos e limites; SMTP de produção preservado como pendência sem fornecedor presumido |
 | Status do M18 | **CONCLUÍDO** - 14 fluxos mapeados em finalidade, armazenamento, retenção, acesso, terceiros e exclusão; política e inventário operacional usam a mesma fonte estruturada; pendências externas preservadas sem dados presumidos |
 | Status do M17 | **CONCLUÍDO** - observações estruturadas no backend com `X-Request-Id`, diagnóstico local ampliado e Service Worker monitorado sem registrar conteúdo financeiro ou enviar diagnóstico automaticamente |
 | Status do M16 | **CONCLUÍDO** - os nove vetores do roteiro possuem prova defensiva; 22 verificações novas nos handlers reais e contrato SQL somente leitura para desenvolvimento ou staging; nenhuma falha de produção confirmada |
@@ -31,10 +32,10 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 | Status do M3 | **CONCLUÍDO** — aplicado e confirmado no banco em 2026-08-28 |
 | Status do M2 | **CONCLUÍDO** — nenhuma vulnerabilidade de autorização; invariantes travados por teste |
 | Status do M1 | **CONCLUÍDO** — aplicado e confirmado; gatilho capturado e versionado |
-| Módulos concluídos | M0, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15, M16, M17, M18 |
-| Próximo módulo | M19 - Transparência de terceiros |
+| Módulos concluídos | M0, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15, M16, M17, M18, M19 |
+| Próximo módulo | M20 - Plano de resposta a incidentes |
 | Branch | `deploy-atualizado` (árvore limpa no início do M0) |
-| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `tests/test-cloud-sync.js`, `tests/test-account-backend.js`, `tests/test-critical-actions.js`, `tests/test-coverage.js`, `tests/test-security-adversarial.js`, `tests/test-observability.js`, `tests/test-data-inventory-lgpd.js`, `supabase/tests/verify_security_boundary.sql`, `scripts/check-deploy.js`, `scripts/serve.js`, `scripts/coverage.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/storage.js`, `js/cloud-sync.js` (M10), `js/analytics.js`, `js/forecast.js`, `js/wrapped.js`, `js/screens/analytics.js` (M11), `js/backup-crypto.js`, `js/app.js`, `js/actions.js`, `js/storage.js`, `js/screens/settings.js`, `css/components.css`, `scripts/build-app-module.js` (M12), `netlify/functions/sync.js` (M13), `js/import.js`, `netlify/functions/_shared/finance-schema.js` (M14), observabilidade em backend, frontend e Service Worker (M17), inventário e tela de Privacidade (M18), `js/modules/app.generated.js` (regerado). Documentação: inventário do M8, protocolo do M10, backup protegido do M12, `docs/VERSIONAMENTO.md` do M13, observabilidade do M17, inventário LGPD do M18 e desenhos de M15 a M18. |
+| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `tests/test-cloud-sync.js`, `tests/test-account-backend.js`, `tests/test-critical-actions.js`, `tests/test-coverage.js`, `tests/test-security-adversarial.js`, `tests/test-observability.js`, `tests/test-data-inventory-lgpd.js`, `tests/test-third-party-transparency.js`, `supabase/tests/verify_security_boundary.sql`, `scripts/check-deploy.js`, `scripts/serve.js`, `scripts/coverage.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/storage.js`, `js/cloud-sync.js` (M10), `js/analytics.js`, `js/forecast.js`, `js/wrapped.js`, `js/screens/analytics.js` (M11), `js/backup-crypto.js`, `js/app.js`, `js/actions.js`, `js/storage.js`, `js/screens/settings.js`, `css/components.css`, `scripts/build-app-module.js` (M12), `netlify/functions/sync.js` (M13), `js/import.js`, `netlify/functions/_shared/finance-schema.js` (M14), observabilidade em backend, frontend e Service Worker (M17), inventário e tela de Privacidade (M18), registro de terceiros e operadores (M19), `js/modules/app.generated.js` (regerado). Documentação: inventário do M8, protocolo do M10, backup protegido do M12, `docs/VERSIONAMENTO.md` do M13, observabilidade do M17, inventário LGPD do M18, terceiros do M19 e desenhos de M15 a M19. |
 | Migration do M13 | `20260831120000_database_schema_version.sql` — **aplicada e confirmada em produção em 2026-08-31** (`database_schema_version = 1`; grants inalterados: só `service_role` e `postgres`). Reversível por `alter table public.cofre_sync_config drop column if exists database_schema_version;` |
 | Migrations criadas até aqui | `20260828120000_rls_auto_enable_least_privilege.sql`, `20260828130000_rls_auto_enable_versionada.sql`, `20260828140000_menor_privilegio_tabelas.sql` (as três **aplicadas e confirmadas em 2026-08-28**), `20260828150000_rls_auto_enable_gatilho.sql` (**ainda não aplicada**; é no-op em produção, onde o gatilho já existe) |
 | Versão do app | `0.30.0` (package.json) |
@@ -2379,6 +2380,68 @@ foram validados. As pendências restantes dependem de dados e contratos externos
 
 ---
 
+## M19 - Transparência de terceiros
+
+### Resultado
+
+`LEGAL_THIRD_PARTIES` registra os cinco serviços externos comprovados pela
+configuração e pelo código: Vercel, Supabase, Anthropic, Have I Been Pwned e o
+portal fiscal indicado pelo QR Code. Cada entrada declara quando participa,
+finalidade, dados recebidos, retenção, exclusão, transferência e fonte oficial.
+
+A hospedagem agora é descrita com a distinção necessária entre processar a
+requisição e escrever conteúdo em log. O evento controlado continua sem corpo,
+email, senha, cookie, IP e dados financeiros, mas as funções processam
+temporariamente cadastro, sincronização, senha ou pacote de IA conforme a rota.
+
+O prazo público da Anthropic foi registrado como exclusão padrão da API em até
+30 dias, com as exceções declaradas pelo fornecedor. A Vercel passou a mostrar a
+faixa por plano, de 1 hora a 30 dias. Plano, contrato e região efetivos continuam
+como decisões externas. O SMTP de produção aparece sem nome de empresa porque o
+fornecedor escolhido não existe no repositório.
+
+### Alterações
+
+| Arquivo | Motivo |
+|---|---|
+| `js/storage.js` | fonte estruturada, validadores, prazos públicos e versão legal `2026-08-31.2` |
+| `js/screens/privacy.js`, `css/screens/legal.css` | registro expansível com estado em uso ou por definir |
+| `docs/TERCEIROS-E-OPERADORES.md` | **novo**; matriz, limites, fontes e regra de atualização |
+| `docs/LEGAL-LAUNCH.md`, `docs/INVENTARIO-DE-DADOS.md`, `README.md` | pendências contratuais e serviços atuais alinhados |
+| `tests/test-third-party-transparency.js` | **novo**; estrutura, integração, UI e publicação |
+| `scripts/check-release.js` | registro, tela e documento viram condição da publicação |
+| `service-worker.js` | pacote offline promovido para `v62` |
+
+### Compatibilidade
+
+Schema financeiro, IndexedDB, protocolo de sincronização e APIs permanecem
+inalterados. A mudança material da política pede novo aceite e preserva o
+histórico anterior. Não foi adicionado nenhum serviço, chamada de rede ou script.
+
+### Testes
+
+| Teste | Resultado |
+|---|---|
+| `node tests/test-third-party-transparency.js` | **PASSOU**; 37 ok, 0 falhas |
+| `node tests/test-data-inventory-lgpd.js` | **PASSOU**; 35 ok, 0 falhas |
+| `node tests/test-legal-privacy-errors.js` | **PASSOU**; 60 ok, 0 falhas |
+| `node tests/test-storage-privacy-inventory.js` | **PASSOU**; 69 ok, 0 falhas |
+| `npm run lint` | **PASSOU**; 0 erro, 0 aviso |
+| `npm test` | **PASSOU**; 66 arquivos |
+| `npm run test:coverage` | **PASSOU**; 79,3% global e 41,7% em `js/actions.js` |
+| `npm run check:build`, `check:release`, `build:dist` | **PASSOU**; 71 fontes e pacote com 38 arquivos; avisos externos conhecidos preservados |
+| `npm run test:browser` | **PASSOU**; 18 de 18 em Chromium, Firefox e WebKit, incluindo o registro expansível |
+| `npm run test:pwa` | **PASSOU**; shell, landing, dados locais, limpeza e API fora do cache |
+| `npm run test:landing` | **PASSOU**; 18 de 18 |
+| Revisão visual | **PASSOU**; 1440 px e 390 px sem estouro horizontal ou erro de página |
+
+### Status
+
+**CONCLUÍDO.** Serviços reais documentados e ausência de analytics declarada.
+Fornecedor SMTP, plano e contrato efetivos permanecem como pendências externas.
+
+---
+
 ## Checklist de regressão
 
 Executar após **todo** módulo que toque no código. Marcar `OK` / `FALHOU` / `NÃO VALIDADO`.
@@ -2387,7 +2450,7 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
 ### A. Automatizado (CI ou máquina com Node) — porta de entrada obrigatória
 
 - [ ] `npm run lint`
-- [ ] `npm test` (65 arquivos)
+- [ ] `npm test` (66 arquivos)
 - [ ] `node tests/test-accounting-integrity.js` (invariantes contábeis do M11)
 - [ ] `node tests/test-backup-restore.js` (backup, restauração e senha do M12)
 - [ ] `node tests/test-versioning.js` (versões e matriz de compatibilidade do M13)
@@ -2397,6 +2460,7 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
 - [ ] `node tests/test-security-adversarial.js` (matriz defensiva do M16)
 - [ ] `node tests/test-observability.js` (contrato de eventos do M17)
 - [ ] `node tests/test-data-inventory-lgpd.js` (matriz de tratamento do M18)
+- [ ] `node tests/test-third-party-transparency.js` (serviços externos do M19)
 - [ ] `npm run check:build` (o `app.generated.js` publicado corresponde às fontes)
 - [ ] `npm run check:release`
 - [ ] `npm run build:dist`

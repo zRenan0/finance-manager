@@ -2,6 +2,22 @@
 
 ## Não publicado
 
+### O M19 passou a identificar cada serviço que recebe dados
+
+- A tela de Privacidade agora separa Vercel, Supabase, Anthropic, Have I Been
+  Pwned e portais fiscais. Cada entrada diz quando participa, qual é a finalidade,
+  quais dados recebe, retenção, exclusão, transferência e fonte oficial.
+- A hospedagem deixou de ser descrita só como log: a política esclarece que uma
+  função processa temporariamente o conteúdo necessário da requisição mesmo sem
+  registrá-lo no evento controlado.
+- A retenção pública foi detalhada sem presumir o contrato. A Vercel varia de 1
+  hora a 30 dias conforme plano e adicional; a Anthropic informa exclusão padrão
+  da API em até 30 dias, sujeita a acordo e exceções declaradas.
+- O provedor SMTP de produção permanece visível como pendência, pois a empresa
+  contratada não aparece no repositório. A tela também confirma que não há
+  analytics, publicidade, pixels, fontes remotas ou scripts de terceiros.
+- A política subiu para `2026-08-31.2` e o cache offline para `v62`.
+
 ### O M18 passou a mostrar o caminho completo de cada dado
 
 - A política agora usa um inventário estruturado com 14 fluxos. Cada item declara

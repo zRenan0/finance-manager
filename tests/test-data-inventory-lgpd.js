@@ -64,14 +64,14 @@ check("diagnóstico local mantém 30 dias e 50 ocorrências",
 
 const observability = read("netlify/functions/_shared/observability.js");
 check("observações do backend não prometem prazo desconhecido",
-  /precisa ser definida antes da oferta/.test(byId["backend-observations"].retention));
+  /1 hora no Hobby/.test(byId["backend-observations"].retention) && /plano efetivo/.test(byId["backend-observations"].retention));
 check("inventário de observação acompanha somente o evento controlado",
   ["area", "operation", "method", "status", "code", "durationMs", "requestId"].every((field) => new RegExp(`\\b${field}\\b`).test(observability))
     && /evento controlado.{0,80}sem corpo, cabeçalhos, cookies, IP, email/.test(byId["backend-observations"].storage));
 check("metadados normais da hospedagem não são escondidos", /metadados normais da conexão/.test(byId["backend-observations"].storage));
 
-check("IA distingue descarte do app e retenção pendente do provedor",
-  /descarta/.test(byId["ai-requests"].retention) && /precisa ser definida/.test(byId["ai-requests"].retention));
+check("IA distingue descarte do app e retenção pública do provedor",
+  /descarta/.test(byId["ai-requests"].retention) && /até 30 dias/.test(byId["ai-requests"].retention));
 check("envio anterior para IA não é anunciado como reversível",
   /não consegue desfazer nem apagar no destino/.test(byId["ai-requests"].deletion));
 
@@ -105,10 +105,10 @@ check("inventário expansível possui estilo próprio", /\.legal-inventory__item
 check("tela avisa sobre cópias locais legíveis", /JSON legível e sem criptografia/.test(privacy));
 check("documento operacional liga matriz e código", /LEGAL_DATA_INVENTORY/.test(doc) && /## Matriz/.test(doc));
 check("documento registra todas as fontes externas", /Supabase/.test(doc) && /Have I Been Pwned/.test(doc) && /Sefaz/.test(doc) && /provedor de IA/.test(doc));
-check("pendências de hospedagem e IA continuam abertas", /logs da hospedagem/.test(launch) && /provedor de IA/.test(launch));
+check("pendências de hospedagem e IA continuam abertas", /plano da Vercel/.test(launch) && /contrato efetivo da Anthropic/.test(launch));
 check("controlador continua sem dados inventados", run("legalControllerGaps(LEGAL_CONTROLLER).length") === 7);
 check("mudança material sobe versão e revisão juntas",
-  run("LEGAL_TEXT_VERSION") === "2026-08-31.1" && run("LEGAL_REVIEW_DATE") === "2026-08-31");
+  run("LEGAL_TEXT_VERSION") === "2026-08-31.2" && run("LEGAL_REVIEW_DATE") === "2026-08-31");
 
 console.log(`\n${fail ? "FALHAS ENCONTRADAS" : "TODOS OS TESTES PASSARAM"}: ${pass} ok, ${fail} falha(s)`);
 process.exit(fail ? 1 : 0);

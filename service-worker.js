@@ -41,7 +41,7 @@
 // v60: falhas fechadas do pacote e da leitura chegam ao diagnóstico local sem
 // levar URL, requisição ou resposta na mensagem enviada à página.
 // v61: publica o inventário de dados e a política revisada do M18.
-const VERSION = "v61";
+const VERSION = "v62";
 const BUILD_ID = VERSION;
 const CACHE_NAME = "financas-cache-" + VERSION;
 // A PÁGINA COMERCIAL TEM CACHE PRÓPRIO.

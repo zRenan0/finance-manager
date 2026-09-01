@@ -41,12 +41,47 @@ function renderLegalDataInventoryGroup(group) {
   </section>`;
 }
 
+function renderLegalThirdParty(item) {
+  const pending = item.status === "pending";
+  const fields = [
+    ["Quando participa", item.when],
+    ["Finalidade", item.purpose],
+    ["Dados que recebe", item.data],
+    ["Retenção", item.retention],
+    ["Como excluir", item.deletion],
+    ["Transferência internacional", item.transfer],
+  ];
+  const privacyLink = item.privacyUrl === LEGAL_PENDING
+    ? ""
+    : `<a href="${escapeHtml(item.privacyUrl)}" target="_blank" rel="noopener noreferrer">Privacidade do serviço</a>`;
+  return `<details class="legal-third-party ${pending ? "legal-third-party--pending" : ""}">
+    <summary>
+      <span class="legal-third-party__identity"><b>${escapeHtml(item.name)}</b><small>${escapeHtml(item.role)}</small></span>
+      <span class="legal-third-party__status">${pending ? "Por definir" : "Em uso"}</span>
+    </summary>
+    <dl class="legal-list">${fields.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl>
+    <div class="source-links">${privacyLink}<a href="${escapeHtml(item.evidence)}" target="_blank" rel="noopener noreferrer">Fonte técnica oficial</a></div>
+  </details>`;
+}
+
+function renderLegalThirdPartyGroup(group) {
+  const items = LEGAL_THIRD_PARTIES.filter((item) => item.group === group.id);
+  if (!items.length) return "";
+  return `<section class="legal-third-parties__group" aria-labelledby="legal-third-party-${escapeHtml(group.id)}">
+    <p class="legal-subhead" id="legal-third-party-${escapeHtml(group.id)}">${escapeHtml(group.title)}</p>
+    <p class="card-subtitle">${escapeHtml(group.detail)}</p>
+    <div class="legal-third-parties__items">${items.map(renderLegalThirdParty).join("")}</div>
+  </section>`;
+}
+
 function renderPrivacyScreen() {
   const privacy = normalizePrivacy(state.data.privacy || defaultPrivacy());
   const accepted = legalAccepted(privacy);
   const diagnostics = safeErrorSummary();
   const gaps = legalControllerGaps(LEGAL_CONTROLLER);
   const inventoryGaps = legalDataInventoryGaps(LEGAL_DATA_INVENTORY);
+  const thirdPartyGaps = legalThirdPartyGaps(LEGAL_THIRD_PARTIES);
+  const thirdPartyLaunchGaps = legalThirdPartyLaunchGaps(LEGAL_THIRD_PARTIES);
   const anteriores = privacy.acceptedVersions.filter((item) => item.version !== LEGAL_TEXT_VERSION);
   return `<div class="screen screen--narrow">
     ${renderBackHeader("Privacidade, termos e fontes")}
@@ -94,6 +129,18 @@ function renderPrivacyScreen() {
       <p class="card-subtitle">Cada item informa a finalidade, onde fica, por quanto tempo permanece, quem acessa, quais terceiros participam e como excluir. Abra uma categoria para ver o caminho completo.</p>
       ${inventoryGaps.length ? `<div class="financial-notice" role="alert">${svgIcon("alertTriangle", 16)}<div><p><b>Inventário incompleto.</b> Esta versão não deve ser oferecida ao público.</p><small>${escapeHtml(inventoryGaps.join("; "))}</small></div></div>` : ""}
       <div class="legal-inventory">${LEGAL_DATA_INVENTORY_GROUPS.map(renderLegalDataInventoryGroup).join("")}</div>
+    </div>
+
+    <div class="card">
+      <p class="card-title">Quem participa do tratamento</p>
+      <p class="card-subtitle">Esta lista vem das integrações encontradas no código e na publicação. Abra um serviço para ver exatamente quando ele entra e quais dados recebe.</p>
+      ${thirdPartyGaps.length ? `<div class="financial-notice" role="alert">${svgIcon("alertTriangle", 16)}<div><p><b>Registro de terceiros incompleto.</b> Esta versão não deve ser oferecida ao público.</p><small>${escapeHtml(thirdPartyGaps.join("; "))}</small></div></div>` : ""}
+      ${thirdPartyLaunchGaps.length ? `<div class="financial-notice" role="note">${svgIcon("alertTriangle", 16)}<div><p><b>Falta registrar o email de produção.</b> O fornecedor SMTP ainda não está identificado.</p><small>${escapeHtml(thirdPartyLaunchGaps.join("; "))}</small></div></div>` : ""}
+      <div class="legal-third-parties">${LEGAL_THIRD_PARTY_GROUPS.map(renderLegalThirdPartyGroup).join("")}</div>
+      <div class="legal-facts legal-facts--compact">
+        <p>${svgIcon("shieldCheck", 15)} Não há analytics, publicidade, pixels, fontes remotas ou scripts de terceiros carregados na página.</p>
+        <p>${svgIcon("phone", 15)} Sem conta e sem uma ação de rede opcional, os dados financeiros permanecem no aparelho.</p>
+      </div>
     </div>
 
     <div class="card">

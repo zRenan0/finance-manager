@@ -46,12 +46,17 @@ Antes da oferta ao público ainda é necessário definir:
 
 1. Os sete campos reais de `LEGAL_CONTROLLER`.
 2. As bases legais e o registro interno das operações de tratamento.
-3. O prazo e o procedimento de exclusão dos logs da hospedagem.
-4. O prazo, a finalidade secundária e o procedimento de exclusão do provedor de IA.
-5. Os contratos e responsabilidades de cada operador e terceiro.
+3. O plano efetivo da Vercel e a retenção aplicável aos logs da publicação.
+4. O contrato efetivo da Anthropic e eventual acordo de retenção diferente do padrão público de até 30 dias.
+5. O provedor SMTP de produção, seus prazos, política e procedimento de exclusão.
+6. A região, os países de processamento e as salvaguardas de transferência aplicáveis às contas externas.
+7. Os contratos e responsabilidades de cada operador e terceiro.
 
 Esses itens permanecem em `docs/LEGAL-LAUNCH.md`. Nenhum recebeu valor presumido
 no inventário.
+
+O registro detalhado dos serviços fica em `LEGAL_THIRD_PARTIES` e em
+`docs/TERCEIROS-E-OPERADORES.md`.
 
 ## Referências oficiais
 

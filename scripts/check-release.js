@@ -78,12 +78,15 @@ check(/const LEGAL_CONTROLLER = \{/.test(storage), "identificação do controlad
 check(/const LEGAL_RETENTION = \[/.test(storage), "prazos de retenção não estão declarados em js/storage.js");
 check(/const LEGAL_SUBJECT_RIGHTS = \[/.test(storage), "direitos do titular não estão declarados em js/storage.js");
 check(/const LEGAL_DATA_INVENTORY = \[/.test(storage), "inventário de dados não está declarado em js/storage.js");
+check(/const LEGAL_THIRD_PARTIES = \[/.test(storage), "registro de terceiros não está declarado em js/storage.js");
 check(/Quem responde por estes dados/.test(privacyScreen), "a tela de privacidade não identifica o controlador");
 check(/Por quanto tempo cada coisa fica/.test(privacyScreen), "a tela de privacidade não informa prazo de retenção");
 check(/Seus direitos/.test(privacyScreen) && /art\. 18/.test(privacyScreen), "a tela de privacidade não lista os direitos do art. 18");
 check(/incidente de segurança/i.test(privacyScreen) && /art\. 48/.test(privacyScreen), "a tela de privacidade não traz canal de comunicação de incidentes");
 check(/Inventário dos dados/.test(privacyScreen) && /LEGAL_DATA_INVENTORY/.test(privacyScreen), "a tela de privacidade não renderiza o inventário de dados");
+check(/Quem participa do tratamento/.test(privacyScreen) && /LEGAL_THIRD_PARTIES/.test(privacyScreen), "a tela de privacidade não renderiza o registro de terceiros");
 check(fs.existsSync(path.join(root, "docs/INVENTARIO-DE-DADOS.md")), "documento operacional do inventário de dados ausente");
+check(fs.existsSync(path.join(root, "docs/TERCEIROS-E-OPERADORES.md")), "documento operacional de terceiros ausente");
 
 // Já os campos que só o dono do app conhece são AVISO, não falha: eles não
 // impedem publicar o beta, impedem oferecer ao público. Reprovar aqui travaria
@@ -91,6 +94,10 @@ check(fs.existsSync(path.join(root, "docs/INVENTARIO-DE-DADOS.md")), "documento 
 const pendentes = (storage.match(/^\s{2}\w+: LEGAL_PENDING,$/gm) || []).length;
 if (pendentes) {
   console.warn(`AVISO: ${pendentes} campo(s) do controlador ainda com marcador. Ver docs/LEGAL-LAUNCH.md; sem eles a instalação não pode ser oferecida ao público.`);
+}
+const terceirosPendentes = (storage.match(/^\s{4}status: "pending",$/gm) || []).length;
+if (terceirosPendentes) {
+  console.warn(`AVISO: ${terceirosPendentes} serviço(s) externo(s) ainda sem fornecedor definido. Ver docs/TERCEIROS-E-OPERADORES.md.`);
 }
 
 if (failures.length) {

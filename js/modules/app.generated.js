@@ -2237,10 +2237,10 @@ function isLocalSyncWriter(value) {
 const SCHEMA_VERSION = 23;  // v23; identificador do banco na origem do lançamento (FITID do OFX)
 const LEGAL_REVIEW_DATE = "2026-08-31";
 // A versão sobe quando o CONTEÚDO do texto muda, não quando muda a redação.
-// Esta subiu porque a política ganhou o inventário completo de dados, passou a
-// declarar as cópias locais legíveis, corrigiu o alcance da sincronização do
-// aceite e expôs os limites de exclusão depois de um envio a terceiros.
-const LEGAL_TEXT_VERSION = "2026-08-31.1";
+// Esta subiu porque a política passou a identificar cada serviço externo,
+// declarar o conteúdo que ele processa e informar os prazos públicos conhecidos
+// de Vercel e Anthropic sem presumir o plano ou contrato efetivo do projeto.
+const LEGAL_TEXT_VERSION = "2026-08-31.2";
 const MIRROR_MAX_BYTES = 3 * 1024 * 1024;
 const MIRROR_THROTTLE_MS = 1200;
 
@@ -2413,7 +2413,7 @@ const LEGAL_DATA_INVENTORY = [
     data: "Observações técnicas do backend e metadados da hospedagem",
     purpose: "Entregar o site, operar as funções, contar falhas e localizar uma requisição por código aleatório, área, operação, método, status e duração.",
     storage: "O evento controlado vai aos logs da hospedagem sem corpo, cabeçalhos, cookies, IP, email, usuário, aparelho, mensagens, pilhas ou valores financeiros. A plataforma ainda recebe metadados normais da conexão para entregar a página ou função e pode manter seus próprios registros de acesso.",
-    retention: "Depende da configuração da plataforma e precisa ser definida antes da oferta ao público; o repositório não fixa um prazo.",
+    retention: "A documentação pública da Vercel informa 1 hora no Hobby, 1 dia no Pro, 3 dias no Enterprise e 30 dias com Observability Plus. O plano efetivo do projeto precisa ser confirmado antes da oferta ao público.",
     access: "Operadores autorizados da hospedagem. O usuário recebe o X-Request-Id da própria resposta para referência.",
     thirdParties: "Plataforma de hospedagem.",
     deletion: "Segue o controle de retenção e exclusão da plataforma. A configuração e o procedimento operacional continuam pendentes antes da oferta ao público.",
@@ -2424,7 +2424,7 @@ const LEGAL_DATA_INVENTORY = [
     data: "Pacotes e respostas de inteligência artificial",
     purpose: "Gerar análise financeira opcional ou interpretar uma frase de lançamento depois da prévia e confirmação do usuário.",
     storage: "O app e o backend tratam o pacote e a resposta de forma transitória, sem gravar uma cópia própria. O provedor de IA recebe o conteúdo enviado.",
-    retention: "O app descarta o pacote e a resposta transitórios. A retenção pelo provedor precisa ser definida em contrato e política antes da oferta ao público.",
+    retention: "O app descarta o pacote e a resposta transitórios. A Anthropic informa exclusão padrão das entradas e saídas da API em até 30 dias, com exceções contratuais, legais e de aplicação da política de uso. O contrato efetivo precisa ser confirmado.",
     access: "Você, o backend durante a chamada e o provedor de IA. O pacote pode conter contexto pessoal mesmo quando usa totais ou nomes limitados.",
     thirdParties: "Plataforma de hospedagem e provedor de IA configurado no backend.",
     deletion: "Bloquear IA impede envios futuros. O app não consegue desfazer nem apagar no destino um pacote já confirmado; isso depende do contrato e do canal do fornecedor.",
@@ -2494,6 +2494,145 @@ function legalDataInventoryGaps(inventory) {
   return gaps;
 }
 
+// Registro dos serviços externos comprovados pelo código e pela configuração.
+// `status: pending` não inventa um fornecedor: marca uma dependência que precisa
+// ser escolhida e incluída na política antes da oferta pública.
+const LEGAL_THIRD_PARTY_FIELDS = [
+  "name", "role", "when", "purpose", "data", "retention", "deletion",
+  "transfer", "privacyUrl", "evidence",
+];
+
+const LEGAL_THIRD_PARTY_GROUPS = [
+  { id: "infrastructure", title: "Infraestrutura da conta", detail: "Serviços que hospedam o app, executam o backend ou guardam a cópia sincronizada." },
+  { id: "on-demand", title: "Serviços acionados quando necessário", detail: "Só participam de uma operação específica, iniciada pelo usuário ou exigida para proteger a conta." },
+  { id: "pending", title: "Configuração ainda necessária", detail: "Dependência de produção cujo fornecedor não aparece no repositório e não pode ser presumido." },
+];
+
+const LEGAL_THIRD_PARTIES = [
+  {
+    id: "vercel",
+    group: "infrastructure",
+    name: "Vercel",
+    role: "Hospedagem do site e execução das funções do backend",
+    when: "Ao abrir o domínio e sempre que uma rota de conta, sincronização, senha vazada ou IA é chamada.",
+    purpose: "Entregar os arquivos do aplicativo, terminar a conexão HTTPS e executar o código do backend.",
+    data: "Metadados normais da conexão, como IP, agente do navegador, rota, horário e status. Nas funções, processa temporariamente o conteúdo necessário: cadastro e credenciais, cookies de sessão, identificadores do aparelho, registros sincronizados, prefixo da senha ou pacote de IA, conforme a operação. O evento criado pelo app não registra corpo, email, senha, cookie, IP nem conteúdo financeiro.",
+    retention: "Logs de execução: 1 hora no plano Hobby, 1 dia no Pro, 3 dias no Enterprise e 30 dias com Observability Plus, segundo a documentação pública. O plano efetivo e a retenção de outros registros precisam ser confirmados.",
+    deletion: "A exclusão no app remove dados da conta e do banco, mas não apaga retroativamente registros da plataforma. Logs saem conforme o prazo e os controles do plano contratado.",
+    transfer: "O país efetivo de processamento e as salvaguardas de transferência dependem da conta e do contrato da Vercel. Precisam ser registrados antes da oferta pública.",
+    privacyUrl: "https://vercel.com/legal/privacy-notice",
+    evidence: "https://vercel.com/docs/logs/runtime",
+    status: "used",
+  },
+  {
+    id: "supabase",
+    group: "infrastructure",
+    name: "Supabase",
+    role: "Autenticação, banco PostgreSQL e APIs de conta e sincronização",
+    when: "Quando uma conta é criada ou usada, inclusive em login, recuperação, sincronização, aparelhos, limites de tentativa e exclusão.",
+    purpose: "Autenticar o usuário, guardar a cópia sincronizada e aplicar isolamento, versões, exclusões e limites do backend.",
+    data: "Email, senha durante a autenticação, cadastro, tokens e identificadores de conta; dados financeiros e preferências sincronizados; versões restauráveis, marcas de exclusão, aparelhos e seus hashes; aceites; códigos HMAC de limite de tentativas. O app não guarda a senha em texto.",
+    retention: "Cadastro e dados atuais enquanto a conta existir; marcas de exclusão por 24 meses, cinco versões restauráveis, recibos por 30 dias e limites elegíveis para limpeza após 1 dia. Prazos próprios de logs e backups da plataforma dependem do projeto e do contrato.",
+    deletion: "Apagar a conta executa a purga dos dados vinculados antes de remover o usuário. Backups e registros operacionais da plataforma seguem os prazos e o aditivo contratado.",
+    transfer: "A região do projeto e as salvaguardas do contrato não estão no repositório. A Supabase informa que o armazenamento principal segue a região escolhida, com processamento adicional previsto no aditivo.",
+    privacyUrl: "https://supabase.com/privacy",
+    evidence: "https://supabase.com/docs/guides/auth/architecture",
+    status: "used",
+  },
+  {
+    id: "anthropic",
+    group: "on-demand",
+    name: "Anthropic",
+    role: "Provedor da análise por IA e do refinamento de lançamento",
+    when: "Somente com conta válida, IA desbloqueada, prévia exibida e confirmação do envio pelo usuário.",
+    purpose: "Produzir uma análise opcional do mês ou interpretar uma frase em campos de lançamento.",
+    data: "Na análise, totais mensais, nomes de categorias, nomes e valores de metas, histórico e regras selecionadas. No refinamento, a frase digitada e os nomes das categorias. O pacote não é chamado de anônimo porque nomes e texto podem revelar contexto pessoal.",
+    retention: "A Anthropic informa exclusão padrão das entradas e saídas da API em até 30 dias. Pode haver prazo diferente por acordo, retenção maior para aplicação da política de uso ou obrigação legal, e retenção zero somente quando contratada e aplicável.",
+    deletion: "Bloquear IA impede novos envios. O app descarta a cópia transitória, mas não possui comando para apagar um envio anterior na Anthropic; isso depende do contrato e do canal do fornecedor.",
+    transfer: "Pode haver processamento fora do Brasil. O destino aplicável e a salvaguarda jurídica precisam ser confirmados no contrato da conta usada pela API.",
+    privacyUrl: "https://www.anthropic.com/legal/privacy",
+    evidence: "https://privacy.claude.com/en/articles/7996866-how-long-do-you-store-my-organization-s-data",
+    status: "used",
+  },
+  {
+    id: "have-i-been-pwned",
+    group: "on-demand",
+    name: "Have I Been Pwned",
+    role: "Consulta de senha conhecida em vazamentos",
+    when: "Ao cadastrar ou trocar uma senha, depois das validações locais e antes de salvar a nova credencial.",
+    purpose: "Recusar senhas já expostas sem revelar a senha ou o hash completo.",
+    data: "Somente os cinco primeiros caracteres do SHA-1, enviados pela função com preenchimento de resposta. Não recebe senha, hash completo, email nem IP do usuário. O serviço vê o endereço de rede da função hospedada.",
+    retention: "O app não persiste a consulta. Eventual retenção do prefixo e dos metadados da conexão segue a política do serviço e de sua infraestrutura.",
+    deletion: "Não há cópia no app para apagar. Qualquer registro externo segue os controles do Have I Been Pwned.",
+    transfer: "A chamada sai do backend para infraestrutura externa ao projeto; a localização de processamento pode variar e não é controlada pelo app.",
+    privacyUrl: "https://haveibeenpwned.com/privacy",
+    evidence: "https://haveibeenpwned.com/api/v3#PwnedPasswords",
+    status: "used",
+  },
+  {
+    id: "fiscal-portals",
+    group: "on-demand",
+    name: "Portal fiscal da Sefaz ou Fazenda",
+    role: "Consulta da página pública indicada no QR Code da nota",
+    when: "Somente quando o usuário lê um QR de NFC-e ou NF-e e confirma a consulta ao endereço governamental.",
+    purpose: "Tentar sugerir valor e estabelecimento a partir da página pública da nota.",
+    data: "URL completa da consulta, que pode conter a chave da nota, além do IP e dos metadados normais da conexão. A chamada sai diretamente do navegador e só aceita HTTPS em domínio governamental de Sefaz ou Fazenda.",
+    retention: "O app processa a página em memória e não a guarda. O portal pode manter registros de acesso conforme as regras do órgão responsável.",
+    deletion: "Cancelar descarta a prévia e apagar o lançamento remove a cópia no app. Essas ações não removem eventual registro de acesso do portal.",
+    transfer: "O órgão e a infraestrutura variam conforme o emissor da nota. A política aplicável é a do portal aberto pelo QR, não uma política única escolhida pelo app.",
+    privacyUrl: "https://www.gov.br/pt-br/termos-de-uso",
+    evidence: "https://www.nfe.fazenda.gov.br/portal/principal.aspx",
+    status: "used",
+  },
+  {
+    id: "production-smtp",
+    group: "pending",
+    name: "Provedor SMTP de produção",
+    role: "Entrega de email de confirmação e recuperação gerado pelo Supabase Auth",
+    when: "Será usado em cadastro, confirmação de email, recuperação de senha e outras mensagens de autenticação quando a oferta pública for configurada.",
+    purpose: "Entregar mensagens de segurança e links necessários para confirmar ou recuperar uma conta.",
+    data: "Endereço de email, remetente, assunto, conteúdo da mensagem e link ou código de autenticação necessário ao fluxo. O fornecedor exato ainda não está declarado no repositório.",
+    retention: "Prazo ainda não definido. Deve ser preenchido a partir do fornecedor e do plano efetivamente contratados.",
+    deletion: "Procedimento ainda não definido. Deve cobrir registros de entrega, rejeição e conteúdo mantidos pelo fornecedor escolhido.",
+    transfer: "País de processamento e salvaguardas ainda não definidos porque o fornecedor não foi registrado.",
+    privacyUrl: LEGAL_PENDING,
+    evidence: "https://supabase.com/docs/guides/auth/auth-smtp",
+    status: "pending",
+  },
+];
+
+function legalThirdPartyGaps(entries) {
+  const source = Array.isArray(entries) ? entries : LEGAL_THIRD_PARTIES;
+  const groups = new Set(LEGAL_THIRD_PARTY_GROUPS.map((group) => group.id));
+  const statuses = new Set(["used", "pending"]);
+  const seen = new Set();
+  const gaps = [];
+  source.forEach((item, index) => {
+    const id = item && typeof item.id === "string" ? item.id.trim() : "";
+    if (!/^[a-z][a-z0-9-]{2,48}$/.test(id)) gaps.push(`entrada ${index + 1}: id inválido`);
+    else if (seen.has(id)) gaps.push(`${id}: id repetido`);
+    else seen.add(id);
+    if (!item || !groups.has(item.group)) gaps.push(`${id || `entrada ${index + 1}`}: group`);
+    if (!item || !statuses.has(item.status)) gaps.push(`${id || `entrada ${index + 1}`}: status`);
+    LEGAL_THIRD_PARTY_FIELDS.forEach((field) => {
+      const value = item && typeof item[field] === "string" ? item[field].trim() : "";
+      const pendingAllowed = item && item.status === "pending" && field === "privacyUrl" && value === LEGAL_PENDING;
+      if ((field === "privacyUrl" || field === "evidence") && !pendingAllowed) {
+        if (!/^https:\/\//.test(value)) gaps.push(`${id || `entrada ${index + 1}`}: ${field}`);
+      } else if (!pendingAllowed && value.length < (field === "name" ? 2 : 12)) gaps.push(`${id || `entrada ${index + 1}`}: ${field}`);
+    });
+  });
+  if (!source.length) gaps.push("registro de terceiros vazio");
+  return gaps;
+}
+
+function legalThirdPartyLaunchGaps(entries) {
+  const source = Array.isArray(entries) ? entries : LEGAL_THIRD_PARTIES;
+  return source
+    .filter((item) => item && item.status === "pending")
+    .map((item) => `${item.name}: fornecedor, retenção, exclusão, transferência e política`);
+}
+
 // Direitos do art. 18. `selfService` marca o que o app já resolve sem pedido:
 // prometer atendimento humano para o que o botão já faz seria burocracia
 // inventada, e o contrário seria promessa vazia.
@@ -2503,7 +2642,7 @@ const LEGAL_SUBJECT_RIGHTS = [
   { law: "art. 18, IV", title: "Bloqueio ou eliminação de dado desnecessário", detail: "Você apaga item a item ou tudo de uma vez, e pode bloquear o envio para IA sem perder o resto.", selfService: true },
   { law: "art. 18, V", title: "Portabilidade", detail: "O backup JSON é legível por máquina e reimportável. Não há formato fechado nem retenção na saída.", selfService: true },
   { law: "art. 18, VI", title: "Eliminação dos dados tratados com consentimento", detail: "Apagar tudo no aparelho e apagar a conta online são ações separadas, e as duas existem.", selfService: true },
-  { law: "art. 18, VII", title: "Informação sobre compartilhamento", detail: "A lista de terceiros está nesta tela, e nenhum envio acontece sem ação sua.", selfService: true },
+  { law: "art. 18, VII", title: "Informação sobre compartilhamento", detail: "A lista de terceiros está nesta tela e informa quando cada serviço participa, inclusive ao abrir o domínio, usar uma conta ou confirmar uma operação externa.", selfService: true },
   { law: "art. 18, VIII", title: "Consequência de negar consentimento", detail: "Recusar o envio para IA desliga a análise por IA e o refinamento de texto. Todo o resto continua funcionando.", selfService: true },
   { law: "art. 18, IX", title: "Revogação do consentimento", detail: "O bloqueio vale a partir do momento em que você o liga. Envios já confirmados não podem ser desfeitos no destino.", selfService: true },
   { law: "art. 20", title: "Revisão de decisão automatizada", detail: "A IA sugere texto e comentário. Ela não decide nada sozinha, não altera dados e a nota que devolve é descartada.", selfService: true },
@@ -31978,12 +32117,47 @@ function renderLegalDataInventoryGroup(group) {
   </section>`;
 }
 
+function renderLegalThirdParty(item) {
+  const pending = item.status === "pending";
+  const fields = [
+    ["Quando participa", item.when],
+    ["Finalidade", item.purpose],
+    ["Dados que recebe", item.data],
+    ["Retenção", item.retention],
+    ["Como excluir", item.deletion],
+    ["Transferência internacional", item.transfer],
+  ];
+  const privacyLink = item.privacyUrl === LEGAL_PENDING
+    ? ""
+    : `<a href="${escapeHtml(item.privacyUrl)}" target="_blank" rel="noopener noreferrer">Privacidade do serviço</a>`;
+  return `<details class="legal-third-party ${pending ? "legal-third-party--pending" : ""}">
+    <summary>
+      <span class="legal-third-party__identity"><b>${escapeHtml(item.name)}</b><small>${escapeHtml(item.role)}</small></span>
+      <span class="legal-third-party__status">${pending ? "Por definir" : "Em uso"}</span>
+    </summary>
+    <dl class="legal-list">${fields.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl>
+    <div class="source-links">${privacyLink}<a href="${escapeHtml(item.evidence)}" target="_blank" rel="noopener noreferrer">Fonte técnica oficial</a></div>
+  </details>`;
+}
+
+function renderLegalThirdPartyGroup(group) {
+  const items = LEGAL_THIRD_PARTIES.filter((item) => item.group === group.id);
+  if (!items.length) return "";
+  return `<section class="legal-third-parties__group" aria-labelledby="legal-third-party-${escapeHtml(group.id)}">
+    <p class="legal-subhead" id="legal-third-party-${escapeHtml(group.id)}">${escapeHtml(group.title)}</p>
+    <p class="card-subtitle">${escapeHtml(group.detail)}</p>
+    <div class="legal-third-parties__items">${items.map(renderLegalThirdParty).join("")}</div>
+  </section>`;
+}
+
 function renderPrivacyScreen() {
   const privacy = normalizePrivacy(state.data.privacy || defaultPrivacy());
   const accepted = legalAccepted(privacy);
   const diagnostics = safeErrorSummary();
   const gaps = legalControllerGaps(LEGAL_CONTROLLER);
   const inventoryGaps = legalDataInventoryGaps(LEGAL_DATA_INVENTORY);
+  const thirdPartyGaps = legalThirdPartyGaps(LEGAL_THIRD_PARTIES);
+  const thirdPartyLaunchGaps = legalThirdPartyLaunchGaps(LEGAL_THIRD_PARTIES);
   const anteriores = privacy.acceptedVersions.filter((item) => item.version !== LEGAL_TEXT_VERSION);
   return `<div class="screen screen--narrow">
     ${renderBackHeader("Privacidade, termos e fontes")}
@@ -32031,6 +32205,18 @@ function renderPrivacyScreen() {
       <p class="card-subtitle">Cada item informa a finalidade, onde fica, por quanto tempo permanece, quem acessa, quais terceiros participam e como excluir. Abra uma categoria para ver o caminho completo.</p>
       ${inventoryGaps.length ? `<div class="financial-notice" role="alert">${svgIcon("alertTriangle", 16)}<div><p><b>Inventário incompleto.</b> Esta versão não deve ser oferecida ao público.</p><small>${escapeHtml(inventoryGaps.join("; "))}</small></div></div>` : ""}
       <div class="legal-inventory">${LEGAL_DATA_INVENTORY_GROUPS.map(renderLegalDataInventoryGroup).join("")}</div>
+    </div>
+
+    <div class="card">
+      <p class="card-title">Quem participa do tratamento</p>
+      <p class="card-subtitle">Esta lista vem das integrações encontradas no código e na publicação. Abra um serviço para ver exatamente quando ele entra e quais dados recebe.</p>
+      ${thirdPartyGaps.length ? `<div class="financial-notice" role="alert">${svgIcon("alertTriangle", 16)}<div><p><b>Registro de terceiros incompleto.</b> Esta versão não deve ser oferecida ao público.</p><small>${escapeHtml(thirdPartyGaps.join("; "))}</small></div></div>` : ""}
+      ${thirdPartyLaunchGaps.length ? `<div class="financial-notice" role="note">${svgIcon("alertTriangle", 16)}<div><p><b>Falta registrar o email de produção.</b> O fornecedor SMTP ainda não está identificado.</p><small>${escapeHtml(thirdPartyLaunchGaps.join("; "))}</small></div></div>` : ""}
+      <div class="legal-third-parties">${LEGAL_THIRD_PARTY_GROUPS.map(renderLegalThirdPartyGroup).join("")}</div>
+      <div class="legal-facts legal-facts--compact">
+        <p>${svgIcon("shieldCheck", 15)} Não há analytics, publicidade, pixels, fontes remotas ou scripts de terceiros carregados na página.</p>
+        <p>${svgIcon("phone", 15)} Sem conta e sem uma ação de rede opcional, os dados financeiros permanecem no aparelho.</p>
+      </div>
     </div>
 
     <div class="card">

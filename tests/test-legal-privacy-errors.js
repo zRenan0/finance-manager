@@ -158,7 +158,7 @@ check("histórico tem teto", run("normalizeLegalHistory(Array.from({length:40},(
 const launchDoc = read("docs/LEGAL-LAUNCH.md");
 check("pendências de lançamento apontam para o marcador no código", /LEGAL_PENDING/.test(launchDoc) && /LEGAL_CONTROLLER/.test(launchDoc));
 check("documento deixou de listar a fonte do Google como pendência", !/^\d+\. Avaliar a remoção das fontes remotas do Google/m.test(launchDoc));
-check("retenção no provedor de IA segue registrada como pendência", /retenção do provedor de IA/i.test(launchDoc));
+check("contrato efetivo do provedor de IA segue registrado como pendência", /contrato efetivo da Anthropic/i.test(launchDoc));
 
 if (originalLocalStorage) Object.defineProperty(global, "localStorage", originalLocalStorage);
 else delete global.localStorage;
