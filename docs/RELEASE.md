@@ -27,7 +27,7 @@
 ## Avisos abertos desta release
 
 Os avisos abaixo não reprovam `npm run verify:release`. Ficam registrados aqui
-para não virarem ruído aceito sem dono. Estado conferido em 25/08/2026.
+para não virarem ruído aceito sem dono. Estado conferido em 31/08/2026.
 
 ### 1. Sete campos do controlador ainda são marcadores
 
@@ -44,8 +44,9 @@ a cláusula 12 dos termos declara isso, de modo que o estado atual é coerente.
 
 **Ação:** preencher com dados reais antes de oferecer a instalação ao público, e
 subir `LEGAL_TEXT_VERSION` e `LEGAL_REVIEW_DATE` na mesma edição. A tabela com a
-base legal de cada campo está em `docs/LEGAL-LAUNCH.md`. Publicar beta continua
-liberado; oferecer ao público, não.
+base legal de cada campo está em `docs/LEGAL-LAUNCH.md`, e o inventário dos
+fluxos está em `docs/INVENTARIO-DE-DADOS.md`. Publicar beta continua liberado;
+oferecer ao público, não.
 
 ### 2 e 3. Endereços de compartilhamento relativos e `SITE_URL`
 

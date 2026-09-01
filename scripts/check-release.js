@@ -77,10 +77,13 @@ const privacyScreen = read("js/screens/privacy.js");
 check(/const LEGAL_CONTROLLER = \{/.test(storage), "identificação do controlador não está declarada em js/storage.js");
 check(/const LEGAL_RETENTION = \[/.test(storage), "prazos de retenção não estão declarados em js/storage.js");
 check(/const LEGAL_SUBJECT_RIGHTS = \[/.test(storage), "direitos do titular não estão declarados em js/storage.js");
+check(/const LEGAL_DATA_INVENTORY = \[/.test(storage), "inventário de dados não está declarado em js/storage.js");
 check(/Quem responde por estes dados/.test(privacyScreen), "a tela de privacidade não identifica o controlador");
 check(/Por quanto tempo cada coisa fica/.test(privacyScreen), "a tela de privacidade não informa prazo de retenção");
 check(/Seus direitos/.test(privacyScreen) && /art\. 18/.test(privacyScreen), "a tela de privacidade não lista os direitos do art. 18");
 check(/incidente de segurança/i.test(privacyScreen) && /art\. 48/.test(privacyScreen), "a tela de privacidade não traz canal de comunicação de incidentes");
+check(/Inventário dos dados/.test(privacyScreen) && /LEGAL_DATA_INVENTORY/.test(privacyScreen), "a tela de privacidade não renderiza o inventário de dados");
+check(fs.existsSync(path.join(root, "docs/INVENTARIO-DE-DADOS.md")), "documento operacional do inventário de dados ausente");
 
 // Já os campos que só o dono do app conhece são AVISO, não falha: eles não
 // impedem publicar o beta, impedem oferecer ao público. Reprovar aqui travaria

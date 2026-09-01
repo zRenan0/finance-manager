@@ -47,8 +47,21 @@ psql <URL_DE_STAGING> -v ON_ERROR_STOP=1 -f supabase/tests/verify_security_bound
 ```
 
 O processo de homologação, publicação e retorno está em `docs/RELEASE.md`. O schema
-de dados está na versão 23 e o cache offline na versão 60. O inventário técnico
-do armazenamento está em `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`.
+de dados está na versão 23 e o cache offline na versão 61. O inventário técnico
+do armazenamento está em `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`; o inventário de
+tratamento da LGPD está em `docs/INVENTARIO-DE-DADOS.md`.
+
+### Inventário de dados e LGPD
+
+A tela de Privacidade reúne 14 fluxos e mostra, em cada um, finalidade,
+armazenamento, retenção, acesso, terceiros e exclusão. A lista cobre dados locais,
+cópias de recuperação em JSON legível, conta sincronizada, sessão, aparelhos,
+limite de tentativas, consentimentos, diagnósticos, IA, senha vazada, nota fiscal,
+importações e arquivos exportados.
+
+Prazos que dependem da hospedagem ou do contrato do provedor de IA continuam
+marcados como pendência, sem estimativa presumida. A identificação do controlador
+também continua vazia e impede a oferta pública até receber dados reais.
 
 ### Observabilidade segura
 

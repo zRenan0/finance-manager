@@ -265,13 +265,12 @@ function isLocalSyncWriter(value) {
   return writer.startsWith(`${stable.slice(0, baseLength)}${marker}`);
 }
 const SCHEMA_VERSION = 23;  // v23; identificador do banco na origem do lançamento (FITID do OFX)
-const LEGAL_REVIEW_DATE = "2026-08-18";
+const LEGAL_REVIEW_DATE = "2026-08-31";
 // A versão sobe quando o CONTEÚDO do texto muda, não quando muda a redação.
-// Esta subiu porque a política passou a declarar controlador, retenção,
-// direitos do titular e canal de incidentes, e porque a versão anterior ainda
-// afirmava que a sincronização não estava ativa. Quem aceitou a anterior
-// aceitou outra coisa, então o aceite precisa ser pedido de novo.
-const LEGAL_TEXT_VERSION = "2026-08-18.1";
+// Esta subiu porque a política ganhou o inventário completo de dados, passou a
+// declarar as cópias locais legíveis, corrigiu o alcance da sincronização do
+// aceite e expôs os limites de exclusão depois de um envio a terceiros.
+const LEGAL_TEXT_VERSION = "2026-08-31.1";
 const MIRROR_MAX_BYTES = 3 * 1024 * 1024;
 const MIRROR_THROTTLE_MS = 1200;
 
@@ -331,9 +330,199 @@ const LEGAL_RETENTION = [
   { scope: "conta", label: "Registro de sincronização", term: "Uma linha por registro, sempre a mais recente. Marcas de exclusão são podadas depois de 24 meses." },
   { scope: "conta", label: "Versões restauráveis", term: "As 5 mais recentes. Criar a sexta apaga a mais antiga." },
   { scope: "conta", label: "Controle de envio repetido", term: "30 dias. Existe para a mesma alteração não ser aplicada duas vezes." },
-  { scope: "conta", label: "Limite de tentativas", term: "1 dia. Guarda um código derivado por HMAC, não o email nem o endereço de origem." },
+  { scope: "conta", label: "Limite de tentativas", term: "Fica elegível para remoção depois de 1 dia e é apagado na execução seguinte do limitador. Guarda um código derivado por HMAC, não o email nem o endereço de origem." },
   { scope: "conta", label: "Exclusão da conta", term: "A purga apaga sincronização, versões, aparelhos e cadastro no mesmo ato, antes de remover o usuário. Se ela falhar, a exclusão é abortada em vez de deixar resto no servidor." },
 ];
+
+// Inventário único do tratamento de dados. A tela de Privacidade renderiza esta
+// mesma estrutura, e a suíte exige as sete dimensões do M18 em cada entrada.
+// Prazos que dependem de contrato ou configuração externa ficam declarados como
+// pendência: esta lista não inventa comportamento de fornecedor.
+const LEGAL_DATA_INVENTORY_FIELDS = [
+  "data", "purpose", "storage", "retention", "access", "thirdParties", "deletion",
+];
+
+const LEGAL_DATA_INVENTORY_GROUPS = [
+  { id: "device", title: "No seu aparelho", detail: "Dados e arquivos que começam sob seu controle local." },
+  { id: "account", title: "Conta, backend e hospedagem", detail: "Dados tratados ao abrir o app, conectar uma conta ou chamar uma função do servidor." },
+  { id: "external", title: "Serviços e destinos externos", detail: "Envios que dependem de uma ação específica ou de um arquivo entregue por você." },
+];
+
+const LEGAL_DATA_INVENTORY = [
+  {
+    id: "local-financial",
+    group: "device",
+    data: "Dados financeiros, perfil e preferências neste aparelho",
+    purpose: "Registrar lançamentos, contas, cartões, metas, dívidas, patrimônio, categorias, orçamento e escolhas de interface para executar os recursos pedidos por você.",
+    storage: "IndexedDB deste navegador. Se ele não estiver disponível, o app usa localStorage; sem ambos, mantém somente a memória da aba.",
+    retention: "Enquanto os dados não forem apagados no app, o armazenamento do site não for limpo ou o perfil do navegador não for removido. Não há expiração automática dos registros financeiros.",
+    access: "Você e o código do aplicativo servido pela mesma origem. A política de conteúdo impede scripts de terceiros na página.",
+    thirdParties: "Nenhum no uso local. Sincronização, IA e consulta fiscal são fluxos separados e dependem de conta ou ação explícita.",
+    deletion: "O controle Apagar todos os dados deste aparelho remove o banco e as preferências do escopo atual. Limpar os dados do site no navegador também remove esse conteúdo.",
+  },
+  {
+    id: "local-readable-copies",
+    group: "device",
+    data: "Cópias locais de recuperação, fila, espelho e desfazer",
+    purpose: "Recuperar gravações interrompidas, permitir desfazer uma restauração e reenviar alterações cuja confirmação possa ter se perdido.",
+    storage: "IndexedDB e localStorage do aparelho. Espelho, fallback, desfazer e backup legado podem conter o snapshot financeiro em JSON legível e sem criptografia local.",
+    retention: "Espelho e fallback são reescritos; a fila sai após confirmação; o desfazer é substituído pela próxima operação compatível; o backup legado permanece até a exclusão local.",
+    access: "Você, o código da mesma origem e qualquer pessoa ou programa que já tenha acesso ao perfil local do navegador.",
+    thirdParties: "Nenhum enquanto permanecem no aparelho. A fila é enviada ao backend somente quando uma conta está ligada.",
+    deletion: "A exclusão local remove essas cópias. A barreira técnica contra o retorno de itens apagados permanece sem conteúdo financeiro.",
+  },
+  {
+    id: "synced-financial",
+    group: "account",
+    data: "Dados financeiros, perfil e preferências sincronizados",
+    purpose: "Manter a mesma base em aparelhos conectados, resolver concorrência, permitir restauração e propagar exclusões.",
+    storage: "Banco de dados do serviço de conta, em registros de sincronização, versões restauráveis, recibos de mutação e identificação do usuário.",
+    retention: "A versão atual permanece enquanto a conta existir; marcas de exclusão são podadas após 24 meses; ficam 5 versões restauráveis; recibos de repetição duram 30 dias.",
+    access: "Você pela sua sessão e o backend com credencial de serviço. As regras do banco não concedem leitura direta dessas tabelas aos papéis públicos do navegador.",
+    thirdParties: "Plataforma de hospedagem e Supabase, apenas quando há conta ligada.",
+    deletion: "Apagar a conta purga sincronização, versões e recibos antes de remover o cadastro. Apagar só este aparelho não apaga a cópia da conta.",
+  },
+  {
+    id: "account-session",
+    group: "account",
+    data: "Cadastro, autenticação, sessão e recuperação de acesso",
+    purpose: "Criar e proteger a conta, confirmar email, manter a sessão, recuperar acesso e autorizar operações vinculadas ao usuário correto.",
+    storage: "Supabase Auth e cookies HttpOnly da mesma origem. O JavaScript do app não lê os tokens de sessão.",
+    retention: "Cadastro enquanto a conta existir. Cookie de acesso por até 1 hora, renovação por 30 dias, verificador por 24 horas e prova de recuperação por 30 minutos.",
+    access: "Você, o backend e o serviço de autenticação. Senha em texto não é armazenada pelo aplicativo.",
+    thirdParties: "Plataforma de hospedagem e Supabase.",
+    deletion: "Logout limpa a sessão deste navegador. Apagar a conta remove o cadastro depois da purga dos dados vinculados.",
+  },
+  {
+    id: "connected-devices",
+    group: "account",
+    data: "Identificação e atividade dos aparelhos conectados",
+    purpose: "Reconhecer cada aparelho, mostrar sessões ativas, permitir revogação e impedir que um segredo antigo continue válido.",
+    storage: "Identificador aleatório no localStorage, segredo em cookie HttpOnly e hash do segredo, rótulo, tipo, datas e estado de revogação no banco.",
+    retention: "O identificador local é estável. O cookie do aparelho vale até 365 dias e o registro do servidor permanece enquanto a conta existir.",
+    access: "Você na lista de aparelhos e o backend. O banco recebe o hash do segredo, não o segredo legível.",
+    thirdParties: "Plataforma de hospedagem e Supabase.",
+    deletion: "Revogar encerra o acesso, mas preserva o registro para mostrar o estado. Apagar a conta remove todos os aparelhos; a exclusão local remove o escopo, mas conserva o identificador aleatório do aparelho.",
+  },
+  {
+    id: "rate-limit",
+    group: "account",
+    data: "Identificadores derivados para limite de tentativas",
+    purpose: "Conter abuso em login, cadastro, recuperação, sincronização e chamadas pagas sem manter email ou endereço de origem em texto.",
+    storage: "Banco do backend, como HMAC do identificador, nome do limite, contagem e datas da janela.",
+    retention: "A linha fica elegível para remoção depois de 1 dia e é apagada quando o limitador volta a executar.",
+    access: "Somente o backend com credencial de serviço; usuários autenticados e anônimos não recebem acesso direto à tabela.",
+    thirdParties: "Plataforma de hospedagem e Supabase.",
+    deletion: "Remoção automática na limpeza do limitador. Como a chave é derivada, o app não oferece busca individual pelo email ou endereço de origem original.",
+  },
+  {
+    id: "privacy-choices",
+    group: "account",
+    data: "Aceites dos textos e preferências de envio para IA",
+    purpose: "Saber qual versão foi aceita, pedir novo aceite quando o conteúdo muda e respeitar bloqueios ou campos retirados do pacote de IA.",
+    storage: "Configuração privacy no banco local. Com conta ligada, essa configuração também participa da sincronização entre aparelhos.",
+    retention: "Até 10 versões aceitas, enquanto os dados locais ou a conta existirem.",
+    access: "Você, o código do app e, com conta ligada, o backend de sincronização.",
+    thirdParties: "Plataforma de hospedagem e Supabase somente quando há conta ligada.",
+    deletion: "A exclusão local remove a cópia do aparelho; apagar a conta remove a cópia sincronizada. Uma dessas ações não executa a outra.",
+  },
+  {
+    id: "local-diagnostics",
+    group: "device",
+    data: "Diagnóstico local de falhas",
+    purpose: "Ajudar a identificar área, código, versão e estado de conexão de uma falha sem guardar mensagem, pilha, valores ou identificadores.",
+    storage: "localStorage deste navegador, na chave financas_safe_errors_v1.",
+    retention: "30 dias e no máximo 50 ocorrências, com poda na leitura.",
+    access: "Você pela tela de Privacidade e o código local do app.",
+    thirdParties: "Nenhum envio automático. O resumo só sai se você exportar e decidir compartilhá-lo.",
+    deletion: "O botão Apagar diagnóstico remove tudo imediatamente; a exclusão local concluída também remove a chave.",
+  },
+  {
+    id: "backend-observations",
+    group: "account",
+    data: "Observações técnicas do backend e metadados da hospedagem",
+    purpose: "Entregar o site, operar as funções, contar falhas e localizar uma requisição por código aleatório, área, operação, método, status e duração.",
+    storage: "O evento controlado vai aos logs da hospedagem sem corpo, cabeçalhos, cookies, IP, email, usuário, aparelho, mensagens, pilhas ou valores financeiros. A plataforma ainda recebe metadados normais da conexão para entregar a página ou função e pode manter seus próprios registros de acesso.",
+    retention: "Depende da configuração da plataforma e precisa ser definida antes da oferta ao público; o repositório não fixa um prazo.",
+    access: "Operadores autorizados da hospedagem. O usuário recebe o X-Request-Id da própria resposta para referência.",
+    thirdParties: "Plataforma de hospedagem.",
+    deletion: "Segue o controle de retenção e exclusão da plataforma. A configuração e o procedimento operacional continuam pendentes antes da oferta ao público.",
+  },
+  {
+    id: "ai-requests",
+    group: "external",
+    data: "Pacotes e respostas de inteligência artificial",
+    purpose: "Gerar análise financeira opcional ou interpretar uma frase de lançamento depois da prévia e confirmação do usuário.",
+    storage: "O app e o backend tratam o pacote e a resposta de forma transitória, sem gravar uma cópia própria. O provedor de IA recebe o conteúdo enviado.",
+    retention: "O app descarta o pacote e a resposta transitórios. A retenção pelo provedor precisa ser definida em contrato e política antes da oferta ao público.",
+    access: "Você, o backend durante a chamada e o provedor de IA. O pacote pode conter contexto pessoal mesmo quando usa totais ou nomes limitados.",
+    thirdParties: "Plataforma de hospedagem e provedor de IA configurado no backend.",
+    deletion: "Bloquear IA impede envios futuros. O app não consegue desfazer nem apagar no destino um pacote já confirmado; isso depende do contrato e do canal do fornecedor.",
+  },
+  {
+    id: "leaked-password-check",
+    group: "external",
+    data: "Prefixo de hash para consulta de senha vazada",
+    purpose: "Recusar senha conhecida em vazamentos sem transmitir a senha ou seu hash completo.",
+    storage: "Cinco caracteres hexadecimais do SHA-1 são enviados pelo backend ao serviço Have I Been Pwned; resultado e hash completo ficam apenas na memória da chamada.",
+    retention: "O app não persiste a consulta. Eventual retenção de prefixo e metadados de rede segue a política do serviço externo.",
+    access: "Backend e Have I Been Pwned. O serviço recebe o endereço da função, não o IP do usuário, e não recebe email nem senha.",
+    thirdParties: "Have I Been Pwned e plataforma de hospedagem.",
+    deletion: "Não há cópia no app para apagar. Dados eventualmente mantidos pelo serviço externo seguem os controles e prazos dele.",
+  },
+  {
+    id: "fiscal-lookup",
+    group: "external",
+    data: "Endereço e chave de nota fiscal consultada",
+    purpose: "Tentar preencher valor e estabelecimento a partir da página pública de uma NFC-e ou NF-e.",
+    storage: "A consulta sai do navegador para o endereço HTTPS lido do QR, restrito a domínio governamental de Sefaz ou Fazenda. A resposta é processada em memória.",
+    retention: "O app não guarda a página consultada. Se o lançamento for confirmado, os campos escolhidos entram nos dados financeiros; o portal pode manter seus próprios registros de acesso.",
+    access: "Você, o código do app e o portal fiscal. Por ser uma chamada direta, o portal também pode receber IP e metadados normais da conexão.",
+    thirdParties: "Portal fiscal oficial da Sefaz ou Fazenda indicado no QR.",
+    deletion: "Cancelar descarta a prévia. Um lançamento confirmado pode ser apagado no app, mas isso não remove registros de acesso mantidos pelo portal.",
+  },
+  {
+    id: "imported-files",
+    group: "device",
+    data: "Arquivos OFX, CSV e PDF importados e dados extraídos",
+    purpose: "Mostrar uma prévia e criar lançamentos escolhidos pelo usuário, com detecção de duplicidade e opção de desfazer a última importação.",
+    storage: "O arquivo original é lido no navegador e não é enviado. Os registros confirmados entram na base financeira; o recibo local guarda identificadores, data e nome do arquivo.",
+    retention: "O original e a prévia ficam apenas durante o fluxo. Registros confirmados seguem a retenção financeira; o recibo é substituído pela importação seguinte ou removido na exclusão local.",
+    access: "Você e o código local do app. O PDF.js também é servido pelo próprio aplicativo.",
+    thirdParties: "Nenhum no fluxo de importação.",
+    deletion: "Cancelar descarta a prévia; Desfazer importação remove somente os registros criados pelo último arquivo; a exclusão local remove registros e recibo.",
+  },
+  {
+    id: "exported-backups",
+    group: "device",
+    data: "Backups exportados e resumos de diagnóstico baixados",
+    purpose: "Permitir portabilidade, recuperação e suporte sob controle do usuário.",
+    storage: "Arquivo no local escolhido pelo usuário. O backup comum contém JSON legível; a opção protegida usa AES-GCM com senha que não é armazenada pelo app.",
+    retention: "O app não controla o arquivo depois do download. Ele permanece até ser apagado pelo usuário ou pelo serviço em que foi guardado.",
+    access: "Quem tiver acesso ao arquivo e, no backup protegido, também à senha correta.",
+    thirdParties: "Nenhum automaticamente. Serviços de nuvem, email ou outras pessoas só recebem se o usuário mover ou compartilhar o arquivo.",
+    deletion: "Apagar dados no app não apaga arquivos já exportados. O usuário precisa removê-los de cada aparelho, pasta, lixeira, nuvem ou destinatário escolhido.",
+  },
+];
+
+function legalDataInventoryGaps(inventory) {
+  const source = Array.isArray(inventory) ? inventory : LEGAL_DATA_INVENTORY;
+  const groups = new Set(LEGAL_DATA_INVENTORY_GROUPS.map((group) => group.id));
+  const seen = new Set();
+  const gaps = [];
+  source.forEach((item, index) => {
+    const id = item && typeof item.id === "string" ? item.id.trim() : "";
+    if (!/^[a-z][a-z0-9-]{2,48}$/.test(id)) gaps.push(`entrada ${index + 1}: id inválido`);
+    else if (seen.has(id)) gaps.push(`${id}: id repetido`);
+    else seen.add(id);
+    if (!item || !groups.has(item.group)) gaps.push(`${id || `entrada ${index + 1}`}: group`);
+    LEGAL_DATA_INVENTORY_FIELDS.forEach((field) => {
+      if (!item || typeof item[field] !== "string" || item[field].trim().length < 12) gaps.push(`${id || `entrada ${index + 1}`}: ${field}`);
+    });
+  });
+  if (!source.length) gaps.push("inventário vazio");
+  return gaps;
+}
 
 // Direitos do art. 18. `selfService` marca o que o app já resolve sem pedido:
 // prometer atendimento humano para o que o botão já faz seria burocracia
@@ -364,9 +553,10 @@ function normalizeAiHide(raw) {
   return Array.from(new Set(raw.filter((item) => typeof item === "string" && /^[a-z]{2,24}$/.test(item)))).slice(0, 12).sort();
 }
 
-// Histórico de aceites. Fica NESTE aparelho e por isso não é prova contra o
-// usuário; serve para o app saber o que ele já leu e mostrar o que mudou desde
-// então, em vez de apagar o aceite anterior a cada revisão do texto.
+// Histórico de aceites. Fica no aparelho e, quando há conta, acompanha a
+// configuração `privacy` sincronizada. Serve para o app saber o que já foi lido
+// e mostrar o que mudou, mas não substitui a identificação do controlador nem
+// uma trilha operacional externa quando ela for juridicamente necessária.
 const LEGAL_HISTORY_MAX = 10;
 
 function normalizeLegalHistory(raw) {

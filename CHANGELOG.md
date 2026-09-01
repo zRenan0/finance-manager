@@ -2,6 +2,22 @@
 
 ## Não publicado
 
+### O M18 passou a mostrar o caminho completo de cada dado
+
+- A política agora usa um inventário estruturado com 14 fluxos. Cada item declara
+  finalidade, armazenamento, retenção, acesso, terceiros e exclusão.
+- A tela informa que espelho, fallback, desfazer e backup legado podem conter JSON
+  financeiro legível e sem criptografia no aparelho. Também separa a exclusão do
+  app de arquivos exportados ou dados já entregues a terceiros.
+- O histórico de aceite foi corrigido para refletir o código: ele fica no aparelho
+  e participa da sincronização quando há conta. A consulta fiscal passou a declarar
+  os metadados normais da conexão, e a checagem de senha detalha o prefixo enviado
+  pelo backend ao Have I Been Pwned.
+- Retenção de logs da hospedagem e do provedor de IA permanece como bloqueador de
+  lançamento, sem prazo presumido. A identificação do controlador continua com os
+  sete marcadores externos.
+- A política subiu para `2026-08-31.1` e o cache offline para `v61`.
+
 ### O M17 passou a observar falhas sem registrar conteúdo financeiro
 
 - Conta, sincronização e análise agora devolvem `X-Request-Id` e produzem um

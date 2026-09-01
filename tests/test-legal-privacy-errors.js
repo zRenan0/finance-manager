@@ -107,7 +107,7 @@ console.log("\n4. Conteúdo obrigatório da política (LGPD)");
 check("não afirma mais que a sincronização está desligada", !/sincronização contínua dos dados financeiros ainda não está ativa/i.test(privacyScreen));
 check("descreve o que muda com conta ligada", /Com conta ligada.{0,120}sincronizados/i.test(privacyScreen));
 check("não promete mais fonte do Google", !/Fontes do Google/i.test(privacyScreen) && /tipografia é servida pelo próprio app/i.test(privacyScreen));
-check("declara a lista de terceiros que recebem dados", /Quem mais recebe dados/.test(privacyScreen) && /Portal fiscal da Sefaz/.test(privacyScreen));
+check("declara o inventário de terceiros e exclusão", /Inventário dos dados/.test(privacyScreen) && /Terceiros/.test(privacyScreen) && /Como excluir/.test(privacyScreen));
 
 check("identificação do controlador está na tela", /Quem responde por estes dados/.test(privacyScreen) && /Encarregado pelos dados/.test(privacyScreen));
 check("prazo de resposta ao titular é declarado", /art\. 19, II/.test(privacyScreen));

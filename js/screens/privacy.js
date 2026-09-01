@@ -16,11 +16,37 @@ function renderLegalRetentionGroup(scope, title, note) {
     <dl class="legal-list">${itens.map((item) => `<div><dt>${escapeHtml(item.label)}</dt><dd>${escapeHtml(item.term)}</dd></div>`).join("")}</dl>`;
 }
 
+function renderLegalDataInventoryItem(item) {
+  const fields = [
+    ["Finalidade", item.purpose],
+    ["Onde fica", item.storage],
+    ["Retenção", item.retention],
+    ["Quem acessa", item.access],
+    ["Terceiros", item.thirdParties],
+    ["Como excluir", item.deletion],
+  ];
+  return `<details class="legal-inventory__item">
+    <summary>${escapeHtml(item.data)}</summary>
+    <dl class="legal-list">${fields.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl>
+  </details>`;
+}
+
+function renderLegalDataInventoryGroup(group) {
+  const items = LEGAL_DATA_INVENTORY.filter((item) => item.group === group.id);
+  if (!items.length) return "";
+  return `<section class="legal-inventory__group" aria-labelledby="legal-inventory-${escapeHtml(group.id)}">
+    <p class="legal-subhead" id="legal-inventory-${escapeHtml(group.id)}">${escapeHtml(group.title)}</p>
+    <p class="card-subtitle">${escapeHtml(group.detail)}</p>
+    <div class="legal-inventory__items">${items.map(renderLegalDataInventoryItem).join("")}</div>
+  </section>`;
+}
+
 function renderPrivacyScreen() {
   const privacy = normalizePrivacy(state.data.privacy || defaultPrivacy());
   const accepted = legalAccepted(privacy);
   const diagnostics = safeErrorSummary();
   const gaps = legalControllerGaps(LEGAL_CONTROLLER);
+  const inventoryGaps = legalDataInventoryGaps(LEGAL_DATA_INVENTORY);
   const anteriores = privacy.acceptedVersions.filter((item) => item.version !== LEGAL_TEXT_VERSION);
   return `<div class="screen screen--narrow">
     ${renderBackHeader("Privacidade, termos e fontes")}
@@ -31,7 +57,7 @@ function renderPrivacyScreen() {
         <span class="status-badge">${accepted ? "Aceitos" : "Pendente"}</span>
       </div>
       <p class="card-subtitle">${accepted ? `Aceitos em ${fmtDateFull(String(privacy.acceptedAt).slice(0, 10))}.` : "Nenhum aceite foi presumido para dados que já existiam antes desta versão."}</p>
-      ${anteriores.length ? `<p class="card-subtitle">Você já havia aceitado ${anteriores.map((item) => `a versão ${escapeHtml(item.version)} em ${fmtDateFull(String(item.at).slice(0, 10))}`).join("; ")}. O registro fica neste aparelho.</p>` : ""}
+      ${anteriores.length ? `<p class="card-subtitle">Você já havia aceitado ${anteriores.map((item) => `a versão ${escapeHtml(item.version)} em ${fmtDateFull(String(item.at).slice(0, 10))}`).join("; ")}. O registro fica neste aparelho e, com conta ligada, acompanha a sincronização das preferências.</p>` : ""}
       ${accepted ? "" : `<button class="btn btn--primary btn--block" data-action="legal-accept">${svgIcon("checkCircle", 16)} Aceitar política e termos</button>`}
     </div>
 
@@ -55,17 +81,19 @@ function renderPrivacyScreen() {
       <p class="card-subtitle">Sem conta, lançamentos, contas financeiras, cartões, metas, dívidas, categorias e preferências ficam apenas no armazenamento deste navegador. Com conta ligada, esses mesmos registros passam a ser sincronizados com o servidor para aparecerem em outros aparelhos, junto com email, sessão e identificação dos aparelhos.</p>
       <div class="legal-facts">
         <p>${svgIcon("shieldCheck", 15)} O backup JSON é criado apenas quando você toca em exportar.</p>
-        <p>${svgIcon("wifi", 15)} Precisam de rede: a sincronização com conta, a IA e a consulta opcional de nota fiscal ao portal da Sefaz.</p>
+        <p>${svgIcon("archive", 15)} Espelho, fallback, desfazer e backup legado podem conter seus dados em JSON legível e sem criptografia neste aparelho.</p>
+        <p>${svgIcon("wifi", 15)} Precisam de rede: a conta, a IA, a checagem de senha vazada e a consulta opcional de nota fiscal ao portal da Sefaz.</p>
         <p>${svgIcon("file", 15)} A tipografia é servida pelo próprio app. Nenhuma fonte, métrica ou script de terceiro carrega junto com a página.</p>
         <p>${svgIcon("phone", 15)} Apagar a conta online (tela Conta e acesso) e apagar os dados deste aparelho são ações separadas. Uma não faz a outra.</p>
       </div>
-      <p class="legal-subhead">Quem mais recebe dados</p>
-      <dl class="legal-list">
-        <div><dt>Hospedagem e banco de dados</dt><dd>Recebem o que você sincroniza quando há conta ligada. Sem conta, não recebem nada.</dd></div>
-        <div><dt>Provedor de IA</dt><dd>Recebe o pacote mostrado na prévia, e só depois da sua confirmação. O app não guarda cópia do que foi enviado.</dd></div>
-        <div><dt>Portal fiscal da Sefaz</dt><dd>Recebe a chave da nota apenas quando você usa a leitura de QR code.</dd></div>
-      </dl>
       <div class="source-links"><a href="https://www.gov.br/anpd/pt-br/assuntos/titular-de-dados-1/direito-dos-titulares" target="_blank" rel="noopener noreferrer">Direitos do titular na ANPD</a><a href="https://www.planalto.gov.br/ccivil_03/_ato2015-2018/2018/lei/l13709compilado.htm" target="_blank" rel="noopener noreferrer">Lei Geral de Proteção de Dados</a></div>
+    </div>
+
+    <div class="card">
+      <p class="card-title">Inventário dos dados</p>
+      <p class="card-subtitle">Cada item informa a finalidade, onde fica, por quanto tempo permanece, quem acessa, quais terceiros participam e como excluir. Abra uma categoria para ver o caminho completo.</p>
+      ${inventoryGaps.length ? `<div class="financial-notice" role="alert">${svgIcon("alertTriangle", 16)}<div><p><b>Inventário incompleto.</b> Esta versão não deve ser oferecida ao público.</p><small>${escapeHtml(inventoryGaps.join("; "))}</small></div></div>` : ""}
+      <div class="legal-inventory">${LEGAL_DATA_INVENTORY_GROUPS.map(renderLegalDataInventoryGroup).join("")}</div>
     </div>
 
     <div class="card">
@@ -150,8 +178,8 @@ function renderPrivacyScreen() {
         <p><b>5. Disponibilidade.</b> Não há garantia de funcionamento ininterrupto, de preservação de dados no servidor nem de prazo de atendimento além do prazo legal de resposta ao titular. Recursos que dependem de rede podem ficar indisponíveis sem aviso.</p>
         <p><b>6. Limite de responsabilidade.</b> O aplicativo é fornecido no estado em que se encontra. Ele não responde por decisão financeira tomada com base nas estimativas, por perda de dados no seu aparelho nem por indisponibilidade de terceiros. Esta cláusula não afasta direitos do consumidor previstos em lei.</p>
         <p><b>7. Uso indevido.</b> É vedado tentar acessar conta alheia, contornar limites de uso, automatizar chamadas às funções do servidor ou usar o aplicativo para atividade ilícita. A conta usada dessa forma pode ser encerrada.</p>
-        <p><b>8. Propriedade.</b> O código e o conteúdo do aplicativo pertencem ao seu titular. Os dados financeiros que você registra pertencem a você, e o app não os usa para publicidade, perfilamento comercial, venda a terceiros ou treinamento de modelo.</p>
-        <p><b>9. Mudanças nos textos.</b> Alteração de conteúdo sobe a versão do texto e o aceite é pedido de novo. O aceite anterior permanece registrado neste aparelho. Continuar usando sem aceitar mantém o app funcionando localmente, com os envios opcionais desligados.</p>
+        <p><b>8. Propriedade.</b> O código e o conteúdo do aplicativo pertencem ao seu titular. Os dados financeiros que você registra pertencem a você, e o app não os usa por conta própria para publicidade, perfilamento comercial, venda a terceiros ou treinamento de modelo. O tratamento pelo provedor de IA depende do contrato e da política dele.</p>
+        <p><b>9. Mudanças nos textos.</b> Alteração de conteúdo sobe a versão do texto e o aceite é pedido de novo. O aceite anterior permanece no histórico e, com conta ligada, acompanha a configuração sincronizada. Continuar usando sem aceitar mantém o app funcionando localmente, com os envios opcionais desligados.</p>
         <p><b>10. Encerramento.</b> Você pode encerrar quando quiser apagando os dados deste aparelho e, se houver, a conta online. Nenhuma das duas ações exige pedido, aprovação ou espera.</p>
         <p><b>11. Lei e foro.</b> Aplica-se a lei brasileira. O foro é o do domicílio do consumidor, na forma do Código de Defesa do Consumidor.</p>
         <p><b>12. Estado desta instalação.</b> ${gaps.length ? "Enquanto a identificação do controlador e o canal de atendimento não forem definidos, esta instalação deve ser tratada como versão local em desenvolvimento e não deve ser oferecida ao público." : "Identificação do controlador e canal de atendimento definidos."}</p>

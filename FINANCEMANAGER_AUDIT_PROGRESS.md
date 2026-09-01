@@ -12,7 +12,9 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 
 | Campo | Valor |
 |---|---|
-| Módulo atual | **M16 - Testes de segurança** (concluído) |
+| Módulo atual | **M18 - Inventário de dados e LGPD** (concluído) |
+| Status do M18 | **CONCLUÍDO** - 14 fluxos mapeados em finalidade, armazenamento, retenção, acesso, terceiros e exclusão; política e inventário operacional usam a mesma fonte estruturada; pendências externas preservadas sem dados presumidos |
+| Status do M17 | **CONCLUÍDO** - observações estruturadas no backend com `X-Request-Id`, diagnóstico local ampliado e Service Worker monitorado sem registrar conteúdo financeiro ou enviar diagnóstico automaticamente |
 | Status do M16 | **CONCLUÍDO** - os nove vetores do roteiro possuem prova defensiva; 22 verificações novas nos handlers reais e contrato SQL somente leitura para desenvolvimento ou staging; nenhuma falha de produção confirmada |
 | Status do M15 | **CONCLUÍDO** - ações financeiras críticas cobertas por comportamento; agregação V8 corrigida; cobertura real em 79,0% global e 41,7% em `js/actions.js`, com pisos de 75% e 35% |
 | Status do M14 | **CONCLUÍDO** - duplicidade passou a olhar a descrição e a ter quatro motivos distintos, o FITID do OFX é lido e guardado, e existe desfazer da última importação; schema local em 23 |
@@ -29,10 +31,10 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 | Status do M3 | **CONCLUÍDO** — aplicado e confirmado no banco em 2026-08-28 |
 | Status do M2 | **CONCLUÍDO** — nenhuma vulnerabilidade de autorização; invariantes travados por teste |
 | Status do M1 | **CONCLUÍDO** — aplicado e confirmado; gatilho capturado e versionado |
-| Módulos concluídos | M0, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15, M16 |
-| Próximo módulo | M17 - Observabilidade |
+| Módulos concluídos | M0, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15, M16, M17, M18 |
+| Próximo módulo | M19 - Transparência de terceiros |
 | Branch | `deploy-atualizado` (árvore limpa no início do M0) |
-| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `tests/test-cloud-sync.js`, `tests/test-account-backend.js`, `tests/test-critical-actions.js`, `tests/test-coverage.js`, `tests/test-security-adversarial.js`, `supabase/tests/verify_security_boundary.sql`, `scripts/check-deploy.js`, `scripts/serve.js`, `scripts/coverage.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/storage.js`, `js/cloud-sync.js` (M10), `js/analytics.js`, `js/forecast.js`, `js/wrapped.js`, `js/screens/analytics.js` (M11), `js/backup-crypto.js` (**novo**), `js/app.js`, `js/actions.js`, `js/storage.js`, `js/screens/settings.js`, `css/components.css`, `scripts/build-app-module.js` (M12), `netlify/functions/sync.js` (M13), `js/import.js`, `netlify/functions/_shared/finance-schema.js` (M14), `js/modules/app.generated.js` (regerado). Documentação: inventário do M8, protocolo do M10, backup protegido do M12, `docs/VERSIONAMENTO.md` do M13 e desenhos dos testes M15/M16. |
+| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `tests/test-cloud-sync.js`, `tests/test-account-backend.js`, `tests/test-critical-actions.js`, `tests/test-coverage.js`, `tests/test-security-adversarial.js`, `tests/test-observability.js`, `tests/test-data-inventory-lgpd.js`, `supabase/tests/verify_security_boundary.sql`, `scripts/check-deploy.js`, `scripts/serve.js`, `scripts/coverage.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/storage.js`, `js/cloud-sync.js` (M10), `js/analytics.js`, `js/forecast.js`, `js/wrapped.js`, `js/screens/analytics.js` (M11), `js/backup-crypto.js`, `js/app.js`, `js/actions.js`, `js/storage.js`, `js/screens/settings.js`, `css/components.css`, `scripts/build-app-module.js` (M12), `netlify/functions/sync.js` (M13), `js/import.js`, `netlify/functions/_shared/finance-schema.js` (M14), observabilidade em backend, frontend e Service Worker (M17), inventário e tela de Privacidade (M18), `js/modules/app.generated.js` (regerado). Documentação: inventário do M8, protocolo do M10, backup protegido do M12, `docs/VERSIONAMENTO.md` do M13, observabilidade do M17, inventário LGPD do M18 e desenhos de M15 a M18. |
 | Migration do M13 | `20260831120000_database_schema_version.sql` — **aplicada e confirmada em produção em 2026-08-31** (`database_schema_version = 1`; grants inalterados: só `service_role` e `postgres`). Reversível por `alter table public.cofre_sync_config drop column if exists database_schema_version;` |
 | Migrations criadas até aqui | `20260828120000_rls_auto_enable_least_privilege.sql`, `20260828130000_rls_auto_enable_versionada.sql`, `20260828140000_menor_privilegio_tabelas.sql` (as três **aplicadas e confirmadas em 2026-08-28**), `20260828150000_rls_auto_enable_gatilho.sql` (**ainda não aplicada**; é no-op em produção, onde o gatilho já existe) |
 | Versão do app | `0.30.0` (package.json) |
@@ -2276,6 +2278,107 @@ staging conectado; isso não pede alteração no banco.
 
 ---
 
+## M17 - Observabilidade
+
+### Resultado
+
+Conta, sincronização e análise agora produzem um evento JSON controlado com
+área, operação, método, status, duração, código e identificador aleatório da
+requisição. O mesmo `X-Request-Id` volta na resposta. Corpo, cabeçalhos, cookies,
+IP, email, identificadores de usuário ou aparelho, mensagens, pilhas e valores
+financeiros não entram no evento.
+
+O diagnóstico do navegador ganhou áreas de autenticação, API e Service Worker,
+mas continua local, limitado a 30 dias e 50 ocorrências e sem envio automático.
+O Service Worker comunica apenas área e código permitidos.
+
+### Alterações
+
+| Arquivo | Motivo |
+|---|---|
+| `netlify/functions/_shared/observability.js` | evento seguro e correlação por requisição |
+| `netlify/functions/account.js`, `sync.js`, `analyze.js` | cobertura das funções públicas |
+| `js/safe-errors.js`, `js/auth.js`, `js/app.js`, `service-worker.js` | diagnóstico local das novas áreas e falhas do pacote |
+| `docs/OBSERVABILIDADE.md` | contrato dos campos e procedimento de consulta |
+| `tests/test-observability.js` | **novo**; 18 verificações do evento, exceção, funções e cliente |
+
+### Testes
+
+| Teste | Resultado |
+|---|---|
+| `node tests/test-observability.js` | **PASSOU**; 18 ok, 0 falhas |
+| `npm run lint` | **PASSOU**; 0 erro, 0 aviso |
+| `npm test` | **PASSOU**; 64 arquivos |
+| `npm run test:coverage` | **PASSOU**; 79,0% global e 41,7% em `js/actions.js` |
+| Matrizes de navegador, PWA e landing | **PASSOU** |
+
+### Status
+
+**CONCLUÍDO.** Nenhum serviço externo de monitoramento foi adicionado. O prazo
+dos logs da plataforma não foi inventado e passou para o inventário do M18.
+
+---
+
+## M18 - Inventário de dados e LGPD
+
+### Resultado
+
+`LEGAL_DATA_INVENTORY` passou a mapear 14 fluxos com as seis dimensões do roteiro:
+finalidade, armazenamento, retenção, acesso, terceiros e exclusão. A tela de
+Privacidade renderiza essa fonte em itens expansíveis, e o documento operacional
+liga cada fluxo ao código que o implementa.
+
+A revisão encontrou duas diferenças entre o texto antigo e o comportamento real.
+O aceite faz parte da configuração sincronizada quando há conta, e a consulta
+fiscal sai diretamente do navegador, permitindo que o portal receba IP e
+metadados normais da conexão. Os dois pontos foram corrigidos na política.
+
+A política também passou a declarar que as cópias locais de recuperação podem
+ser JSON legível e sem criptografia e que apagar dados do app não alcança backup
+exportado, chamada já enviada à IA nem registro mantido por portal externo.
+
+### Alterações
+
+| Arquivo | Motivo |
+|---|---|
+| `js/storage.js` | fonte estruturada, validador, versão legal `2026-08-31.1` e retenção precisa do limite de tentativas |
+| `js/screens/privacy.js`, `css/screens/legal.css` | inventário acessível e avisos corrigidos |
+| `docs/INVENTARIO-DE-DADOS.md` | **novo**; matriz operacional e fontes de código |
+| `docs/LEGAL-LAUNCH.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `docs/RELEASE.md` | pendências e fluxos externos atualizados |
+| `tests/test-data-inventory-lgpd.js` | **novo**; 35 verificações de estrutura, agrupamento e correspondência |
+| `scripts/check-release.js` | presença do inventário vira condição da publicação |
+| `service-worker.js` | pacote offline promovido para `v61` |
+
+### Compatibilidade
+
+Schema financeiro, IndexedDB, protocolo de sincronização e APIs permanecem
+inalterados. A mudança material da política pede novo aceite e preserva o
+histórico anterior. Os sete campos do controlador, a retenção dos logs e o
+contrato de retenção e exclusão da IA continuam como decisões externas.
+
+### Testes
+
+| Teste | Resultado |
+|---|---|
+| `node tests/test-data-inventory-lgpd.js` | **PASSOU**; 35 ok, 0 falhas |
+| `node tests/test-legal-privacy-errors.js` | **PASSOU**; 60 ok, 0 falhas |
+| `node tests/test-storage-privacy-inventory.js` | **PASSOU**; 69 ok, 0 falhas |
+| `node tests/test-versioning.js` | **PASSOU**; 44 ok, 0 falhas |
+| `npm run lint` | **PASSOU**; 0 erro, 0 aviso |
+| `npm test` | **PASSOU**; 65 arquivos |
+| `npm run test:coverage` | **PASSOU**; 79,1% global e 41,7% em `js/actions.js` |
+| `npm run check:build`, `check:release`, `build:dist` | **PASSOU**; 71 fontes e pacote com 38 arquivos; avisos externos conhecidos preservados |
+| `npm run test:browser` | **PASSOU**; 18 de 18 em Chromium, Firefox e WebKit |
+| `npm run test:pwa` | **PASSOU**; shell, landing, dados locais, limpeza e API fora do cache |
+| `npm run test:landing` | **PASSOU**; 18 de 18 |
+
+### Status
+
+**CONCLUÍDO.** Inventário, política, documentação, publicação e fluxos de navegador
+foram validados. As pendências restantes dependem de dados e contratos externos.
+
+---
+
 ## Checklist de regressão
 
 Executar após **todo** módulo que toque no código. Marcar `OK` / `FALHOU` / `NÃO VALIDADO`.
@@ -2284,7 +2387,7 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
 ### A. Automatizado (CI ou máquina com Node) — porta de entrada obrigatória
 
 - [ ] `npm run lint`
-- [ ] `npm test` (63 arquivos)
+- [ ] `npm test` (65 arquivos)
 - [ ] `node tests/test-accounting-integrity.js` (invariantes contábeis do M11)
 - [ ] `node tests/test-backup-restore.js` (backup, restauração e senha do M12)
 - [ ] `node tests/test-versioning.js` (versões e matriz de compatibilidade do M13)
@@ -2292,6 +2395,8 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
 - [ ] `node tests/test-critical-actions.js` (ações financeiras críticas do M15)
 - [ ] `node tests/test-coverage.js` (agregação de cobertura do M15)
 - [ ] `node tests/test-security-adversarial.js` (matriz defensiva do M16)
+- [ ] `node tests/test-observability.js` (contrato de eventos do M17)
+- [ ] `node tests/test-data-inventory-lgpd.js` (matriz de tratamento do M18)
 - [ ] `npm run check:build` (o `app.generated.js` publicado corresponde às fontes)
 - [ ] `npm run check:release`
 - [ ] `npm run build:dist`

@@ -5,6 +5,10 @@ sair do aparelho e quais versões controlam cada formato. O código continua
 sendo a fonte de verdade. O teste `tests/test-storage-privacy-inventory.js`
 impede que as chaves principais e este inventário se afastem.
 
+O inventário de tratamento do M18, com finalidade, retenção, acesso, terceiros e
+exclusão de cada classe, está em `docs/INVENTARIO-DE-DADOS.md` e na estrutura
+`LEGAL_DATA_INVENTORY`, usada pela tela de Privacidade.
+
 ## Versões atuais
 
 | Contrato | Versão | Fonte |
@@ -12,7 +16,7 @@ impede que as chaves principais e este inventário se afastem.
 | Schema lógico dos dados | 23 | `SCHEMA_VERSION` em `js/storage.js` e `netlify/functions/_shared/finance-schema.js` |
 | Estrutura física do IndexedDB | 4 | `DB_VERSION` em `js/storage.js` |
 | Protocolo de sincronização | 3 | `CLOUD_SYNC_PROTOCOL` no cliente e `SYNC_PROTOCOL` no servidor |
-| Pacote do cache offline | v60 | `VERSION` em `service-worker.js` |
+| Pacote do cache offline | v61 | `VERSION` em `service-worker.js` |
 
 As duas primeiras versões não são a mesma coisa. O schema lógico sobe quando o
 formato ou o significado dos dados muda. A versão física sobe somente quando um
@@ -69,7 +73,7 @@ Versão física atual: 4.
 | `categories` | Categorias e limites | Sim | Sim |
 | `goals` | Metas | Sim | Sim |
 | `assets` | Bens, investimentos e dívidas | Sim | Sim |
-| `settings` | Renda, contas, cartões, movimentos internos, preferências, avisos, consentimentos, lápides e versão lógica | Sim, com seleção explícita de campos | Parcialmente |
+| `settings` | Renda, contas, cartões, movimentos internos, preferências, avisos, consentimentos, lápides e versão lógica | Sim, com seleção explícita de campos | Parcialmente; `privacy` participa |
 | `outbox` | Operações ainda não confirmadas pelo servidor, inclusive o registro completo em operações de gravação | Não | É a fila de envio |
 | `localMeta` | Cursor, recibos e diários de semeadura, vínculo, reconciliação e lote de envio em voo | Não | Não |
 
@@ -114,12 +118,12 @@ repetir com segurança uma chamada cuja resposta possa ter se perdido.
 
 | Cache | Conteúdo |
 |---|---|
-| `financas-cache-v60` | HTML do app, CSS, JavaScript, PDF.js, fontes locais, manifesto e ícones |
-| `financas-pages-v60` | Landing e outras navegações públicas |
-| `financas-fonts-v60` | Reserva para fontes externas; vazio hoje porque `FONT_HOSTS` está vazio |
+| `financas-cache-v61` | HTML do app, CSS, JavaScript, PDF.js, fontes locais, manifesto e ícones |
+| `financas-pages-v61` | Landing e outras navegações públicas |
+| `financas-fonts-v61` | Reserva para fontes externas; vazio hoje porque `FONT_HOSTS` está vazio |
 
 No pacote publicado, cada nome recebe ainda o SHA-256 integral da publicação
-depois de `v60`. Isso faz duas versões coexistirem durante a instalação sem que
+depois de `v61`. Isso faz duas versões coexistirem durante a instalação sem que
 a nova escrita altere o cache usado pelo worker anterior.
 
 Somente requisições GET podem entrar no service worker. Qualquer caminho sob
@@ -154,7 +158,9 @@ da conta.
 | Ligar uma conta | Backend da mesma origem e Supabase | Registros selecionados pelo protocolo de sincronização, email, sessão e identificação dos aparelhos |
 | Pedir análise por IA | `/api/analyze` e provedor de IA | Totais mensais, nomes de categorias, nomes e valores de metas, histórico e regras escolhidas na prévia; não é anônimo porque nomes podem revelar contexto |
 | Pedir refinamento de lançamento | `/api/analyze` e provedor de IA | Frase digitada e nomes das categorias |
-| Consultar QR de nota fiscal | Portal oficial da Sefaz | Chave da nota, somente depois da ação do usuário |
+| Cadastrar ou trocar senha | Backend e Have I Been Pwned | Cinco caracteres do SHA-1 enviados pelo servidor; sem senha, email ou IP do usuário |
+| Usar conta, sincronização ou IA | Logs da hospedagem | Área, operação, método, status, duração, código controlado e `X-Request-Id`; sem corpo, IP, email ou conteúdo financeiro |
+| Consultar QR de nota fiscal | Portal oficial da Sefaz | Endereço e chave da nota depois da ação do usuário; como a chamada sai do navegador, o portal pode receber IP e metadados normais da conexão |
 | Exportar backup | Arquivo escolhido pelo usuário | Snapshot financeiro versionado com checksum |
 | Exportar backup protegido | Arquivo escolhido pelo usuário | O mesmo snapshot dentro de um envelope AES-GCM; fora dele ficam apenas o rótulo do formato, os parâmetros do derivador e a data |
 

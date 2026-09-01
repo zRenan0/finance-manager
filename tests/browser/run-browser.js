@@ -1097,6 +1097,14 @@ async function runOnboardingViewportM4(browser, scenario) {
     await page.waitForSelector('[data-action="privacy-ai-mode"][data-value="blocked"]');
     assert((await page.locator("h1").textContent()).includes("Privacidade"), "a central de privacidade não abriu");
 
+    const inventory = page.locator(".legal-inventory");
+    assert(await inventory.locator(".legal-inventory__group").count() === 3, "o inventário não separou aparelho, conta e serviços externos");
+    assert(await inventory.locator(".legal-inventory__item").count() === 14, "o inventário não mostrou os 14 fluxos");
+    const firstInventoryItem = inventory.locator(".legal-inventory__item").first();
+    await firstInventoryItem.locator("summary").click();
+    assert(await firstInventoryItem.getAttribute("open") !== null, "o item do inventário não abriu");
+    assert(await firstInventoryItem.locator("dt").count() === 6, "o item não mostrou as seis dimensões do tratamento");
+
     const blocked = page.locator('[data-action="privacy-ai-mode"][data-value="blocked"]');
     await blocked.click();
     assert(await blocked.getAttribute("aria-checked") === "true", "o bloqueio da IA não foi gravado");
