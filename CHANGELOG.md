@@ -2,6 +2,23 @@
 
 ## Não publicado
 
+### O M23 deu à landing o mapa que faltava
+
+- Nova seção "A proposta" entre o problema e a demonstração, com os três pilares
+  na ordem em que a pessoa vive o dinheiro: **entenda seu dinheiro**, **planeje
+  seu mês**, **construa seu patrimônio**. Cada pilar diz o que resolve, lista três
+  capacidades concretas e leva à seção que o prova mais adiante.
+- **Nada foi removido.** As nove funcionalidades do bento, os nove simuladores, a
+  história das quatro telas, a comparação com a planilha, a seção de segurança, os
+  passos, o preço e o FAQ continuam onde estavam, na mesma ordem. A seção nova
+  ordena o que já existia em vez de substituir.
+- O design e as animações foram preservados: a seção usa o mesmo shell, o mesmo
+  cabeçalho, o mesmo kicker e o `.lp-reveal` que o restante da página já usava,
+  com a mesma escada de atraso do bento.
+- O cache offline subiu para `v63`. A folha da landing é servida por
+  stale-while-revalidate, então sem a promoção quem já tinha a página em cache
+  receberia o HTML novo com o CSS antigo, e veria a seção sem estilo nenhum.
+
 ### O M22 resolveu a confusão entre o nome e o endereço
 
 - Ficou decidido e escrito: **o produto se chama Cofre e `financemanager.dev.br`

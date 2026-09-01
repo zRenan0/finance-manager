@@ -12,7 +12,8 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 
 | Campo | Valor |
 |---|---|
-| Módulo atual | **M22 - Arquitetura de marca** (concluído) |
+| Módulo atual | **M23 - Landing page** (concluído) |
+| Status do M23 | **CONCLUÍDO** - seção dos três pilares entre o problema e a demonstração, sem remover nenhuma funcionalidade da página e sem tocar no bento; cache promovido para `v63` porque a folha da landing é stale-while-revalidate |
 | Status do M22 | **CONCLUÍDO** - decisão registrada (produto = Cofre, `financemanager.dev.br` = endereço), superfícies padronizadas, aplicativo em `noindex` e identificadores congelados travados por teste contra faxina de marca |
 | Status do M21 | **CONCLUÍDO** - página pública `/reportar-vulnerabilidade`, `SECURITY.md` e `security.txt` gerado no build (RFC 9116), verificados em navegador real e em produção pelo `check:deploy`; nenhum endereço inventado enquanto `incidentEmail` for marcador |
 | Status do M20 | **CONCLUÍDO** - `SECURITY_INCIDENT_RESPONSE.md` cobre as oito fases com as alavancas reais do sistema; teste novo amarra cada código, rota, RPC e variável citada ao código; `check:release` passou a exigir o documento. **Achado independente:** 5 arquivos de teste falham por fixture dependente de data, e a falha já existia em `HEAD` |
@@ -35,10 +36,10 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 | Status do M3 | **CONCLUÍDO** — aplicado e confirmado no banco em 2026-08-28 |
 | Status do M2 | **CONCLUÍDO** — nenhuma vulnerabilidade de autorização; invariantes travados por teste |
 | Status do M1 | **CONCLUÍDO** — aplicado e confirmado; gatilho capturado e versionado |
-| Módulos concluídos | M0, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15, M16, M17, M18, M19, M20, M21, M22 |
-| Próximo módulo | M23 - Landing page (hierarquia em três pilares, preservando o design) |
+| Módulos concluídos | M0, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15, M16, M17, M18, M19, M20, M21, M22, M23 |
+| Próximo módulo | M24 - Onboarding curto (valor em menos de dois minutos) |
 | Branch | `deploy-atualizado` (árvore limpa no início do M0) |
-| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `tests/test-cloud-sync.js`, `tests/test-account-backend.js`, `tests/test-critical-actions.js`, `tests/test-coverage.js`, `tests/test-security-adversarial.js`, `tests/test-observability.js`, `tests/test-data-inventory-lgpd.js`, `tests/test-third-party-transparency.js`, `supabase/tests/verify_security_boundary.sql`, `scripts/check-deploy.js`, `scripts/serve.js`, `scripts/coverage.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/storage.js`, `js/cloud-sync.js` (M10), `js/analytics.js`, `js/forecast.js`, `js/wrapped.js`, `js/screens/analytics.js` (M11), `js/backup-crypto.js`, `js/app.js`, `js/actions.js`, `js/storage.js`, `js/screens/settings.js`, `css/components.css`, `scripts/build-app-module.js` (M12), `netlify/functions/sync.js` (M13), `js/import.js`, `netlify/functions/_shared/finance-schema.js` (M14), observabilidade em backend, frontend e Service Worker (M17), inventário e tela de Privacidade (M18), registro de terceiros e operadores (M19), `js/modules/app.generated.js` (regerado). Documentação: inventário do M8, protocolo do M10, backup protegido do M12, `docs/VERSIONAMENTO.md` do M13, observabilidade do M17, inventário LGPD do M18, terceiros do M19 e desenhos de M15 a M19. **M20 (só documentação e verificação, nenhum arquivo de produção):** `SECURITY_INCIDENT_RESPONSE.md` (novo), `tests/test-incident-response.js` (novo), `scripts/check-release.js`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. **M21:** `reportar-vulnerabilidade.html` (novo), `css/reportar.css` (novo), `SECURITY.md` (novo), `scripts/security-txt.js` (novo), `tests/test-responsible-disclosure.js` (novo), `vercel.json`, `scripts/build-dist.js`, `scripts/serve.js`, `scripts/check-release.js`, `scripts/check-deploy.js`, `landing.html`, `tests/test-landing.js`, `tests/browser/run-landing.js`, `SECURITY_INCIDENT_RESPONSE.md`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. **M22:** `docs/MARCA.md` (novo), `tests/test-brand.js` (novo), `index.html`, `manifest.webmanifest`, `landing.html`, `scripts/check-release.js`, `scripts/security-txt.js`, `SECURITY.md`, `SECURITY_INCIDENT_RESPONSE.md`, `README.md`, `CHANGELOG.md`. |
+| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `tests/test-cloud-sync.js`, `tests/test-account-backend.js`, `tests/test-critical-actions.js`, `tests/test-coverage.js`, `tests/test-security-adversarial.js`, `tests/test-observability.js`, `tests/test-data-inventory-lgpd.js`, `tests/test-third-party-transparency.js`, `supabase/tests/verify_security_boundary.sql`, `scripts/check-deploy.js`, `scripts/serve.js`, `scripts/coverage.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/storage.js`, `js/cloud-sync.js` (M10), `js/analytics.js`, `js/forecast.js`, `js/wrapped.js`, `js/screens/analytics.js` (M11), `js/backup-crypto.js`, `js/app.js`, `js/actions.js`, `js/storage.js`, `js/screens/settings.js`, `css/components.css`, `scripts/build-app-module.js` (M12), `netlify/functions/sync.js` (M13), `js/import.js`, `netlify/functions/_shared/finance-schema.js` (M14), observabilidade em backend, frontend e Service Worker (M17), inventário e tela de Privacidade (M18), registro de terceiros e operadores (M19), `js/modules/app.generated.js` (regerado). Documentação: inventário do M8, protocolo do M10, backup protegido do M12, `docs/VERSIONAMENTO.md` do M13, observabilidade do M17, inventário LGPD do M18, terceiros do M19 e desenhos de M15 a M19. **M20 (só documentação e verificação, nenhum arquivo de produção):** `SECURITY_INCIDENT_RESPONSE.md` (novo), `tests/test-incident-response.js` (novo), `scripts/check-release.js`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. **M21:** `reportar-vulnerabilidade.html` (novo), `css/reportar.css` (novo), `SECURITY.md` (novo), `scripts/security-txt.js` (novo), `tests/test-responsible-disclosure.js` (novo), `vercel.json`, `scripts/build-dist.js`, `scripts/serve.js`, `scripts/check-release.js`, `scripts/check-deploy.js`, `landing.html`, `tests/test-landing.js`, `tests/browser/run-landing.js`, `SECURITY_INCIDENT_RESPONSE.md`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. **M22:** `docs/MARCA.md` (novo), `tests/test-brand.js` (novo), `index.html`, `manifest.webmanifest`, `landing.html`, `scripts/check-release.js`, `scripts/security-txt.js`, `SECURITY.md`, `SECURITY_INCIDENT_RESPONSE.md`, `README.md`, `CHANGELOG.md`. **M23:** `landing.html`, `css/landing.css`, `service-worker.js` (v63), `tests/test-brand.js`, `tests/test-responsible-disclosure.js`, `tests/test-third-party-transparency.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. |
 | Migration do M13 | `20260831120000_database_schema_version.sql` — **aplicada e confirmada em produção em 2026-08-31** (`database_schema_version = 1`; grants inalterados: só `service_role` e `postgres`). Reversível por `alter table public.cofre_sync_config drop column if exists database_schema_version;` |
 | Migrations criadas até aqui | `20260828120000_rls_auto_enable_least_privilege.sql`, `20260828130000_rls_auto_enable_versionada.sql`, `20260828140000_menor_privilegio_tabelas.sql` (as três **aplicadas e confirmadas em 2026-08-28**), `20260828150000_rls_auto_enable_gatilho.sql` (**ainda não aplicada**; é no-op em produção, onde o gatilho já existe) |
 | Versão do app | `0.30.0` (package.json) |
@@ -2732,6 +2733,84 @@ Open Graph próprio, então um link direto para `/index.html` compartilhado em r
 social não gera cartão. A landing é a página de compartilhamento e tem o conjunto
 completo; resolver isso exigiria estender a absolutização de endereços do build
 para uma segunda página, o que é custo sem retorno hoje.
+
+---
+
+## M23 - Landing page
+
+### Antes
+
+A landing já é boa e a ordem dela já estava certa: problema, quatro telas,
+recursos, momento wow, simuladores, comparação, segurança, passos, preço, FAQ,
+chamada final. O que faltava não era conteúdo nem ordem, era **o mapa**: o leitor
+saía de "cadê o dinheiro?" e caía direto em quatro telas e nove cartões de
+recurso, sem uma gaveta onde guardar o que estava vendo.
+
+### Alterações
+
+| Arquivo | Motivo |
+|---|---|
+| `landing.html` | seção nova "A proposta", entre o problema e a demonstração |
+| `css/landing.css` | bloco 27, só o que não existia (cartão de pilar, lista, link) |
+| `service-worker.js` | `v62` para `v63` |
+| `tests/test-brand.js`, `test-responsible-disclosure.js`, `test-third-party-transparency.js` | fixavam o número da versão do cache |
+| `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md` | versão do cache publicada |
+
+### Motivo
+
+Os três pilares entram **onde a pergunta nasce**: logo depois de "Tudo isso cabe
+em uma tela só" e antes da demonstração. Eles respondem "e o que isso faz por
+mim?" em três movimentos, na ordem em que a pessoa vive o dinheiro, e cada um
+aponta para a seção que o prova (`#historia`, `#recursos`, `#simuladores`).
+
+**O que NÃO foi feito, e por quê.** O caminho óbvio seria reagrupar os nove
+cartões do bento sob os três pilares. Não foi feito: o bento é uma grade de 6
+colunas cujos `span` ladrilham exatamente (3+3, 4+2, 2+2+2, 3+3), e qualquer
+reagrupamento por pilar quebra a conta — "ENTENDA" sozinho daria 3+2+3+2, que não
+fecha linha. Seria refazer um layout que funciona para satisfazer uma taxonomia.
+Os atrasos de revelação (`nth-child(3n+2)`) e as regras responsivas também
+dependem da ordem atual dos filhos diretos.
+
+**Nenhuma funcionalidade saiu da página.** Nenhuma seção mudou de lugar, nenhum
+`id` mudou, a navegação e o rodapé não foram tocados. A seção nova reaproveita
+shell, cabeçalho, kicker e o `.lp-reveal` global, então não há JavaScript novo e
+a animação é a mesma do resto da página.
+
+### O achado do módulo: a folha da landing é stale-while-revalidate
+
+O preview mostrou a seção **sem estilo nenhum**. Não era erro de CSS: o Service
+Worker registrado servia `css/landing.css` do balde `financas-cache-v62`. Foi
+confirmado ao vivo — com `navigator.serviceWorker.controller` presente, o estilo
+não aplicava; sem controlador, aplicava.
+
+É exatamente o caso descrito no comentário do `v51` no próprio Service Worker.
+Como a navegação vai à rede primeiro, o visitante que voltasse receberia o **HTML
+novo com a folha antiga** e veria a seção crua. Por isso a versão foi promovida
+para `v63`, com o motivo registrado na lista de versões do arquivo.
+
+Três testes fixavam `"v62"` literalmente e reprovaram por causa disso. Eles foram
+relaxados para o invariante que realmente importa (a versão existe e não regride),
+porque fixar o número transforma toda promoção legítima futura em falha de um
+módulo que nada tem a ver com ela. Os outros testes já liam a versão do arquivo e
+exigiam que a documentação acompanhasse — esses estavam certos, e a documentação
+foi atualizada.
+
+### Testes
+
+| Teste | Resultado |
+|---|---|
+| `node tests/test-landing.js` | **PASSOU**; 71 ok |
+| `npm run test:landing` | **PASSOU**; 18 de 18, incluindo "todo CTA chega a uma página que existe" |
+| `npm run test:browser` | **PASSOU**; 18 de 18 em Chromium, Firefox e WebKit |
+| `npm run test:pwa` | **PASSOU**; promoção de cache não quebrou o offline |
+| `npm run lint`, `check:release`, `build:dist` | **PASSOU** |
+| `npm test` | 69 arquivos; as **mesmas 5 falhas** de data, nenhuma nova |
+| Navegador real | **PASSOU**; 1440 px em três colunas com a mesma altura e os três links alinhados na base; 797 px e 390 px em coluna única, sem estouro horizontal; os três destinos existem |
+
+### Status
+
+**CONCLUÍDO.** Design e animações preservados, nenhuma funcionalidade removida da
+página, hierarquia resolvida por adição.
 
 ---
 

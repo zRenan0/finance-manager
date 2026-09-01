@@ -3070,3 +3070,108 @@ html.lp-locked, html.lp-locked body.lp { overflow: hidden; }
    ------------------------------------------------------------------ */
 .lp [id] { scroll-margin-top: 88px; }
 .lp-wow { scroll-margin-top: 0; }
+
+/* ------------------------------------------------------------------
+   27. OS TRÊS PILARES (M23)
+   O mapa que a página não tinha: a proposta em três movimentos, entre
+   o problema e a demonstração. Reaproveita shell, cabeçalho, kicker e
+   o `.lp-reveal` global; o que está aqui é só o que não existia.
+   ------------------------------------------------------------------ */
+.lp-pillars__grid {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.lp-pillar {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: clamp(22px, 2.4vw, 30px);
+  border: 1px solid var(--lp-line-2);
+  border-radius: 18px;
+  background: var(--lp-surface-2);
+  /* A borda superior é o que liga visualmente os três sem precisar de
+     numeração colorida ou ícone novo: mesma família do painel do hero. */
+  background-image: linear-gradient(180deg, rgba(31, 179, 148, 0.09), rgba(31, 179, 148, 0) 42%);
+}
+
+.lp-pillar__step {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  font-variant-numeric: tabular-nums;
+  color: var(--lp-brand);
+  margin-bottom: 14px;
+}
+
+.lp-pillar h3 {
+  font-size: clamp(19px, 1.9vw, 23px);
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+  margin-bottom: 10px;
+}
+
+.lp-pillar__lead {
+  color: var(--lp-soft);
+  line-height: 1.6;
+  margin-bottom: 18px;
+}
+
+.lp-pillar__list {
+  list-style: none;
+  display: grid;
+  gap: 9px;
+  margin-bottom: 20px;
+  /* Empurra o link para a base, para os três cartões terminarem na
+     mesma linha mesmo com textos de alturas diferentes. */
+  flex: 1;
+}
+
+.lp-pillar__list > li {
+  position: relative;
+  padding-left: 20px;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--lp-soft);
+}
+
+.lp-pillar__list > li::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 0.6em;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--lp-brand);
+  opacity: 0.7;
+}
+
+.lp-pillar__more {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--lp-text);
+  text-decoration: none;
+  border-bottom: 1px solid var(--lp-line-2);
+  padding-bottom: 3px;
+  transition: border-color 220ms var(--lp-ease), color 220ms var(--lp-ease);
+}
+
+.lp-pillar__more:hover { color: var(--lp-brand); border-bottom-color: var(--lp-brand); }
+.lp-pillar__arrow { transition: transform 220ms var(--lp-ease); }
+.lp-pillar__more:hover .lp-pillar__arrow { transform: translateX(3px); }
+
+/* Mesma escada de atraso usada no bento e no grid de confiança. */
+[data-lp-motion="on"] .lp-pillars__grid > .lp-reveal:nth-child(2) { transition-delay: 80ms; }
+[data-lp-motion="on"] .lp-pillars__grid > .lp-reveal:nth-child(3) { transition-delay: 160ms; }
+
+@media (max-width: 900px) {
+  .lp-pillars__grid { grid-template-columns: 1fr; gap: 12px; }
+  .lp-pillar { padding: 22px; }
+}

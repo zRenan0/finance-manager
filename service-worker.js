@@ -41,7 +41,12 @@
 // v60: falhas fechadas do pacote e da leitura chegam ao diagnóstico local sem
 // levar URL, requisição ou resposta na mensagem enviada à página.
 // v61: publica o inventário de dados e a política revisada do M18.
-const VERSION = "v62";
+// v63: a landing ganhou a seção dos três pilares, e com ela regras novas em
+// css/landing.css. A folha é estático servido por stale-while-revalidate, o
+// mesmo caso do v51: sem promover a versão, quem já tinha a landing em cache
+// receberia o HTML novo (navegação vai à rede primeiro) com a folha ANTIGA, e
+// veria a seção sem estilo nenhum. Conferido no navegador antes de promover.
+const VERSION = "v63";
 const BUILD_ID = VERSION;
 const CACHE_NAME = "financas-cache-" + VERSION;
 // A PÁGINA COMERCIAL TEM CACHE PRÓPRIO.

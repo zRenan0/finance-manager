@@ -133,8 +133,14 @@ check("o scope do manifesto não mudou", manifest.scope === "./", manifest.scope
 check("o campo descritivo do backup pode acompanhar a marca, o kind não",
   /app: "Cofre\. Organizador financeiro pessoal"/.test(storage)
   && /kind: BACKUP_KIND/.test(storage));
-check("o service worker não precisou de promoção para uma mudança de texto",
-  /const VERSION = "v62";/.test(sw));
+// O M22 não promoveu o cache, porque mudança de texto de marca não precisa
+// disso. Fixar "v62" aqui, porém, transformaria qualquer promoção legítima
+// futura em falha de marca (foi o que aconteceu no M23, com a folha da
+// landing). O invariante que interessa é outro: a versão existe e nunca anda
+// para trás, porque a limpeza da instalação antiga se apoia nela.
+const versaoSw = Number((sw.match(/const VERSION = "v(\d+)";/) || [])[1]);
+check("o service worker declara versão e ela não regrediu",
+  Number.isInteger(versaoSw) && versaoSw >= 62, versaoSw);
 check("o domínio segue sendo tratado como endereço nos documentos de segurança",
   /publicado em `financemanager\.dev\.br`/.test(read("SECURITY.md"))
   && /Procedimento operacional do Cofre \(`financemanager\.dev\.br`\)/.test(read("SECURITY_INCIDENT_RESPONSE.md")));

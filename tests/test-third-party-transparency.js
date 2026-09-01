@@ -89,7 +89,12 @@ check("documento liga matriz e fonte estruturada", /LEGAL_THIRD_PARTIES/.test(do
 check("documento cobre os seis registros", required.every((id) => id === "production-smtp" ? /Provedor SMTP de produção/.test(doc) : new RegExp(byId[id].name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).test(doc)));
 check("pendências contratuais continuam no lançamento", /plano da Vercel/.test(launch) && /contrato efetivo da Anthropic/.test(launch) && /provedor SMTP/.test(launch));
 check("checagem de publicação exige código, tela e documento", /LEGAL_THIRD_PARTIES/.test(release) && /Quem participa do tratamento/.test(release) && /TERCEIROS-E-OPERADORES/.test(release));
-check("mudança material sobe política e cache", run("LEGAL_TEXT_VERSION") === "2026-08-31.2" && /const VERSION = "v62"/.test(read("service-worker.js")));
+// O M19 subiu política E cache juntos. A política fica fixa aqui porque é o
+// conteúdo entregue ao titular; o cache, não: outros módulos promovem a versão
+// por motivos próprios, e fixá-la faria este teste reprovar por mudança alheia.
+const versaoCache = Number((read("service-worker.js").match(/const VERSION = "v(\d+)";/) || [])[1]);
+check("mudança material subiu a política, e o cache não regrediu",
+  run("LEGAL_TEXT_VERSION") === "2026-08-31.2" && Number.isInteger(versaoCache) && versaoCache >= 62, versaoCache);
 
 console.log(`\n${fail ? "FALHAS ENCONTRADAS" : "TODOS OS TESTES PASSARAM"}: ${pass} ok, ${fail} falha(s)`);
 process.exit(fail ? 1 : 0);

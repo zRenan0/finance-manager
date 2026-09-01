@@ -141,8 +141,14 @@ check("a CSP continua sem permitir formulário",
   /form-action 'none'/.test(read("vercel.json")));
 check("a página respeita a CSP: sem inline, sem origem externa de script ou estilo",
   !/<style\b/i.test(pagina) && !/<script\b/i.test(pagina));
-check("o service worker não precisou mudar para a página nova",
-  /const VERSION = "v62";/.test(read("service-worker.js")));
+// A página do M21 não exigiu promoção de cache: ela não faz parte do app shell,
+// e o `handleNavigate` já trata qualquer outra navegação pelo PAGE_CACHE, sob a
+// própria URL. Fixar o número da versão aqui faria toda promoção legítima futura
+// reprovar como se fosse regressão deste módulo — foi o que o M23 mostrou. O que
+// se confere é o que realmente importa: a página continua fora do app shell.
+check("a página nova continua fora do app shell, sem exigir promoção de cache",
+  !/reportar-vulnerabilidade/.test(read("service-worker.js"))
+  && /url\.pathname\.endsWith\("\/index\.html"\)/.test(read("service-worker.js")));
 check("nenhum arquivo do aplicativo entrou no módulo",
   !/reportar/i.test(read("js/app.js")));
 
