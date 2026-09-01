@@ -12,7 +12,8 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 
 | Campo | Valor |
 |---|---|
-| Módulo atual | **M19 - Transparência de terceiros** (concluído) |
+| Módulo atual | **M20 - Resposta a incidentes** (concluído) |
+| Status do M20 | **CONCLUÍDO** - `SECURITY_INCIDENT_RESPONSE.md` cobre as oito fases com as alavancas reais do sistema; teste novo amarra cada código, rota, RPC e variável citada ao código; `check:release` passou a exigir o documento. **Achado independente:** 5 arquivos de teste falham por fixture dependente de data, e a falha já existia em `HEAD` |
 | Status do M19 | **CONCLUÍDO** - Vercel, Supabase, Anthropic, Have I Been Pwned e portais fiscais registrados com dados recebidos e limites; SMTP de produção preservado como pendência sem fornecedor presumido |
 | Status do M18 | **CONCLUÍDO** - 14 fluxos mapeados em finalidade, armazenamento, retenção, acesso, terceiros e exclusão; política e inventário operacional usam a mesma fonte estruturada; pendências externas preservadas sem dados presumidos |
 | Status do M17 | **CONCLUÍDO** - observações estruturadas no backend com `X-Request-Id`, diagnóstico local ampliado e Service Worker monitorado sem registrar conteúdo financeiro ou enviar diagnóstico automaticamente |
@@ -32,10 +33,10 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 | Status do M3 | **CONCLUÍDO** — aplicado e confirmado no banco em 2026-08-28 |
 | Status do M2 | **CONCLUÍDO** — nenhuma vulnerabilidade de autorização; invariantes travados por teste |
 | Status do M1 | **CONCLUÍDO** — aplicado e confirmado; gatilho capturado e versionado |
-| Módulos concluídos | M0, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15, M16, M17, M18, M19 |
-| Próximo módulo | M20 - Plano de resposta a incidentes |
+| Módulos concluídos | M0, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15, M16, M17, M18, M19, M20 |
+| Próximo módulo | M21 - Divulgação responsável (`security.txt` e página de relato) |
 | Branch | `deploy-atualizado` (árvore limpa no início do M0) |
-| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `tests/test-cloud-sync.js`, `tests/test-account-backend.js`, `tests/test-critical-actions.js`, `tests/test-coverage.js`, `tests/test-security-adversarial.js`, `tests/test-observability.js`, `tests/test-data-inventory-lgpd.js`, `tests/test-third-party-transparency.js`, `supabase/tests/verify_security_boundary.sql`, `scripts/check-deploy.js`, `scripts/serve.js`, `scripts/coverage.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/storage.js`, `js/cloud-sync.js` (M10), `js/analytics.js`, `js/forecast.js`, `js/wrapped.js`, `js/screens/analytics.js` (M11), `js/backup-crypto.js`, `js/app.js`, `js/actions.js`, `js/storage.js`, `js/screens/settings.js`, `css/components.css`, `scripts/build-app-module.js` (M12), `netlify/functions/sync.js` (M13), `js/import.js`, `netlify/functions/_shared/finance-schema.js` (M14), observabilidade em backend, frontend e Service Worker (M17), inventário e tela de Privacidade (M18), registro de terceiros e operadores (M19), `js/modules/app.generated.js` (regerado). Documentação: inventário do M8, protocolo do M10, backup protegido do M12, `docs/VERSIONAMENTO.md` do M13, observabilidade do M17, inventário LGPD do M18, terceiros do M19 e desenhos de M15 a M19. |
+| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `tests/test-cloud-sync.js`, `tests/test-account-backend.js`, `tests/test-critical-actions.js`, `tests/test-coverage.js`, `tests/test-security-adversarial.js`, `tests/test-observability.js`, `tests/test-data-inventory-lgpd.js`, `tests/test-third-party-transparency.js`, `supabase/tests/verify_security_boundary.sql`, `scripts/check-deploy.js`, `scripts/serve.js`, `scripts/coverage.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/storage.js`, `js/cloud-sync.js` (M10), `js/analytics.js`, `js/forecast.js`, `js/wrapped.js`, `js/screens/analytics.js` (M11), `js/backup-crypto.js`, `js/app.js`, `js/actions.js`, `js/storage.js`, `js/screens/settings.js`, `css/components.css`, `scripts/build-app-module.js` (M12), `netlify/functions/sync.js` (M13), `js/import.js`, `netlify/functions/_shared/finance-schema.js` (M14), observabilidade em backend, frontend e Service Worker (M17), inventário e tela de Privacidade (M18), registro de terceiros e operadores (M19), `js/modules/app.generated.js` (regerado). Documentação: inventário do M8, protocolo do M10, backup protegido do M12, `docs/VERSIONAMENTO.md` do M13, observabilidade do M17, inventário LGPD do M18, terceiros do M19 e desenhos de M15 a M19. **M20 (só documentação e verificação, nenhum arquivo de produção):** `SECURITY_INCIDENT_RESPONSE.md` (novo), `tests/test-incident-response.js` (novo), `scripts/check-release.js`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. |
 | Migration do M13 | `20260831120000_database_schema_version.sql` — **aplicada e confirmada em produção em 2026-08-31** (`database_schema_version = 1`; grants inalterados: só `service_role` e `postgres`). Reversível por `alter table public.cofre_sync_config drop column if exists database_schema_version;` |
 | Migrations criadas até aqui | `20260828120000_rls_auto_enable_least_privilege.sql`, `20260828130000_rls_auto_enable_versionada.sql`, `20260828140000_menor_privilegio_tabelas.sql` (as três **aplicadas e confirmadas em 2026-08-28**), `20260828150000_rls_auto_enable_gatilho.sql` (**ainda não aplicada**; é no-op em produção, onde o gatilho já existe) |
 | Versão do app | `0.30.0` (package.json) |
@@ -2442,6 +2443,110 @@ Fornecedor SMTP, plano e contrato efetivos permanecem como pendências externas.
 
 ---
 
+## M20 - Resposta a incidentes
+
+### Antes
+
+Não existia procedimento. O item 8 de `docs/LEGAL-LAUNCH.md` registrava a falta
+("quem detecta, quem decide, em quanto tempo comunica, onde fica o registro") e a
+tela de Privacidade já publicava um canal do art. 48 sem processo por trás dele.
+As peças estavam todas prontas e espalhadas: eventos do M17, inventário do M18,
+terceiros do M19, revogação do M7, protocolo do M10, retorno de publicação do
+`docs/RELEASE.md`. Faltava a ordem em que se puxa cada uma sob pressão.
+
+### Alterações
+
+| Arquivo | Motivo |
+|---|---|
+| `SECURITY_INCIDENT_RESPONSE.md` | **novo**; as oito fases, papéis, prazos, registro e pendências |
+| `tests/test-incident-response.js` | **novo**; 69 verificações que amarram o documento ao código |
+| `scripts/check-release.js` | documento e as oito fases viram condição de publicação |
+| `docs/LEGAL-LAUNCH.md` | item 8 deixa de ser "processo indefinido" e passa a ser "designação pendente" |
+| `README.md`, `CHANGELOG.md` | apontam o procedimento |
+
+**Nenhum arquivo de produção foi tocado.** Sem `js/`, sem `css/`, sem
+`netlify/`, sem `supabase/`, sem `service-worker.js`, sem migration. O cache
+offline não precisou de promoção e `LEGAL_TEXT_VERSION` não mudou, porque nada do
+que o usuário recebe mudou.
+
+### Motivo
+
+O que diferencia este plano de um modelo genérico é que a contenção só cita
+alavanca que existe:
+
+- rotação de `SUPABASE_SERVICE_ROLE_KEY`, `ANTHROPIC_API_KEY`, `RATE_LIMIT_SECRET`;
+- `revoke-device` e `revoke-others` (M7), que encerram sessão sem tocar dado local;
+- **subir `minimum_write_protocol` em `cofre_sync_config`**, que faz o cliente
+  vulnerável receber **426** e **manter a fila** — o desligamento mais seguro do
+  sistema, porque recusa escrita sem descartar nada;
+- remover `ANTHROPIC_API_KEY`, que desliga só a IA;
+- promover o último deploy bom na Vercel.
+
+Dois pontos que só aparecem por ser este sistema e não outro:
+
+1. **Reverter o servidor não alcança o cliente.** Quem já instalou o pacote ruim
+   continua com ele; só publicação com `VERSION` do Service Worker promovida chega
+   ao navegador. Um plano copiado de SaaS comum erraria isso.
+2. **Preservar evidência vem antes de conter**, porque o log de execução pode durar
+   1 hora conforme o plano da Vercel (M19). Conter primeiro apagaria a prova.
+
+Há uma lista explícita de **"o que nunca é contenção"** — não desabilitar RLS, não
+purgar dado de terceiro, não apagar dado local (em modo visitante o aparelho é a
+única cópia), não editar migration histórica. É a regra de ouro da auditoria
+escrita para o momento em que a pressa empurra para o lado contrário.
+
+### Compatibilidade
+
+Total. Módulo de documentação e verificação. Contratos de API, banco, IndexedDB,
+localStorage, sincronização e formatos de dados intocados. `check:release` ganhou
+verificação nova, e ela foi testada nos dois sentidos: aprova com o documento
+íntegro e reprova sem ele ou com ele esvaziado.
+
+### Testes
+
+| Teste | Resultado |
+|---|---|
+| `node tests/test-incident-response.js` | **PASSOU**; 69 ok, 0 falhas |
+| `npm run check:release` | **PASSOU**; avisos externos conhecidos (7 campos do controlador, 1 fornecedor) preservados |
+| `npm run check:release` sem o documento | **REPROVOU como esperado**; 3 falhas |
+| `npm run check:release` com o documento esvaziado | **REPROVOU como esperado**; 2 falhas |
+| `npm run lint` | **PASSOU**; 0 erro, 0 aviso |
+| `npm run check:build` | **PASSOU**; 71 fontes, módulo gerado conferido |
+| `npm test` | **5 arquivos falharam**, todos por causa anterior — ver o achado abaixo |
+| `npm run test:browser`, `test:pwa`, `test:coverage` | **NÃO EXECUTADOS**; nenhum arquivo de cliente ou de produção mudou, então não haveria o que provar |
+
+### Achado independente do módulo (P2, pré-existente)
+
+`test-goals.js`, `test-health.js`, `test-insights-engine.js`, `test-render.js` e
+`test-wealth.js` falham nesta árvore. **Não é regressão do M20**: o M20 não tocou
+nenhum `js/`, e as cinco falhas foram reproduzidas em uma worktree limpa no commit
+`56c58f9` (M19).
+
+**Causa: fixture dependente da data de execução.** As suítes montam dados com
+`monthsAgo(n, day = 10)`, que ancora lançamentos no **dia 10** de cada mês. Hoje é
+**dia 1**, então `monthsAgo(0)` cai no **futuro** e o app corretamente ignora
+lançamento futuro. Daí "caixa = 8.000 → 10000" (a despesa futura não baixou o
+saldo), o mapa de calor do mês vazio e o aporte da meta não contabilizado.
+
+O produto está certo; o teste é que assume que o dia 10 já passou. Por isso o M19
+registrou `npm test` como aprovado em **2026-08-31** e a mesma árvore reprova em
+**2026-09-01**. A suíte passa do dia 11 em diante e reprova nos dez primeiros dias
+de qualquer mês.
+
+Correção sugerida (não feita aqui, é escopo do M15): congelar o relógio das
+fixtures ou ancorar no dia 1 em vez do dia 10. Enquanto não for feito, a CI
+reprova dez dias por mês por motivo falso — o que é pior que um teste vermelho
+conhecido, porque ensina a ignorar o vermelho.
+
+### Status
+
+**CONCLUÍDO.** O procedimento existe, está amarrado ao código por teste e virou
+condição de publicação. O que continua aberto não é processo, é **designação**:
+sem `dpoName`, `dpoEmail` e `incidentEmail` reais não há encarregado nomeado nem
+canal publicado. O canal de entrada para pesquisador é o M21.
+
+---
+
 ## Checklist de regressão
 
 Executar após **todo** módulo que toque no código. Marcar `OK` / `FALHOU` / `NÃO VALIDADO`.
@@ -2450,7 +2555,9 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
 ### A. Automatizado (CI ou máquina com Node) — porta de entrada obrigatória
 
 - [ ] `npm run lint`
-- [ ] `npm test` (66 arquivos)
+- [ ] `npm test` (67 arquivos) — **atenção:** 5 arquivos reprovam do dia 1 ao 10 de
+  cada mês por fixture ancorada no dia 10; ver o achado P2 do M20 antes de investigar
+- [ ] `node tests/test-incident-response.js` (plano de resposta a incidentes do M20)
 - [ ] `node tests/test-accounting-integrity.js` (invariantes contábeis do M11)
 - [ ] `node tests/test-backup-restore.js` (backup, restauração e senha do M12)
 - [ ] `node tests/test-versioning.js` (versões e matriz de compatibilidade do M13)
@@ -2583,5 +2690,13 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
 - Item 17 de `AUDIT_FIX_PROGRESS.md` e F-06/F-08 a F-17 de `docs/PROXIMA-SESSAO.md`
   continuam abertos e serão absorvidos pelos módulos correspondentes. O item 19
   foi concluído no M9.
+- **P2 aberto (M20): suíte dependente da data.** `test-goals`, `test-health`,
+  `test-insights-engine`, `test-render` e `test-wealth` reprovam nos dez primeiros
+  dias de cada mês porque as fixtures ancoram no dia 10. Reproduzido em worktree
+  limpa no commit `56c58f9`; não é regressão de módulo nenhum. Corrigir no escopo
+  do M15 congelando o relógio das fixtures.
+- **M20:** o procedimento está pronto, mas não foi ensaiado (sem exercício de mesa)
+  e não há alerta ativo nem plantão. A janela de evidência depende do plano da
+  Vercel e pode ser de 1 hora.
 - 7 campos legais do controlador ainda com marcador (`docs/LEGAL-LAUNCH.md`); o
   `check-release.js` avisa a cada execução. Decisão externa, entra no M18.

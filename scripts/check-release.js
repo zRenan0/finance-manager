@@ -88,6 +88,20 @@ check(/Quem participa do tratamento/.test(privacyScreen) && /LEGAL_THIRD_PARTIES
 check(fs.existsSync(path.join(root, "docs/INVENTARIO-DE-DADOS.md")), "documento operacional do inventário de dados ausente");
 check(fs.existsSync(path.join(root, "docs/TERCEIROS-E-OPERADORES.md")), "documento operacional de terceiros ausente");
 
+// M20: o plano de resposta a incidentes precisa existir E manter as oito fases.
+// Um arquivo presente porém esvaziado seria pior que ausente: passaria batido
+// justamente na hora em que alguém for procurá-lo.
+const incidentes = fs.existsSync(path.join(root, "SECURITY_INCIDENT_RESPONSE.md"))
+  ? read("SECURITY_INCIDENT_RESPONSE.md")
+  : "";
+check(incidentes !== "", "plano de resposta a incidentes ausente");
+check(["## 1. Detecção", "## 2. Classificação", "## 3. Contenção", "## 4. Investigação",
+  "## 5. Correção", "## 6. Avaliação de impacto", "## 7. Comunicação quando aplicável",
+  "## 8. Post-mortem"].every((fase) => incidentes.includes(fase)),
+  "plano de resposta a incidentes não cobre as oito fases");
+check(/## Papéis/.test(incidentes) && /## Registro de incidentes/.test(incidentes),
+  "plano de resposta a incidentes não define papéis nem onde fica o registro");
+
 // Já os campos que só o dono do app conhece são AVISO, não falha: eles não
 // impedem publicar o beta, impedem oferecer ao público. Reprovar aqui travaria
 // a própria esteira que precisa rodar até esses dados existirem.

@@ -31,7 +31,7 @@ Isso não torna o produto pronto para oferta pública. Falta preencher os campos
 5. Identificar e registrar o provedor SMTP de produção, sua política, retenção, exclusão, país e contrato. O Supabase exige SMTP próprio para produção, mas o fornecedor não aparece no repositório.
 6. Registrar a região de Vercel e Supabase, os países de processamento e as salvaguardas de transferência internacional aplicáveis às contas efetivas.
 7. Registrar internamente as finalidades e bases legais por operação. As finalidades técnicas estão no inventário, mas a escolha jurídica da base continua pendente.
-8. Definir o processo interno de incidentes: quem detecta, quem decide, em quanto tempo comunica o titular e a ANPD, e onde fica o registro.
+8. O processo interno de incidentes está definido em `SECURITY_INCIDENT_RESPONSE.md` (M20): quem detecta, quem contém, quem decide comunicar, os prazos e onde fica o registro. O que continua aberto é a **designação real**: sem `dpoName`, `dpoEmail` e `incidentEmail` preenchidos, não há encarregado nomeado nem canal publicado para comunicar ou receber comunicação. Enquanto isso, o papel de controlador e o de encarregado recaem sobre o mantenedor por falta de designação formal.
 9. Revisar os termos comerciais, preço, renovação, cancelamento, suporte, disponibilidade, propriedade intelectual e foro com assessoria jurídica. O texto atual foi escrito para uma versão gratuita e local.
 10. Conferir publicidade, simuladores e conteúdos com profissional habilitado antes de apresentar qualquer resultado como orientação individual.
 11. Fazer nova revisão da política e dos termos sempre que mudar a coleta, a infraestrutura ou a versão comercial, subindo `LEGAL_TEXT_VERSION` quando o conteúdo mudar.

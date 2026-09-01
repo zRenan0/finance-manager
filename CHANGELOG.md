@@ -2,6 +2,24 @@
 
 ## Não publicado
 
+### O M20 escreveu o que fazer quando algo der errado
+
+- `SECURITY_INCIDENT_RESPONSE.md` traz o fluxo completo: detecção, classificação,
+  contenção, investigação, correção, avaliação de impacto, comunicação e
+  post-mortem. Papéis, prazos e o lugar do registro ficaram definidos.
+- A contenção usa só alavancas que já existem: rotação das chaves do projeto,
+  revogação de aparelho, `minimum_write_protocol` para recusar escrita de cliente
+  vulnerável sem descartar a fila, desligamento da IA e retorno da publicação.
+- Ficou registrado que reverter o servidor não alcança quem já instalou o pacote
+  antigo: só uma publicação com o cache promovido chega ao navegador.
+- Uma lista do que **nunca** é contenção evita que a pressa desabilite RLS, apague
+  dado de terceiro ou edite migration histórica.
+- A avaliação de impacto lê as classes do inventário do M18, e a comunicação
+  respeita o prazo da ANPD com ressalva de conferir a redação vigente.
+- `tests/test-incident-response.js` confere que cada código, rota, RPC, variável e
+  script citado existe no código, e `npm run check:release` passou a exigir o
+  documento com as oito fases.
+
 ### O M19 passou a identificar cada serviço que recebe dados
 
 - A tela de Privacidade agora separa Vercel, Supabase, Anthropic, Have I Been

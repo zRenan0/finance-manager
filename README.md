@@ -52,6 +52,14 @@ do armazenamento está em `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`; o inventário d
 tratamento da LGPD está em `docs/INVENTARIO-DE-DADOS.md`; e o registro dos
 serviços externos está em `docs/TERCEIROS-E-OPERADORES.md`.
 
+Quando algo dá errado em segurança, o procedimento está em
+`SECURITY_INCIDENT_RESPONSE.md`: detecção pelos eventos do M17, classificação por
+gravidade e por dado pessoal, contenção pelas alavancas que o sistema já tem
+(rotação de chave, revogação de aparelho, `minimum_write_protocol`, retorno da
+publicação), avaliação de impacto pelo inventário do M18, prazos de comunicação e
+post-mortem. `npm run check:release` reprova se o documento sumir ou perder uma das
+oito fases.
+
 ### Inventário de dados e LGPD
 
 A tela de Privacidade reúne 14 fluxos e mostra, em cada um, finalidade,
