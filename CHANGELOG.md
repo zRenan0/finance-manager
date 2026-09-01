@@ -2,6 +2,25 @@
 
 ## Não publicado
 
+### O M27 abriu a nota de saúde financeira
+
+- Novo painel "Sua pontuação", na tela de Saúde: cada pilar aparece com os
+  pontos que ganhou sobre o peso que tem ("7 de 20"), o motivo em uma frase e o
+  que fazer a respeito.
+- No alto, a frase que faltava: "Você está com 69. O maior ganho disponível está
+  em Percentual investido: fechar essa lacuna somaria até 17 pontos, chegando
+  perto de 86."
+- A conta desse ganho respeita como a nota é feita. Ela é normalizada sobre o
+  peso do que foi **avaliado**, não sobre 100, então o ganho de um pilar é a
+  lacuna dele dividida por esse peso. Somar todos os ganhos dá exatamente a
+  distância até 100 — nem um ponto a mais prometido.
+- Nada de precisão falsa: o painel declara que é indicador educacional, que não
+  é score de crédito nem é usado por banco nenhum, e mostra quantos pilares
+  tinham base de cálculo no mês.
+- O motor da nota não mudou: os sete pilares, os pesos e a regra de excluir
+  pilar sem dado continuam iguais. O que ele já calculava passou a aparecer.
+- O cache offline subiu para `v67`.
+
 ### O M26 avisa quando os dados existem em um lugar só
 
 - Uma linha discreta na tela inicial: "Seus dados estão salvos somente neste

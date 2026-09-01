@@ -12,7 +12,8 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 
 | Campo | Valor |
 |---|---|
-| Módulo atual | **M26 - Aviso de dados somente locais** (concluído) |
+| Módulo atual | **M27 - Saúde financeira explicável** (concluído) |
+| Status do M27 | **CONCLUÍDO** - painel "Sua pontuação" com pontos por pilar, motivo, conselho e o maior ganho disponível; a promessa de pontos é normalizada pelo peso avaliado e travada por teste (somar os ganhos dá exatamente 100). Cache em `v67` |
 | Status do M26 | **CONCLUÍDO** - linha discreta na tela inicial com "Proteger meus dados"; some sozinha quando há conta ou backup recente. Corrigido de passagem o diálogo de três botões, que espremia rótulos. Cache em `v66` |
 | Status do M25 | **CONCLUÍDO** - demonstração vive só na memória, com as duas guardas no único caminho de gravação; provado em navegador que uma escrita real dentro dela não altera IndexedDB, espelho nem fila. Cache em `v65` |
 | Status do M24 | **CONCLUÍDO** - passo de gastos fixos opcional, que vira teto de categoria em vez de lançamento; o assistente entrega plano pessoal em 11 interações. Cache em `v64` |
@@ -39,10 +40,10 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 | Status do M3 | **CONCLUÍDO** — aplicado e confirmado no banco em 2026-08-28 |
 | Status do M2 | **CONCLUÍDO** — nenhuma vulnerabilidade de autorização; invariantes travados por teste |
 | Status do M1 | **CONCLUÍDO** — aplicado e confirmado; gatilho capturado e versionado |
-| Módulos concluídos | M0, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15, M16, M17, M18, M19, M20, M21, M22, M23, M24, M25, M26 |
-| Próximo módulo | M27 - Saúde financeira explicável |
+| Módulos concluídos | M0, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15, M16, M17, M18, M19, M20, M21, M22, M23, M24, M25, M26, M27 |
+| Próximo módulo | M28 - Reserva de emergência dinâmica |
 | Branch | `deploy-atualizado` (árvore limpa no início do M0) |
-| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `tests/test-cloud-sync.js`, `tests/test-account-backend.js`, `tests/test-critical-actions.js`, `tests/test-coverage.js`, `tests/test-security-adversarial.js`, `tests/test-observability.js`, `tests/test-data-inventory-lgpd.js`, `tests/test-third-party-transparency.js`, `supabase/tests/verify_security_boundary.sql`, `scripts/check-deploy.js`, `scripts/serve.js`, `scripts/coverage.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/storage.js`, `js/cloud-sync.js` (M10), `js/analytics.js`, `js/forecast.js`, `js/wrapped.js`, `js/screens/analytics.js` (M11), `js/backup-crypto.js`, `js/app.js`, `js/actions.js`, `js/storage.js`, `js/screens/settings.js`, `css/components.css`, `scripts/build-app-module.js` (M12), `netlify/functions/sync.js` (M13), `js/import.js`, `netlify/functions/_shared/finance-schema.js` (M14), observabilidade em backend, frontend e Service Worker (M17), inventário e tela de Privacidade (M18), registro de terceiros e operadores (M19), `js/modules/app.generated.js` (regerado). Documentação: inventário do M8, protocolo do M10, backup protegido do M12, `docs/VERSIONAMENTO.md` do M13, observabilidade do M17, inventário LGPD do M18, terceiros do M19 e desenhos de M15 a M19. **M20 (só documentação e verificação, nenhum arquivo de produção):** `SECURITY_INCIDENT_RESPONSE.md` (novo), `tests/test-incident-response.js` (novo), `scripts/check-release.js`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. **M21:** `reportar-vulnerabilidade.html` (novo), `css/reportar.css` (novo), `SECURITY.md` (novo), `scripts/security-txt.js` (novo), `tests/test-responsible-disclosure.js` (novo), `vercel.json`, `scripts/build-dist.js`, `scripts/serve.js`, `scripts/check-release.js`, `scripts/check-deploy.js`, `landing.html`, `tests/test-landing.js`, `tests/browser/run-landing.js`, `SECURITY_INCIDENT_RESPONSE.md`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. **M22:** `docs/MARCA.md` (novo), `tests/test-brand.js` (novo), `index.html`, `manifest.webmanifest`, `landing.html`, `scripts/check-release.js`, `scripts/security-txt.js`, `SECURITY.md`, `SECURITY_INCIDENT_RESPONSE.md`, `README.md`, `CHANGELOG.md`. **M23:** `landing.html`, `css/landing.css`, `service-worker.js` (v63), `tests/test-brand.js`, `tests/test-responsible-disclosure.js`, `tests/test-third-party-transparency.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M24:** `js/screens/onboarding.js`, `js/app.js`, `js/actions.js`, `css/screens/notifications-onboarding.css`, `service-worker.js` (v64), `js/modules/app.generated.js`, `tests/test-onboarding.js`, `tests/browser/run-browser.js`, `tests/browser/run-pwa.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M26:** `tests/test-local-only-notice.js` (novo), `js/app.js`, `js/actions.js`, `js/screens/dashboard.js`, `css/screens/dashboard.css`, `css/components.css`, `service-worker.js` (v66), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M25:** `js/demo.js` (novo), `tests/test-demo-mode.js` (novo), `js/app.js`, `js/actions.js`, `js/screens/onboarding.js`, `css/components.css`, `service-worker.js` (v65), `scripts/build-app-module.js`, `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. |
+| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `tests/test-cloud-sync.js`, `tests/test-account-backend.js`, `tests/test-critical-actions.js`, `tests/test-coverage.js`, `tests/test-security-adversarial.js`, `tests/test-observability.js`, `tests/test-data-inventory-lgpd.js`, `tests/test-third-party-transparency.js`, `supabase/tests/verify_security_boundary.sql`, `scripts/check-deploy.js`, `scripts/serve.js`, `scripts/coverage.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/storage.js`, `js/cloud-sync.js` (M10), `js/analytics.js`, `js/forecast.js`, `js/wrapped.js`, `js/screens/analytics.js` (M11), `js/backup-crypto.js`, `js/app.js`, `js/actions.js`, `js/storage.js`, `js/screens/settings.js`, `css/components.css`, `scripts/build-app-module.js` (M12), `netlify/functions/sync.js` (M13), `js/import.js`, `netlify/functions/_shared/finance-schema.js` (M14), observabilidade em backend, frontend e Service Worker (M17), inventário e tela de Privacidade (M18), registro de terceiros e operadores (M19), `js/modules/app.generated.js` (regerado). Documentação: inventário do M8, protocolo do M10, backup protegido do M12, `docs/VERSIONAMENTO.md` do M13, observabilidade do M17, inventário LGPD do M18, terceiros do M19 e desenhos de M15 a M19. **M20 (só documentação e verificação, nenhum arquivo de produção):** `SECURITY_INCIDENT_RESPONSE.md` (novo), `tests/test-incident-response.js` (novo), `scripts/check-release.js`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. **M21:** `reportar-vulnerabilidade.html` (novo), `css/reportar.css` (novo), `SECURITY.md` (novo), `scripts/security-txt.js` (novo), `tests/test-responsible-disclosure.js` (novo), `vercel.json`, `scripts/build-dist.js`, `scripts/serve.js`, `scripts/check-release.js`, `scripts/check-deploy.js`, `landing.html`, `tests/test-landing.js`, `tests/browser/run-landing.js`, `SECURITY_INCIDENT_RESPONSE.md`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. **M22:** `docs/MARCA.md` (novo), `tests/test-brand.js` (novo), `index.html`, `manifest.webmanifest`, `landing.html`, `scripts/check-release.js`, `scripts/security-txt.js`, `SECURITY.md`, `SECURITY_INCIDENT_RESPONSE.md`, `README.md`, `CHANGELOG.md`. **M23:** `landing.html`, `css/landing.css`, `service-worker.js` (v63), `tests/test-brand.js`, `tests/test-responsible-disclosure.js`, `tests/test-third-party-transparency.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M24:** `js/screens/onboarding.js`, `js/app.js`, `js/actions.js`, `css/screens/notifications-onboarding.css`, `service-worker.js` (v64), `js/modules/app.generated.js`, `tests/test-onboarding.js`, `tests/browser/run-browser.js`, `tests/browser/run-pwa.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M27:** `tests/test-score-explainable.js` (novo), `js/score.js`, `js/screens/health.js`, `css/screens/health.css`, `service-worker.js` (v67), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M26:** `tests/test-local-only-notice.js` (novo), `js/app.js`, `js/actions.js`, `js/screens/dashboard.js`, `css/screens/dashboard.css`, `css/components.css`, `service-worker.js` (v66), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M25:** `js/demo.js` (novo), `tests/test-demo-mode.js` (novo), `js/app.js`, `js/actions.js`, `js/screens/onboarding.js`, `css/components.css`, `service-worker.js` (v65), `scripts/build-app-module.js`, `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. |
 | Migration do M13 | `20260831120000_database_schema_version.sql` — **aplicada e confirmada em produção em 2026-08-31** (`database_schema_version = 1`; grants inalterados: só `service_role` e `postgres`). Reversível por `alter table public.cofre_sync_config drop column if exists database_schema_version;` |
 | Migrations criadas até aqui | `20260828120000_rls_auto_enable_least_privilege.sql`, `20260828130000_rls_auto_enable_versionada.sql`, `20260828140000_menor_privilegio_tabelas.sql` (as três **aplicadas e confirmadas em 2026-08-28**), `20260828150000_rls_auto_enable_gatilho.sql` (**ainda não aplicada**; é no-op em produção, onde o gatilho já existe) |
 | Versão do app | `0.30.0` (package.json) |
@@ -3093,6 +3094,89 @@ alguma.
 
 ---
 
+## M27 - Saúde financeira explicável
+
+### Antes
+
+A auditoria assumiu que faltava explicabilidade. O levantamento mostrou outra
+coisa: **o motor já explicava tudo e nada aparecia**. `js/score.js` calcula sete
+pilares, cada um com peso, pontos, razão em linguagem humana (`detail`) e o que
+fazer (`advice`); `weaknesses` já vinha ordenado pela lacuna disponível. A tela
+de Saúde mostrava só o número, o rótulo e uma frase de método.
+
+Ou seja: o trabalho não era construir uma explicação, era **exibir a que já
+existia** e completá-la com a única peça que o roteiro pede e o motor não tinha:
+quanto cada pilar ainda pode somar **na nota**.
+
+### Alterações
+
+| Arquivo | Motivo |
+|---|---|
+| `js/score.js` | expõe `maxWeight`/`earned` e ganha `scoreGains()`, puro |
+| `js/screens/health.js`, `css/screens/health.css` | painel "Sua pontuação" |
+| `tests/test-score-explainable.js` | **novo**; 38 verificações, a maioria sobre a aritmética |
+| `service-worker.js` | `v66` para `v67` |
+
+**Nenhum pilar, peso ou fórmula do motor foi alterado**, e o teste trava isso:
+os sete ids, os sete pesos na ordem e a soma 100.
+
+### O ponto difícil: prometer pontos que existem
+
+A frase do roteiro ("para chegar perto de 80, X teria maior impacto") é a única
+do painel que faz promessa numérica, e é fácil errá-la.
+
+A nota é normalizada **sobre o peso do que foi avaliado**, não sobre 100 — é como
+o motor evita punir quem ainda não informou um dado. Logo, o ganho de fechar a
+lacuna de um pilar **não** é `weight * (1 - ratio)`: é essa lacuna dividida pelo
+peso avaliado, vezes 100. Um pilar de peso 15, num mês em que só 90 de peso foram
+avaliados, vale 16,7 pontos, não 15.
+
+Sem essa divisão o app prometeria pontos inexistentes. A invariante que trava
+isso: **somar todos os ganhos tem de dar exatamente 100 menos a nota atual.**
+Conferido com o conjunto da demonstração: nota 69, soma dos ganhos 31, total 100.
+O teste falha se alguém "simplificar" a fórmula.
+
+Dois cuidados de linguagem, também travados por teste: a frase diz "somaria
+**até**", porque fechar a lacuna inteira é teto e não expectativa; e ganho abaixo
+de meio ponto não vira recomendação, porque meio ponto não é conselho.
+
+### Falsa precisão
+
+O roteiro pede explicitamente para não apresentar precisão científica falsa. O
+rodapé do painel diz, com todas as letras, que é indicador educacional criado
+por este app, que **não é score de crédito, não é usado por banco nenhum e não
+vale como análise de risco**, e mostra a cobertura quando algum pilar ficou sem
+base ("hoje 90% dos pilares têm base de cálculo; os demais ficam fora da conta em
+vez de virar nota baixa").
+
+### Compatibilidade
+
+Total. As duas adições ao retorno de `computeFinanceScore` são campos novos;
+`scoreGains` é função nova e pura. Nenhum consumidor existente muda de
+comportamento, e base vazia continua sem nota (o painel não aparece).
+
+### Testes
+
+| Teste | Resultado |
+|---|---|
+| `node tests/test-score-explainable.js` | **PASSOU**; 38 ok |
+| `npm run test:browser` | **PASSOU**; 18 de 18 |
+| `npm run test:pwa` | **PASSOU** |
+| `npm run lint`, `check:build`, `check:release` | **PASSOU** |
+| `npm test` | 72 arquivos; as **mesmas 5 falhas** de data, nenhuma nova |
+| Navegador real | **PASSOU**; frase do ganho conferindo com o cálculo (69 → até 17 pontos → perto de 86), seis pilares com pontos e conselho, rodapé educacional visível, 390 px sem estouro |
+
+### Status
+
+**CONCLUÍDO.** Nota: os nomes dos pilares do roteiro (endividamento, estabilidade
+do orçamento, liquidez) não batem um a um com os do motor (poupança, gastos,
+reserva, investimento, patrimônio, pontualidade, crédito). Os do motor foram
+mantidos: renomear pilar muda a leitura de uma nota que já está no aparelho das
+pessoas, e a tela de Saúde já traz liquidez e endividamento como indicadores
+próprios, ao lado do painel.
+
+---
+
 ## Checklist de regressão
 
 Executar após **todo** módulo que toque no código. Marcar `OK` / `FALHOU` / `NÃO VALIDADO`.
@@ -3109,6 +3193,7 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
 - [ ] `node tests/test-onboarding.js` (cinco passos e gastos fixos do M24)
 - [ ] `node tests/test-demo-mode.js` (guardas da demonstração do M25)
 - [ ] `node tests/test-local-only-notice.js` (aviso de dados locais do M26)
+- [ ] `node tests/test-score-explainable.js` (aritmética do ganho de pontos do M27)
 - [ ] `node tests/test-accounting-integrity.js` (invariantes contábeis do M11)
 - [ ] `node tests/test-backup-restore.js` (backup, restauração e senha do M12)
 - [ ] `node tests/test-versioning.js` (versões e matriz de compatibilidade do M13)

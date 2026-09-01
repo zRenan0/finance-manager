@@ -51,6 +51,7 @@ function renderHealthScreen() {
     ${renderBackHeader("Saúde financeira")}
     <div class="grid-dashboard">
       ${renderHealthHero(model, h, toneColor)}
+      ${renderScoreBreakdown(model.score)}
       ${model.indicators.map((i) => renderHealthIndicator(i)).join("")}
       ${renderHealthPlan(model)}
       <p class="footnote span-3">Os indicadores usam apenas os seus lançamentos, metas e renda cadastrada. Nada é enviado para fora do aparelho. As faixas são referências educativas, e indicadores sem base de cálculo ficam marcados como “sem dados”.</p>
@@ -87,6 +88,72 @@ function renderHealthHero(model, h, toneColor) {
         </div>` : ""}
       </div>
     </div>
+  </div>`;
+}
+
+// ==================================================================
+// [M27] "SUA PONTUAÇÃO": DE ONDE VÊM OS PONTOS
+// ==================================================================
+// A nota existia desde antes e era explicada só por fora: um número, um rótulo
+// e um texto de método. Quem via "69 - Regular" não tinha como saber o que
+// compõe 69, quanto cada parte pesa, nem o que mudaria o número.
+//
+// O motor (score.js) já calculava tudo isso e nada aparecia. Este painel mostra
+// o que já existia: pontos ganhos sobre o peso de cada pilar, o motivo em
+// linguagem humana e o que fazer a respeito.
+//
+// SOBRE A FRASE DO GANHO
+//
+// Ela é a única do painel que faz uma promessa, então é a que precisa de mais
+// cuidado. O ganho vem de `scoreGains`, que divide a lacuna do pilar pelo peso
+// AVALIADO, e não por 100: prometer pontos calculados sobre pilares que estão
+// fora da conta seria inventar. O texto diz "até", porque fechar a lacuna
+// inteira é o teto, não o esperado.
+//
+// E não há precisão falsa: a nota é declarada como indicador educacional, com a
+// cobertura à vista quando algum pilar ficou sem base.
+function renderScoreBreakdown(s) {
+  if (!s || s.insufficient || typeof scoreGains !== "function") return "";
+  const ganhos = scoreGains(s);
+  if (ganhos.length === 0) return "";
+
+  const maior = ganhos[0];
+  // Meio ponto não é conselho; abaixo disso a nota já está no que dá.
+  const vale = maior && maior.gain >= 0.5 ? maior : null;
+  const alvo = vale ? Math.min(100, Math.round(s.score + vale.gain)) : null;
+
+  return `<div class="card span-3 score-breakdown">
+    <div class="score-breakdown__head">
+      <p class="card-title">Sua pontuação</p>
+      <p class="card-subtitle">${vale
+        ? `Você está com <b>${s.score}</b>. O maior ganho disponível está em <b>${escapeHtml(vale.label)}</b>: fechar essa lacuna somaria até <b>${Math.round(vale.gain)} ${Math.round(vale.gain) === 1 ? "ponto" : "pontos"}</b>, chegando perto de <b>${alvo}</b>.`
+        : `Você está com <b>${s.score}</b>. Nenhum pilar tem lacuna relevante agora; a nota se mantém acompanhando o que já está funcionando.`}</p>
+    </div>
+
+    <ul class="score-parts">
+      ${ganhos.map((p) => {
+        const pct = clamp(p.ratio * 100, 0, 100);
+        const pontos = Math.round(p.points);
+        const cor = p.good ? "var(--brand)" : "var(--goal)";
+        return `<li class="score-part">
+          <div class="score-part__head">
+            <span class="score-part__label">${svgIcon(p.icon, 14)} ${escapeHtml(p.label)}</span>
+            <span class="score-part__points"><b>${pontos}</b> de ${p.weight}</span>
+          </div>
+          <div class="score-part__meter" role="img" aria-label="${escapeHtml(p.label)}: ${pontos} de ${p.weight} pontos">
+            <span class="score-part__fill" data-ui-css="width:${pct}%; background:${cor}"></span>
+          </div>
+          ${p.detail ? `<p class="score-part__detail">${escapeHtml(p.detail)}</p>` : ""}
+          ${p.advice ? `<p class="score-part__advice">${svgIcon("sparkles", 13)} <span>${escapeHtml(p.advice)}</span></p>` : ""}
+        </li>`;
+      }).join("")}
+    </ul>
+
+    <p class="footnote score-breakdown__note">
+      Indicador educacional, criado por este app para organizar a leitura do seu mês.
+      Não é score de crédito, não é usado por banco nenhum e não vale como análise de risco.
+      ${s.coverage < 100 ? `Hoje ${s.coverage}% dos pilares têm base de cálculo; os demais ficam fora da conta em vez de virar nota baixa.` : "Todos os pilares têm base de cálculo neste mês."}
+    </p>
   </div>`;
 }
 

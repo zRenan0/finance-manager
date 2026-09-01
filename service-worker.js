@@ -54,7 +54,10 @@
 // a faixa e sem as guardas que impedem a demonstração de gravar.
 // v66: o aviso de dados somente locais entrou no pacote e nos estilos da
 // tela inicial. Sem promover, a instalação existente continuaria sem ele.
-const VERSION = "v66";
+// v67: a tela de Saúde ganhou o detalhamento da nota. Muda o pacote e a
+// folha da tela; sem promover, a instalação existente continuaria só com o
+// número, que é justamente o que o módulo veio resolver.
+const VERSION = "v67";
 const BUILD_ID = VERSION;
 const CACHE_NAME = "financas-cache-" + VERSION;
 // A PÁGINA COMERCIAL TEM CACHE PRÓPRIO.

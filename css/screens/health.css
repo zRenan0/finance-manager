@@ -183,3 +183,51 @@ ol.plan-list { list-style: none; margin: 16px 0 0; padding: 0; display: flex; fl
 @media (min-width: 560px) {
   .health-hero__grid { grid-template-columns: auto minmax(0, 1fr); gap: 24px; }
 }
+
+/* ------------------------------------------------------------------
+   [M27] "SUA PONTUAÇÃO"
+   Uma linha por pilar: rótulo, pontos sobre o peso, barra, motivo e
+   conselho. A barra é decorativa; o número ao lado é a informação.
+   ------------------------------------------------------------------ */
+.score-breakdown__head { margin-bottom: 14px; }
+.score-parts { list-style: none; display: grid; gap: 14px; margin: 0 0 14px; padding: 0; }
+
+.score-part__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.score-part__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 600;
+  font-size: 14px;
+  min-width: 0;
+}
+.score-part__label > svg { flex: none; color: var(--muted); }
+.score-part__points { flex: none; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.score-part__points > b { color: var(--ink); font-size: 15px; }
+
+.score-part__meter {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+}
+.score-part__fill { display: block; height: 100%; border-radius: 999px; }
+
+.score-part__detail { margin: 7px 0 0; font-size: 13px; color: var(--muted); line-height: 1.45; }
+.score-part__advice {
+  display: flex;
+  gap: 7px;
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink-soft);
+}
+.score-part__advice > svg { flex: none; margin-top: 2px; color: var(--brand); }
+
+.score-breakdown__note { margin: 0; }

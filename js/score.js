@@ -249,6 +249,39 @@ function buildScoreContext(data, monthKey, ctx) {
   };
 }
 
+// ------------------------------------------------------------------------------
+// [M27] QUANTO CADA PILAR AINDA PODE SOMAR NA NOTA
+// ------------------------------------------------------------------------------
+// A nota é normalizada sobre o peso do que foi AVALIADO, não sobre 100. Então o
+// ganho de fechar a lacuna de um pilar não é `weight * (1 - ratio)`: é essa
+// lacuna dividida pelo peso avaliado, vezes 100. Sem essa divisão, o app
+// prometeria pontos que não existem quando algum pilar está fora da conta.
+//
+// Devolve a lista ordenada pelo maior ganho. Função pura, como o resto daqui.
+function scoreGains(model) {
+  if (!model || model.insufficient || !(model.maxWeight > 0)) return [];
+  return model.pillars
+    .filter((p) => p.applicable)
+    .map((p) => {
+      const lacuna = p.weight * (1 - p.ratio);
+      return {
+        id: p.id,
+        label: p.label,
+        icon: p.icon,
+        points: p.points,
+        weight: p.weight,
+        ratio: p.ratio,
+        detail: p.detail,
+        advice: p.advice,
+        good: p.good,
+        // Arredondado só na exibição; aqui fica cheio para a ordenação não
+        // empatar por causa do arredondamento.
+        gain: (lacuna / model.maxWeight) * 100,
+      };
+    })
+    .sort((a, b) => b.gain - a.gain);
+}
+
 function computeFinanceScore(data, monthKey, ctx) {
   const mKey = monthKey || keyOfDate(new Date());
   const context = buildScoreContext(data, mKey, ctx);
@@ -283,6 +316,9 @@ function computeFinanceScore(data, monthKey, ctx) {
 
   return {
     score, level, insufficient,
+    // Expostos para o detalhamento do M27 poder dizer "18 de 25" e converter
+    // lacuna de pilar em pontos de nota. Não mudam nenhum cálculo daqui.
+    maxWeight, earned: roundMoney(earned),
     coverage: Math.round((maxWeight / SCORE_PILLARS.reduce((s, p) => s + p.weight, 0)) * 100),
     pillars: results,
     strengths,
