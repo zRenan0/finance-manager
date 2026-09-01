@@ -49,7 +49,10 @@
 // v64: o assistente ganhou o passo de gastos fixos. Muda o pacote do
 // aplicativo (app.generated.js) e a folha do assistente; sem promover, a
 // instalação existente continuaria servindo os dois do cache antigo.
-const VERSION = "v64";
+// v65: o modo demonstração entrou no pacote do aplicativo e nos estilos.
+// Sem promover, a instalação existente serviria o app.generated.js antigo, sem
+// a faixa e sem as guardas que impedem a demonstração de gravar.
+const VERSION = "v65";
 const BUILD_ID = VERSION;
 const CACHE_NAME = "financas-cache-" + VERSION;
 // A PÁGINA COMERCIAL TEM CACHE PRÓPRIO.

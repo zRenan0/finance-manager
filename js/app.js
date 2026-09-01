@@ -89,6 +89,10 @@ let state = {
   data: loadData(),
   storageOk: isStorageAvailable(),
   storageWarningDismissed: false,
+  // [M25] Modo demonstração. Vive SÓ na memória: não é lido nem gravado no
+  // banco, então recarregar a página encerra a demonstração e devolve os dados
+  // reais. Ver js/demo.js.
+  demo: { active: false },
   tab: "dashboard",
   monthOffset: 0,
   toast: null,
@@ -531,9 +535,20 @@ function applyHistoryRoute() {
   render();
 }
 
+// [M25] A DEMONSTRAÇÃO NÃO GRAVA E NÃO SOBE. AS DUAS GUARDAS SÃO AQUI.
+//
+// `setData` é "o ponto por onde TODA alteração passa" (ver o comentário do
+// agendamento de nuvem, abaixo). Guardar o modo aqui, em vez de espalhar
+// verificações por cada tela, é o que torna a promessa verificável: enquanto
+// `state.demo.active` for verdadeiro, nem `saveData` nem `CloudSync.schedule`
+// são chamados, e o banco do usuário continua exatamente como estava.
+function isDemoMode() {
+  return !!(state.demo && state.demo.active);
+}
+
 function setData(updater) {
   state.data = typeof updater === "function" ? updater(state.data) : updater;
-  const ok = saveData(state.data);
+  const ok = isDemoMode() ? true : saveData(state.data);
   if (!ok) notify("Não foi possível salvar os dados neste navegador");
   render();
   // [M6] A verificação de conquistas é reavaliação completa (metas, reserva,
@@ -550,7 +565,51 @@ function setData(updater) {
   // O `typeof` é o mesmo cuidado usado com `reportSafeError` e `NavHistory`:
   // gravar é a operação mais crítica do app e não pode depender de um módulo
   // opcional ter sido carregado.
-  if (typeof CloudSync !== "undefined") CloudSync.schedule();
+  if (typeof CloudSync !== "undefined" && !isDemoMode()) CloudSync.schedule();
+}
+
+// ------------------------------------------------------------------------------
+// [M25] ENTRAR E SAIR DA DEMONSTRAÇÃO
+// ------------------------------------------------------------------------------
+// Entrar troca `state.data` por um conjunto fictício e desliga a sincronização.
+// Sair não "desfaz" nada: relê o disco, que nunca foi tocado. É por isso que não
+// existe caminho em que a demonstração possa vazar para a conta ou para o banco
+// local; não há o que vazar.
+function enterDemoMode() {
+  if (isDemoMode()) return;
+  // Desligar ANTES de trocar os dados: uma resposta remota em voo aplicaria
+  // conteúdo da conta por cima da demonstração, ou o contrário.
+  if (typeof CloudSync !== "undefined") CloudSync.disable();
+  // Guardar se o assistente estava aberto é o que devolve o aceite da política
+  // ao lugar dele quando a demonstração termina. Sem isto, olhar a
+  // demonstração viraria um caminho para entrar no app sem passar pelo aceite,
+  // que é justamente a porta que o assistente existe para segurar.
+  state.demo = { active: true, startedAt: new Date().toISOString(), onboardingWasOpen: !!state.onboarding.open };
+  state.onboarding.open = false;
+  state.form = freshTxForm();
+  state.data = buildDemoData();
+  setState({ tab: "dashboard", monthOffset: 0 });
+  notify("Você está na demonstração. Nada aqui é salvo nem sincronizado.");
+}
+
+function exitDemoMode(options) {
+  if (!isDemoMode()) return;
+  const opts = options || {};
+  const voltarAoAssistente = !!state.demo.onboardingWasOpen;
+  state.demo = { active: false };
+  // O snapshot do disco, intacto desde antes de a demonstração começar.
+  state.data = loadData();
+  // O assistente volta exatamente como estava, inclusive com o aceite pendente.
+  if (voltarAoAssistente && !(state.data.onboarding && state.data.onboarding.done)) {
+    state.onboarding.open = true;
+  }
+  state.form = freshTxForm();
+  state.storageOk = isStorageAvailable();
+  if (typeof refreshOnboardingGate === "function") refreshOnboardingGate();
+  // A conta volta a sincronizar sozinha; sem conta, `enable` não faz nada.
+  if (typeof CloudSync !== "undefined" && state.account && state.account.authenticated) CloudSync.enable();
+  setState({ tab: opts.tab || "dashboard", monthOffset: 0 });
+  notify(opts.quiet ? "" : "Demonstração encerrada. Estes são os seus dados.");
 }
 
 // Alteração que veio de FORA (outro aparelho ou outra aba). Grava e redesenha
@@ -1224,6 +1283,7 @@ function renderShell() {
     <a class="skip-link" href="#conteudo" data-action="skip-to-content" tabindex="0">Ir para o conteúdo</a>
     ${renderSideNav()}
     <main class="main-content" id="conteudo" tabindex="-1">
+      ${isDemoMode() ? renderDemoBanner() : ""}
       ${(!state.booting && !state.storageOk && !state.storageWarningDismissed) ? renderStorageWarning() : ""}
       ${state.booting ? renderDashboardSkeleton() : renderScreen()}
     </main>
@@ -1268,6 +1328,20 @@ function renderDashboardSkeleton() {
       <div class="card span-1 sk-card">${block("sk--line sk--w90")}${block("sk--line")}${block("sk--line sk--w70")}</div>
       <div class="card span-2 sk-card">${block("sk--line sk--w120")}${block("sk--line")}${block("sk--line")}${block("sk--line sk--w70")}</div>
     </div>
+  </div>`;
+}
+
+// A faixa não tem botão de fechar, de propósito: ela é a única coisa que
+// separa "os números do app" de "números inventados". Um aviso que some é um
+// aviso que não estava lá quando a pessoa tirou a conclusão errada.
+function renderDemoBanner() {
+  return `<div class="demo-banner" role="status">
+    ${svgIcon("info", 18)}
+    <div class="demo-banner__text">
+      <strong>Dados de demonstração.</strong>
+      <span>Nada aqui é seu, nada é salvo no aparelho e nada sobe para conta nenhuma. Recarregar a página já encerra.</span>
+    </div>
+    <button class="btn btn--secondary btn--sm" data-action="demo-exit">Começar com meus dados</button>
   </div>`;
 }
 

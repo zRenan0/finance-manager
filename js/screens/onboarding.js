@@ -286,6 +286,17 @@ function renderOnbWelcome() {
     ${svgIcon("shieldCheck", 17)}
     <p>Sem conta, seus dados financeiros ficam neste aparelho. Recursos de IA só enviam o conteúdo descrito depois da sua confirmação.</p>
   </div>
+  <!-- [M25] A demonstração NÃO exige o aceite, e a diferença é real: ela não
+       grava nada no aparelho e não envia nada para lugar nenhum, então não há
+       tratamento de dado pessoal para consentir. Quem sair dela para usar o
+       app de verdade volta para cá, com o aceite ainda pendente. -->
+  <div class="onb-demo">
+    <div class="onb-demo__text">
+      <b>Quer ver funcionando antes?</b>
+      <small>Seis meses de dados fictícios: painel, gráficos, orçamento, metas, patrimônio e recorrências. Nada é salvo.</small>
+    </div>
+    <button type="button" class="btn btn--secondary btn--sm" data-action="demo-enter">Explorar demonstração</button>
+  </div>
   <details class="onb-legal-summary">
     <summary>Resumo da política e dos termos</summary>
     <p>O app organiza dados e produz estimativas educativas. Ele não substitui proposta, contrato, consultoria de investimentos ou análise do INSS. Sem conta, os dados ficam no navegador até você exportar ou apagar; com conta ligada, eles também são sincronizados com o servidor. IA e consulta de nota fiscal usam rede apenas quando você aciona esses recursos.</p>

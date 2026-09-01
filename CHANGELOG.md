@@ -2,6 +2,22 @@
 
 ## Não publicado
 
+### O M25 deixou experimentar antes de cadastrar
+
+- "Explorar demonstração", no primeiro passo do assistente, abre o app inteiro
+  com seis meses de dados fictícios: painel, gráficos, orçamento por categoria,
+  metas, patrimônio, dívidas, assinaturas e saúde financeira.
+- **Nada da demonstração é salvo e nada sobe para conta nenhuma.** Ela vive só na
+  memória: o banco do aparelho continua exatamente como estava e a fila de
+  sincronização não recebe uma linha sequer. Recarregar a página já encerra.
+- Uma faixa fixa no alto de todas as telas diz "Dados de demonstração" e oferece
+  "Começar com meus dados". Ela não fecha, de propósito.
+- Sair não desfaz nada: relê o disco, que nunca foi tocado. Se o assistente
+  estava aberto, ele volta com o aceite da política ainda pendente; olhar a
+  demonstração não é um jeito de entrar sem passar por ele.
+- A demonstração não pede aceite, porque não grava nem envia nada.
+- O cache offline subiu para `v65`.
+
 ### O M24 perguntou o que sai todo mês
 
 - O assistente ganhou um passo entre a conta e o orçamento: **gastos fixos**, com

@@ -49,6 +49,7 @@ const SOURCES = Object.freeze([
   "js/achievements.js",
   "js/wrapped.js",
   "js/services.js",
+  "js/demo.js",
   "js/screens/_shared.js",
   "js/screens/onboarding.js",
   "js/screens/dashboard.js",
