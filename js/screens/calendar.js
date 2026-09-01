@@ -200,6 +200,61 @@ function forecastNextMoveNote(f, active) {
   return `<p class="forecast-note forecast-note--empty">Nada agendado nos próximos ${active.label}: o próximo movimento previsto é em <b>${fmtDateFull(proximo.iso)}</b>. Escolha um prazo maior para vê-lo.</p>`;
 }
 
+// ==================================================================
+// [M29] O FECHAMENTO DO MÊS, PARCELA POR PARCELA
+// ==================================================================
+// O cartão já dizia o resultado ("R$ 18.587,55 em 30 dias"). O que faltava era
+// a conta: de onde sai esse número. Um valor projetado que ninguém consegue
+// reconstruir é palpite com tipografia bonita, e é justamente o número que a
+// pessoa usa para decidir se pode gastar.
+//
+// A cadeia vem de `monthCloseForecast` (forecast.js), que lê as parcelas do
+// MESMO lugar que produz o saldo diário. A conta exibida fecha no centavo: o
+// valor mostrado é o resultado da soma que está na tela, e não um segundo
+// número calculado por outro caminho.
+//
+// Duas colunas de honestidade que o roteiro pede:
+//   • margem de segurança é medida no PIOR dia do mês, não no último. Fechar
+//     positivo não ajuda quem fica no vermelho no dia 18;
+//   • gasto variável é estimativa por média e vem rotulado como tal, ao lado
+//     de compromissos que são conhecidos.
+function renderMonthClose(f) {
+  if (typeof monthCloseForecast !== "function") return "";
+  const m = monthCloseForecast(f);
+  if (!m) return "";
+
+  const linhas = [
+    { label: "Saldo hoje", valor: m.saldoAtual, sinal: "", nota: "o que está nas contas agora" },
+    { label: "Receitas previstas", valor: m.receitas, sinal: "+", nota: "entradas já esperadas até o fim do mês" },
+    { label: "Contas previstas", valor: m.contas, sinal: "−", nota: "fixas, parcelas e faturas com data" },
+    { label: "Gastos variáveis estimados", valor: m.variaveis, sinal: "−", nota: "média dos últimos meses, é estimativa" },
+  ];
+  const tom = m.risco ? "var(--negative)" : (m.projetado >= m.saldoAtual ? "var(--positive)" : "var(--goal)");
+
+  return `<div class="month-close">
+    <p class="card-subtitle month-close__title">Como o mês fecha</p>
+    <ul class="month-close__rows">
+      ${linhas.map((l) => `<li class="month-close__row">
+        <span class="month-close__label"><span class="month-close__line">${l.sinal ? `<b aria-hidden="true">${l.sinal}</b>` : ""}${escapeHtml(l.label)}</span><small>${escapeHtml(l.nota)}</small></span>
+        <span class="month-close__value">${fmtBRL(l.valor)}</span>
+      </li>`).join("")}
+      <li class="month-close__row month-close__row--total">
+        <span class="month-close__label">Saldo projetado no fim do mês<small>${fmtDateFull(m.endIso)}</small></span>
+        <span class="month-close__value" data-ui-css="color:${tom}">${fmtBRL(m.projetado)}</span>
+      </li>
+    </ul>
+    <div class="month-close__flags">
+      <p class="month-close__flag">
+        ${svgIcon("shieldCheck", 14)}
+        <span><b>Margem de segurança</b>: no pior dia do mês, ${fmtDateShort(m.fundoIso)}, o saldo chega a <b>${fmtBRL(m.margem)}</b>.</span>
+      </p>
+      ${m.risco
+        ? `<p class="month-close__flag month-close__flag--risk">${svgIcon("alertTriangle", 14)}<span><b>Risco de fechar negativo</b>: pelo ritmo atual o saldo fica abaixo de zero em <b>${fmtDateFull(m.riscoIso)}</b>.</span></p>`
+        : `<p class="month-close__flag">${svgIcon("checkCircle", 14)}<span>Sem risco de saldo negativo no mês, com as informações de hoje.</span></p>`}
+    </div>
+  </div>`;
+}
+
 function renderForecastCard(forecast, full) {
   const f = forecast || forecastModel();
   const active = f.horizons.find((h) => h.id === state.forecastHorizon) || f.horizons[1];
@@ -233,6 +288,7 @@ function renderForecastCard(forecast, full) {
         </div>
       </div>
       ${emptyNote}${alert}
+      ${renderMonthClose(f)}
     </div>`;
   }
 
@@ -255,6 +311,7 @@ function renderForecastCard(forecast, full) {
 
     ${renderForecastChart(f, active)}
     ${emptyNote}${alert}
+    ${renderMonthClose(f)}
 
     <div class="forecast-assumptions">
       <p class="card-subtitle" data-ui-css="margin:0 0 8px">De onde vêm estes números</p>

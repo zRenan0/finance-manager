@@ -18,7 +18,7 @@ do que documentação nenhuma.
 | `INDEXEDDB_VERSION` | `js/storage.js` (`DB_VERSION`) | `4` | O próprio navegador, no `indexedDB.open()` |
 | `SYNC_PROTOCOL_VERSION` | `js/storage.js` (`CLOUD_SYNC_PROTOCOL`) e `netlify/functions/sync.js` (`PROTOCOL`) | `3` (mínimo de escrita `2`, leitura legada `1`) | O backend, pelo cabeçalho `X-Sync-Protocol` e pelo campo `protocol` do corpo |
 | `DATABASE_SCHEMA_VERSION` | `cofre_sync_config.database_schema_version` | `1` | Ninguém: é declarativa. Publicada em `/api/sync/health` |
-| `SERVICE_WORKER_VERSION` | `service-worker.js` (`VERSION`) | `v67` + digest do pacote | `scripts/build-dist.js`, que injeta o SHA-256 de todo o pacote publicado |
+| `SERVICE_WORKER_VERSION` | `service-worker.js` (`VERSION`) | `v68` + digest do pacote | `scripts/build-dist.js`, que injeta o SHA-256 de todo o pacote publicado |
 
 Versões menores, com regra própria:
 

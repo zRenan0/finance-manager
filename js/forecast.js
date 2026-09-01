@@ -414,6 +414,89 @@ function buildForecast(data, refIso) {
   };
 }
 
+// ------------------------------------------------------------------------------
+// [M29] O FECHAMENTO DO MÊS, EM QUATRO PARCELAS
+// ------------------------------------------------------------------------------
+// `buildForecast` já produz o saldo dia a dia até o fim do horizonte, e a tela
+// mostrava o resultado. O que faltava era a CONTA: de onde sai o saldo do dia
+// 30. Um número projetado que ninguém consegue reconstruir é um palpite com
+// tipografia bonita.
+//
+// A cadeia é a do roteiro:
+//
+//   saldo atual
+//   + receitas previstas do que falta do mês
+//   - contas previstas (fixas, parcelas, faturas)
+//   - gastos variáveis ainda esperados
+//   = saldo projetado no fim do mês
+//
+// AS PARTES SÃO LIDAS DO MESMO LUGAR QUE PRODUZ O RESULTADO. Nada é recalculado
+// por outro caminho: as três primeiras vêm dos eventos com efeito de caixa até
+// o último dia do mês, e a quarta é `baseline.remainingCurrentMonth`, que já
+// exclui recorrente, parcelado e aporte justamente para não contar duas vezes.
+// Por isso a soma das partes bate com o saldo do último dia; o teste do M29
+// trava essa igualdade, que é a única forma de a explicação não mentir.
+function monthCloseForecast(forecast) {
+  if (!forecast || !Array.isArray(forecast.days) || forecast.days.length === 0) return null;
+  const hoje = forecast.today;
+  const mKey = String(hoje).slice(0, 7);
+  const doMes = forecast.days.filter((d) => String(d.iso).slice(0, 7) === mKey);
+  if (doMes.length === 0) return null;
+  const ultimo = doMes[doMes.length - 1];
+
+  const ateOFim = (forecast.events || []).filter((e) => e.cashEffect !== false && e.iso <= ultimo.iso);
+  const receitas = sumMoney(ateOFim.filter((e) => e.type === "income"), (e) => e.amount);
+  const contas = sumMoney(ateOFim.filter((e) => e.type !== "income"), (e) => e.amount);
+  const variaveis = roundMoney((forecast.baseline && forecast.baseline.remainingCurrentMonth) || 0);
+
+  const saldoAtual = roundMoney(forecast.balance);
+
+  // O NÚMERO MOSTRADO É O DA PRÓPRIA CONTA, NÃO O DA CAMINHADA DIÁRIA.
+  //
+  // As duas rotas chegam ao mesmo lugar, mas não ao mesmo centavo: a caminhada
+  // dia a dia arredonda a cada passo e a soma das parcelas arredonda uma vez.
+  // No conjunto da demonstração a diferença é de três centavos.
+  //
+  // Três centavos não mudam decisão nenhuma, mas uma conta escrita na tela que
+  // não fecha destrói a confiança no resto do cartão. Então o card exibe o
+  // resultado da SOMA que ele mostra, e a caminhada fica ao lado como
+  // conferência: `divergencia` existe para o teste travar que as duas rotas
+  // continuam concordando, e não para aparecer na tela.
+  const projetado = roundMoney(subMoney(subMoney(addMoney(saldoAtual, receitas), contas), variaveis));
+  const projetadoDiario = roundMoney(ultimo.balance);
+
+  // O PIOR DIA, NÃO O ÚLTIMO. Fechar o mês positivo não ajuda quem fica no
+  // vermelho no dia 18 e volta ao azul quando o salário cai no dia 30. A margem
+  // de segurança é a distância do fundo do poço até zero.
+  const fundo = doMes.reduce((min, d) => (moneyCompare(d.balance, min.balance) < 0 ? d : min), doMes[0]);
+  // Quando o pior dia É o último, a margem e o saldo projetado são a mesma
+  // coisa e precisam ser o MESMO número na tela. Vindo de rotas diferentes,
+  // eles diferem por centavos de arredondamento, e dois valores quase iguais
+  // lado a lado leem como erro de cálculo.
+  const margem = fundo.iso === ultimo.iso ? projetado : roundMoney(fundo.balance);
+  const diaNegativo = doMes.find((d) => d.balance < 0) || null;
+
+  return {
+    monthKey: mKey,
+    endIso: ultimo.iso,
+    saldoAtual,
+    receitas,
+    contas,
+    variaveis,
+    projetado,
+    projetadoDiario,
+    divergencia: roundMoney(subMoney(projetado, projetadoDiario)),
+    // Quanto sobra de folga no pior momento do mês. Negativa = falta caixa.
+    margem,
+    fundoIso: fundo.iso,
+    risco: !!diaNegativo,
+    riscoIso: diaNegativo ? diaNegativo.iso : null,
+    // Só as duas primeiras parcelas são compromissos conhecidos; a terceira é
+    // estimativa por média. A tela precisa dizer isso.
+    estimado: variaveis,
+  };
+}
+
 // Um número projetado sem a premissa ao lado é chute. Estas frases são a
 // prestação de contas do cálculo acima.
 function forecastAssumptions(data, baseline, events) {

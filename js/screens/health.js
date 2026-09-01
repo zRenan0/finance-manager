@@ -52,6 +52,7 @@ function renderHealthScreen() {
     <div class="grid-dashboard">
       ${renderHealthHero(model, h, toneColor)}
       ${renderScoreBreakdown(model.score)}
+      ${renderEmergencyLadder()}
       ${model.indicators.map((i) => renderHealthIndicator(i)).join("")}
       ${renderHealthPlan(model)}
       <p class="footnote span-3">Os indicadores usam apenas os seus lançamentos, metas e renda cadastrada. Nada é enviado para fora do aparelho. As faixas são referências educativas, e indicadores sem base de cálculo ficam marcados como “sem dados”.</p>
@@ -153,6 +154,64 @@ function renderScoreBreakdown(s) {
       Indicador educacional, criado por este app para organizar a leitura do seu mês.
       Não é score de crédito, não é usado por banco nenhum e não vale como análise de risco.
       ${s.coverage < 100 ? `Hoje ${s.coverage}% dos pilares têm base de cálculo; os demais ficam fora da conta em vez de virar nota baixa.` : "Todos os pilares têm base de cálculo neste mês."}
+    </p>
+  </div>`;
+}
+
+// ==================================================================
+// [M28] QUANTO GUARDAR PARA EMERGÊNCIAS
+// ==================================================================
+// O app já tinha um alvo de reserva, mas ele era um número só, calculado sobre
+// o gasto TOTAL e apresentado como se fosse o certo. Duas coisas erradas nisso:
+//
+//   1. numa emergência a pessoa corta delivery e streaming antes de cortar
+//      aluguel e remédio, então o gasto total pede uma reserva maior que a
+//      necessária, e meta grande demais é a que ninguém começa;
+//   2. três, seis e nove meses não são níveis de acerto: são apostas sobre
+//      quanto tempo levaria para repor a renda. O app não sabe se quem está
+//      lendo é concursado ou autônomo, e fingir que sabe é o erro.
+//
+// Por isso a escada mostra os três degraus lado a lado, com o que cada um
+// compra, e apenas MARCA o que a pessoa escolheu em Ajustes.
+function renderEmergencyLadder() {
+  if (typeof emergencyLadder !== "function") return "";
+  const e = emergencyLadder(state.data);
+  if (!e.measurable) return "";
+
+  const meses = e.monthsCovered;
+  const cobertura = meses >= 0.1 ? `${meses.toFixed(1).replace(".", ",")} ${meses < 2 ? "mês" : "meses"}` : "menos de um mês";
+
+  return `<div class="card span-3 reserve-ladder">
+    <p class="card-title">Quanto guardar para emergências</p>
+    <p class="card-subtitle">
+      Seus gastos essenciais somam <b>${fmtBRL(e.essentials)} por mês</b>, na média dos últimos meses fechados.
+      ${e.current > 0
+        ? `Os <b>${fmtBRL(e.current)}</b> que você já reservou cobrem <b>${cobertura}</b> desse essencial.`
+        : "Você ainda não tem reserva registrada."}
+    </p>
+
+    <ul class="reserve-rungs">
+      ${e.rungs.map((r) => `<li class="reserve-rung ${r.chosen ? "is-chosen" : ""} ${r.reached ? "is-reached" : ""}">
+        <div class="reserve-rung__head">
+          <span class="reserve-rung__months">${escapeHtml(r.label)}${r.chosen ? ` <span class="reserve-rung__tag">seu alvo</span>` : ""}</span>
+          <span class="reserve-rung__target">${fmtBRL(r.target)}</span>
+        </div>
+        <div class="reserve-rung__meter" role="img" aria-label="${escapeHtml(r.label)}: ${Math.round(r.pct)}% de ${fmtBRL(r.target)}">
+          <span class="reserve-rung__fill" data-ui-css="width:${clamp(r.pct, 0, 100)}%"></span>
+        </div>
+        <p class="reserve-rung__note">${escapeHtml(r.note)}</p>
+        <p class="reserve-rung__gap">${r.reached
+          ? "Já alcançado."
+          : `Faltam ${fmtBRL(r.missing)}.`}</p>
+      </li>`).join("")}
+    </ul>
+
+    <p class="footnote reserve-ladder__note">
+      Nenhum desses degraus é obrigatório, e o app não recomenda um. Quanto mais
+      instável a renda, mais meses fazem sentido; quanto mais estável, menos.
+      A conta usa só o essencial (o grupo de necessidades do seu orçamento),
+      porque é o que continua saindo quando tudo o mais é cortado.
+      Você escolhe o alvo em Ajustes.
     </p>
   </div>`;
 }

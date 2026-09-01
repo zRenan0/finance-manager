@@ -278,6 +278,78 @@ function avgMonthlyExpense(data, months = 3) {
   return moneyFromCents(Math.round(cents / counted));
 }
 
+// ------------------------------------------------------------------------------
+// [M28] MÉDIA DOS GASTOS ESSENCIAIS, E A ESCADA DA RESERVA
+// ------------------------------------------------------------------------------
+// `avgMonthlyExpense` soma TUDO que saiu, e é o certo para medir queima de caixa.
+// Para dimensionar reserva de emergência ele superestima: numa emergência a
+// pessoa corta streaming, delivery e lazer antes de cortar aluguel e remédio.
+// Reserva calculada sobre o gasto total pede uma meta maior do que a necessária,
+// e meta grande demais é a que ninguém começa.
+//
+// A régua de "essencial" não é inventada aqui: é o grupo `necessidade` do
+// 50/30/20 que o app já usa em orçamento, score e saúde. Mesma régua, mesma
+// conta, um lugar só para mudar.
+function avgMonthlyEssentials(data, months = 3) {
+  const now = new Date();
+  let cents = 0;
+  let counted = 0;
+  for (let i = 1; i <= months; i++) {
+    const key = keyOfDate(addMonths(now, -i));
+    const total = monthGroupSpend(data, key).necessidade;
+    if (total <= 0) continue;
+    cents += moneyToCents(total);
+    counted++;
+  }
+  // Sem histórico fechado, o mês corrente é a única evidência que existe.
+  if (counted === 0) {
+    const atual = monthGroupSpend(data, keyOfDate(now)).necessidade;
+    return atual > 0 ? atual : 0;
+  }
+  return moneyFromCents(Math.round(cents / counted));
+}
+
+// A ESCADA, E POR QUE ELA NÃO TEM UM DEGRAU "CERTO".
+//
+// Três, seis e nove meses não são níveis de acerto: são apostas diferentes
+// sobre quanto tempo levaria para repor a renda. Quem é concursado e quem é
+// autônomo não têm o mesmo risco, e o app não sabe qual é o caso. Por isso a
+// função devolve os três degraus lado a lado, com o que cada um compra, e
+// marca qual deles a pessoa escolheu, sem chamar nenhum de recomendado.
+const EMERGENCY_RUNGS = [
+  { months: 3, label: "3 meses", note: "Cobre um intervalo curto entre empregos ou uma despesa grande e inesperada." },
+  { months: 6, label: "6 meses", note: "Faixa mais citada para renda estável com carteira assinada." },
+  { months: 9, label: "9 meses", note: "Faz mais sentido para renda variável, autônomo ou sócio de empresa." },
+];
+
+function emergencyLadder(data, months = 3) {
+  const essentials = avgMonthlyEssentials(data, months);
+  const fund = emergencyFund(data);
+  const current = fund.current;
+  const escolhido = Math.max(1, Number(data.emergencyMonths) || 6);
+  const rungs = EMERGENCY_RUNGS.map((r) => {
+    const target = mulMoney(essentials, r.months);
+    return {
+      ...r,
+      target,
+      missing: Math.max(0, roundMoney(subMoney(target, current))),
+      reached: essentials > 0 && current >= target,
+      chosen: r.months === escolhido,
+      pct: target > 0 ? clamp(safePct(current, target), 0, 100) : 0,
+    };
+  });
+  return {
+    essentials,
+    current,
+    // Meses cobertos pela régua do essencial, que é maior que a do gasto total.
+    monthsCovered: essentials > 0 ? current / essentials : 0,
+    chosenMonths: escolhido,
+    rungs,
+    // Sem essencial medido não há escada: qualquer alvo seria chute.
+    measurable: essentials > 0,
+  };
+}
+
 function emergencyFund(data) {
   const goal = emergencyGoalOf(data);
   const targetMonths = Math.max(1, Number(data.emergencyMonths) || 6);

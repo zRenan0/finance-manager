@@ -57,7 +57,9 @@
 // v67: a tela de Saúde ganhou o detalhamento da nota. Muda o pacote e a
 // folha da tela; sem promover, a instalação existente continuaria só com o
 // número, que é justamente o que o módulo veio resolver.
-const VERSION = "v67";
+// v68: a escada da reserva (M28) e a conta do fechamento do mês (M29)
+// entraram no pacote e nas folhas de Saúde e Planejamento.
+const VERSION = "v68";
 const BUILD_ID = VERSION;
 const CACHE_NAME = "financas-cache-" + VERSION;
 // A PÁGINA COMERCIAL TEM CACHE PRÓPRIO.

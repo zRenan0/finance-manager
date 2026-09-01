@@ -2,6 +2,32 @@
 
 ## Não publicado
 
+### O M28 dimensionou a reserva pelo que realmente é essencial
+
+- Novo painel na tela de Saúde: "Quanto guardar para emergências". A conta parte
+  da média dos seus **gastos essenciais**, não do gasto total. Numa emergência
+  ninguém corta aluguel e remédio antes de streaming e delivery, e reserva
+  calculada sobre o total pede uma meta maior que a necessária.
+- Três degraus lado a lado, 3, 6 e 9 meses, cada um com o valor, o quanto falta e
+  para quem faz sentido. **Nenhum é apresentado como o certo**; só o alvo que
+  você escolheu em Ajustes recebe marca.
+- A régua de "essencial" é a mesma do orçamento, do score e da saúde: o grupo de
+  necessidades do 50/30/20 que o app já usava.
+
+### O M29 mostrou a conta do fechamento do mês
+
+- O cartão de previsão dizia o resultado; agora mostra de onde ele sai: saldo
+  hoje, mais receitas previstas, menos contas previstas, menos gastos variáveis
+  estimados, igual ao saldo projetado no fim do mês.
+- **A conta fecha no centavo.** O valor exibido é o resultado da soma que está na
+  tela, e não um segundo número calculado por outro caminho.
+- Cada parcela diz o que é: contas previstas são compromissos com data; gasto
+  variável vem rotulado como estimativa por média.
+- Duas leituras novas: **margem de segurança**, medida no pior dia do mês e não
+  no último (fechar positivo não ajuda quem fica no vermelho no dia 18), e
+  **risco de fechar negativo**, com a data em que isso aconteceria.
+- O cache offline subiu para `v68`.
+
 ### O M27 abriu a nota de saúde financeira
 
 - Novo painel "Sua pontuação", na tela de Saúde: cada pilar aparece com os

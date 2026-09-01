@@ -15956,6 +15956,78 @@ function avgMonthlyExpense(data, months = 3) {
   return moneyFromCents(Math.round(cents / counted));
 }
 
+// ------------------------------------------------------------------------------
+// [M28] MÉDIA DOS GASTOS ESSENCIAIS, E A ESCADA DA RESERVA
+// ------------------------------------------------------------------------------
+// `avgMonthlyExpense` soma TUDO que saiu, e é o certo para medir queima de caixa.
+// Para dimensionar reserva de emergência ele superestima: numa emergência a
+// pessoa corta streaming, delivery e lazer antes de cortar aluguel e remédio.
+// Reserva calculada sobre o gasto total pede uma meta maior do que a necessária,
+// e meta grande demais é a que ninguém começa.
+//
+// A régua de "essencial" não é inventada aqui: é o grupo `necessidade` do
+// 50/30/20 que o app já usa em orçamento, score e saúde. Mesma régua, mesma
+// conta, um lugar só para mudar.
+function avgMonthlyEssentials(data, months = 3) {
+  const now = new Date();
+  let cents = 0;
+  let counted = 0;
+  for (let i = 1; i <= months; i++) {
+    const key = keyOfDate(addMonths(now, -i));
+    const total = monthGroupSpend(data, key).necessidade;
+    if (total <= 0) continue;
+    cents += moneyToCents(total);
+    counted++;
+  }
+  // Sem histórico fechado, o mês corrente é a única evidência que existe.
+  if (counted === 0) {
+    const atual = monthGroupSpend(data, keyOfDate(now)).necessidade;
+    return atual > 0 ? atual : 0;
+  }
+  return moneyFromCents(Math.round(cents / counted));
+}
+
+// A ESCADA, E POR QUE ELA NÃO TEM UM DEGRAU "CERTO".
+//
+// Três, seis e nove meses não são níveis de acerto: são apostas diferentes
+// sobre quanto tempo levaria para repor a renda. Quem é concursado e quem é
+// autônomo não têm o mesmo risco, e o app não sabe qual é o caso. Por isso a
+// função devolve os três degraus lado a lado, com o que cada um compra, e
+// marca qual deles a pessoa escolheu, sem chamar nenhum de recomendado.
+const EMERGENCY_RUNGS = [
+  { months: 3, label: "3 meses", note: "Cobre um intervalo curto entre empregos ou uma despesa grande e inesperada." },
+  { months: 6, label: "6 meses", note: "Faixa mais citada para renda estável com carteira assinada." },
+  { months: 9, label: "9 meses", note: "Faz mais sentido para renda variável, autônomo ou sócio de empresa." },
+];
+
+function emergencyLadder(data, months = 3) {
+  const essentials = avgMonthlyEssentials(data, months);
+  const fund = emergencyFund(data);
+  const current = fund.current;
+  const escolhido = Math.max(1, Number(data.emergencyMonths) || 6);
+  const rungs = EMERGENCY_RUNGS.map((r) => {
+    const target = mulMoney(essentials, r.months);
+    return {
+      ...r,
+      target,
+      missing: Math.max(0, roundMoney(subMoney(target, current))),
+      reached: essentials > 0 && current >= target,
+      chosen: r.months === escolhido,
+      pct: target > 0 ? clamp(safePct(current, target), 0, 100) : 0,
+    };
+  });
+  return {
+    essentials,
+    current,
+    // Meses cobertos pela régua do essencial, que é maior que a do gasto total.
+    monthsCovered: essentials > 0 ? current / essentials : 0,
+    chosenMonths: escolhido,
+    rungs,
+    // Sem essencial medido não há escada: qualquer alvo seria chute.
+    measurable: essentials > 0,
+  };
+}
+
 function emergencyFund(data) {
   const goal = emergencyGoalOf(data);
   const targetMonths = Math.max(1, Number(data.emergencyMonths) || 6);
@@ -17960,6 +18032,89 @@ function buildForecast(data, refIso) {
     negativeDayIso,
     baseline: { monthly: baseline.monthly, months: baseline.months, remainingCurrentMonth: moneyFromCents(remainingCurrent) },
     assumptions: forecastAssumptions(data, baseline, events),
+  };
+}
+
+// ------------------------------------------------------------------------------
+// [M29] O FECHAMENTO DO MÊS, EM QUATRO PARCELAS
+// ------------------------------------------------------------------------------
+// `buildForecast` já produz o saldo dia a dia até o fim do horizonte, e a tela
+// mostrava o resultado. O que faltava era a CONTA: de onde sai o saldo do dia
+// 30. Um número projetado que ninguém consegue reconstruir é um palpite com
+// tipografia bonita.
+//
+// A cadeia é a do roteiro:
+//
+//   saldo atual
+//   + receitas previstas do que falta do mês
+//   - contas previstas (fixas, parcelas, faturas)
+//   - gastos variáveis ainda esperados
+//   = saldo projetado no fim do mês
+//
+// AS PARTES SÃO LIDAS DO MESMO LUGAR QUE PRODUZ O RESULTADO. Nada é recalculado
+// por outro caminho: as três primeiras vêm dos eventos com efeito de caixa até
+// o último dia do mês, e a quarta é `baseline.remainingCurrentMonth`, que já
+// exclui recorrente, parcelado e aporte justamente para não contar duas vezes.
+// Por isso a soma das partes bate com o saldo do último dia; o teste do M29
+// trava essa igualdade, que é a única forma de a explicação não mentir.
+function monthCloseForecast(forecast) {
+  if (!forecast || !Array.isArray(forecast.days) || forecast.days.length === 0) return null;
+  const hoje = forecast.today;
+  const mKey = String(hoje).slice(0, 7);
+  const doMes = forecast.days.filter((d) => String(d.iso).slice(0, 7) === mKey);
+  if (doMes.length === 0) return null;
+  const ultimo = doMes[doMes.length - 1];
+
+  const ateOFim = (forecast.events || []).filter((e) => e.cashEffect !== false && e.iso <= ultimo.iso);
+  const receitas = sumMoney(ateOFim.filter((e) => e.type === "income"), (e) => e.amount);
+  const contas = sumMoney(ateOFim.filter((e) => e.type !== "income"), (e) => e.amount);
+  const variaveis = roundMoney((forecast.baseline && forecast.baseline.remainingCurrentMonth) || 0);
+
+  const saldoAtual = roundMoney(forecast.balance);
+
+  // O NÚMERO MOSTRADO É O DA PRÓPRIA CONTA, NÃO O DA CAMINHADA DIÁRIA.
+  //
+  // As duas rotas chegam ao mesmo lugar, mas não ao mesmo centavo: a caminhada
+  // dia a dia arredonda a cada passo e a soma das parcelas arredonda uma vez.
+  // No conjunto da demonstração a diferença é de três centavos.
+  //
+  // Três centavos não mudam decisão nenhuma, mas uma conta escrita na tela que
+  // não fecha destrói a confiança no resto do cartão. Então o card exibe o
+  // resultado da SOMA que ele mostra, e a caminhada fica ao lado como
+  // conferência: `divergencia` existe para o teste travar que as duas rotas
+  // continuam concordando, e não para aparecer na tela.
+  const projetado = roundMoney(subMoney(subMoney(addMoney(saldoAtual, receitas), contas), variaveis));
+  const projetadoDiario = roundMoney(ultimo.balance);
+
+  // O PIOR DIA, NÃO O ÚLTIMO. Fechar o mês positivo não ajuda quem fica no
+  // vermelho no dia 18 e volta ao azul quando o salário cai no dia 30. A margem
+  // de segurança é a distância do fundo do poço até zero.
+  const fundo = doMes.reduce((min, d) => (moneyCompare(d.balance, min.balance) < 0 ? d : min), doMes[0]);
+  // Quando o pior dia É o último, a margem e o saldo projetado são a mesma
+  // coisa e precisam ser o MESMO número na tela. Vindo de rotas diferentes,
+  // eles diferem por centavos de arredondamento, e dois valores quase iguais
+  // lado a lado leem como erro de cálculo.
+  const margem = fundo.iso === ultimo.iso ? projetado : roundMoney(fundo.balance);
+  const diaNegativo = doMes.find((d) => d.balance < 0) || null;
+
+  return {
+    monthKey: mKey,
+    endIso: ultimo.iso,
+    saldoAtual,
+    receitas,
+    contas,
+    variaveis,
+    projetado,
+    projetadoDiario,
+    divergencia: roundMoney(subMoney(projetado, projetadoDiario)),
+    // Quanto sobra de folga no pior momento do mês. Negativa = falta caixa.
+    margem,
+    fundoIso: fundo.iso,
+    risco: !!diaNegativo,
+    riscoIso: diaNegativo ? diaNegativo.iso : null,
+    // Só as duas primeiras parcelas são compromissos conhecidos; a terceira é
+    // estimativa por média. A tela precisa dizer isso.
+    estimado: variaveis,
   };
 }
 
@@ -27742,6 +27897,61 @@ function forecastNextMoveNote(f, active) {
   return `<p class="forecast-note forecast-note--empty">Nada agendado nos próximos ${active.label}: o próximo movimento previsto é em <b>${fmtDateFull(proximo.iso)}</b>. Escolha um prazo maior para vê-lo.</p>`;
 }
 
+// ==================================================================
+// [M29] O FECHAMENTO DO MÊS, PARCELA POR PARCELA
+// ==================================================================
+// O cartão já dizia o resultado ("R$ 18.587,55 em 30 dias"). O que faltava era
+// a conta: de onde sai esse número. Um valor projetado que ninguém consegue
+// reconstruir é palpite com tipografia bonita, e é justamente o número que a
+// pessoa usa para decidir se pode gastar.
+//
+// A cadeia vem de `monthCloseForecast` (forecast.js), que lê as parcelas do
+// MESMO lugar que produz o saldo diário. A conta exibida fecha no centavo: o
+// valor mostrado é o resultado da soma que está na tela, e não um segundo
+// número calculado por outro caminho.
+//
+// Duas colunas de honestidade que o roteiro pede:
+//   • margem de segurança é medida no PIOR dia do mês, não no último. Fechar
+//     positivo não ajuda quem fica no vermelho no dia 18;
+//   • gasto variável é estimativa por média e vem rotulado como tal, ao lado
+//     de compromissos que são conhecidos.
+function renderMonthClose(f) {
+  if (typeof monthCloseForecast !== "function") return "";
+  const m = monthCloseForecast(f);
+  if (!m) return "";
+
+  const linhas = [
+    { label: "Saldo hoje", valor: m.saldoAtual, sinal: "", nota: "o que está nas contas agora" },
+    { label: "Receitas previstas", valor: m.receitas, sinal: "+", nota: "entradas já esperadas até o fim do mês" },
+    { label: "Contas previstas", valor: m.contas, sinal: "−", nota: "fixas, parcelas e faturas com data" },
+    { label: "Gastos variáveis estimados", valor: m.variaveis, sinal: "−", nota: "média dos últimos meses, é estimativa" },
+  ];
+  const tom = m.risco ? "var(--negative)" : (m.projetado >= m.saldoAtual ? "var(--positive)" : "var(--goal)");
+
+  return `<div class="month-close">
+    <p class="card-subtitle month-close__title">Como o mês fecha</p>
+    <ul class="month-close__rows">
+      ${linhas.map((l) => `<li class="month-close__row">
+        <span class="month-close__label"><span class="month-close__line">${l.sinal ? `<b aria-hidden="true">${l.sinal}</b>` : ""}${escapeHtml(l.label)}</span><small>${escapeHtml(l.nota)}</small></span>
+        <span class="month-close__value">${fmtBRL(l.valor)}</span>
+      </li>`).join("")}
+      <li class="month-close__row month-close__row--total">
+        <span class="month-close__label">Saldo projetado no fim do mês<small>${fmtDateFull(m.endIso)}</small></span>
+        <span class="month-close__value" data-ui-css="color:${tom}">${fmtBRL(m.projetado)}</span>
+      </li>
+    </ul>
+    <div class="month-close__flags">
+      <p class="month-close__flag">
+        ${svgIcon("shieldCheck", 14)}
+        <span><b>Margem de segurança</b>: no pior dia do mês, ${fmtDateShort(m.fundoIso)}, o saldo chega a <b>${fmtBRL(m.margem)}</b>.</span>
+      </p>
+      ${m.risco
+        ? `<p class="month-close__flag month-close__flag--risk">${svgIcon("alertTriangle", 14)}<span><b>Risco de fechar negativo</b>: pelo ritmo atual o saldo fica abaixo de zero em <b>${fmtDateFull(m.riscoIso)}</b>.</span></p>`
+        : `<p class="month-close__flag">${svgIcon("checkCircle", 14)}<span>Sem risco de saldo negativo no mês, com as informações de hoje.</span></p>`}
+    </div>
+  </div>`;
+}
+
 function renderForecastCard(forecast, full) {
   const f = forecast || forecastModel();
   const active = f.horizons.find((h) => h.id === state.forecastHorizon) || f.horizons[1];
@@ -27775,6 +27985,7 @@ function renderForecastCard(forecast, full) {
         </div>
       </div>
       ${emptyNote}${alert}
+      ${renderMonthClose(f)}
     </div>`;
   }
 
@@ -27797,6 +28008,7 @@ function renderForecastCard(forecast, full) {
 
     ${renderForecastChart(f, active)}
     ${emptyNote}${alert}
+    ${renderMonthClose(f)}
 
     <div class="forecast-assumptions">
       <p class="card-subtitle" data-ui-css="margin:0 0 8px">De onde vêm estes números</p>
@@ -27935,6 +28147,7 @@ function renderHealthScreen() {
     <div class="grid-dashboard">
       ${renderHealthHero(model, h, toneColor)}
       ${renderScoreBreakdown(model.score)}
+      ${renderEmergencyLadder()}
       ${model.indicators.map((i) => renderHealthIndicator(i)).join("")}
       ${renderHealthPlan(model)}
       <p class="footnote span-3">Os indicadores usam apenas os seus lançamentos, metas e renda cadastrada. Nada é enviado para fora do aparelho. As faixas são referências educativas, e indicadores sem base de cálculo ficam marcados como “sem dados”.</p>
@@ -28036,6 +28249,64 @@ function renderScoreBreakdown(s) {
       Indicador educacional, criado por este app para organizar a leitura do seu mês.
       Não é score de crédito, não é usado por banco nenhum e não vale como análise de risco.
       ${s.coverage < 100 ? `Hoje ${s.coverage}% dos pilares têm base de cálculo; os demais ficam fora da conta em vez de virar nota baixa.` : "Todos os pilares têm base de cálculo neste mês."}
+    </p>
+  </div>`;
+}
+
+// ==================================================================
+// [M28] QUANTO GUARDAR PARA EMERGÊNCIAS
+// ==================================================================
+// O app já tinha um alvo de reserva, mas ele era um número só, calculado sobre
+// o gasto TOTAL e apresentado como se fosse o certo. Duas coisas erradas nisso:
+//
+//   1. numa emergência a pessoa corta delivery e streaming antes de cortar
+//      aluguel e remédio, então o gasto total pede uma reserva maior que a
+//      necessária, e meta grande demais é a que ninguém começa;
+//   2. três, seis e nove meses não são níveis de acerto: são apostas sobre
+//      quanto tempo levaria para repor a renda. O app não sabe se quem está
+//      lendo é concursado ou autônomo, e fingir que sabe é o erro.
+//
+// Por isso a escada mostra os três degraus lado a lado, com o que cada um
+// compra, e apenas MARCA o que a pessoa escolheu em Ajustes.
+function renderEmergencyLadder() {
+  if (typeof emergencyLadder !== "function") return "";
+  const e = emergencyLadder(state.data);
+  if (!e.measurable) return "";
+
+  const meses = e.monthsCovered;
+  const cobertura = meses >= 0.1 ? `${meses.toFixed(1).replace(".", ",")} ${meses < 2 ? "mês" : "meses"}` : "menos de um mês";
+
+  return `<div class="card span-3 reserve-ladder">
+    <p class="card-title">Quanto guardar para emergências</p>
+    <p class="card-subtitle">
+      Seus gastos essenciais somam <b>${fmtBRL(e.essentials)} por mês</b>, na média dos últimos meses fechados.
+      ${e.current > 0
+        ? `Os <b>${fmtBRL(e.current)}</b> que você já reservou cobrem <b>${cobertura}</b> desse essencial.`
+        : "Você ainda não tem reserva registrada."}
+    </p>
+
+    <ul class="reserve-rungs">
+      ${e.rungs.map((r) => `<li class="reserve-rung ${r.chosen ? "is-chosen" : ""} ${r.reached ? "is-reached" : ""}">
+        <div class="reserve-rung__head">
+          <span class="reserve-rung__months">${escapeHtml(r.label)}${r.chosen ? ` <span class="reserve-rung__tag">seu alvo</span>` : ""}</span>
+          <span class="reserve-rung__target">${fmtBRL(r.target)}</span>
+        </div>
+        <div class="reserve-rung__meter" role="img" aria-label="${escapeHtml(r.label)}: ${Math.round(r.pct)}% de ${fmtBRL(r.target)}">
+          <span class="reserve-rung__fill" data-ui-css="width:${clamp(r.pct, 0, 100)}%"></span>
+        </div>
+        <p class="reserve-rung__note">${escapeHtml(r.note)}</p>
+        <p class="reserve-rung__gap">${r.reached
+          ? "Já alcançado."
+          : `Faltam ${fmtBRL(r.missing)}.`}</p>
+      </li>`).join("")}
+    </ul>
+
+    <p class="footnote reserve-ladder__note">
+      Nenhum desses degraus é obrigatório, e o app não recomenda um. Quanto mais
+      instável a renda, mais meses fazem sentido; quanto mais estável, menos.
+      A conta usa só o essencial (o grupo de necessidades do seu orçamento),
+      porque é o que continua saindo quando tudo o mais é cortado.
+      Você escolhe o alvo em Ajustes.
     </p>
   </div>`;
 }
