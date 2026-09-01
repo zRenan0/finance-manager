@@ -154,7 +154,11 @@
 
 /* Barra de progresso: quatro segmentos com rótulo. Um passo concluído fica
    cheio, o atual fica cheio e com o rótulo em destaque, os seguintes vazios. */
-.onb__progress { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; flex: 0 0 auto; }
+/* `repeat(4, 1fr)` era o número de passos escrito na folha. Com o passo de
+   gastos fixos a grade passou a quebrar linha, deixando "Orçamento" sozinho
+   embaixo. `auto-fit` conta os passos que existem, então acrescentar ou tirar
+   um deixa de exigir edição aqui. */
+.onb__progress { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; flex: 0 0 auto; }
 .onb__step { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .onb__step-bar {
   height: 4px; border-radius: 999px; background: var(--border);
@@ -166,6 +170,12 @@
   letter-spacing: 0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .onb__step.active .onb__step-label { color: var(--ink); }
+
+/* Só aparece na faixa estreita, onde os cinco rótulos saem de cena. */
+.onb__progress-now {
+  display: none; margin: 6px 0 0; font-size: 12px; font-weight: 650;
+  color: var(--ink); letter-spacing: 0.01em;
+}
 
 .onb__body {
   display: flex; flex: 1 1 auto; flex-direction: column; gap: 14px;
@@ -299,7 +309,50 @@
   .onb { padding-left: 10px; padding-right: 10px; }
   .onb__sheet { padding: 18px 15px 16px; border-radius: var(--radius); }
   .onb__title { font-size: 19px; }
-  .onb__step-label { font-size: 9.5px; }
+  /* Cinco colunas a 320 px não cabem cinco rótulos legíveis. Some com todos
+     e mostra só o do passo atual, em linha própria; a barra continua contando
+     visualmente e o grupo continua anunciando "Passo X de N". */
+  .onb__step-label { display: none; }
+  .onb__progress-now { display: block; }
   .onb__foot .btn { min-width: 0; flex: 1; }
   .onb-focus__grid { grid-template-columns: 1fr; }
+}
+
+/* ------------------------------------------------------------------
+   PASSO 4 DO ASSISTENTE: GASTOS FIXOS
+   Cinco linhas de rótulo mais valor. Nenhuma é obrigatória, então o
+   estado vazio é o normal e não recebe destaque de erro.
+   ------------------------------------------------------------------ */
+.onb-fixed { display: grid; gap: 8px; margin-bottom: 14px; }
+
+.onb-fixed__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 128px;
+  align-items: center;
+  gap: 12px;
+}
+
+.onb-fixed__label { display: grid; gap: 2px; min-width: 0; }
+.onb-fixed__name { font-weight: 600; font-size: 15px; }
+.onb-fixed__hint { font-size: 12px; color: var(--muted); line-height: 1.35; }
+.onb-fixed__input { text-align: right; }
+
+.onb-fixed__total {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  margin-bottom: 8px;
+}
+.onb-fixed__total > span { color: var(--muted); font-size: 13px; }
+.onb-fixed__total > b { font-size: 20px; font-variant-numeric: tabular-nums; }
+
+/* No estreito o valor vai para baixo do rótulo: 128px de campo mais o
+   texto da dica não cabem lado a lado sem quebrar palavra. */
+@media (max-width: 420px) {
+  .onb-fixed__row { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .onb-fixed__input { text-align: left; }
 }

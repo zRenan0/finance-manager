@@ -46,7 +46,10 @@
 // mesmo caso do v51: sem promover a versão, quem já tinha a landing em cache
 // receberia o HTML novo (navegação vai à rede primeiro) com a folha ANTIGA, e
 // veria a seção sem estilo nenhum. Conferido no navegador antes de promover.
-const VERSION = "v63";
+// v64: o assistente ganhou o passo de gastos fixos. Muda o pacote do
+// aplicativo (app.generated.js) e a folha do assistente; sem promover, a
+// instalação existente continuaria servindo os dois do cache antigo.
+const VERSION = "v64";
 const BUILD_ID = VERSION;
 const CACHE_NAME = "financas-cache-" + VERSION;
 // A PÁGINA COMERCIAL TEM CACHE PRÓPRIO.

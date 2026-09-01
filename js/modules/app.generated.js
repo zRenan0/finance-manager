@@ -24244,7 +24244,36 @@ const ONB_STEPS = [
   { n: 1, label: "Boas-vindas" },
   { n: 2, label: "Renda" },
   { n: 3, label: "Conta" },
-  { n: 4, label: "Orçamento" },
+  { n: 4, label: "Gastos fixos" },
+  { n: 5, label: "Orçamento" },
+];
+
+// ------------------------------------------------------------------------------
+// PASSO 4: OS GASTOS FIXOS, E POR QUE ELE NÃO CRIA LANÇAMENTO
+// ------------------------------------------------------------------------------
+// A pergunta é a do roteiro do módulo ("deseja cadastrar gastos fixos?"), mas a
+// resposta NÃO vira transação. Duas razões, as duas do próprio app:
+//
+//   1. Recorrência aqui é DERIVADA, não cadastrada. `recurring.js` classifica a
+//      cadência pelo intervalo entre cobranças reais. Semear lançamentos para
+//      alimentar esse motor seria dar histórico falso justamente ao componente
+//      cujo trabalho é inferir o histórico verdadeiro.
+//   2. Um aluguel que ainda não venceu não é despesa do mês. Gravá-lo hoje
+//      inflaria "Despesas do mês"; gravá-lo no mês passado inventaria um
+//      passado que a pessoa não viveu. Nenhuma das duas datas é honesta.
+//
+// O que a resposta faz é melhor e não custa nada em integridade: ela vira TETO
+// da categoria antes da semeadura. `seedBudgetsFromSplit` já trata teto
+// existente como intocável e o desconta da cota do grupo (ver budgets.js), de
+// modo que declarar R$ 1.500 de moradia não só fixa a linha de moradia como
+// reparte o que sobra de Necessidades entre as outras. O plano nasce pessoal em
+// vez de percentual, e nenhum centavo foi inventado.
+const ONB_FIXED_PRESETS = [
+  { categoryId: "moradia", label: "Moradia", hint: "Aluguel ou financiamento, condomínio, luz, água" },
+  { categoryId: "transporte", label: "Transporte", hint: "Combustível, transporte público, parcela do carro" },
+  { categoryId: "saude", label: "Saúde", hint: "Plano, remédio de uso contínuo" },
+  { categoryId: "educacao", label: "Educação", hint: "Escola, faculdade, curso" },
+  { categoryId: "assinaturas", label: "Assinaturas e serviços", hint: "Celular, internet, streaming, academia" },
 ];
 
 const ONB_SPLIT_PRESETS = [
@@ -24263,6 +24292,9 @@ function freshOnboarding() {
     income: "",
     account: { name: "", type: "corrente", balance: "", openingDate: todayIso() },
     skipAccount: false,
+    // { [categoryId]: "texto digitado" }. Vazio é resposta válida: o passo 4
+    // nunca bloqueia o avanço.
+    fixed: {},
     legalAccepted: false,
     focus: "month",
     split: { necessidade: 50, desejo: 30, futuro: 20 },
@@ -24395,8 +24427,9 @@ function renderOnboardingLayer() {
   const body = o.step === 1 ? renderOnbWelcome()
     : o.step === 2 ? renderOnbIncome()
     : o.step === 3 ? renderOnbAccount()
+    : o.step === 4 ? renderOnbFixed()
     : renderOnbSplit();
-  const last = o.step === 4;
+  const last = o.step === ONB_STEPS.length;
   return `<div class="onb" role="dialog" aria-modal="true" aria-label="Configuração inicial">
     <div class="onb__sheet">
       <div class="onb__head">
@@ -24439,13 +24472,23 @@ function patchOnboardingFooter() {
   if (aviso) aviso.hidden = pode;
 }
 
+// O RÓTULO DE RESERVA, E POR QUE ELE EXISTE.
+//
+// Com cinco passos, a 320 px e com zoom de 200%, cada coluna fica com menos de
+// 50 px e "Boas-vindas" passa a ser cortado. Encolher a fonte só adia o
+// problema e piora a leitura de quem ampliou a tela justamente para enxergar.
+// Abaixo desse limite os cinco rótulos saem e fica só o do passo atual, em
+// linha própria e com espaço inteiro. Nada se perde: o grupo já anuncia
+// "Passo X de N" para leitor de tela, em qualquer largura.
 function renderOnbProgress(step) {
-  return `<div class="onb__progress" role="group" aria-label="Passo ${step} de 4">
+  const atual = ONB_STEPS.find((s) => s.n === step);
+  return `<div class="onb__progress" role="group" aria-label="Passo ${step} de ${ONB_STEPS.length}">
     ${ONB_STEPS.map((s) => `<div class="onb__step ${s.n === step ? "active" : ""} ${s.n < step ? "done" : ""}">
       <span class="onb__step-bar"></span>
       <span class="onb__step-label">${s.label}</span>
     </div>`).join("")}
-  </div>`;
+  </div>
+  <p class="onb__progress-now" aria-hidden="true">${atual ? atual.label : ""}</p>`;
 }
 
 /* --------------------------------------------------------------- passo 1 */
@@ -24453,7 +24496,7 @@ function renderOnbWelcome() {
   return `<div class="onb__intro">
     <span class="onb__icon">${svgIcon("sparkles", 26)}</span>
     <h1 class="onb__title">Vamos deixar o app com a sua cara</h1>
-    <p class="onb__lead">São quatro perguntas rápidas. Dá para mudar tudo depois em Ajustes.</p>
+    <p class="onb__lead">São cinco telas curtas, e só duas pedem um número. Dá para mudar tudo depois em Ajustes.</p>
   </div>
   <div class="field">
     <label class="field__label" for="onb-name">Como você quer ser chamado?</label>
@@ -24541,6 +24584,99 @@ function renderOnbAccount() {
 }
 
 /* --------------------------------------------------------------- passo 4 */
+
+// Valor digitado para uma categoria, em reais. Texto vazio ou lixo vira 0, que
+// significa "não declarou" e não "declarou zero".
+function onbFixedOf(categoryId) {
+  const bruto = (state.onboarding.fixed || {})[categoryId];
+  const n = parseMoneyInput(String(bruto == null ? "" : bruto));
+  return Number.isFinite(n) && n > 0 ? roundMoney(n) : 0;
+}
+
+function onbFixedTotal() {
+  return sumMoney(ONB_FIXED_PRESETS, (p) => onbFixedOf(p.categoryId));
+}
+
+// As categorias como o motor de tetos deve enxergá-las: com o que a pessoa
+// declarou já gravado como teto. Existe uma função só para isso porque a PRÉVIA
+// (passo 5) e a GRAVAÇÃO (conclusão) precisam partir exatamente da mesma base;
+// é a mesma razão pela qual `seeds` é calculado uma vez só na conclusão.
+function onbSeedCategories() {
+  const base = (state.data && state.data.categories) || [];
+  const declarados = new Map();
+  ONB_FIXED_PRESETS.forEach((p) => {
+    const valor = onbFixedOf(p.categoryId);
+    if (valor > 0) declarados.set(p.categoryId, valor);
+  });
+  if (declarados.size === 0) return base;
+  // Teto que a pessoa já tinha continua ganhando: quem chega aqui com
+  // categorias configuradas está refazendo o assistente, não começando.
+  return base.map((c) => (declarados.has(c.id) && !hasBudgetCeiling(c)
+    ? { ...c, budget: declarados.get(c.id) }
+    : c));
+}
+
+// Somar cinco campos e só mostrar o resultado na próxima renderização
+// esvaziaria o passo: a pessoa digita e nada responde. O corpo do assistente
+// não é redesenhado a cada tecla (isso tiraria o foco do campo), então o
+// resumo é remendado no lugar, do mesmo jeito que o rodapé já era.
+//
+// O remendo escreve TEXTO em elementos que já existem, e não HTML novo. Um
+// `innerHTML` aqui seria o primeiro sink novo do app desde o M4 (ver
+// tests/test-xss-surface.js) para exibir dois números formatados; o preço de
+// abrir essa porta é maior que o negrito que ela compraria.
+const ONB_FIXED_HINT_VAZIO = "Se preferir, siga em branco. O passo seguinte sugere tetos a partir da sua renda, e você ajusta depois.";
+const ONB_FIXED_HINT_SEM_RENDA = "Sem renda informada, o app não tem como dizer o peso disso no mês.";
+
+function onbFixedHint(income, total) {
+  if (!(total > 0)) return ONB_FIXED_HINT_VAZIO;
+  if (!(income > 0)) return ONB_FIXED_HINT_SEM_RENDA;
+  const pct = Math.round((total / income) * 100);
+  return `Isso é cerca de ${pct}% da sua renda. Sobram ${fmtBRL(subMoney(income, total))} para o resto do mês.`;
+}
+
+function patchOnbFixedSummary() {
+  const total = onbFixedTotal();
+  const caixa = document.getElementById("onb-fixed-total");
+  const valor = document.getElementById("onb-fixed-total-value");
+  const dica = document.getElementById("onb-fixed-hint");
+  if (caixa) caixa.hidden = !(total > 0);
+  if (valor) valor.textContent = fmtBRL(total);
+  if (dica) dica.textContent = onbFixedHint(onbIncome(), total);
+}
+
+function renderOnbFixed() {
+  return `<div class="onb__intro">
+    <span class="onb__icon">${svgIcon("calendar", 26)}</span>
+    <h1 class="onb__title">O que sai todo mês<br>sem você decidir?</h1>
+    <p class="onb__lead">Só o que é fixo e previsível. Deixe em branco o que não se aplica; nada aqui é obrigatório.</p>
+  </div>
+
+  <div class="onb-fixed">
+    ${ONB_FIXED_PRESETS.map((p) => `<div class="onb-fixed__row">
+      <label class="onb-fixed__label" for="onb-fixed-${p.categoryId}">
+        <span class="onb-fixed__name">${escapeHtml(p.label)}</span>
+        <span class="onb-fixed__hint">${escapeHtml(p.hint)}</span>
+      </label>
+      <input id="onb-fixed-${p.categoryId}" class="input onb-fixed__input" data-field="onb-fixed" data-id="${p.categoryId}"
+        value="${escapeHtml(String((state.onboarding.fixed || {})[p.categoryId] || ""))}"
+        inputmode="decimal" placeholder="0,00" aria-label="Valor mensal de ${escapeHtml(p.label)}" />
+    </div>`).join("")}
+  </div>
+
+  <div class="onb-fixed__total" id="onb-fixed-total" ${onbFixedTotal() > 0 ? "" : "hidden"}>
+    <span>Fixo declarado</span>
+    <b id="onb-fixed-total-value">${fmtBRL(onbFixedTotal())}</b>
+  </div>
+  <p class="field-hint" id="onb-fixed-hint">${escapeHtml(onbFixedHint(onbIncome(), onbFixedTotal()))}</p>
+
+  <div class="onb__note">
+    ${svgIcon("info", 17)}
+    <p>Isso não cria lançamento nenhum. Vira o teto dessas categorias, e o passo seguinte reparte o que sobra entre as outras.</p>
+  </div>`;
+}
+
+/* --------------------------------------------------------------- passo 5 */
 function renderOnbSplit() {
   const income = onbIncome();
   const active = onbSplitPresetId();
@@ -24580,7 +24716,7 @@ function renderOnbSplit() {
 function renderOnbSeedPreview() {
   const income = onbIncome();
   if (!(income > 0)) return "";
-  const seeds = seedBudgetsFromSplit(state.data, income, state.onboarding.split);
+  const seeds = seedBudgetsFromSplit({ ...state.data, categories: onbSeedCategories() }, income, state.onboarding.split);
   if (seeds.items.length === 0 && seeds.kept.length === 0) return "";
 
   const n = seeds.items.length;
@@ -24620,7 +24756,11 @@ function finishOnboarding() {
   // Calculado UMA vez, fora do setData, para que o texto do aviso e o que foi
   // de fato gravado venham do mesmo resultado. Recalcular dentro do reducer
   // abriria espaço para os dois divergirem.
-  const seeds = seedBudgetsFromSplit(state.data, income, o.split);
+  // Mesma base da prévia do passo 5: o que a pessoa declarou como fixo entra
+  // como teto ANTES da semeadura, e o motor o preserva e o desconta da cota do
+  // grupo. Ver o bloco do passo 4 e budgets.js.
+  const categoriasBase = onbSeedCategories();
+  const seeds = seedBudgetsFromSplit({ ...state.data, categories: categoriasBase }, income, o.split);
 
   // A ordem importa: `setData` já renderiza. Fechar a camada antes evita um
   // quadro em que a tela de boas-vindas reaparece por um instante com os dados
@@ -24636,7 +24776,7 @@ function finishOnboarding() {
       dashboardLayout: applyDashboardFocus(d.dashboardLayout, o.focus),
       onboarding: { done: true, skipped: false, completedAt: todayIso() },
       privacy: acceptLegalTexts(d.privacy),
-      categories: categoriesWithSeededBudgets(d.categories, seeds),
+      categories: categoriesWithSeededBudgets(categoriasBase, seeds),
     };
     if (wantsAccount) {
       next.accounts = [...(d.accounts || []), makeAccount({
@@ -33244,7 +33384,7 @@ function onClick(e) {
       break;
     case "dismiss-storage-warning": setState({ storageWarningDismissed: true }); break;
     // ---- Configuração inicial (4 passos) ----
-    case "onb-next": if (onbCanAdvance(state.onboarding.step)) { state.onboarding.step = Math.min(4, state.onboarding.step + 1); render(); } break;
+    case "onb-next": if (onbCanAdvance(state.onboarding.step)) { state.onboarding.step = Math.min(ONB_STEPS.length, state.onboarding.step + 1); render(); } break;
     // O "Continuar" nasce desabilitado até o aceite, e o aceite fica no fim de
     // uma área que rola: numa janela de 720px de altura o checkbox cai fora da
     // tela enquanto o botão morto continua visível no rodapé fixo. A frase que
@@ -36902,6 +37042,11 @@ function onInput(e) {
     case "onb-acc-name": state.onboarding.account.name = val; patchOnboardingFooter(); break;
     case "onb-acc-balance": state.onboarding.account.balance = val; patchOnboardingFooter(); break;
     case "onb-acc-date": state.onboarding.account.openingDate = val; patchOnboardingFooter(); break;
+    // Um caso para as cinco linhas do passo 4: a categoria vem em `data-id`.
+    // Sem isso seriam cinco `case` idênticos, e cada preset novo exigiria um.
+    case "onb-fixed":
+      if (id) { state.onboarding.fixed = { ...(state.onboarding.fixed || {}), [id]: val }; patchOnbFixedSummary(); patchOnboardingFooter(); }
+      break;
     case "tx-amount": state.form.amount = val; patchSubmitButton(); patchFormWarnings(); break;
     case "tx-description": state.form.description = val; break;
     case "tx-date": state.form.date = val; break;

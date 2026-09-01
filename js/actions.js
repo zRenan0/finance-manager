@@ -267,7 +267,7 @@ function onClick(e) {
       break;
     case "dismiss-storage-warning": setState({ storageWarningDismissed: true }); break;
     // ---- Configuração inicial (4 passos) ----
-    case "onb-next": if (onbCanAdvance(state.onboarding.step)) { state.onboarding.step = Math.min(4, state.onboarding.step + 1); render(); } break;
+    case "onb-next": if (onbCanAdvance(state.onboarding.step)) { state.onboarding.step = Math.min(ONB_STEPS.length, state.onboarding.step + 1); render(); } break;
     // O "Continuar" nasce desabilitado até o aceite, e o aceite fica no fim de
     // uma área que rola: numa janela de 720px de altura o checkbox cai fora da
     // tela enquanto o botão morto continua visível no rodapé fixo. A frase que

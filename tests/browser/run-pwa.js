@@ -75,6 +75,10 @@ async function completeOnboarding(page) {
   await page.fill("#onb-acc-name", "Conta offline");
   await page.fill("#onb-acc-balance", "2000,00");
   await page.locator('[data-action="onb-next"]').click();
+  // Laço, e não contagem: ver a nota do mesmo ajudante em run-browser.js.
+  for (let i = 0; i < 6 && await page.locator('[data-action="onb-next"]').count() > 0; i++) {
+    await page.locator('[data-action="onb-next"]').click();
+  }
   await page.locator('[data-action="onb-finish"]').click();
   await page.waitForSelector(".main-content");
 }

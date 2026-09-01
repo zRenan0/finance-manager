@@ -263,10 +263,10 @@ section("3b. Semeadura de tetos pela regra x/x/x");
 }
 
 /* ============================================================== renderização */
-section("4. Renderização dos 4 passos");
+section("4. Renderização dos 5 passos");
 {
   run(`state.data = migrate(defaultData()); state.onboarding = freshOnboarding(); state.onboarding.open = true; state.onboarding.legalAccepted = true;`);
-  for (let step = 1; step <= 4; step++) {
+  for (let step = 1; step <= 5; step++) {
     run(`state.onboarding.step = ${step};`);
     const html = run(`renderOnboardingLayer()`);
     check(`passo ${step}: HTML não vazio`, html.length > 300, html.length);
@@ -277,23 +277,67 @@ section("4. Renderização dos 4 passos");
     check(`passo ${step}: botão de avanço tem âncora de id`, /id="onb-advance"/.test(html));
   }
 
-  // O passo 4 só mostra a prévia em reais quando existe renda para dividir.
-  run(`state.onboarding.step = 4; state.onboarding.income = "";`);
-  check("passo 4 sem renda omite a prévia", !/onb__preview/.test(run(`renderOnboardingLayer()`)));
+  // O passo do orçamento (agora o 5) só mostra a prévia em reais quando existe
+  // renda para dividir.
+  run(`state.onboarding.step = 5; state.onboarding.income = "";`);
+  check("passo 5 sem renda omite a prévia", !/onb__preview/.test(run(`renderOnboardingLayer()`)));
   run(`state.onboarding.income = "5000";`);
   const comPrevia = run(`renderOnboardingLayer()`);
-  check("passo 4 com renda mostra a prévia", /onb__preview/.test(comPrevia));
+  check("passo 5 com renda mostra a prévia", /onb__preview/.test(comPrevia));
   check("prévia calcula 50% da renda", comPrevia.includes("2.500,00"), comPrevia.includes("2.500,00"));
 
   // A conclusão grava teto em categoria que o usuário não tocou. Ele precisa
   // poder ver o que vai acontecer antes de concluir, não descobrir depois.
-  check("passo 4 mostra a prévia dos tetos", /onb-seed/.test(comPrevia));
+  check("passo 5 mostra a prévia dos tetos", /onb-seed/.test(comPrevia));
   check("prévia dos tetos lista uma linha por categoria principal",
     (comPrevia.match(/onb-seed__row/g) || []).length === 9, (comPrevia.match(/onb-seed__row/g) || []).length);
   check("prévia dos tetos nomeia a categoria", comPrevia.includes("Moradia"));
   run(`state.onboarding.income = "";`);
   check("sem renda não há prévia de tetos", !/onb-seed/.test(run(`renderOnboardingLayer()`)));
   run(`state.onboarding.income = "5000";`);
+
+  /* ---------------------------------------------------- passo 4: gastos fixos */
+  // O passo é opcional POR CONTRATO: em branco ele avança, e o roteiro do
+  // módulo pede um assistente curto, não um formulário obrigatório a mais.
+  run(`state.onboarding.step = 4; state.onboarding.fixed = {};`);
+  const fixoVazio = run(`renderOnboardingLayer()`);
+  check("passo 4 avança em branco", run(`onbCanAdvance(4)`) === true);
+  check("passo 4 não tem motivo de bloqueio", run(`onbBlockReason(4)`) === "");
+  check("passo 4 lista as cinco linhas", (fixoVazio.match(/onb-fixed__row/g) || []).length === 5,
+    (fixoVazio.match(/onb-fixed__row/g) || []).length);
+  // A caixa existe sempre no HTML e nasce escondida: é ela que o remendo do
+  // resumo preenche a cada tecla, sem escrever HTML novo no DOM.
+  check("passo 4 em branco esconde o total", /id="onb-fixed-total" hidden/.test(fixoVazio));
+  check("passo 4 em branco dá a saída de seguir sem preencher", /siga em branco/.test(fixoVazio));
+  check("passo 4 avisa que não cria lançamento", /não cria lançamento nenhum/.test(fixoVazio));
+
+  run(`state.onboarding.fixed = { moradia: "1500", transporte: "400" };`);
+  const fixoCheio = run(`renderOnboardingLayer()`);
+  check("passo 4 soma o declarado", run(`onbFixedTotal()`) === 1900, run(`onbFixedTotal()`));
+  check("passo 4 mostra o total", !/id="onb-fixed-total" hidden/.test(fixoCheio) && fixoCheio.includes("1.900,00"));
+  check("passo 4 mostra o peso na renda", fixoCheio.includes("38%"), fixoCheio.includes("38%"));
+  check("passo 4 mostra o que sobra", fixoCheio.includes("3.100,00"));
+
+  // O EFEITO REAL: declarado vira teto ANTES da semeadura, e o motor o preserva
+  // e desconta da cota do grupo. Sem isso o passo seria uma pergunta decorativa.
+  const comFixo = run(`JSON.stringify(onbSeedCategories().filter((c) => c.budget != null).map((c) => [c.id, c.budget]))`);
+  check("declarado vira teto na base da semeadura", comFixo === '[["moradia",1500],["transporte",400]]', comFixo);
+  const semeado = run(`JSON.stringify((function () {
+    const base = onbSeedCategories();
+    const s = seedBudgetsFromSplit({ ...state.data, categories: base }, onbIncome(), state.onboarding.split);
+    return { mantidos: s.kept.map((k) => [k.categoryId, k.budget]), novos: s.items.map((i) => i.categoryId) };
+  })())`);
+  const res = JSON.parse(semeado);
+  check("o motor preserva o que foi declarado",
+    JSON.stringify(res.mantidos) === '[["moradia",1500],["transporte",400]]', semeado);
+  check("e não semeia teto novo por cima dele",
+    !res.novos.includes("moradia") && !res.novos.includes("transporte"), res.novos.join(","));
+  // A prévia do passo 5 precisa enxergar a mesma base, senão ela promete uma
+  // coisa e a conclusão grava outra.
+  run(`state.onboarding.step = 5;`);
+  check("a prévia do passo 5 reflete o fixo declarado",
+    !/onb-seed__row[sS]{0,200}Moradia/.test(run(`renderOnboardingLayer()`)));
+  run(`state.onboarding.fixed = {}; state.onboarding.step = 5;`);
 
   // Todo input delegado precisa de id, senão o foco se perde a cada tecla.
   const semAncora = (readSrc("js/screens/onboarding.js").match(/<input[^>]*>/g) || [])
@@ -310,7 +354,7 @@ section("5. Ações têm case no onClick");
     .forEach((a) => check(`ação "${a}" tem case`, src.includes(`case "${a}"`)));
 
   const inputSrc = run(`onInput.toString()`);
-  ["onb-name", "onb-income", "onb-acc-name", "onb-acc-balance"]
+  ["onb-name", "onb-income", "onb-acc-name", "onb-acc-balance", "onb-fixed"]
     .forEach((f) => check(`campo "${f}" tem case no onInput`, inputSrc.includes(`case "${f}"`)));
   check("tipo da conta é tratado no onChange", run(`onChange.toString()`).includes("onb-acc-type"));
 }

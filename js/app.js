@@ -1740,6 +1740,11 @@ function onInput(e) {
     case "onb-acc-name": state.onboarding.account.name = val; patchOnboardingFooter(); break;
     case "onb-acc-balance": state.onboarding.account.balance = val; patchOnboardingFooter(); break;
     case "onb-acc-date": state.onboarding.account.openingDate = val; patchOnboardingFooter(); break;
+    // Um caso para as cinco linhas do passo 4: a categoria vem em `data-id`.
+    // Sem isso seriam cinco `case` idênticos, e cada preset novo exigiria um.
+    case "onb-fixed":
+      if (id) { state.onboarding.fixed = { ...(state.onboarding.fixed || {}), [id]: val }; patchOnbFixedSummary(); patchOnboardingFooter(); }
+      break;
     case "tx-amount": state.form.amount = val; patchSubmitButton(); patchFormWarnings(); break;
     case "tx-description": state.form.description = val; break;
     case "tx-date": state.form.date = val; break;

@@ -2,6 +2,23 @@
 
 ## Não publicado
 
+### O M24 perguntou o que sai todo mês
+
+- O assistente ganhou um passo entre a conta e o orçamento: **gastos fixos**, com
+  cinco linhas (moradia, transporte, saúde, educação, assinaturas). Nada é
+  obrigatório, o passo avança em branco e "Pular por agora" continua no alto.
+- Enquanto você digita, o passo soma o declarado e diz o peso disso na renda:
+  "R$ 2.080,00 · cerca de 35% da sua renda. Sobram R$ 3.920,00 para o resto do
+  mês."
+- **O que você declara não vira lançamento nenhum.** Vira o teto daquelas
+  categorias, e o passo seguinte reparte o que sobra entre as outras. Quem
+  declara R$ 1.500 de moradia termina o assistente com um plano pessoal em vez
+  de um rateio por percentual.
+- A barra de progresso passou a caber cinco passos em uma linha. Em telas
+  estreitas com zoom, os rótulos dão lugar ao nome do passo atual, sozinho e
+  legível; o leitor de tela continua anunciando "Passo X de 5".
+- O cache offline subiu para `v64`.
+
 ### O M23 deu à landing o mapa que faltava
 
 - Nova seção "A proposta" entre o problema e a demonstração, com os três pilares

@@ -41,6 +41,12 @@ async function completeOnboarding(page, focus = "month") {
   await page.fill("#onb-acc-name", "Conta principal");
   await page.fill("#onb-acc-balance", "2000,00");
   await page.locator('[data-action="onb-next"]').click();
+  // Os passos que sobram são opcionais e não pedem nada. Avançar em laço, em
+  // vez de contar cliques, faz este ajudante sobreviver a um passo novo no
+  // assistente; era o número fixo de "Próximo" que derrubava a suíte inteira.
+  for (let i = 0; i < 6 && await page.locator('[data-action="onb-next"]').count() > 0; i++) {
+    await page.locator('[data-action="onb-next"]').click();
+  }
   await page.locator('[data-action="onb-finish"]').click();
   await page.waitForSelector(".main-content");
 }
@@ -135,6 +141,9 @@ async function captureOnboardingGeometryM4(page) {
         skip: { action: "onb-skip", rect: rectOf(skip) },
         footer: footerButtons.map((button) => ({ action: button.dataset.action || "", rect: rectOf(button) })),
       },
+      progressAriaLabel: progress.getAttribute("aria-label") || "",
+      progressNow: (document.querySelector(".onb__progress-now")?.clientWidth || 0) > 0
+        ? document.querySelector(".onb__progress-now").textContent.trim() : "",
       progressLabels: progressLabels.map((node) => ({
         text: node.textContent.trim(),
         rect: rectOf(node),
@@ -191,8 +200,18 @@ async function assertOnboardingGeometryM4(page, label, options = {}) {
     assert(control.rect.width >= 44 && control.rect.height >= 44,
       `${label}: botão ${control.action} tem alvo menor que 44 px: ${JSON.stringify(control.rect)}`);
   });
-  assert(geometry.progressLabels.length === 4, `${label}: a barra não mostrou os quatro rótulos de progresso`);
-  geometry.progressLabels.forEach((item) => {
+  // O que importa é que TODO passo declarado tenha rótulo visível na barra,
+  // não que sejam quatro. O rótulo do progresso diz quantos são.
+  const totalPassos = Number((geometry.progressAriaLabel || "").match(/de (\d+)$/)?.[1]) || 0;
+  assert(totalPassos >= 4, `${label}: o rótulo do progresso não declarou o total de passos: ${geometry.progressAriaLabel}`);
+  assert(geometry.progressLabels.length === totalPassos,
+    `${label}: a barra mostrou ${geometry.progressLabels.length} rótulos para ${totalPassos} passos`);
+  // Na faixa estreita os cinco rótulos saem e sobra o do passo atual, em linha
+  // própria. Ou os rótulos cabem, ou existe essa reserva; nunca nenhum dos dois.
+  const rotulosVisiveis = geometry.progressLabels.filter((item) => item.clientWidth > 0);
+  assert(rotulosVisiveis.length === totalPassos || geometry.progressNow,
+    `${label}: os rótulos saíram da barra e não há rótulo de reserva do passo atual`);
+  rotulosVisiveis.forEach((item) => {
     assert(item.rect.width > 0 && item.rect.height > 0, `${label}: rótulo de progresso oculto: ${item.text}`);
     assert(item.scrollWidth <= item.clientWidth + tolerance && item.scrollHeight <= item.clientHeight + tolerance,
       `${label}: rótulo de progresso cortado: ${JSON.stringify(item)}`);
@@ -280,7 +299,9 @@ async function advanceOnboardingM4(page, label) {
 async function runOnboardingViewportM4(browser, scenario) {
   const fresh = await openFresh(browser, scenario.viewport, { hasTouch: true, reducedMotion: "reduce", ...scenario.contextOptions });
   const page = fresh.page;
-  const step = (number) => page.locator(`.onb__progress[aria-label="Passo ${number} de 4"]`);
+  // O total sai do próprio rótulo: fixá-lo aqui já quebrou a suíte quando o
+  // assistente ganhou o passo de gastos fixos.
+  const step = (number) => page.locator(`.onb__progress[aria-label^="Passo ${number} de "]`);
   try {
     const first = await assertOnboardingGeometryM4(page, `${scenario.label}, passo 1`);
     assert(Math.abs(first.viewport.devicePixelRatio - scenario.devicePixelRatio) < 0.01,
@@ -323,8 +344,19 @@ async function runOnboardingViewportM4(browser, scenario) {
 
     await step(4).waitFor();
     await assertOnboardingScrollResetM4(page, `${scenario.label}, Próximo para o passo 4`);
-    assert(await page.locator(".onb__preview").count() === 1, `${scenario.label}: o passo 4 não mostrou a prévia da renda`);
     await assertOnboardingGeometryM4(page, `${scenario.label}, passo 4`, { expectBodyOverflow: true });
+    // O passo de gastos fixos é opcional: avança em branco, sem preencher nada.
+    await scrollOnboardingBodyToEndM4(page);
+    await advanceOnboardingM4(page, `${scenario.label}, passo 4`);
+
+    await step(5).waitFor();
+    await assertOnboardingScrollResetM4(page, `${scenario.label}, Próximo para o passo 5`);
+    assert(await page.locator(".onb__preview").count() === 1, `${scenario.label}: o passo 5 não mostrou a prévia da renda`);
+    await assertOnboardingGeometryM4(page, `${scenario.label}, passo 5`, { expectBodyOverflow: true });
+    await scrollOnboardingBodyToEndM4(page);
+    await page.locator('[data-action="onb-back"]').click();
+
+    await step(4).waitFor();
     await scrollOnboardingBodyToEndM4(page);
     await page.locator('[data-action="onb-back"]').click();
 
@@ -336,7 +368,11 @@ async function runOnboardingViewportM4(browser, scenario) {
 
     await step(4).waitFor();
     await assertOnboardingScrollResetM4(page, `${scenario.label}, novo Próximo para o passo 4`);
-    await assertOnboardingGeometryM4(page, `${scenario.label}, passo 4 final`, { expectBodyOverflow: true });
+    await scrollOnboardingBodyToEndM4(page);
+    await advanceOnboardingM4(page, `${scenario.label}, passo 4 de volta`);
+
+    await step(5).waitFor();
+    await assertOnboardingGeometryM4(page, `${scenario.label}, passo 5 final`, { expectBodyOverflow: true });
     await page.locator('[data-action="onb-finish"]').click();
     await page.waitForSelector(".main-content");
 
