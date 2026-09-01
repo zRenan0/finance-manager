@@ -7,6 +7,41 @@
 // Recalcula, sem gravar nada, o efeito de uma despesa hipotética no
 // orçamento diário restante do mês e no prazo de uma meta (se escolhida).
 // ------------------------------------------------------------------
+// ------------------------------------------------------------------------------
+// [M31] "POSSO COMPRAR?" - O QUE FALTAVA NA RESPOSTA
+// ------------------------------------------------------------------------------
+// O simulador já respondia em orçamento DIÁRIO, e diário é a unidade errada
+// para decidir uma compra grande: ninguém pensa "posso trocar R$ 12 por dia por
+// um notebook". A pergunta é mensal, e a resposta precisa das três leituras que
+// mudam a decisão: quanto sobra por mês antes e depois, quanto da renda passa a
+// estar comprometido com parcelas, e se a reserva é atingida.
+//
+// A régua da parcela existente sai do que já está cadastrado em Patrimônio como
+// dívida com parcela mensal. Nada é estimado: se a pessoa não cadastrou, o
+// comprometimento "antes" é zero e a tela diz de onde veio.
+function monthlyDebtCommitment(data) {
+  return (data.assets || [])
+    .filter((a) => a.kind === "liability" && a.debtStatus !== "paid")
+    .reduce((soma, a) => addMoney(soma, Math.max(0, roundMoney(a.monthlyPayment))), 0);
+}
+
+// A reserva é atingida quando pagar a compra exige encostar no dinheiro que
+// está reservado para emergência. Para o parcelado, o gatilho é outro: a sobra
+// mensal virar negativa significa que a parcela sai da reserva todo mês.
+function reserveImpactOf(data, cashNow, monthlyAfter) {
+  const fundo = typeof emergencyFund === "function" ? emergencyFund(data) : null;
+  const reserva = fundo ? roundMoney(fundo.current) : 0;
+  const caixa = typeof realizedBalance === "function" ? roundMoney(realizedBalance(data)) : 0;
+  if (reserva <= 0) return { reserve: 0, affected: false, reason: "sem-reserva" };
+  if (cashNow > 0 && subMoney(caixa, cashNow) < reserva) {
+    return { reserve: reserva, affected: true, reason: "caixa" };
+  }
+  if (monthlyAfter != null && monthlyAfter < 0) {
+    return { reserve: reserva, affected: true, reason: "sobra-negativa" };
+  }
+  return { reserve: reserva, affected: false, reason: "preservada" };
+}
+
 function simulateExpenseImpact(data, hypotheticalAmount, goalId) {
   const now = new Date();
   const mKey = keyOfDate(now);
@@ -47,6 +82,11 @@ function simulateExpenseImpact(data, hypotheticalAmount, goalId) {
     dailyDrop: subMoney(dailyBefore, dailyAfter),
     willExceedIncome: afterRemaining < 0,
     goalDelay,
+    // [M31] A leitura mensal, que é a unidade em que a decisão é tomada.
+    income,
+    monthlyBefore: beforeRemaining,
+    monthlyAfter: afterRemaining,
+    reserveImpact: reserveImpactOf(data, hypotheticalAmount, afterRemaining),
   };
 }
 
@@ -73,11 +113,25 @@ function simulateFinancingImpact(data, params, goalId) {
 
   const monthlyImpact = simulateExpenseImpact(data, valorParcela, goalId);
 
+  // [M31] O comprometimento que interessa não é o desta parcela sozinha: é o
+  // total da renda que passa a estar preso em parcela. Quem já tem R$ 900 de
+  // financiamento e assume mais R$ 400 sai de 12% para 18%, e é esse salto que
+  // muda a decisão.
+  const commitmentNow = monthlyDebtCommitment(data);
+  const commitmentBefore = fixedIncome > 0 ? safePct(commitmentNow, fixedIncome) : null;
+  const commitmentAfter = fixedIncome > 0 ? safePct(addMoney(commitmentNow, valorParcela), fixedIncome) : null;
+
+  // A entrada sai do caixa hoje; a parcela sai da sobra todo mês. As duas
+  // portas de risco para a reserva, então as duas entram na conta.
+  const reserveImpact = reserveImpactOf(data, entrada, monthlyImpact.monthlyAfter);
+
   return {
     valorBem, entrada, numParcelas, valorParcela,
     totalPaid, interestCost, interestPct,
     commitmentPct, commitmentWarning,
+    commitmentNow, commitmentBefore, commitmentAfter,
     ...monthlyImpact,
+    reserveImpact,
   };
 }
 

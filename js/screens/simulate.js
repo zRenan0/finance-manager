@@ -32,6 +32,7 @@ function renderSimulateScreen() {
     ${!isFinance ? `
     <div class="card" data-ui-css="margin-top:12px">
       <p class="card-subtitle" data-ui-css="margin-top:0">Veja o impacto de uma compra antes de fazer, sem lançar nada de verdade.</p>
+      ${renderSimLabelField()}
       <div class="amount-input-wrap">
         <p class="field__label center">Quanto você pensa em gastar?</p>
         <div class="amount-row">
@@ -45,6 +46,7 @@ function renderSimulateScreen() {
     ` : `
     <div class="card" data-ui-css="margin-top:12px">
       <p class="card-subtitle" data-ui-css="margin-top:0">Compare o custo real de financiar contra o valor à vista do bem.</p>
+      ${renderSimLabelField()}
       <div class="field-row">
         <div class="field"><label class="field__label" for="fin-bem-input">Valor do bem</label>
           <input id="fin-bem-input" class="input" data-field="sim-finance-valorbem" value="${escapeHtml(fin.valorBem)}" inputmode="decimal" placeholder="0,00" /></div>
@@ -64,6 +66,56 @@ function renderSimulateScreen() {
   </div>`;
 }
 
+// [M31] O nome do produto não entra em conta nenhuma. Ele existe para a
+// resposta falar da COISA que a pessoa está pensando em comprar, e não de "um
+// gasto de R$ 4.000,00". Some do texto quando fica em branco.
+function renderSimLabelField() {
+  return `<div class="field">
+    <label class="field__label" for="sim-label-input">O que você quer comprar? (opcional)</label>
+    <input id="sim-label-input" class="input" data-field="sim-label" value="${escapeHtml(state.simulate.label)}" maxlength="60" placeholder="Notebook, geladeira, viagem..." autocomplete="off" />
+  </div>`;
+}
+
+function simLabel() {
+  const t = String(state.simulate.label || "").trim();
+  return t ? escapeHtml(t) : "";
+}
+
+// As três leituras que o M31 acrescentou, compartilhadas pelos dois modos:
+// sobra mensal antes e depois, comprometimento da renda antes e depois, e o que
+// acontece com a reserva. A conclusão é EDUCATIVA: o app diz o que muda e o que
+// isso costuma significar, e não se a pessoa deve ou não comprar.
+function renderPurchaseReadings(r, opts) {
+  const o = opts || {};
+  const sobraCor = r.monthlyAfter < 0 ? "var(--negative)" : (r.monthlyAfter < r.monthlyBefore * 0.4 ? "var(--goal)" : "var(--positive)");
+  const temComprometimento = r.commitmentBefore != null && r.commitmentAfter != null;
+  const compCor = temComprometimento && r.commitmentAfter > 30 ? "var(--negative)" : (temComprometimento && r.commitmentAfter > 20 ? "var(--goal)" : "var(--positive)");
+  const res = r.reserveImpact || {};
+
+  return `<div class="purchase-readings">
+    <div class="health-grid">
+      <div class="health-stat"><span>Sobra mensal hoje</span><b>${fmtBRL(r.monthlyBefore)}</b></div>
+      <div class="health-stat"><span>Sobra mensal depois</span><b data-ui-css="color:${sobraCor}">${fmtBRL(r.monthlyAfter)}</b></div>
+    </div>
+
+    ${temComprometimento ? `<p class="health-note">
+      A parte da renda presa em parcelas passa de <b>${r.commitmentBefore.toFixed(0)}%</b> para
+      <b data-ui-css="color:${compCor}">${r.commitmentAfter.toFixed(0)}%</b>.
+      ${r.commitmentNow > 0 ? `Hoje são ${fmtBRL(r.commitmentNow)} por mês em dívidas cadastradas.` : "Hoje não há dívida cadastrada com parcela mensal."}
+    </p>` : ""}
+
+    <p class="health-note">${res.affected
+      ? (res.reason === "caixa"
+        ? `Pagar isso agora encostaria na sua reserva de ${fmtBRL(res.reserve)}: o caixa livre não cobre a compra sem tocar nela.`
+        : `Com a sobra mensal negativa, a diferença sairia da sua reserva de ${fmtBRL(res.reserve)} todo mês.`)
+      : res.reason === "sem-reserva"
+        ? "Você ainda não tem reserva de emergência registrada, então não há o que preservar nesta conta."
+        : `Sua reserva de ${fmtBRL(res.reserve)} <b>não seria afetada</b> por esta compra.`}</p>
+
+    ${o.nota ? `<p class="field-hint">${o.nota}</p>` : ""}
+  </div>`;
+}
+
 function renderSimGoalSelect() {
   const sim = state.simulate;
   if (state.data.goals.length === 0) return "";
@@ -79,7 +131,8 @@ function renderSimGoalSelect() {
 function renderSimulateResult(r, amt) {
   const dropColor = r.willExceedIncome ? "var(--negative)" : (r.dailyDrop > r.dailyBefore * 0.3 ? "var(--goal)" : "var(--positive)");
   return `<div class="card card--elevated" data-ui-css="margin-top:14px">
-    <p class="card-title">Se você gastar ${fmtBRL(amt)} agora</p>
+    <p class="card-title">${simLabel() ? `${simLabel()} por ${fmtBRL(amt)}` : `Se você gastar ${fmtBRL(amt)} agora`}</p>
+    ${renderPurchaseReadings(r, { nota: "Leitura educativa, calculada com os seus números. A decisão continua sua: o app não diz se vale a pena." })}
     <div class="health-grid">
       <div class="health-stat"><span>Orçamento diário hoje</span><b>${fmtBRL(r.dailyBefore)}</b></div>
       <div class="health-stat"><span>Orçamento diário depois</span><b data-ui-css="color:${dropColor}">${fmtBRL(r.dailyAfter)}</b></div>
@@ -97,7 +150,7 @@ function renderFinanceResult(r) {
   const interestColor = r.interestCost > 0 ? "var(--negative)" : "var(--positive)";
   const commitColor = r.commitmentWarning ? "var(--negative)" : "var(--positive)";
   return `<div class="card card--elevated" data-ui-css="margin-top:14px">
-    <p class="card-title">Custo real do financiamento</p>
+    <p class="card-title">${simLabel() ? `${simLabel()}: custo real do financiamento` : "Custo real do financiamento"}</p>
     <div class="health-grid">
       <div class="health-stat"><span>Valor do bem</span><b>${fmtBRL(r.valorBem)}</b></div>
       <div class="health-stat"><span>Total pago ao final</span><b>${fmtBRL(r.totalPaid)}</b></div>
@@ -111,6 +164,9 @@ function renderFinanceResult(r) {
     <p class="health-note">A parcela consome <b data-ui-css="color:${commitColor}">${r.commitmentPct.toFixed(1)}%</b> da sua renda fixa cadastrada.
       ${r.commitmentWarning ? `<b data-ui-css="color:var(--negative)"> Isso passa da faixa de atenção de 20% usada nesta análise. Compare também com sua sobra real e outras parcelas.</b>` : ""}</p>
     ` : `<p class="health-note" data-ui-css="margin-top:16px">Defina sua renda mensal fixa em Ajustes para eu calcular quanto essa parcela compromete do seu orçamento.</p>`}
+
+    <p class="card-title" data-ui-css="margin-top:16px">O que muda no seu mês</p>
+    ${renderPurchaseReadings(r, { nota: "Leitura educativa, calculada com os seus números. Parcelar não é errado nem certo por si: o que muda é quanto da sua renda deixa de estar disponível enquanto durar." })}
 
     <p class="card-title" data-ui-css="margin-top:16px">Impacto no saldo livre diário</p>
     <div class="health-grid">

@@ -2,6 +2,34 @@
 
 ## Não publicado
 
+### O M30 trocou o teto diário por um limite com meta
+
+- Junto da conta do fechamento, uma linha nova: "Para terminar o mês com
+  R$ 950,00 guardados, sobram R$ 17.815,35 para gasto variável, cerca de
+  R$ 593,85 por dia nos 30 dias que faltam."
+- O app já tinha um teto diário, mas ele era renda menos gasto: respondia
+  "quanto ainda cabe na renda", que é gastar até zerar o mês com a meta de
+  guardar sacrificada por último. Agora a meta entra na conta **antes**.
+- O alvo não é um campo novo: vem do aporte mensal que você já planejou nas suas
+  metas ou, sem metas, da fatia de futuro da sua regra de orçamento. A tela diz
+  de onde veio.
+- Quando o alvo não cabe no mês, o app diz isso em vez de mostrar um teto
+  convidativo, e deixa claro que não bloqueia nada.
+
+### O M31 respondeu "posso comprar?" na unidade certa
+
+- O simulador respondia em orçamento diário, e ninguém decide um notebook
+  pensando em R$ 12 por dia. Agora a resposta é mensal e traz as três leituras
+  que mudam a decisão.
+- **Sobra mensal** hoje e depois da compra. **Comprometimento da renda** passando
+  de X% para Y%, somando as dívidas que você já cadastrou. E se a **reserva** é
+  atingida, por caixa (à vista) ou por sobra negativa (parcelado).
+- Campo novo, opcional: o que você quer comprar. O nome aparece na resposta, para
+  ela falar da coisa e não de "um gasto de R$ 4.000,00".
+- A análise se declara educativa e devolve a decisão: parcelar não é errado nem
+  certo por si, o que muda é quanto da renda deixa de estar disponível.
+- O cache offline subiu para `v69`.
+
 ### O M28 dimensionou a reserva pelo que realmente é essencial
 
 - Novo painel na tela de Saúde: "Quanto guardar para emergências". A conta parte

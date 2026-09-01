@@ -243,6 +243,8 @@ function renderMonthClose(f) {
         <span class="month-close__value" data-ui-css="color:${tom}">${fmtBRL(m.projetado)}</span>
       </li>
     </ul>
+    ${renderDailyAllowance(f)}
+
     <div class="month-close__flags">
       <p class="month-close__flag">
         ${svgIcon("shieldCheck", 14)}
@@ -253,6 +255,35 @@ function renderMonthClose(f) {
         : `<p class="month-close__flag">${svgIcon("checkCircle", 14)}<span>Sem risco de saldo negativo no mês, com as informações de hoje.</span></p>`}
     </div>
   </div>`;
+}
+
+// [M30] O limite diário fica no mesmo painel do fechamento porque é a MESMA
+// conta olhada por outro lado: o que sobra depois de compromissos e da meta,
+// dividido pelos dias que faltam. Separá-lo em outro cartão faria parecerem
+// dois cálculos independentes que podem discordar.
+function renderDailyAllowance(f) {
+  if (typeof dailyAllowance !== "function") return "";
+  const d = dailyAllowance(state.data, f);
+  if (!d || d.alvo <= 0) return "";
+
+  const fonte = d.alvoFonte === "metas"
+    ? "do aporte mensal que você planejou nas suas metas"
+    : "da fatia de futuro da sua regra de orçamento";
+
+  if (d.apertado) {
+    return `<p class="daily-allowance daily-allowance--tight">
+      ${svgIcon("info", 14)}
+      <span>Para guardar os <b>${fmtBRL(d.alvo)}</b> que você planejou, o mês já não tem folga para gasto variável.
+      Isso não bloqueia nada: é a conta dizendo que ou o alvo cede, ou alguma despesa cede.</span>
+    </p>`;
+  }
+
+  return `<p class="daily-allowance">
+    ${svgIcon("target", 14)}
+    <span>Para terminar o mês com <b>${fmtBRL(d.alvo)}</b> guardados, sobram <b>${fmtBRL(d.disponivel)}</b> para gasto variável,
+    o equivalente a cerca de <b>${fmtBRL(d.porDia)} por dia</b> nos ${d.diasRestantes} dias que faltam.
+    O alvo vem de ${fonte}. É referência, não obrigação.</span>
+  </p>`;
 }
 
 function renderForecastCard(forecast, full) {

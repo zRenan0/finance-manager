@@ -364,3 +364,22 @@
 }
 .month-close__flag > svg { flex: none; margin-top: 2px; color: var(--brand); }
 .month-close__flag--risk > svg { color: var(--negative); }
+
+/* [M30] Limite diário, dentro do painel do fechamento. */
+.daily-allowance {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--card-alt);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.daily-allowance > svg { flex: none; margin-top: 2px; color: var(--brand); }
+.daily-allowance--tight > svg { color: var(--goal); }
+
+/* [M31] As três leituras da compra. */
+.purchase-readings { display: grid; gap: 10px; }
+.purchase-readings .health-grid { margin: 0; }

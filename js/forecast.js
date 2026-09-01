@@ -497,6 +497,68 @@ function monthCloseForecast(forecast) {
   };
 }
 
+// ------------------------------------------------------------------------------
+// [M30] LIMITE DIÁRIO, A PARTIR DE UMA META E NÃO DA RENDA
+// ------------------------------------------------------------------------------
+// O app já tinha um teto diário: renda menos gasto, dividido pelos dias que
+// faltam. Ele responde "quanto ainda cabe na renda", que é pergunta diferente e
+// mais frouxa: gastar tudo o que cabe na renda é terminar o mês em zero, com a
+// meta de guardar sacrificada por último.
+//
+// Este parte do outro lado. Fixa quanto a pessoa QUER que sobre, tira isso do
+// caixa junto com os compromissos já conhecidos, e divide o que resta pelos
+// dias que faltam. É a conta do roteiro: "para terminar o mês com R$ 800
+// disponíveis, o variável restante dá cerca de R$ 47 por dia".
+//
+// DE ONDE SAI A META, e por que não é campo novo:
+//   1. a soma do aporte mensal planejado das metas, compromisso que a pessoa já
+//      escreveu no app;
+//   2. sem metas com plano, a fatia "futuro" da regra de orçamento dela.
+// Pedir mais um número seria pedir de novo o que já foi dito.
+//
+// E é REFERÊNCIA, não obrigação: quem gastar acima num dia continua com o app
+// funcionando, e a tela diz isso.
+function savingTargetOf(data) {
+  const metas = (data.goals || []).reduce((soma, g) => addMoney(soma, Math.max(0, roundMoney(g.monthlyPlan))), 0);
+  if (metas > 0) return { value: metas, source: "metas" };
+  const renda = roundMoney((data && data.monthlyIncome) || 0);
+  const pct = Number((data && data.budgetSplit && data.budgetSplit.futuro) || 0);
+  if (renda > 0 && pct > 0) return { value: mulMoney(renda, pct / 100), source: "regra" };
+  return { value: 0, source: "nenhuma" };
+}
+
+function dailyAllowance(data, forecast) {
+  const close = monthCloseForecast(forecast);
+  if (!close) return null;
+
+  const hoje = dateFromIso(forecast.today);
+  const fim = dateFromIso(close.endIso);
+  const diasRestantes = Math.max(1, Math.round((fim - hoje) / 86400000) + 1);
+
+  const alvo = savingTargetOf(data);
+  // O que sobra para gasto variável depois de honrar compromissos e a meta.
+  // `contas` já traz fixas, parcelas e faturas com data; nada é contado duas
+  // vezes porque a ESTIMATIVA de variável não entra aqui: ela é justamente o
+  // que este número substitui por uma decisão.
+  const disponivel = subMoney(subMoney(addMoney(close.saldoAtual, close.receitas), close.contas), alvo.value);
+  const porDia = disponivel > 0 ? divMoney(disponivel, diasRestantes) : 0;
+
+  return {
+    endIso: close.endIso,
+    diasRestantes,
+    alvo: alvo.value,
+    alvoFonte: alvo.source,
+    disponivel: roundMoney(disponivel),
+    porDia: roundMoney(porDia),
+    // Sem folga o número vira zero, e dizer "R$ 0,00 por dia" sem explicar por
+    // que seria pior que não dizer nada.
+    apertado: disponivel <= 0,
+    // Para a frase não sair no vácuo: dá para comparar com o que vinha sendo
+    // gasto em variável.
+    estimativaVariavel: close.variaveis,
+  };
+}
+
 // Um número projetado sem a premissa ao lado é chute. Estas frases são a
 // prestação de contas do cálculo acima.
 function forecastAssumptions(data, baseline, events) {

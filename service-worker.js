@@ -59,7 +59,9 @@
 // número, que é justamente o que o módulo veio resolver.
 // v68: a escada da reserva (M28) e a conta do fechamento do mês (M29)
 // entraram no pacote e nas folhas de Saúde e Planejamento.
-const VERSION = "v68";
+// v69: limite diário (M30) e as leituras mensais do "posso comprar?" (M31)
+// entraram no pacote e na folha de Planejamento.
+const VERSION = "v69";
 const BUILD_ID = VERSION;
 const CACHE_NAME = "financas-cache-" + VERSION;
 // A PÁGINA COMERCIAL TEM CACHE PRÓPRIO.

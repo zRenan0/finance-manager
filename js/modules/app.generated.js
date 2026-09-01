@@ -18118,6 +18118,68 @@ function monthCloseForecast(forecast) {
   };
 }
 
+// ------------------------------------------------------------------------------
+// [M30] LIMITE DIÁRIO, A PARTIR DE UMA META E NÃO DA RENDA
+// ------------------------------------------------------------------------------
+// O app já tinha um teto diário: renda menos gasto, dividido pelos dias que
+// faltam. Ele responde "quanto ainda cabe na renda", que é pergunta diferente e
+// mais frouxa: gastar tudo o que cabe na renda é terminar o mês em zero, com a
+// meta de guardar sacrificada por último.
+//
+// Este parte do outro lado. Fixa quanto a pessoa QUER que sobre, tira isso do
+// caixa junto com os compromissos já conhecidos, e divide o que resta pelos
+// dias que faltam. É a conta do roteiro: "para terminar o mês com R$ 800
+// disponíveis, o variável restante dá cerca de R$ 47 por dia".
+//
+// DE ONDE SAI A META, e por que não é campo novo:
+//   1. a soma do aporte mensal planejado das metas, compromisso que a pessoa já
+//      escreveu no app;
+//   2. sem metas com plano, a fatia "futuro" da regra de orçamento dela.
+// Pedir mais um número seria pedir de novo o que já foi dito.
+//
+// E é REFERÊNCIA, não obrigação: quem gastar acima num dia continua com o app
+// funcionando, e a tela diz isso.
+function savingTargetOf(data) {
+  const metas = (data.goals || []).reduce((soma, g) => addMoney(soma, Math.max(0, roundMoney(g.monthlyPlan))), 0);
+  if (metas > 0) return { value: metas, source: "metas" };
+  const renda = roundMoney((data && data.monthlyIncome) || 0);
+  const pct = Number((data && data.budgetSplit && data.budgetSplit.futuro) || 0);
+  if (renda > 0 && pct > 0) return { value: mulMoney(renda, pct / 100), source: "regra" };
+  return { value: 0, source: "nenhuma" };
+}
+
+function dailyAllowance(data, forecast) {
+  const close = monthCloseForecast(forecast);
+  if (!close) return null;
+
+  const hoje = dateFromIso(forecast.today);
+  const fim = dateFromIso(close.endIso);
+  const diasRestantes = Math.max(1, Math.round((fim - hoje) / 86400000) + 1);
+
+  const alvo = savingTargetOf(data);
+  // O que sobra para gasto variável depois de honrar compromissos e a meta.
+  // `contas` já traz fixas, parcelas e faturas com data; nada é contado duas
+  // vezes porque a ESTIMATIVA de variável não entra aqui: ela é justamente o
+  // que este número substitui por uma decisão.
+  const disponivel = subMoney(subMoney(addMoney(close.saldoAtual, close.receitas), close.contas), alvo.value);
+  const porDia = disponivel > 0 ? divMoney(disponivel, diasRestantes) : 0;
+
+  return {
+    endIso: close.endIso,
+    diasRestantes,
+    alvo: alvo.value,
+    alvoFonte: alvo.source,
+    disponivel: roundMoney(disponivel),
+    porDia: roundMoney(porDia),
+    // Sem folga o número vira zero, e dizer "R$ 0,00 por dia" sem explicar por
+    // que seria pior que não dizer nada.
+    apertado: disponivel <= 0,
+    // Para a frase não sair no vácuo: dá para comparar com o que vinha sendo
+    // gasto em variável.
+    estimativaVariavel: close.variaveis,
+  };
+}
+
 // Um número projetado sem a premissa ao lado é chute. Estas frases são a
 // prestação de contas do cálculo acima.
 function forecastAssumptions(data, baseline, events) {
@@ -19497,6 +19559,41 @@ function buildAnalyticsModel(data, monthKey) {
 // Recalcula, sem gravar nada, o efeito de uma despesa hipotética no
 // orçamento diário restante do mês e no prazo de uma meta (se escolhida).
 // ------------------------------------------------------------------
+// ------------------------------------------------------------------------------
+// [M31] "POSSO COMPRAR?" - O QUE FALTAVA NA RESPOSTA
+// ------------------------------------------------------------------------------
+// O simulador já respondia em orçamento DIÁRIO, e diário é a unidade errada
+// para decidir uma compra grande: ninguém pensa "posso trocar R$ 12 por dia por
+// um notebook". A pergunta é mensal, e a resposta precisa das três leituras que
+// mudam a decisão: quanto sobra por mês antes e depois, quanto da renda passa a
+// estar comprometido com parcelas, e se a reserva é atingida.
+//
+// A régua da parcela existente sai do que já está cadastrado em Patrimônio como
+// dívida com parcela mensal. Nada é estimado: se a pessoa não cadastrou, o
+// comprometimento "antes" é zero e a tela diz de onde veio.
+function monthlyDebtCommitment(data) {
+  return (data.assets || [])
+    .filter((a) => a.kind === "liability" && a.debtStatus !== "paid")
+    .reduce((soma, a) => addMoney(soma, Math.max(0, roundMoney(a.monthlyPayment))), 0);
+}
+
+// A reserva é atingida quando pagar a compra exige encostar no dinheiro que
+// está reservado para emergência. Para o parcelado, o gatilho é outro: a sobra
+// mensal virar negativa significa que a parcela sai da reserva todo mês.
+function reserveImpactOf(data, cashNow, monthlyAfter) {
+  const fundo = typeof emergencyFund === "function" ? emergencyFund(data) : null;
+  const reserva = fundo ? roundMoney(fundo.current) : 0;
+  const caixa = typeof realizedBalance === "function" ? roundMoney(realizedBalance(data)) : 0;
+  if (reserva <= 0) return { reserve: 0, affected: false, reason: "sem-reserva" };
+  if (cashNow > 0 && subMoney(caixa, cashNow) < reserva) {
+    return { reserve: reserva, affected: true, reason: "caixa" };
+  }
+  if (monthlyAfter != null && monthlyAfter < 0) {
+    return { reserve: reserva, affected: true, reason: "sobra-negativa" };
+  }
+  return { reserve: reserva, affected: false, reason: "preservada" };
+}
+
 function simulateExpenseImpact(data, hypotheticalAmount, goalId) {
   const now = new Date();
   const mKey = keyOfDate(now);
@@ -19537,6 +19634,11 @@ function simulateExpenseImpact(data, hypotheticalAmount, goalId) {
     dailyDrop: subMoney(dailyBefore, dailyAfter),
     willExceedIncome: afterRemaining < 0,
     goalDelay,
+    // [M31] A leitura mensal, que é a unidade em que a decisão é tomada.
+    income,
+    monthlyBefore: beforeRemaining,
+    monthlyAfter: afterRemaining,
+    reserveImpact: reserveImpactOf(data, hypotheticalAmount, afterRemaining),
   };
 }
 
@@ -19563,11 +19665,25 @@ function simulateFinancingImpact(data, params, goalId) {
 
   const monthlyImpact = simulateExpenseImpact(data, valorParcela, goalId);
 
+  // [M31] O comprometimento que interessa não é o desta parcela sozinha: é o
+  // total da renda que passa a estar preso em parcela. Quem já tem R$ 900 de
+  // financiamento e assume mais R$ 400 sai de 12% para 18%, e é esse salto que
+  // muda a decisão.
+  const commitmentNow = monthlyDebtCommitment(data);
+  const commitmentBefore = fixedIncome > 0 ? safePct(commitmentNow, fixedIncome) : null;
+  const commitmentAfter = fixedIncome > 0 ? safePct(addMoney(commitmentNow, valorParcela), fixedIncome) : null;
+
+  // A entrada sai do caixa hoje; a parcela sai da sobra todo mês. As duas
+  // portas de risco para a reserva, então as duas entram na conta.
+  const reserveImpact = reserveImpactOf(data, entrada, monthlyImpact.monthlyAfter);
+
   return {
     valorBem, entrada, numParcelas, valorParcela,
     totalPaid, interestCost, interestPct,
     commitmentPct, commitmentWarning,
+    commitmentNow, commitmentBefore, commitmentAfter,
     ...monthlyImpact,
+    reserveImpact,
   };
 }
 
@@ -27940,6 +28056,8 @@ function renderMonthClose(f) {
         <span class="month-close__value" data-ui-css="color:${tom}">${fmtBRL(m.projetado)}</span>
       </li>
     </ul>
+    ${renderDailyAllowance(f)}
+
     <div class="month-close__flags">
       <p class="month-close__flag">
         ${svgIcon("shieldCheck", 14)}
@@ -27950,6 +28068,35 @@ function renderMonthClose(f) {
         : `<p class="month-close__flag">${svgIcon("checkCircle", 14)}<span>Sem risco de saldo negativo no mês, com as informações de hoje.</span></p>`}
     </div>
   </div>`;
+}
+
+// [M30] O limite diário fica no mesmo painel do fechamento porque é a MESMA
+// conta olhada por outro lado: o que sobra depois de compromissos e da meta,
+// dividido pelos dias que faltam. Separá-lo em outro cartão faria parecerem
+// dois cálculos independentes que podem discordar.
+function renderDailyAllowance(f) {
+  if (typeof dailyAllowance !== "function") return "";
+  const d = dailyAllowance(state.data, f);
+  if (!d || d.alvo <= 0) return "";
+
+  const fonte = d.alvoFonte === "metas"
+    ? "do aporte mensal que você planejou nas suas metas"
+    : "da fatia de futuro da sua regra de orçamento";
+
+  if (d.apertado) {
+    return `<p class="daily-allowance daily-allowance--tight">
+      ${svgIcon("info", 14)}
+      <span>Para guardar os <b>${fmtBRL(d.alvo)}</b> que você planejou, o mês já não tem folga para gasto variável.
+      Isso não bloqueia nada: é a conta dizendo que ou o alvo cede, ou alguma despesa cede.</span>
+    </p>`;
+  }
+
+  return `<p class="daily-allowance">
+    ${svgIcon("target", 14)}
+    <span>Para terminar o mês com <b>${fmtBRL(d.alvo)}</b> guardados, sobram <b>${fmtBRL(d.disponivel)}</b> para gasto variável,
+    o equivalente a cerca de <b>${fmtBRL(d.porDia)} por dia</b> nos ${d.diasRestantes} dias que faltam.
+    O alvo vem de ${fonte}. É referência, não obrigação.</span>
+  </p>`;
 }
 
 function renderForecastCard(forecast, full) {
@@ -29959,6 +30106,7 @@ function renderSimulateScreen() {
     ${!isFinance ? `
     <div class="card" data-ui-css="margin-top:12px">
       <p class="card-subtitle" data-ui-css="margin-top:0">Veja o impacto de uma compra antes de fazer, sem lançar nada de verdade.</p>
+      ${renderSimLabelField()}
       <div class="amount-input-wrap">
         <p class="field__label center">Quanto você pensa em gastar?</p>
         <div class="amount-row">
@@ -29972,6 +30120,7 @@ function renderSimulateScreen() {
     ` : `
     <div class="card" data-ui-css="margin-top:12px">
       <p class="card-subtitle" data-ui-css="margin-top:0">Compare o custo real de financiar contra o valor à vista do bem.</p>
+      ${renderSimLabelField()}
       <div class="field-row">
         <div class="field"><label class="field__label" for="fin-bem-input">Valor do bem</label>
           <input id="fin-bem-input" class="input" data-field="sim-finance-valorbem" value="${escapeHtml(fin.valorBem)}" inputmode="decimal" placeholder="0,00" /></div>
@@ -29991,6 +30140,56 @@ function renderSimulateScreen() {
   </div>`;
 }
 
+// [M31] O nome do produto não entra em conta nenhuma. Ele existe para a
+// resposta falar da COISA que a pessoa está pensando em comprar, e não de "um
+// gasto de R$ 4.000,00". Some do texto quando fica em branco.
+function renderSimLabelField() {
+  return `<div class="field">
+    <label class="field__label" for="sim-label-input">O que você quer comprar? (opcional)</label>
+    <input id="sim-label-input" class="input" data-field="sim-label" value="${escapeHtml(state.simulate.label)}" maxlength="60" placeholder="Notebook, geladeira, viagem..." autocomplete="off" />
+  </div>`;
+}
+
+function simLabel() {
+  const t = String(state.simulate.label || "").trim();
+  return t ? escapeHtml(t) : "";
+}
+
+// As três leituras que o M31 acrescentou, compartilhadas pelos dois modos:
+// sobra mensal antes e depois, comprometimento da renda antes e depois, e o que
+// acontece com a reserva. A conclusão é EDUCATIVA: o app diz o que muda e o que
+// isso costuma significar, e não se a pessoa deve ou não comprar.
+function renderPurchaseReadings(r, opts) {
+  const o = opts || {};
+  const sobraCor = r.monthlyAfter < 0 ? "var(--negative)" : (r.monthlyAfter < r.monthlyBefore * 0.4 ? "var(--goal)" : "var(--positive)");
+  const temComprometimento = r.commitmentBefore != null && r.commitmentAfter != null;
+  const compCor = temComprometimento && r.commitmentAfter > 30 ? "var(--negative)" : (temComprometimento && r.commitmentAfter > 20 ? "var(--goal)" : "var(--positive)");
+  const res = r.reserveImpact || {};
+
+  return `<div class="purchase-readings">
+    <div class="health-grid">
+      <div class="health-stat"><span>Sobra mensal hoje</span><b>${fmtBRL(r.monthlyBefore)}</b></div>
+      <div class="health-stat"><span>Sobra mensal depois</span><b data-ui-css="color:${sobraCor}">${fmtBRL(r.monthlyAfter)}</b></div>
+    </div>
+
+    ${temComprometimento ? `<p class="health-note">
+      A parte da renda presa em parcelas passa de <b>${r.commitmentBefore.toFixed(0)}%</b> para
+      <b data-ui-css="color:${compCor}">${r.commitmentAfter.toFixed(0)}%</b>.
+      ${r.commitmentNow > 0 ? `Hoje são ${fmtBRL(r.commitmentNow)} por mês em dívidas cadastradas.` : "Hoje não há dívida cadastrada com parcela mensal."}
+    </p>` : ""}
+
+    <p class="health-note">${res.affected
+      ? (res.reason === "caixa"
+        ? `Pagar isso agora encostaria na sua reserva de ${fmtBRL(res.reserve)}: o caixa livre não cobre a compra sem tocar nela.`
+        : `Com a sobra mensal negativa, a diferença sairia da sua reserva de ${fmtBRL(res.reserve)} todo mês.`)
+      : res.reason === "sem-reserva"
+        ? "Você ainda não tem reserva de emergência registrada, então não há o que preservar nesta conta."
+        : `Sua reserva de ${fmtBRL(res.reserve)} <b>não seria afetada</b> por esta compra.`}</p>
+
+    ${o.nota ? `<p class="field-hint">${o.nota}</p>` : ""}
+  </div>`;
+}
+
 function renderSimGoalSelect() {
   const sim = state.simulate;
   if (state.data.goals.length === 0) return "";
@@ -30006,7 +30205,8 @@ function renderSimGoalSelect() {
 function renderSimulateResult(r, amt) {
   const dropColor = r.willExceedIncome ? "var(--negative)" : (r.dailyDrop > r.dailyBefore * 0.3 ? "var(--goal)" : "var(--positive)");
   return `<div class="card card--elevated" data-ui-css="margin-top:14px">
-    <p class="card-title">Se você gastar ${fmtBRL(amt)} agora</p>
+    <p class="card-title">${simLabel() ? `${simLabel()} por ${fmtBRL(amt)}` : `Se você gastar ${fmtBRL(amt)} agora`}</p>
+    ${renderPurchaseReadings(r, { nota: "Leitura educativa, calculada com os seus números. A decisão continua sua: o app não diz se vale a pena." })}
     <div class="health-grid">
       <div class="health-stat"><span>Orçamento diário hoje</span><b>${fmtBRL(r.dailyBefore)}</b></div>
       <div class="health-stat"><span>Orçamento diário depois</span><b data-ui-css="color:${dropColor}">${fmtBRL(r.dailyAfter)}</b></div>
@@ -30024,7 +30224,7 @@ function renderFinanceResult(r) {
   const interestColor = r.interestCost > 0 ? "var(--negative)" : "var(--positive)";
   const commitColor = r.commitmentWarning ? "var(--negative)" : "var(--positive)";
   return `<div class="card card--elevated" data-ui-css="margin-top:14px">
-    <p class="card-title">Custo real do financiamento</p>
+    <p class="card-title">${simLabel() ? `${simLabel()}: custo real do financiamento` : "Custo real do financiamento"}</p>
     <div class="health-grid">
       <div class="health-stat"><span>Valor do bem</span><b>${fmtBRL(r.valorBem)}</b></div>
       <div class="health-stat"><span>Total pago ao final</span><b>${fmtBRL(r.totalPaid)}</b></div>
@@ -30038,6 +30238,9 @@ function renderFinanceResult(r) {
     <p class="health-note">A parcela consome <b data-ui-css="color:${commitColor}">${r.commitmentPct.toFixed(1)}%</b> da sua renda fixa cadastrada.
       ${r.commitmentWarning ? `<b data-ui-css="color:var(--negative)"> Isso passa da faixa de atenção de 20% usada nesta análise. Compare também com sua sobra real e outras parcelas.</b>` : ""}</p>
     ` : `<p class="health-note" data-ui-css="margin-top:16px">Defina sua renda mensal fixa em Ajustes para eu calcular quanto essa parcela compromete do seu orçamento.</p>`}
+
+    <p class="card-title" data-ui-css="margin-top:16px">O que muda no seu mês</p>
+    ${renderPurchaseReadings(r, { nota: "Leitura educativa, calculada com os seus números. Parcelar não é errado nem certo por si: o que muda é quanto da sua renda deixa de estar disponível enquanto durar." })}
 
     <p class="card-title" data-ui-css="margin-top:16px">Impacto no saldo livre diário</p>
     <div class="health-grid">
@@ -36033,7 +36236,7 @@ let state = {
   backup: { preview: null, error: null, mode: "merge", busy: false, undoAvailable: false, encryptOpen: false, password: "", passwordConfirm: "", locked: null, unlockPassword: "" },
   // ---- Feature 3: painel de orçamentos ----
   budgetsExpanded: false,
-  simulate: { mode: "vista", amount: "", goalId: "", finance: { valorBem: "", entrada: "", numParcelas: "", valorParcela: "" } },
+  simulate: { mode: "vista", amount: "", label: "", goalId: "", finance: { valorBem: "", entrada: "", numParcelas: "", valorParcela: "" } },
   wrapped: { open: false },
   categoryPickerFor: null, // id da categoria principal cujo seletor de subcategoria está aberto
   // ---- Máquina do tempo dos juros compostos (Feature 3) ----
@@ -37796,6 +37999,7 @@ function onInput(e) {
       render();
       break;
     case "sim-amount": state.simulate.amount = val; render(); break;
+    case "sim-label": state.simulate.label = val; break;
     case "sim-finance-valorbem": state.simulate.finance.valorBem = val; render(); break;
     case "sim-finance-entrada": state.simulate.finance.entrada = val; render(); break;
     case "sim-finance-numparcelas": state.simulate.finance.numParcelas = val.replace(/[^0-9]/g, ""); render(); break;

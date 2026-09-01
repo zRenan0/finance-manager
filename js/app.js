@@ -184,7 +184,7 @@ let state = {
   backup: { preview: null, error: null, mode: "merge", busy: false, undoAvailable: false, encryptOpen: false, password: "", passwordConfirm: "", locked: null, unlockPassword: "" },
   // ---- Feature 3: painel de orçamentos ----
   budgetsExpanded: false,
-  simulate: { mode: "vista", amount: "", goalId: "", finance: { valorBem: "", entrada: "", numParcelas: "", valorParcela: "" } },
+  simulate: { mode: "vista", amount: "", label: "", goalId: "", finance: { valorBem: "", entrada: "", numParcelas: "", valorParcela: "" } },
   wrapped: { open: false },
   categoryPickerFor: null, // id da categoria principal cujo seletor de subcategoria está aberto
   // ---- Máquina do tempo dos juros compostos (Feature 3) ----
@@ -1947,6 +1947,7 @@ function onInput(e) {
       render();
       break;
     case "sim-amount": state.simulate.amount = val; render(); break;
+    case "sim-label": state.simulate.label = val; break;
     case "sim-finance-valorbem": state.simulate.finance.valorBem = val; render(); break;
     case "sim-finance-entrada": state.simulate.finance.entrada = val; render(); break;
     case "sim-finance-numparcelas": state.simulate.finance.numParcelas = val.replace(/[^0-9]/g, ""); render(); break;
