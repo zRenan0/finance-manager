@@ -131,6 +131,22 @@ check(["Contact:", "Expires:", "Canonical:", "Policy:", "Preferred-Languages:"]
   .every((campo) => amostra.includes(campo)), "o security.txt gerado não traz os campos da RFC 9116");
 check(!/\[definir antes/.test(amostra), "o security.txt gerado publicou um marcador no lugar de um canal real");
 
+// M22: um nome público só, e os identificadores congelados intactos. O segundo
+// é o que importa: `cofre_*`, `financas_*` e o `kind` do backup parecem
+// inconsistência de marca e são contrato com dado já gravado.
+const marca = fs.existsSync(path.join(root, "docs/MARCA.md")) ? read("docs/MARCA.md") : "";
+check(marca !== "", "decisão de arquitetura de marca não está documentada");
+check(!/FinanceManager/.test(read("index.html") + read("landing.html") + read("manifest.webmanifest")),
+  "o domínio voltou a ser tratado como nome de produto na interface");
+check(/const BACKUP_KIND = "organizador-financeiro\/backup";/.test(storage)
+  && /["']financas_db["']/.test(storage),
+  "identificador congelado foi renomeado: backup antigo e banco local do usuário param de abrir");
+const manifesto = JSON.parse(read("manifest.webmanifest"));
+check(manifesto.short_name === "Cofre" && manifesto.start_url === "./index.html" && manifesto.scope === "./",
+  "o manifesto mudou identidade de instalação (short_name, start_url ou scope)");
+check(/<meta name="robots" content="noindex, follow" \/>/.test(read("index.html")),
+  "o aplicativo voltou a ser indexável e disputa a busca com a landing pelo mesmo título");
+
 // Já os campos que só o dono do app conhece são AVISO, não falha: eles não
 // impedem publicar o beta, impedem oferecer ao público. Reprovar aqui travaria
 // a própria esteira que precisa rodar até esses dados existirem.

@@ -12,7 +12,8 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 
 | Campo | Valor |
 |---|---|
-| Módulo atual | **M21 - Divulgação responsável** (concluído) |
+| Módulo atual | **M22 - Arquitetura de marca** (concluído) |
+| Status do M22 | **CONCLUÍDO** - decisão registrada (produto = Cofre, `financemanager.dev.br` = endereço), superfícies padronizadas, aplicativo em `noindex` e identificadores congelados travados por teste contra faxina de marca |
 | Status do M21 | **CONCLUÍDO** - página pública `/reportar-vulnerabilidade`, `SECURITY.md` e `security.txt` gerado no build (RFC 9116), verificados em navegador real e em produção pelo `check:deploy`; nenhum endereço inventado enquanto `incidentEmail` for marcador |
 | Status do M20 | **CONCLUÍDO** - `SECURITY_INCIDENT_RESPONSE.md` cobre as oito fases com as alavancas reais do sistema; teste novo amarra cada código, rota, RPC e variável citada ao código; `check:release` passou a exigir o documento. **Achado independente:** 5 arquivos de teste falham por fixture dependente de data, e a falha já existia em `HEAD` |
 | Status do M19 | **CONCLUÍDO** - Vercel, Supabase, Anthropic, Have I Been Pwned e portais fiscais registrados com dados recebidos e limites; SMTP de produção preservado como pendência sem fornecedor presumido |
@@ -34,10 +35,10 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 | Status do M3 | **CONCLUÍDO** — aplicado e confirmado no banco em 2026-08-28 |
 | Status do M2 | **CONCLUÍDO** — nenhuma vulnerabilidade de autorização; invariantes travados por teste |
 | Status do M1 | **CONCLUÍDO** — aplicado e confirmado; gatilho capturado e versionado |
-| Módulos concluídos | M0, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15, M16, M17, M18, M19, M20, M21 |
-| Próximo módulo | M22 - Arquitetura de marca (FinanceManager x Cofre) |
+| Módulos concluídos | M0, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15, M16, M17, M18, M19, M20, M21, M22 |
+| Próximo módulo | M23 - Landing page (hierarquia em três pilares, preservando o design) |
 | Branch | `deploy-atualizado` (árvore limpa no início do M0) |
-| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `tests/test-cloud-sync.js`, `tests/test-account-backend.js`, `tests/test-critical-actions.js`, `tests/test-coverage.js`, `tests/test-security-adversarial.js`, `tests/test-observability.js`, `tests/test-data-inventory-lgpd.js`, `tests/test-third-party-transparency.js`, `supabase/tests/verify_security_boundary.sql`, `scripts/check-deploy.js`, `scripts/serve.js`, `scripts/coverage.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/storage.js`, `js/cloud-sync.js` (M10), `js/analytics.js`, `js/forecast.js`, `js/wrapped.js`, `js/screens/analytics.js` (M11), `js/backup-crypto.js`, `js/app.js`, `js/actions.js`, `js/storage.js`, `js/screens/settings.js`, `css/components.css`, `scripts/build-app-module.js` (M12), `netlify/functions/sync.js` (M13), `js/import.js`, `netlify/functions/_shared/finance-schema.js` (M14), observabilidade em backend, frontend e Service Worker (M17), inventário e tela de Privacidade (M18), registro de terceiros e operadores (M19), `js/modules/app.generated.js` (regerado). Documentação: inventário do M8, protocolo do M10, backup protegido do M12, `docs/VERSIONAMENTO.md` do M13, observabilidade do M17, inventário LGPD do M18, terceiros do M19 e desenhos de M15 a M19. **M20 (só documentação e verificação, nenhum arquivo de produção):** `SECURITY_INCIDENT_RESPONSE.md` (novo), `tests/test-incident-response.js` (novo), `scripts/check-release.js`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. **M21:** `reportar-vulnerabilidade.html` (novo), `css/reportar.css` (novo), `SECURITY.md` (novo), `scripts/security-txt.js` (novo), `tests/test-responsible-disclosure.js` (novo), `vercel.json`, `scripts/build-dist.js`, `scripts/serve.js`, `scripts/check-release.js`, `scripts/check-deploy.js`, `landing.html`, `tests/test-landing.js`, `tests/browser/run-landing.js`, `SECURITY_INCIDENT_RESPONSE.md`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. |
+| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `tests/test-cloud-sync.js`, `tests/test-account-backend.js`, `tests/test-critical-actions.js`, `tests/test-coverage.js`, `tests/test-security-adversarial.js`, `tests/test-observability.js`, `tests/test-data-inventory-lgpd.js`, `tests/test-third-party-transparency.js`, `supabase/tests/verify_security_boundary.sql`, `scripts/check-deploy.js`, `scripts/serve.js`, `scripts/coverage.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/storage.js`, `js/cloud-sync.js` (M10), `js/analytics.js`, `js/forecast.js`, `js/wrapped.js`, `js/screens/analytics.js` (M11), `js/backup-crypto.js`, `js/app.js`, `js/actions.js`, `js/storage.js`, `js/screens/settings.js`, `css/components.css`, `scripts/build-app-module.js` (M12), `netlify/functions/sync.js` (M13), `js/import.js`, `netlify/functions/_shared/finance-schema.js` (M14), observabilidade em backend, frontend e Service Worker (M17), inventário e tela de Privacidade (M18), registro de terceiros e operadores (M19), `js/modules/app.generated.js` (regerado). Documentação: inventário do M8, protocolo do M10, backup protegido do M12, `docs/VERSIONAMENTO.md` do M13, observabilidade do M17, inventário LGPD do M18, terceiros do M19 e desenhos de M15 a M19. **M20 (só documentação e verificação, nenhum arquivo de produção):** `SECURITY_INCIDENT_RESPONSE.md` (novo), `tests/test-incident-response.js` (novo), `scripts/check-release.js`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. **M21:** `reportar-vulnerabilidade.html` (novo), `css/reportar.css` (novo), `SECURITY.md` (novo), `scripts/security-txt.js` (novo), `tests/test-responsible-disclosure.js` (novo), `vercel.json`, `scripts/build-dist.js`, `scripts/serve.js`, `scripts/check-release.js`, `scripts/check-deploy.js`, `landing.html`, `tests/test-landing.js`, `tests/browser/run-landing.js`, `SECURITY_INCIDENT_RESPONSE.md`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. **M22:** `docs/MARCA.md` (novo), `tests/test-brand.js` (novo), `index.html`, `manifest.webmanifest`, `landing.html`, `scripts/check-release.js`, `scripts/security-txt.js`, `SECURITY.md`, `SECURITY_INCIDENT_RESPONSE.md`, `README.md`, `CHANGELOG.md`. |
 | Migration do M13 | `20260831120000_database_schema_version.sql` — **aplicada e confirmada em produção em 2026-08-31** (`database_schema_version = 1`; grants inalterados: só `service_role` e `postgres`). Reversível por `alter table public.cofre_sync_config drop column if exists database_schema_version;` |
 | Migrations criadas até aqui | `20260828120000_rls_auto_enable_least_privilege.sql`, `20260828130000_rls_auto_enable_versionada.sql`, `20260828140000_menor_privilegio_tabelas.sql` (as três **aplicadas e confirmadas em 2026-08-28**), `20260828150000_rls_auto_enable_gatilho.sql` (**ainda não aplicada**; é no-op em produção, onde o gatilho já existe) |
 | Versão do app | `0.30.0` (package.json) |
@@ -2641,6 +2642,99 @@ isso o link do canal preferido não abre para quem relatar), e preencher
 
 ---
 
+## M22 - Arquitetura de marca
+
+### Antes
+
+A auditoria abriu este módulo supondo disputa entre duas marcas. O levantamento
+mostrou outra coisa: **não havia duas marcas**. "FinanceManager" não aparecia em
+nenhuma tela, título, manifesto, PDF, backup ou onboarding. Aparecia na barra de
+endereço e em **três linhas de documentação**, escritas nos módulos 20 e 21 por
+este próprio trabalho. O produto sempre se chamou Cofre.
+
+O que existia de verdade eram duas coisas diferentes:
+
+1. **Nome e endereço não combinam**, o que é comum e não é defeito;
+2. **Três gerações de identificadores** convivem no código (`cofre_*` no banco,
+   `financas_*` no aparelho, `organizador-financeiro/backup` no arquivo), e essa
+   divergência *parece* bagunça de marca esperando limpeza.
+
+O segundo item é o risco real do módulo. Uma "padronização de marca" feita por
+busca e substituição renomearia tabela em produção, chave de IndexedDB e o `kind`
+do backup — apagando o banco local de quem já usa e impedindo a abertura de
+backups antigos.
+
+### Alterações
+
+| Arquivo | Motivo |
+|---|---|
+| `docs/MARCA.md` | **novo**; a decisão, a regra de escrita e os identificadores congelados |
+| `tests/test-brand.js` | **novo**; 52 verificações, metade delas travando os congelados |
+| `index.html` | `noindex, follow` e o comentário explicando por que o título é igual ao da landing |
+| `manifest.webmanifest` | `name` sem barra vertical; `short_name`, `start_url` e `scope` intactos |
+| `landing.html` | `apple-mobile-web-app-title` = `Cofre` |
+| `SECURITY.md`, `SECURITY_INCIDENT_RESPONSE.md`, `scripts/security-txt.js` | as três linhas que tratavam o domínio como nome de produto |
+| `scripts/check-release.js` | marca, congelados e identidade de instalação viram condição de publicação |
+
+### Motivo
+
+**A decisão:** o produto se chama Cofre; `financemanager.dev.br` é o endereço.
+Nem "FinanceManager — Cofre", nem "Cofre by FinanceManager". "Cofre" já é a
+identidade inteira (logotipo, atalho instalado, PDF, retrospectiva, onboarding), e
+o domínio é o ativo caro de trocar (indexação, links compartilhados, `SITE_URL`
+dos emails de confirmação, `Canonical` do `security.txt`). Trocar qualquer um dos
+dois custaria muito mais do que a confusão resolve.
+
+**O que NÃO foi feito, e por quê.** O impulso natural aqui era separar os títulos
+da landing e do aplicativo, que hoje são idênticos. Isso teria contrariado uma
+correção anterior deliberada: o F-11 de `tests/test-beta-fixes.js` trava a
+igualdade porque o aplicativo já se chamou "Finanças" enquanto a landing se
+chamava "Cofre", e quem clicava em "Começar grátis" chegava ao que parecia outro
+produto. A regra de ouro se aplicou: **função confirmada, não se remove.**
+
+O efeito colateral legítimo do título repetido — duas URLs disputando a mesma
+busca — foi resolvido pelo outro lado: o aplicativo virou `noindex, follow`. Ele
+não tem o que indexar (sem JavaScript executado, a página é um esqueleto de
+carregamento), e isso também resolve a duplicata entre `/index.html` e
+`/app.html`, que servem os mesmos bytes. Reversível apagando uma linha.
+
+### Compatibilidade
+
+Total, e este é o ponto do módulo. `short_name`, `start_url` e `scope` do
+manifesto não mudaram — como não existe campo `id`, é o `start_url` que identifica
+a instalação, então nenhum atalho já instalado foi afetado. O `name` mudou só de
+`|` para `.`, seguindo o idioma que o projeto já usa em outros lugares.
+
+O Service Worker continua em `v62`: `handleNavigate` busca o app shell pela rede
+primeiro e só cai no cache quando falha, então o `noindex` chega na próxima
+abertura com conexão, sem forçar todo mundo a rebaixar o pacote.
+
+Nenhum identificador congelado foi tocado.
+
+### Testes
+
+| Teste | Resultado |
+|---|---|
+| `node tests/test-brand.js` | **PASSOU**; 52 ok, 0 falhas |
+| `node tests/test-beta-fixes.js` (F-11) | **PASSOU**; a igualdade de títulos continua travada |
+| `node tests/test-input-validation.js` | **PASSOU** depois de corrigir dois travessões que eu havia introduzido em `index.html` e no manifesto (o projeto proíbe `—` no código entregue) |
+| `npm run lint`, `check:release`, `check:build`, `build:dist` | **PASSOU** |
+| `npm run test:pwa` | **PASSOU**; manifesto alterado não afetou instalação nem cache |
+| `npm run test:browser` | **PASSOU**; 18 de 18 em Chromium, Firefox e WebKit |
+| `npm run test:landing` | **PASSOU**; 18 de 18 |
+| `npm test` | 69 arquivos; as **mesmas 5 falhas** de data, nenhuma nova |
+| Navegador real | **PASSOU**; aplicativo abre no onboarding com a marca Cofre, `robots` e ícones conferidos, único 404 é `/api/account/session` (esperado sem `vercel dev`) |
+
+### Status
+
+**CONCLUÍDO.** Fica registrado como P3, sem impedimento: o aplicativo não declara
+Open Graph próprio, então um link direto para `/index.html` compartilhado em rede
+social não gera cartão. A landing é a página de compartilhamento e tem o conjunto
+completo; resolver isso exigiria estender a absolutização de endereços do build
+para uma segunda página, o que é custo sem retorno hoje.
+
+---
+
 ## Checklist de regressão
 
 Executar após **todo** módulo que toque no código. Marcar `OK` / `FALHOU` / `NÃO VALIDADO`.
@@ -2649,10 +2743,11 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
 ### A. Automatizado (CI ou máquina com Node) — porta de entrada obrigatória
 
 - [ ] `npm run lint`
-- [ ] `npm test` (68 arquivos) — **atenção:** 5 arquivos reprovam do dia 1 ao 10 de
+- [ ] `npm test` (69 arquivos) — **atenção:** 5 arquivos reprovam do dia 1 ao 10 de
   cada mês por fixture ancorada no dia 10; ver o achado P2 do M20 antes de investigar
 - [ ] `node tests/test-incident-response.js` (plano de resposta a incidentes do M20)
 - [ ] `node tests/test-responsible-disclosure.js` (canal de divulgação responsável do M21)
+- [ ] `node tests/test-brand.js` (marca e identificadores congelados do M22)
 - [ ] `node tests/test-accounting-integrity.js` (invariantes contábeis do M11)
 - [ ] `node tests/test-backup-restore.js` (backup, restauração e senha do M12)
 - [ ] `node tests/test-versioning.js` (versões e matriz de compatibilidade do M13)

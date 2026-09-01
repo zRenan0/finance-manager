@@ -66,6 +66,16 @@ e o `/.well-known/security.txt` (RFC 9116) é **gerado no build** para o prazo
 `Expires` nunca vencer sozinho. Enquanto o email de incidentes for marcador, o
 canal é o aviso privado do GitHub — nenhum endereço é inventado.
 
+### Nome e endereço
+
+O produto se chama **Cofre**; `financemanager.dev.br` é o endereço dele. Não há
+submarca. A regra de escrita e, mais importante, a lista de **identificadores
+congelados** (`cofre_*` no banco, `financas_db` no aparelho,
+`organizador-financeiro/backup` no arquivo de backup, `window.CofreUI`, prefixos
+de cache) está em `docs/MARCA.md`. Esses nomes parecem inconsistência de marca e
+são contrato com dado já gravado: renomeá-los apaga os dados de quem já usa.
+`tests/test-brand.js` reprova qualquer tentativa.
+
 ### Inventário de dados e LGPD
 
 A tela de Privacidade reúne 14 fluxos e mostra, em cada um, finalidade,

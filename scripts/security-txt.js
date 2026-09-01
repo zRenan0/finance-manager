@@ -69,7 +69,7 @@ function gerarSecurityTxt(base, agora = new Date()) {
   const email = emailPublicavel(controlador());
 
   const linhas = [
-    "# Cofre / FinanceManager — divulgação responsável de vulnerabilidades.",
+    "# Cofre — divulgação responsável de vulnerabilidades.",
     "# Gerado no build. Não edite à mão: veja scripts/security-txt.js.",
     "",
   ];

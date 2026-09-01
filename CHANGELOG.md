@@ -2,6 +2,28 @@
 
 ## Não publicado
 
+### O M22 resolveu a confusão entre o nome e o endereço
+
+- Ficou decidido e escrito: **o produto se chama Cofre e `financemanager.dev.br`
+  é o endereço dele**. Não há submarca, não há dois produtos. Onde os dois
+  precisam aparecer juntos, a forma é "Cofre (financemanager.dev.br)".
+- Nenhuma tela mudou de nome. "FinanceManager" só aparecia em três linhas de
+  documentação escritas nos módulos 20 e 21, e essas foram corrigidas.
+- O aplicativo passou a ser `noindex, follow`. Ele divide o título com a landing
+  de propósito, por uma correção antiga, e sem JavaScript executado a página é só
+  um esqueleto de carregamento; assim a landing volta a ser a única porta
+  indexada, sem renomear nada.
+- O manifesto instala como "Cofre. Organizador financeiro pessoal", sem a barra
+  vertical que aparecia no convite de instalação. `short_name`, `start_url` e
+  `scope` ficaram intactos, então nenhuma instalação existente foi afetada.
+- A landing ganhou `apple-mobile-web-app-title`, para o atalho criado pelo iOS a
+  partir dela nascer como "Cofre" e não com o título da página.
+- `docs/MARCA.md` lista os identificadores **congelados** (`cofre_*`,
+  `financas_db`, `organizador-financeiro/backup`, `window.CofreUI`, prefixos de
+  cache) e `tests/test-brand.js` os trava. Eles parecem inconsistência de marca e
+  são contrato com dado já gravado: uma faxina por busca e substituição apagaria
+  os dados de quem já usa o aplicativo.
+
 ### O M21 abriu um caminho para quem encontra falha
 
 - Nova página pública em `/reportar-vulnerabilidade`, com canais, o que enviar,

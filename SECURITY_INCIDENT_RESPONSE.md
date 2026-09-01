@@ -1,6 +1,6 @@
 # Resposta a incidentes de segurança
 
-Procedimento operacional do FinanceManager. Ele responde ao item 8 de
+Procedimento operacional do Cofre (`financemanager.dev.br`). Ele responde ao item 8 de
 `docs/LEGAL-LAUNCH.md`: quem detecta, quem decide, em quanto tempo se comunica e
 onde fica o registro.
 

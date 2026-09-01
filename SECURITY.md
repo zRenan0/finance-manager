@@ -1,7 +1,7 @@
 # Política de segurança
 
-O Cofre (FinanceManager) guarda dado financeiro pessoal. Se você encontrou uma
-falha, queremos saber antes de qualquer outra pessoa.
+O Cofre, publicado em `financemanager.dev.br`, guarda dado financeiro pessoal. Se
+você encontrou uma falha, queremos saber antes de qualquer outra pessoa.
 
 A versão publicada desta política, com escopo e prazos, fica em
 **https://www.financemanager.dev.br/reportar-vulnerabilidade**, e o canal também
