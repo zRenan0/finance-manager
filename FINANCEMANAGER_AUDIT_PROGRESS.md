@@ -12,7 +12,8 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 
 | Campo | Valor |
 |---|---|
-| Módulo atual | **M20 - Resposta a incidentes** (concluído) |
+| Módulo atual | **M21 - Divulgação responsável** (concluído) |
+| Status do M21 | **CONCLUÍDO** - página pública `/reportar-vulnerabilidade`, `SECURITY.md` e `security.txt` gerado no build (RFC 9116), verificados em navegador real e em produção pelo `check:deploy`; nenhum endereço inventado enquanto `incidentEmail` for marcador |
 | Status do M20 | **CONCLUÍDO** - `SECURITY_INCIDENT_RESPONSE.md` cobre as oito fases com as alavancas reais do sistema; teste novo amarra cada código, rota, RPC e variável citada ao código; `check:release` passou a exigir o documento. **Achado independente:** 5 arquivos de teste falham por fixture dependente de data, e a falha já existia em `HEAD` |
 | Status do M19 | **CONCLUÍDO** - Vercel, Supabase, Anthropic, Have I Been Pwned e portais fiscais registrados com dados recebidos e limites; SMTP de produção preservado como pendência sem fornecedor presumido |
 | Status do M18 | **CONCLUÍDO** - 14 fluxos mapeados em finalidade, armazenamento, retenção, acesso, terceiros e exclusão; política e inventário operacional usam a mesma fonte estruturada; pendências externas preservadas sem dados presumidos |
@@ -33,10 +34,10 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 | Status do M3 | **CONCLUÍDO** — aplicado e confirmado no banco em 2026-08-28 |
 | Status do M2 | **CONCLUÍDO** — nenhuma vulnerabilidade de autorização; invariantes travados por teste |
 | Status do M1 | **CONCLUÍDO** — aplicado e confirmado; gatilho capturado e versionado |
-| Módulos concluídos | M0, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15, M16, M17, M18, M19, M20 |
-| Próximo módulo | M21 - Divulgação responsável (`security.txt` e página de relato) |
+| Módulos concluídos | M0, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15, M16, M17, M18, M19, M20, M21 |
+| Próximo módulo | M22 - Arquitetura de marca (FinanceManager x Cofre) |
 | Branch | `deploy-atualizado` (árvore limpa no início do M0) |
-| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `tests/test-cloud-sync.js`, `tests/test-account-backend.js`, `tests/test-critical-actions.js`, `tests/test-coverage.js`, `tests/test-security-adversarial.js`, `tests/test-observability.js`, `tests/test-data-inventory-lgpd.js`, `tests/test-third-party-transparency.js`, `supabase/tests/verify_security_boundary.sql`, `scripts/check-deploy.js`, `scripts/serve.js`, `scripts/coverage.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/storage.js`, `js/cloud-sync.js` (M10), `js/analytics.js`, `js/forecast.js`, `js/wrapped.js`, `js/screens/analytics.js` (M11), `js/backup-crypto.js`, `js/app.js`, `js/actions.js`, `js/storage.js`, `js/screens/settings.js`, `css/components.css`, `scripts/build-app-module.js` (M12), `netlify/functions/sync.js` (M13), `js/import.js`, `netlify/functions/_shared/finance-schema.js` (M14), observabilidade em backend, frontend e Service Worker (M17), inventário e tela de Privacidade (M18), registro de terceiros e operadores (M19), `js/modules/app.generated.js` (regerado). Documentação: inventário do M8, protocolo do M10, backup protegido do M12, `docs/VERSIONAMENTO.md` do M13, observabilidade do M17, inventário LGPD do M18, terceiros do M19 e desenhos de M15 a M19. **M20 (só documentação e verificação, nenhum arquivo de produção):** `SECURITY_INCIDENT_RESPONSE.md` (novo), `tests/test-incident-response.js` (novo), `scripts/check-release.js`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. |
+| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `tests/test-cloud-sync.js`, `tests/test-account-backend.js`, `tests/test-critical-actions.js`, `tests/test-coverage.js`, `tests/test-security-adversarial.js`, `tests/test-observability.js`, `tests/test-data-inventory-lgpd.js`, `tests/test-third-party-transparency.js`, `supabase/tests/verify_security_boundary.sql`, `scripts/check-deploy.js`, `scripts/serve.js`, `scripts/coverage.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/storage.js`, `js/cloud-sync.js` (M10), `js/analytics.js`, `js/forecast.js`, `js/wrapped.js`, `js/screens/analytics.js` (M11), `js/backup-crypto.js`, `js/app.js`, `js/actions.js`, `js/storage.js`, `js/screens/settings.js`, `css/components.css`, `scripts/build-app-module.js` (M12), `netlify/functions/sync.js` (M13), `js/import.js`, `netlify/functions/_shared/finance-schema.js` (M14), observabilidade em backend, frontend e Service Worker (M17), inventário e tela de Privacidade (M18), registro de terceiros e operadores (M19), `js/modules/app.generated.js` (regerado). Documentação: inventário do M8, protocolo do M10, backup protegido do M12, `docs/VERSIONAMENTO.md` do M13, observabilidade do M17, inventário LGPD do M18, terceiros do M19 e desenhos de M15 a M19. **M20 (só documentação e verificação, nenhum arquivo de produção):** `SECURITY_INCIDENT_RESPONSE.md` (novo), `tests/test-incident-response.js` (novo), `scripts/check-release.js`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. **M21:** `reportar-vulnerabilidade.html` (novo), `css/reportar.css` (novo), `SECURITY.md` (novo), `scripts/security-txt.js` (novo), `tests/test-responsible-disclosure.js` (novo), `vercel.json`, `scripts/build-dist.js`, `scripts/serve.js`, `scripts/check-release.js`, `scripts/check-deploy.js`, `landing.html`, `tests/test-landing.js`, `tests/browser/run-landing.js`, `SECURITY_INCIDENT_RESPONSE.md`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. |
 | Migration do M13 | `20260831120000_database_schema_version.sql` — **aplicada e confirmada em produção em 2026-08-31** (`database_schema_version = 1`; grants inalterados: só `service_role` e `postgres`). Reversível por `alter table public.cofre_sync_config drop column if exists database_schema_version;` |
 | Migrations criadas até aqui | `20260828120000_rls_auto_enable_least_privilege.sql`, `20260828130000_rls_auto_enable_versionada.sql`, `20260828140000_menor_privilegio_tabelas.sql` (as três **aplicadas e confirmadas em 2026-08-28**), `20260828150000_rls_auto_enable_gatilho.sql` (**ainda não aplicada**; é no-op em produção, onde o gatilho já existe) |
 | Versão do app | `0.30.0` (package.json) |
@@ -2547,6 +2548,99 @@ canal publicado. O canal de entrada para pesquisador é o M21.
 
 ---
 
+## M21 - Divulgação responsável
+
+### Antes
+
+Não havia por onde relatar. O M20 já dizia, nas próprias pendências, que "hoje um
+pesquisador não tem para onde escrever". O repositório é público
+(`zRenan0/finance-manager`, confirmado pela API do GitHub), mas não tinha
+`SECURITY.md`; o domínio não servia `security.txt`; e os sete campos de
+`LEGAL_CONTROLLER` continuam marcadores, então **não existe endereço de email
+publicável**.
+
+### Alterações
+
+| Arquivo | Motivo |
+|---|---|
+| `reportar-vulnerabilidade.html` | **novo**; página pública, estática, sem script, formulário ou rede |
+| `css/reportar.css` | **novo**; só o que a landing não tinha (texto corrido, listas, cartões) |
+| `SECURITY.md` | **novo**; a mesma política onde o GitHub procura |
+| `scripts/security-txt.js` | **novo**; gerador do `/.well-known/security.txt` (RFC 9116) |
+| `tests/test-responsible-disclosure.js` | **novo**; 63 verificações |
+| `vercel.json` | reescrita de `/reportar-vulnerabilidade` e `/security.txt`; `Content-Type` do arquivo |
+| `scripts/build-dist.js` | publica a página e gera o `security.txt` |
+| `scripts/serve.js`, `tests/browser/run-landing.js` | espelham as reescritas, lendo do próprio `vercel.json` |
+| `scripts/check-release.js`, `scripts/check-deploy.js` | canal vira condição de publicação e é conferido em produção |
+| `landing.html`, `tests/test-landing.js` | link no rodapé; validador de links passou a entender reescrita |
+| `SECURITY_INCIDENT_RESPONSE.md`, `docs/LEGAL-LAUNCH.md` | o M20 deixa de listar o canal como ausente |
+
+**Nenhum arquivo de `js/` foi tocado**, e o Service Worker continua em `v62`: a
+página nova não faz parte do app shell, e o `handleNavigate` já trata qualquer
+outra página do site pelo `PAGE_CACHE`, sob a própria URL, com a raiz de reserva.
+
+### Motivo
+
+Três decisões carregam o módulo:
+
+1. **O `security.txt` é gerado, não commitado.** O campo `Expires` é obrigatório e
+   a RFC 9116 o quer a menos de um ano no futuro. Arquivo estático vence sozinho,
+   em silêncio, e um pesquisador que o encontre expirado tem motivo para achar o
+   canal abandonado. Gerando no build, cada publicação renova o prazo (hoje 180
+   dias). Sem `SITE_URL` resolvida ele não é escrito — URI relativa seria inválida,
+   e publicar inválido é pior que não publicar.
+2. **O `Contact` aponta para a página e para o GitHub, não para um email.** A RFC
+   aceita qualquer URI. Como `incidentEmail` é marcador, inventar endereço faria o
+   relato cair no vazio. Quando o campo receber valor real, o `mailto:` entra
+   sozinho, na frente dos outros, **sem mudança de código** — e há teste provando
+   os dois estados.
+3. **A página é inerte.** Sem script, sem formulário, sem manipulador, sem estilo
+   embutido, sem recurso de outra origem. Quem chega nela pode estar investigando
+   o site; ela não deve ser mais uma superfície para investigar. Isso também a
+   mantém dentro da CSP atual, que tem `form-action 'none'`.
+
+O conteúdo diz o que o módulo pede e mais uma coisa que só vale para este produto:
+a divulgação deve esperar a correção **porque o app é offline-first** — quem já
+instalou uma versão só recebe o conserto ao abrir de novo, então publicar antes
+atinge quem ainda não teve como se atualizar.
+
+### Compatibilidade
+
+Total. Nenhuma rota, contrato, chave ou formato mudou. As duas reescritas novas
+são endereços que não existiam. As duas verificações que já espelhavam o
+`vercel.json` (servidor local e servidor da suíte de navegador) passaram a ler as
+reescritas do próprio arquivo, em vez de repetir a lista — e o espelho do
+navegador só aplica a reescrita quando o destino existe ali, senão `/index.html`
+passaria a 404 ao servir o repositório.
+
+### Testes
+
+| Teste | Resultado |
+|---|---|
+| `node tests/test-responsible-disclosure.js` | **PASSOU**; 63 ok, 0 falhas |
+| `node tests/test-incident-response.js` | **PASSOU**; 69 ok |
+| `node tests/test-landing.js` | **PASSOU**; 71 ok |
+| `npm run lint` | **PASSOU**; 0 erro, 0 aviso |
+| `npm run check:release` | **PASSOU**; avisos externos conhecidos preservados |
+| `npm run check:build` | **PASSOU**; 71 fontes |
+| `npm run build:dist` | **PASSOU**; 40 arquivos + `security.txt` válido até 2027-02-28 |
+| `npm run test:landing` | **PASSOU**; 18 de 18 |
+| `npm run test:browser` | **PASSOU**; 18 de 18 em Chromium, Firefox e WebKit |
+| `npm run test:pwa` | **PASSOU**; shell, landing, dados locais, limpeza e API fora do cache |
+| `npm test` | 68 arquivos; as **mesmas 5 falhas** de data do M20, nenhuma nova |
+| Navegador real | **PASSOU**; página conferida em 1440, 390 e 320 px, sem estouro horizontal e sem erro de console |
+| `npm run check:deploy` | **NÃO VALIDADO**; as verificações novas do bloco 8 só rodam contra o site publicado |
+
+### Status
+
+**CONCLUÍDO.** O canal existe e não depende de nenhuma pendência jurídica para
+funcionar. Duas coisas ficam fora do alcance do repositório: confirmar no painel
+do GitHub que o **recebimento privado de vulnerabilidade** está habilitado (sem
+isso o link do canal preferido não abre para quem relatar), e preencher
+`incidentEmail` quando existir.
+
+---
+
 ## Checklist de regressão
 
 Executar após **todo** módulo que toque no código. Marcar `OK` / `FALHOU` / `NÃO VALIDADO`.
@@ -2555,9 +2649,10 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
 ### A. Automatizado (CI ou máquina com Node) — porta de entrada obrigatória
 
 - [ ] `npm run lint`
-- [ ] `npm test` (67 arquivos) — **atenção:** 5 arquivos reprovam do dia 1 ao 10 de
+- [ ] `npm test` (68 arquivos) — **atenção:** 5 arquivos reprovam do dia 1 ao 10 de
   cada mês por fixture ancorada no dia 10; ver o achado P2 do M20 antes de investigar
 - [ ] `node tests/test-incident-response.js` (plano de resposta a incidentes do M20)
+- [ ] `node tests/test-responsible-disclosure.js` (canal de divulgação responsável do M21)
 - [ ] `node tests/test-accounting-integrity.js` (invariantes contábeis do M11)
 - [ ] `node tests/test-backup-restore.js` (backup, restauração e senha do M12)
 - [ ] `node tests/test-versioning.js` (versões e matriz de compatibilidade do M13)
@@ -2695,6 +2790,9 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
   dias de cada mês porque as fixtures ancoram no dia 10. Reproduzido em worktree
   limpa no commit `56c58f9`; não é regressão de módulo nenhum. Corrigir no escopo
   do M15 congelando o relógio das fixtures.
+- **M21:** falta confirmar no painel do GitHub que o recebimento privado de
+  vulnerabilidade está habilitado; sem isso, o link do canal preferido não abre
+  para quem relatar. `incidentEmail` entra sozinho no `security.txt` quando existir.
 - **M20:** o procedimento está pronto, mas não foi ensaiado (sem exercício de mesa)
   e não há alerta ativo nem plantão. A janela de evidência depende do plano da
   Vercel e pode ser de 1 hora.

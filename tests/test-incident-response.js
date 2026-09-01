@@ -167,8 +167,9 @@ check("os documentos citados existem",
   ["docs/LEGAL-LAUNCH.md", "docs/INVENTARIO-DE-DADOS.md", "docs/TERCEIROS-E-OPERADORES.md",
     "docs/VERSIONAMENTO.md", "docs/RELEASE.md", "FINANCEMANAGER_AUDIT_PROGRESS.md", "AUDIT_FIX_PROGRESS.md"]
     .every((arquivo) => doc.includes(path.basename(arquivo)) && existe(arquivo)));
-check("o canal de divulgação responsável continua como pendência do M21",
-  /security\.txt/.test(doc) && /M21/.test(doc) && !existe(".well-known/security.txt"));
+check("o canal de divulgação responsável do M21 está ligado ao procedimento",
+  /reportar-vulnerabilidade/.test(doc) && /security\.txt/.test(doc)
+  && existe("reportar-vulnerabilidade.html") && existe("SECURITY.md"));
 check("nenhum código citado ficou fora do contrato de observação",
   codigosCitados.filter((codigo) => codigosDeObservacao.includes(codigo)).every((codigo) => declarados.has(codigo)));
 

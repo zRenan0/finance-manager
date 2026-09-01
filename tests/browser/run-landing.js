@@ -44,9 +44,24 @@ const mime = {
 // E, ao contrário do servidor de desenvolvimento, caminho desconhecido aqui
 // devolve 404 de verdade. É esse detalhe que faz uma referência quebrada
 // aparecer como falha em vez de virar HTML servido como se fosse fonte.
+// As reescritas sem extensão saem do próprio vercel.json, e não de uma lista
+// repetida aqui: publicar uma rota nova sem ensiná-la a este servidor faria o
+// teste reprovar um link que funciona em produção.
+const REESCRITAS_DA_PUBLICACAO = new Map(
+  (JSON.parse(fs.readFileSync(path.join(root, "vercel.json"), "utf8")).rewrites || [])
+    .filter((regra) => !/[:*]/.test(String(regra.source || "")))
+    .map((regra) => [String(regra.source), String(regra.destination).replace(/^\/+/, "")])
+);
+
 const server = http.createServer((request, response) => {
   const urlPath = decodeURIComponent(new URL(request.url, "http://localhost").pathname);
-  const relative = urlPath === "/" ? "landing.html" : urlPath.replace(/^\/+/, "");
+  // A reescrita só vale quando o destino existe AQUI: servindo o repositório,
+  // "/index.html" é o próprio arquivo, e o "app.html" da publicação só nasce
+  // no `dist/`. Sem esta condição, o teste passaria a 404 no aplicativo.
+  const destino = REESCRITAS_DA_PUBLICACAO.get(urlPath.replace(/\/+$/, "") || "/");
+  const reescrito = destino && fs.existsSync(path.resolve(root, destino)) ? destino : "";
+  const relative = urlPath === "/" ? "landing.html"
+    : (reescrito || urlPath.replace(/^\/+/, ""));
   const file = path.resolve(root, relative);
   if (!file.startsWith(root + path.sep) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
     response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });

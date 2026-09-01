@@ -60,6 +60,12 @@ publicação), avaliação de impacto pelo inventário do M18, prazos de comunic
 post-mortem. `npm run check:release` reprova se o documento sumir ou perder uma das
 oito fases.
 
+Quem está de fora relata em `/reportar-vulnerabilidade`, com escopo, regras de
+teste, prazos e divulgação coordenada. A mesma política fica em `SECURITY.md`,
+e o `/.well-known/security.txt` (RFC 9116) é **gerado no build** para o prazo
+`Expires` nunca vencer sozinho. Enquanto o email de incidentes for marcador, o
+canal é o aviso privado do GitHub — nenhum endereço é inventado.
+
 ### Inventário de dados e LGPD
 
 A tela de Privacidade reúne 14 fluxos e mostra, em cada um, finalidade,

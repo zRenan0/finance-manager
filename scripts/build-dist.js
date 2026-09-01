@@ -22,6 +22,7 @@
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const securityTxt = require("./security-txt");
 
 const ROOT = path.join(__dirname, "..");
 const DIST = path.join(ROOT, "dist");
@@ -53,7 +54,10 @@ const DIST = path.join(ROOT, "dist");
 //
 // O nome do arquivo publicado nao aparece em endereco nenhum: e detalhe de
 // dentro da pasta `dist/`.
-const ARQUIVOS = ["landing.html", "manifest.webmanifest", "service-worker.js"];
+// `reportar-vulnerabilidade.html` é página pública estática (M21): sem script,
+// sem formulário, sem chamada de rede. Ela entra aqui como qualquer outro
+// documento; a reescrita de "/reportar-vulnerabilidade" está no vercel.json.
+const ARQUIVOS = ["landing.html", "reportar-vulnerabilidade.html", "manifest.webmanifest", "service-worker.js"];
 const RENOMEADOS = { "index.html": "app.html" };
 const PASTAS = ["css", "icons", "fonts", "vendor"];
 // De `js/`, só o que o `index.html` carrega. O resto são as fontes que o build
@@ -386,6 +390,19 @@ function main() {
   const modulos = versionarModulos();
   absolutizar("landing.html");
   const pacote = reescreverPacoteVersionado(modulos);
+
+  // O security.txt é gerado, não copiado: `Expires` precisa ser renovado a cada
+  // publicação, senão o canal aparece expirado para quem o consultar. Ver
+  // scripts/security-txt.js.
+  const seguranca = securityTxt.escreverEmDist(DIST, baseDoSite());
+  if (seguranca.escrito) {
+    console.log(`${seguranca.caminho} gerado, válido até ${seguranca.expira}.`);
+  } else {
+    console.warn(
+      `AVISO: ${securityTxt.CAMINHO_ARQUIVO} não foi gerado (${seguranca.motivo}). `
+      + "Defina SITE_URL para publicar o canal de divulgação responsável."
+    );
+  }
 
   console.log(`Pacote ${pacote.buildId} inicia em ${pacote.bootstrap}.`);
   console.log(`dist/ gerado com ${total} arquivo(s).`);

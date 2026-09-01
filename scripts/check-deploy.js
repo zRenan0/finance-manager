@@ -361,6 +361,51 @@ async function main() {
     check(`${caminho} não está publicado`, res.status === 404 || res.status === 403, res.status);
   }
 
+  /* ---------------------------------------------------------------- *
+   * 8. DIVULGAÇÃO RESPONSÁVEL (M21)
+   * ---------------------------------------------------------------- *
+   * O security.txt é GERADO no build, então ele não existe no repositório
+   * para ser conferido antes. E, ao contrário de todo o resto, não adianta
+   * ele estar certo: precisa estar ALCANÇÁVEL no endereço que a RFC 9116
+   * manda, com prazo válido. Um canal de segurança que responde 404 é pior
+   * que ausência de canal, porque a página promete o que o servidor não
+   * entrega.
+   * ---------------------------------------------------------------- */
+  console.log("\n8. Divulgação responsável");
+
+  const pagina = await pegar("/reportar-vulnerabilidade");
+  check("/reportar-vulnerabilidade responde 200", pagina.status === 200, pagina.status);
+  check("/reportar-vulnerabilidade entrega a página, não o aplicativo",
+    /Reportar uma vulnerabilidade/.test(pagina.corpo) && !/id="app"/.test(pagina.corpo));
+  check("a página de relato não carrega script", !/<script\b/i.test(pagina.corpo));
+  check("a página aponta o canal privado do GitHub",
+    /security\/advisories\/new/.test(pagina.corpo));
+
+  const txt = await pegar("/.well-known/security.txt");
+  check("/.well-known/security.txt responde 200", txt.status === 200, txt.status);
+  check("security.txt é servido como texto",
+    /text\/plain/.test(String(txt.headers.get("content-type") || "")),
+    txt.headers.get("content-type"));
+
+  if (txt.status === 200) {
+    ["Contact:", "Expires:", "Canonical:", "Policy:", "Preferred-Languages:"].forEach((campo) => {
+      check(`security.txt declara ${campo}`, txt.corpo.includes(campo));
+    });
+    const expira = (txt.corpo.match(/Expires:\s*(\S+)/) || [])[1];
+    const prazo = expira ? Date.parse(expira) : NaN;
+    const agora = Date.now();
+    check("o prazo do security.txt é válido", Number.isFinite(prazo), expira || "ausente");
+    check("o security.txt não está expirado", Number.isFinite(prazo) && prazo > agora, expira);
+    // A RFC 9116 recusa prazo a mais de um ano. Como o valor é recalculado a
+    // cada publicação, estourar aqui significa relógio de build errado.
+    check("o prazo cabe na janela de um ano da RFC 9116",
+      Number.isFinite(prazo) && prazo < agora + 366 * 24 * 60 * 60 * 1000, expira);
+    check("o Canonical aponta para o próprio endereço servido",
+      new RegExp(`Canonical:\\s*https?://[^\\s]*${base.host.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/\\.well-known/security\\.txt`).test(txt.corpo)
+      || txt.corpo.includes("/.well-known/security.txt"),
+      (txt.corpo.match(/Canonical:.*/) || [])[0]);
+  }
+
   console.log(`\n${fail ? "FALHAS ENCONTRADAS" : "PUBLICAÇÃO CONFERIDA"}: ${ok} ok, ${fail} falha(s), ${warn} aviso(s)`);
   if (!raizEhLanding && raizEhApp) {
     console.log([

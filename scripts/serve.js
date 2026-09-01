@@ -102,6 +102,13 @@ function resolverSeguro(base, urlPath) {
 // "/app.html", que é o nome com que o aplicativo é publicado. Se o servidor de
 // desenvolvimento não fizer o mesmo, a diferença aparece só depois do deploy,
 // que é o pior lugar para descobrir qual página abre no domínio.
+// Espelho das reescritas declaradas no vercel.json, fora "/" e "/index.html",
+// que têm tratamento próprio logo abaixo.
+const REESCRITAS = {
+  "/reportar-vulnerabilidade": "reportar-vulnerabilidade.html",
+  "/security.txt": path.join(".well-known", "security.txt"),
+};
+
 function ehRaiz(urlPath) {
   const caminho = String(urlPath || "/").split("?")[0].split("#")[0];
   return caminho === "" || caminho === "/";
@@ -144,9 +151,14 @@ function servir(base) {
       return;
     }
 
+    // As MESMAS reescritas do vercel.json, pelo mesmo motivo de "/" e
+    // "/index.html": sem elas, "/reportar-vulnerabilidade" cairia no fallback
+    // do aplicativo aqui e só abriria a página certa depois do deploy.
+    const reescrito = REESCRITAS[caminhoUrl.replace(/\/+$/, "") || "/"];
+
     let alvo = ehRaiz(req.url)
       ? path.join(base, "landing.html")
-      : resolverSeguro(base, req.url);
+      : (reescrito ? path.join(base, reescrito) : resolverSeguro(base, req.url));
     if (!alvo) {
       res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
       res.end("Caminho fora da raiz");

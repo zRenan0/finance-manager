@@ -45,7 +45,7 @@ incidente.
 | Supabase | Security Advisor e logs do projeto | Função privilegiada exposta, RLS desabilitada, policy nova, grant novo |
 | Roteamento e cabeçalhos | `npm run check:deploy` | Reprovação em qualquer das verificações de produção (M5) |
 | Diagnóstico do usuário | Arquivo que o usuário exporta na tela de Privacidade | `area` e `code`; nunca conteúdo |
-| Relato externo | Canal de divulgação responsável | Ainda não existe — é o M21 |
+| Relato externo | Aviso privado no GitHub, `/reportar-vulnerabilidade` e `/.well-known/security.txt` | Relato de pesquisador; entra por este fluxo na fase 2 |
 
 Códigos que merecem atenção imediata quando aparecem em volume anormal ou fora do
 fluxo esperado:
@@ -193,7 +193,7 @@ backend não alcança, por si, o dado que nunca saiu do aparelho.
 |---|---|---|---|
 | ANPD | Incidente com dado pessoal que possa acarretar risco ou dano relevante | **3 dias úteis** do conhecimento | Comunicado de Incidente de Segurança (CIS) no site da ANPD |
 | Titulares afetados | No mesmo evento | Junto da comunicação à ANPD | Email do cadastro e aviso no app |
-| Pesquisador que relatou | Ao conter e ao corrigir | Assim que houver o que dizer | Canal do M21 |
+| Pesquisador que relatou | Ao conter e ao corrigir | Assim que houver o que dizer | O mesmo aviso privado por onde ele escreveu |
 | Operadores (Vercel, Supabase, Anthropic) | Quando a causa estiver no serviço deles | Assim que identificado | Suporte do fornecedor |
 
 O prazo de 3 dias úteis vem do Regulamento de Comunicação de Incidente de Segurança
@@ -266,8 +266,10 @@ parte de comunicação ele depende de decisões externas ao repositório:
    Ver `docs/LEGAL-LAUNCH.md`.
 2. **Retenção de log da hospedagem.** O plano efetivo da Vercel define a janela de
    evidência. Com 1 hora, quase toda investigação começa tarde.
-3. **Canal de divulgação responsável.** `security.txt` e página de relato são o M21;
-   hoje um pesquisador não tem para onde escrever.
+3. **Recebimento privado no GitHub.** O canal existe (M21): página pública,
+   `SECURITY.md` e `security.txt` gerado no build. Falta confirmar nas
+   configurações do repositório que o aviso privado de vulnerabilidade está
+   habilitado — sem isso, o link do canal preferido não abre para quem relatar.
 4. **Sem alerta ativo.** A detecção depende de alguém olhar o log ou de alguém
    relatar. Não há disparo automático nem plantão.
 5. **Sem exercício de mesa.** O procedimento nunca foi ensaiado com um caso simulado

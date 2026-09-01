@@ -2,6 +2,23 @@
 
 ## Não publicado
 
+### O M21 abriu um caminho para quem encontra falha
+
+- Nova página pública em `/reportar-vulnerabilidade`, com canais, o que enviar,
+  escopo de dentro e de fora, regras de teste, prazos de resposta e divulgação
+  coordenada. Ela é estática: sem script, sem formulário, sem chamada de rede.
+- `SECURITY.md` publica a mesma política no repositório, e o canal preferido é o
+  aviso privado do GitHub — nada fica público antes da correção.
+- `/.well-known/security.txt` passou a ser **gerado no build** (RFC 9116), para o
+  campo `Expires` ser renovado a cada publicação em vez de vencer sozinho.
+- Nenhum endereço foi inventado: enquanto o email de incidentes for marcador, ele
+  simplesmente não aparece no `security.txt`, e a página diz que ainda não foi
+  publicado. Quando o campo receber valor real, ele entra sozinho.
+- A página explica por que a publicação deve esperar a correção: o app funciona
+  offline, e quem já instalou uma versão só recebe o conserto ao abrir de novo.
+- `npm run check:deploy` passou a conferir em produção que a página responde e que
+  o `security.txt` está no ar, como texto e dentro do prazo.
+
 ### O M20 escreveu o que fazer quando algo der errado
 
 - `SECURITY_INCIDENT_RESPONSE.md` traz o fluxo completo: detecção, classificação,

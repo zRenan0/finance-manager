@@ -11,6 +11,8 @@
   "rewrites": [
     { "source": "/", "destination": "/landing.html" },
     { "source": "/index.html", "destination": "/app.html" },
+    { "source": "/reportar-vulnerabilidade", "destination": "/reportar-vulnerabilidade.html" },
+    { "source": "/security.txt", "destination": "/.well-known/security.txt" },
     { "source": "/api/account/:action*", "destination": "/api/account?action=:action*" },
     { "source": "/api/sync/:action*", "destination": "/api/sync?action=:action*" }
   ],
@@ -18,6 +20,10 @@
     {
       "source": "/service-worker.js",
       "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+    },
+    {
+      "source": "/.well-known/security.txt",
+      "headers": [{ "key": "Content-Type", "value": "text/plain; charset=utf-8" }]
     },
     {
       "source": "/(.*)",

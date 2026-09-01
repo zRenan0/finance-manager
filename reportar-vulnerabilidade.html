@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+
+<title>Reportar vulnerabilidade | Cofre</title>
+<meta name="description" content="Como relatar uma falha de segurança no Cofre: canais, escopo, regras de teste, prazos de resposta e divulgação coordenada." />
+
+<link rel="canonical" href="/reportar-vulnerabilidade" />
+<meta name="robots" content="index, follow" />
+
+<meta name="theme-color" content="#05100D" />
+<meta name="color-scheme" content="dark" />
+
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="Cofre" />
+<meta property="og:locale" content="pt_BR" />
+<meta property="og:title" content="Reportar vulnerabilidade | Cofre" />
+<meta property="og:description" content="Canal para pesquisadores de segurança relatarem falhas no Cofre, com escopo, regras e prazos." />
+
+<link rel="icon" href="icons/icon-192.png" />
+<link rel="apple-touch-icon" href="icons/icon-192.png" />
+
+<!-- Página estática de propósito: nenhum script, nenhum formulário, nenhuma
+     chamada de rede. Quem chega aqui pode estar investigando o próprio site,
+     e a página não deve ser mais uma superfície para investigar. -->
+<link rel="stylesheet" href="css/landing.css" />
+<link rel="stylesheet" href="css/reportar.css" />
+</head>
+<body class="lp rv">
+
+<a class="lp-skip" href="#conteudo">Pular para o conteúdo</a>
+
+<main id="conteudo">
+
+  <section class="lp-sec rv-hero">
+    <div class="lp-shell lp-shell--narrow">
+      <p class="lp-eyebrow"><span class="lp-eyebrow__dot" aria-hidden="true"></span>Divulgação responsável</p>
+      <h1 class="lp-h2">Reportar uma vulnerabilidade</h1>
+      <p class="lp-lead">
+        Se você encontrou uma falha de segurança no Cofre, queremos saber antes de
+        qualquer outra pessoa. Esta página diz por onde falar, o que está no escopo,
+        o que esperar de nós e em quanto tempo.
+      </p>
+      <p class="rv-note">
+        O Cofre guarda dado financeiro pessoal. Um relato bem feito protege gente
+        real, não um número de versão.
+      </p>
+    </div>
+  </section>
+
+  <section class="lp-sec rv-sec" id="como-reportar">
+    <div class="lp-shell lp-shell--narrow">
+      <h2 class="lp-h2">Como reportar</h2>
+
+      <div class="rv-channel">
+        <h3>Aviso privado no GitHub <span class="rv-tag rv-tag--on">canal preferido</span></h3>
+        <p>
+          O relato entra em um canal privado do repositório, visível só para quem
+          mantém o projeto. Nada fica público enquanto a falha não for corrigida.
+        </p>
+        <p>
+          <a class="lp-btn lp-btn--primary" href="https://github.com/zRenan0/finance-manager/security/advisories/new" rel="noopener">Abrir aviso privado</a>
+        </p>
+        <p class="rv-fallback">
+          Se a página pedir permissão que você não tem, use
+          <a href="https://github.com/zRenan0/finance-manager/security/policy" rel="noopener">a política de segurança do repositório</a>.
+          <strong>Não abra issue pública</strong> descrevendo a falha.
+        </p>
+      </div>
+
+      <div class="rv-channel">
+        <h3>Email <span class="rv-tag">ainda não publicado</span></h3>
+        <p>
+          O endereço de incidentes é publicado junto com a identificação do
+          controlador, antes da oferta ao público. Enquanto isso, o canal do
+          GitHub é o caminho completo — ele não depende desse endereço.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="lp-sec rv-sec" id="o-que-enviar">
+    <div class="lp-shell lp-shell--narrow">
+      <h2 class="lp-h2">O que enviar</h2>
+      <p>Quanto mais direto, mais rápido vira correção:</p>
+      <ol class="rv-list">
+        <li>o que a falha permite fazer, em uma frase;</li>
+        <li>onde: endereço, tela, rota da API ou função;</li>
+        <li>como reproduzir, passo a passo;</li>
+        <li>o que você viu acontecer e o que deveria acontecer;</li>
+        <li>navegador, sistema e versão do aplicativo, se souber;</li>
+        <li>data e hora aproximadas do teste, que ajudam a achar o registro.</li>
+      </ol>
+      <p class="rv-warn">
+        <strong>Não envie dado de outra pessoa.</strong> Se durante o teste você
+        alcançou informação de terceiro, diga que alcançou e descreva o tipo — não
+        anexe o conteúdo, não guarde cópia e apague o que tiver baixado.
+      </p>
+    </div>
+  </section>
+
+  <section class="lp-sec rv-sec" id="escopo">
+    <div class="lp-shell lp-shell--narrow">
+      <h2 class="lp-h2">Escopo</h2>
+
+      <div class="rv-scope">
+        <div class="rv-scope__col">
+          <h3>Dentro</h3>
+          <ul class="rv-list">
+            <li>o site e o aplicativo em <span class="rv-code">financemanager.dev.br</span>;</li>
+            <li>as funções em <span class="rv-code">/api/account</span>, <span class="rv-code">/api/sync</span> e <span class="rv-code">/api/analyze</span>;</li>
+            <li>autenticação, sessão, aparelhos e revogação;</li>
+            <li>isolamento entre contas na sincronização;</li>
+            <li>o Service Worker, o cache e o comportamento offline;</li>
+            <li>importação de extratos, backup e restauração;</li>
+            <li>o código deste repositório.</li>
+          </ul>
+        </div>
+        <div class="rv-scope__col">
+          <h3>Fora</h3>
+          <ul class="rv-list">
+            <li>ataques de negação de serviço ou teste de carga;</li>
+            <li>engenharia social contra pessoas ou suporte;</li>
+            <li>ataque físico e acesso a aparelho de terceiro;</li>
+            <li>falha em serviço de terceiro — leve ao programa do próprio fornecedor;</li>
+            <li>relato gerado só por varredura, sem impacto demonstrado;</li>
+            <li>ausência de cabeçalho ou boa prática sem caminho de exploração;</li>
+            <li>conta de teste sua sendo afetada por você mesmo.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="lp-sec rv-sec" id="regras">
+    <div class="lp-shell lp-shell--narrow">
+      <h2 class="lp-h2">Regras do teste</h2>
+      <p>
+        Ao pesquisar dentro destas regras, tratamos seu trabalho como contribuição
+        de boa-fé e não tomamos medida legal contra você por causa dele.
+      </p>
+      <ul class="rv-list">
+        <li>Use conta sua. Crie quantas precisar.</li>
+        <li>Pare no momento em que confirmar a falha. Não é preciso ir mais fundo para provar.</li>
+        <li>Não acesse, copie, altere nem apague dado de outra pessoa.</li>
+        <li>Não degrade o serviço para quem está usando.</li>
+        <li>Não use a falha para obter vantagem.</li>
+        <li>Não publique nem compartilhe antes da correção.</li>
+      </ul>
+      <p class="rv-warn">
+        Sair dessas regras — em especial acessar dado de terceiro ou tirar o
+        serviço do ar — deixa de ser pesquisa e volta a ser um incidente, tratado
+        como tal.
+      </p>
+    </div>
+  </section>
+
+  <section class="lp-sec rv-sec" id="prazos">
+    <div class="lp-shell lp-shell--narrow">
+      <h2 class="lp-h2">O que esperar</h2>
+      <ul class="rv-steps">
+        <li><span class="rv-steps__when">até 72 horas</span> confirmamos que o relato chegou;</li>
+        <li><span class="rv-steps__when">até 7 dias</span> dizemos se reproduzimos e qual a gravidade;</li>
+        <li><span class="rv-steps__when">enquanto durar</span> avisamos o andamento sem você precisar cobrar;</li>
+        <li><span class="rv-steps__when">ao corrigir</span> avisamos e combinamos quando pode ser publicado.</li>
+      </ul>
+      <p>
+        Falha que alcança dado de outro titular entra em contenção imediata. O
+        procedimento interno completo — detecção, contenção, investigação, impacto
+        e comunicação — está no repositório, em
+        <span class="rv-code">SECURITY_INCIDENT_RESPONSE.md</span>.
+      </p>
+      <p class="rv-note">
+        Este é um projeto pequeno e os prazos são compromisso de esforço, não de
+        contrato. Se passar do prazo, cobre: a demora é falha nossa, não sinal de
+        que o relato foi ignorado.
+      </p>
+    </div>
+  </section>
+
+  <section class="lp-sec rv-sec" id="divulgacao">
+    <div class="lp-shell lp-shell--narrow">
+      <h2 class="lp-h2">Divulgação coordenada</h2>
+      <p>
+        Pedimos que a publicação venha depois da correção estar no ar. O motivo é
+        concreto: o aplicativo funciona offline, e quem já instalou uma versão só
+        recebe a correção ao abrir de novo. Uma publicação antecipada atinge quem
+        ainda não teve como se atualizar.
+      </p>
+      <p>
+        Não pedimos silêncio indefinido. Se a correção demorar sem explicação, é
+        justo publicar — avise antes.
+      </p>
+      <p>
+        <strong>Não há recompensa em dinheiro.</strong> O projeto está em beta e
+        não mantém programa pago. O que oferecemos é resposta rápida, correção
+        real e crédito público a quem quiser, com nome ou identificação à sua
+        escolha.
+      </p>
+    </div>
+  </section>
+
+  <section class="lp-sec rv-sec" id="dados">
+    <div class="lp-shell lp-shell--narrow">
+      <h2 class="lp-h2">Sobre o que você nos envia</h2>
+      <p>
+        O relato é lido por quem mantém o projeto. Guardamos o conteúdo enquanto a
+        falha estiver aberta e depois pelo tempo necessário para o registro da
+        correção. Não usamos seu relato para outra finalidade e não repassamos a
+        terceiro, salvo quando a falha estiver no serviço de um fornecedor e
+        precisar ser levada a ele — nesse caso avisamos você.
+      </p>
+      <p>
+        Como o Cofre trata dado pessoal, a política de privacidade e o inventário
+        de dados ficam dentro do aplicativo, em
+        <a href="index.html#/privacidade">Privacidade</a>.
+      </p>
+    </div>
+  </section>
+
+</main>
+
+<footer class="lp-foot">
+  <div class="lp-shell lp-foot__base">
+    <p><a href="/">Voltar para o Cofre</a></p>
+    <p>Cofre. Aplicativo em beta aberto.</p>
+  </div>
+</footer>
+
+</body>
+</html>

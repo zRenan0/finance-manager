@@ -50,13 +50,22 @@ const router = read("js/router.js");
  * ================================================================== */
 console.log("\n1. Todo recurso referenciado existe");
 
+// Endereço sem extensão que a plataforma resolve por reescrita não é arquivo:
+// "/reportar-vulnerabilidade" existe como rota, não como caminho no disco. A
+// lista sai do próprio vercel.json, então tirar a reescrita de lá volta a
+// reprovar aqui em vez de publicar um link quebrado.
+const fontesReescritas = new Set(
+  (vercel.rewrites || []).map((regra) => String(regra.source || "").replace(/^\//, ""))
+);
+const ehReescrito = (destino) => fontesReescritas.has(String(destino).replace(/^\//, ""));
+
 const referencias = Array.from(landing.matchAll(/(?:src|href)="([^"#][^"]*)"/g))
   .map((m) => m[1])
   .filter((valor) => !/^(https?:)?\/\//.test(valor) && !valor.startsWith("mailto:") && !valor.startsWith("/"))
   .map((valor) => valor.split("#")[0])
   .filter(Boolean);
 
-const ausentes = [...new Set(referencias)].filter((arquivo) => !existe(arquivo));
+const ausentes = [...new Set(referencias)].filter((arquivo) => !existe(arquivo) && !ehReescrito(arquivo));
 check("landing.html não aponta para arquivo inexistente", ausentes.length === 0, ausentes.join(", "));
 
 // A REGRA DAS FONTES.
@@ -118,6 +127,7 @@ const invalidos = destinos.filter((destino) => {
   if (destino === "/") return false;                       // raiz: a própria landing
   if (destino.startsWith("#")) return !ancoras.has(destino.slice(1));
   if (destino === "index.html") return false;              // aplicativo
+  if (ehReescrito(destino)) return false;                  // rota da plataforma
   const rota = destino.match(/^index\.html#\/([a-z0-9-]+)$/);
   if (rota) return !slugs.has(rota[1]);
   return !existe(destino.split("#")[0]);

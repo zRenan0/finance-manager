@@ -102,6 +102,35 @@ check(["## 1. Detecção", "## 2. Classificação", "## 3. Contenção", "## 4. 
 check(/## Papéis/.test(incidentes) && /## Registro de incidentes/.test(incidentes),
   "plano de resposta a incidentes não define papéis nem onde fica o registro");
 
+// M21: o canal de divulgação responsável. A página é estática de propósito —
+// quem chega nela pode estar investigando o site, e ela não deve ser mais uma
+// superfície para investigar.
+const relato = fs.existsSync(path.join(root, "reportar-vulnerabilidade.html"))
+  ? read("reportar-vulnerabilidade.html")
+  : "";
+check(relato !== "", "página de relato de vulnerabilidade ausente");
+check(!/<script\b/i.test(relato) && !/<form\b/i.test(relato) && !/\son\w+=/i.test(relato),
+  "a página de relato não pode carregar script, formulário ou manipulador embutido");
+check(/security\/advisories\/new/.test(relato), "a página de relato não indica canal privado de recebimento");
+check(["Escopo", "Regras do teste", "O que esperar", "Divulgação coordenada"].every((secao) => relato.includes(secao)),
+  "a página de relato não cobre escopo, regras, prazos e divulgação coordenada");
+check(/Não publique nem compartilhe antes da correção|antes da correção/.test(relato),
+  "a página de relato não pede divulgação coordenada");
+check(fs.existsSync(path.join(root, "SECURITY.md")) && /reportar-vulnerabilidade/.test(read("SECURITY.md")),
+  "política de segurança do repositório ausente ou desligada da página publicada");
+check(read("vercel.json").includes("/reportar-vulnerabilidade"),
+  "a reescrita de /reportar-vulnerabilidade não está declarada");
+check(read("scripts/build-dist.js").includes("reportar-vulnerabilidade.html")
+  && /securityTxt\.escreverEmDist/.test(read("scripts/build-dist.js")),
+  "o build não publica a página de relato nem gera o security.txt");
+
+// O security.txt sai do build, então o que dá para conferir aqui é o gerador:
+// se ele produz um arquivo válido pela RFC 9116 a partir de uma base qualquer.
+const amostra = require("./security-txt").gerarSecurityTxt("https://exemplo.test");
+check(["Contact:", "Expires:", "Canonical:", "Policy:", "Preferred-Languages:"]
+  .every((campo) => amostra.includes(campo)), "o security.txt gerado não traz os campos da RFC 9116");
+check(!/\[definir antes/.test(amostra), "o security.txt gerado publicou um marcador no lugar de um canal real");
+
 // Já os campos que só o dono do app conhece são AVISO, não falha: eles não
 // impedem publicar o beta, impedem oferecer ao público. Reprovar aqui travaria
 // a própria esteira que precisa rodar até esses dados existirem.
