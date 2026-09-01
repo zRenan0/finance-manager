@@ -79,6 +79,7 @@ function renderDashboardScreen() {
 
   return `<div class="screen ${starting ? "screen--starter" : ""}">
     ${renderDashboardHeader(model)}
+    ${shouldWarnLocalOnly() ? renderLocalOnlyNotice() : ""}
     ${showCarry ? renderCarryBanner(pending) : ""}
     ${state.dashboardEditing ? renderDashboardCustomizer() : ""}
 

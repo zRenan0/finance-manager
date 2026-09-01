@@ -149,3 +149,40 @@
   display: flex; flex-direction: column;
 }
 .card--reserve .mini-card__note, .card--goal-featured .mini-card__note { flex: 1; }
+
+/* ------------------------------------------------------------------
+   [M26] AVISO DE DADOS SOMENTE LOCAIS
+   Uma linha, não um cartão. O tom é neutro de propósito: o objetivo é
+   informar e oferecer saída, não assustar quem ainda não decidiu.
+   ------------------------------------------------------------------ */
+.local-only {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card-alt);
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+.local-only > svg { flex: none; color: var(--muted); }
+.local-only__text { flex: 1; min-width: 180px; }
+.local-only__action { flex: none; font-size: 13px; font-weight: 600; }
+/* O fechar é o alvo menos importante da linha; fica discreto, mas mantém os
+   44px de área de toque exigidos pelo teste de navegador. */
+.local-only__close { flex: none; min-width: 44px; min-height: 44px; color: var(--muted); }
+
+/* No estreito vira duas linhas: ícone e texto em cima, ação e fechar embaixo.
+   Dar `order` a só dois dos quatro filhos deixava o fechar sozinho no topo,
+   antes da frase que ele serve para fechar. */
+@media (max-width: 480px) {
+  .local-only { align-items: flex-start; }
+  .local-only > svg { order: 1; margin-top: 3px; }
+  .local-only__text { order: 2; flex: 1 1 140px; min-width: 0; }
+  .local-only__action { order: 3; margin-left: 22px; }
+  .local-only__close { order: 4; margin-left: auto; }
+}

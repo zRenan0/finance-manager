@@ -89,6 +89,11 @@ let state = {
   data: loadData(),
   storageOk: isStorageAvailable(),
   storageWarningDismissed: false,
+  // [M26] Dispensa do aviso de dados locais. De sessão, como o aviso de
+  // armazenamento logo acima: o risco não deixa de existir porque a pessoa
+  // fechou o aviso, e gravar a dispensa exigiria campo novo no schema para
+  // resolver um incômodo que a própria condição já limita.
+  localOnlyDismissed: false,
   // [M25] Modo demonstração. Vive SÓ na memória: não é lido nem gravado no
   // banco, então recarregar a página encerra a demonstração e devolve os dados
   // reais. Ver js/demo.js.
@@ -421,6 +426,63 @@ function reviewIssueIds(el) {
   if (brutos.length) return new Set(brutos);
   const unico = el && el.dataset ? el.dataset.id : null;
   return new Set(unico ? [unico] : []);
+}
+
+// ------------------------------------------------------------------------------
+// [M26] "PROTEGER MEUS DADOS"
+// ------------------------------------------------------------------------------
+// O aviso da tela inicial é uma linha; o que fazer a respeito não cabe nela. As
+// duas saídas reais do produto são backup e conta, e as duas aparecem aqui, com
+// o risco dito uma vez, sem alarme: quem limpa o site no navegador ou desinstala
+// o app perde o que está só no aparelho.
+function openProtectDataDialog() {
+  requestConfirmation({
+    title: "Proteger seus dados",
+    message: "Hoje eles existem só neste aparelho. Baixar um backup guarda uma cópia onde você escolher; ligar uma conta mantém tudo em dia entre aparelhos. Sem uma das duas, limpar os dados do site no navegador ou desinstalar o app leva junto o que está aqui.",
+    icon: "shieldCheck",
+    confirmLabel: "Baixar backup completo",
+    alternateLabel: "Criar conta e sincronizar",
+    alternateIcon: "refresh",
+    cancelLabel: "Agora não",
+    onConfirm: () => { exportBackupJson(); },
+    onAlternate: () => { setState({ tab: "account" }); },
+  });
+}
+
+// A CONDIÇÃO É O QUE MANTÉM O AVISO DISCRETO.
+//
+// Ele não aparece para quem não tem o que perder, nem para quem já resolveu, e
+// some sozinho quando o problema deixa de existir. Um aviso que aparece sempre
+// é um aviso que ninguém lê.
+function shouldWarnLocalOnly() {
+  if (isDemoMode()) return false;
+  if (state.localOnlyDismissed) return false;
+  if (state.booting) return false;
+  // Com conta ligada, os dados não estão só aqui.
+  if (state.account && state.account.authenticated) return false;
+  // Sem nada lançado não há perda possível, e o começo da tela já é outro.
+  const total = (state.data.transactions || []).length;
+  if (total === 0) return false;
+  // Backup recente conta como resolvido. É a mesma régua de renderLastBackupLine.
+  const last = state.data.lastBackupAt;
+  if (last) {
+    const dias = Math.floor((Date.parse(`${todayIso()}T12:00:00`) - Date.parse(`${last}T12:00:00`)) / 86400000);
+    if (Number.isFinite(dias) && dias < 30) return false;
+  }
+  return true;
+}
+
+function renderLocalOnlyNotice() {
+  const last = state.data.lastBackupAt;
+  const detalhe = last
+    ? "O último backup foi há mais de 30 dias."
+    : "Ainda não há backup.";
+  return `<p class="local-only" role="status">
+    ${svgIcon("info", 14)}
+    <span class="local-only__text">Seus dados estão salvos somente neste dispositivo. ${detalhe}</span>
+    <button type="button" class="link-btn local-only__action" data-action="protect-data">Proteger meus dados</button>
+    <button type="button" class="icon-btn local-only__close" data-action="local-only-dismiss" aria-label="Dispensar aviso por esta sessão">${svgIcon("x", 13)}</button>
+  </p>`;
 }
 
 function requestConfirmation(options) {

@@ -2,6 +2,23 @@
 
 ## Não publicado
 
+### O M26 avisa quando os dados existem em um lugar só
+
+- Uma linha discreta na tela inicial: "Seus dados estão salvos somente neste
+  dispositivo", com o estado do backup ao lado. Sem cor de alarme, sem ponto de
+  exclamação, com um × para dispensar.
+- "Proteger meus dados" abre as duas saídas reais do produto lado a lado: baixar
+  o backup completo ou ligar uma conta. O risco é dito uma vez, sem drama: sem
+  uma das duas, limpar os dados do site ou desinstalar o app leva junto o que
+  está aqui.
+- O aviso **não aparece** para quem não tem lançamento, para quem já tem conta
+  ligada, para quem exportou backup nos últimos 30 dias, dentro da demonstração
+  ou durante o carregamento. Ele some sozinho quando o problema deixa de existir.
+- Correção de tabela: o diálogo de confirmação com três botões espremia os
+  rótulos até um cobrir o outro. A linha de ações passou a quebrar; vale para
+  qualquer diálogo do app, não só o novo.
+- O cache offline subiu para `v66`.
+
 ### O M25 deixou experimentar antes de cadastrar
 
 - "Explorar demonstração", no primeiro passo do assistente, abre o app inteiro

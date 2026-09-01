@@ -760,13 +760,19 @@
 }
 .confirmation-dialog__copy .card-title { margin: 1px 0 6px; }
 .confirmation-dialog__copy .card-subtitle { margin: 0; line-height: 1.55; }
+/* `flex-wrap` não é enfeite: o diálogo aceita um terceiro botão
+   (`alternateLabel`), e três rótulos longos numa linha só se sobrepunham em
+   vez de quebrar. Rótulo de ação não deve ser encurtado para caber no layout;
+   é o layout que cede. */
 .confirmation-dialog__actions {
   grid-column: 1 / -1;
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 10px;
   margin-top: 4px;
 }
+.confirmation-dialog__actions .btn { flex: 0 0 auto; }
 
 .input[aria-invalid="true"],
 .amount-field[aria-invalid="true"] {

@@ -12,7 +12,8 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 
 | Campo | Valor |
 |---|---|
-| Módulo atual | **M25 - Modo demonstração** (concluído) |
+| Módulo atual | **M26 - Aviso de dados somente locais** (concluído) |
+| Status do M26 | **CONCLUÍDO** - linha discreta na tela inicial com "Proteger meus dados"; some sozinha quando há conta ou backup recente. Corrigido de passagem o diálogo de três botões, que espremia rótulos. Cache em `v66` |
 | Status do M25 | **CONCLUÍDO** - demonstração vive só na memória, com as duas guardas no único caminho de gravação; provado em navegador que uma escrita real dentro dela não altera IndexedDB, espelho nem fila. Cache em `v65` |
 | Status do M24 | **CONCLUÍDO** - passo de gastos fixos opcional, que vira teto de categoria em vez de lançamento; o assistente entrega plano pessoal em 11 interações. Cache em `v64` |
 | Status do M23 | **CONCLUÍDO** - seção dos três pilares entre o problema e a demonstração, sem remover nenhuma funcionalidade da página e sem tocar no bento; cache promovido para `v63` porque a folha da landing é stale-while-revalidate |
@@ -38,10 +39,10 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 | Status do M3 | **CONCLUÍDO** — aplicado e confirmado no banco em 2026-08-28 |
 | Status do M2 | **CONCLUÍDO** — nenhuma vulnerabilidade de autorização; invariantes travados por teste |
 | Status do M1 | **CONCLUÍDO** — aplicado e confirmado; gatilho capturado e versionado |
-| Módulos concluídos | M0, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15, M16, M17, M18, M19, M20, M21, M22, M23, M24, M25 |
-| Próximo módulo | M26 - Alerta de dados somente locais |
+| Módulos concluídos | M0, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15, M16, M17, M18, M19, M20, M21, M22, M23, M24, M25, M26 |
+| Próximo módulo | M27 - Saúde financeira explicável |
 | Branch | `deploy-atualizado` (árvore limpa no início do M0) |
-| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `tests/test-cloud-sync.js`, `tests/test-account-backend.js`, `tests/test-critical-actions.js`, `tests/test-coverage.js`, `tests/test-security-adversarial.js`, `tests/test-observability.js`, `tests/test-data-inventory-lgpd.js`, `tests/test-third-party-transparency.js`, `supabase/tests/verify_security_boundary.sql`, `scripts/check-deploy.js`, `scripts/serve.js`, `scripts/coverage.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/storage.js`, `js/cloud-sync.js` (M10), `js/analytics.js`, `js/forecast.js`, `js/wrapped.js`, `js/screens/analytics.js` (M11), `js/backup-crypto.js`, `js/app.js`, `js/actions.js`, `js/storage.js`, `js/screens/settings.js`, `css/components.css`, `scripts/build-app-module.js` (M12), `netlify/functions/sync.js` (M13), `js/import.js`, `netlify/functions/_shared/finance-schema.js` (M14), observabilidade em backend, frontend e Service Worker (M17), inventário e tela de Privacidade (M18), registro de terceiros e operadores (M19), `js/modules/app.generated.js` (regerado). Documentação: inventário do M8, protocolo do M10, backup protegido do M12, `docs/VERSIONAMENTO.md` do M13, observabilidade do M17, inventário LGPD do M18, terceiros do M19 e desenhos de M15 a M19. **M20 (só documentação e verificação, nenhum arquivo de produção):** `SECURITY_INCIDENT_RESPONSE.md` (novo), `tests/test-incident-response.js` (novo), `scripts/check-release.js`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. **M21:** `reportar-vulnerabilidade.html` (novo), `css/reportar.css` (novo), `SECURITY.md` (novo), `scripts/security-txt.js` (novo), `tests/test-responsible-disclosure.js` (novo), `vercel.json`, `scripts/build-dist.js`, `scripts/serve.js`, `scripts/check-release.js`, `scripts/check-deploy.js`, `landing.html`, `tests/test-landing.js`, `tests/browser/run-landing.js`, `SECURITY_INCIDENT_RESPONSE.md`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. **M22:** `docs/MARCA.md` (novo), `tests/test-brand.js` (novo), `index.html`, `manifest.webmanifest`, `landing.html`, `scripts/check-release.js`, `scripts/security-txt.js`, `SECURITY.md`, `SECURITY_INCIDENT_RESPONSE.md`, `README.md`, `CHANGELOG.md`. **M23:** `landing.html`, `css/landing.css`, `service-worker.js` (v63), `tests/test-brand.js`, `tests/test-responsible-disclosure.js`, `tests/test-third-party-transparency.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M24:** `js/screens/onboarding.js`, `js/app.js`, `js/actions.js`, `css/screens/notifications-onboarding.css`, `service-worker.js` (v64), `js/modules/app.generated.js`, `tests/test-onboarding.js`, `tests/browser/run-browser.js`, `tests/browser/run-pwa.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M25:** `js/demo.js` (novo), `tests/test-demo-mode.js` (novo), `js/app.js`, `js/actions.js`, `js/screens/onboarding.js`, `css/components.css`, `service-worker.js` (v65), `scripts/build-app-module.js`, `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. |
+| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `tests/test-cloud-sync.js`, `tests/test-account-backend.js`, `tests/test-critical-actions.js`, `tests/test-coverage.js`, `tests/test-security-adversarial.js`, `tests/test-observability.js`, `tests/test-data-inventory-lgpd.js`, `tests/test-third-party-transparency.js`, `supabase/tests/verify_security_boundary.sql`, `scripts/check-deploy.js`, `scripts/serve.js`, `scripts/coverage.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/storage.js`, `js/cloud-sync.js` (M10), `js/analytics.js`, `js/forecast.js`, `js/wrapped.js`, `js/screens/analytics.js` (M11), `js/backup-crypto.js`, `js/app.js`, `js/actions.js`, `js/storage.js`, `js/screens/settings.js`, `css/components.css`, `scripts/build-app-module.js` (M12), `netlify/functions/sync.js` (M13), `js/import.js`, `netlify/functions/_shared/finance-schema.js` (M14), observabilidade em backend, frontend e Service Worker (M17), inventário e tela de Privacidade (M18), registro de terceiros e operadores (M19), `js/modules/app.generated.js` (regerado). Documentação: inventário do M8, protocolo do M10, backup protegido do M12, `docs/VERSIONAMENTO.md` do M13, observabilidade do M17, inventário LGPD do M18, terceiros do M19 e desenhos de M15 a M19. **M20 (só documentação e verificação, nenhum arquivo de produção):** `SECURITY_INCIDENT_RESPONSE.md` (novo), `tests/test-incident-response.js` (novo), `scripts/check-release.js`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. **M21:** `reportar-vulnerabilidade.html` (novo), `css/reportar.css` (novo), `SECURITY.md` (novo), `scripts/security-txt.js` (novo), `tests/test-responsible-disclosure.js` (novo), `vercel.json`, `scripts/build-dist.js`, `scripts/serve.js`, `scripts/check-release.js`, `scripts/check-deploy.js`, `landing.html`, `tests/test-landing.js`, `tests/browser/run-landing.js`, `SECURITY_INCIDENT_RESPONSE.md`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. **M22:** `docs/MARCA.md` (novo), `tests/test-brand.js` (novo), `index.html`, `manifest.webmanifest`, `landing.html`, `scripts/check-release.js`, `scripts/security-txt.js`, `SECURITY.md`, `SECURITY_INCIDENT_RESPONSE.md`, `README.md`, `CHANGELOG.md`. **M23:** `landing.html`, `css/landing.css`, `service-worker.js` (v63), `tests/test-brand.js`, `tests/test-responsible-disclosure.js`, `tests/test-third-party-transparency.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M24:** `js/screens/onboarding.js`, `js/app.js`, `js/actions.js`, `css/screens/notifications-onboarding.css`, `service-worker.js` (v64), `js/modules/app.generated.js`, `tests/test-onboarding.js`, `tests/browser/run-browser.js`, `tests/browser/run-pwa.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M26:** `tests/test-local-only-notice.js` (novo), `js/app.js`, `js/actions.js`, `js/screens/dashboard.js`, `css/screens/dashboard.css`, `css/components.css`, `service-worker.js` (v66), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M25:** `js/demo.js` (novo), `tests/test-demo-mode.js` (novo), `js/app.js`, `js/actions.js`, `js/screens/onboarding.js`, `css/components.css`, `service-worker.js` (v65), `scripts/build-app-module.js`, `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. |
 | Migration do M13 | `20260831120000_database_schema_version.sql` — **aplicada e confirmada em produção em 2026-08-31** (`database_schema_version = 1`; grants inalterados: só `service_role` e `postgres`). Reversível por `alter table public.cofre_sync_config drop column if exists database_schema_version;` |
 | Migrations criadas até aqui | `20260828120000_rls_auto_enable_least_privilege.sql`, `20260828130000_rls_auto_enable_versionada.sql`, `20260828140000_menor_privilegio_tabelas.sql` (as três **aplicadas e confirmadas em 2026-08-28**), `20260828150000_rls_auto_enable_gatilho.sql` (**ainda não aplicada**; é no-op em produção, onde o gatilho já existe) |
 | Versão do app | `0.30.0` (package.json) |
@@ -3004,6 +3005,94 @@ no assistente. Quem já concluiu a configuração não tem como abrir a demonstr
 
 ---
 
+## M26 - Aviso de dados somente locais
+
+### Antes
+
+O app dizia isso em oito lugares diferentes — Ajustes, Privacidade, Contas,
+Conta, assistente — e em nenhum deles no momento em que importa: olhando os
+próprios lançamentos. `renderLastBackupLine()` já existia, mas mora dentro de
+Ajustes, onde só chega quem já foi procurar.
+
+### Alterações
+
+| Arquivo | Motivo |
+|---|---|
+| `js/app.js` | `shouldWarnLocalOnly`, `renderLocalOnlyNotice`, `openProtectDataDialog` |
+| `js/screens/dashboard.js`, `css/screens/dashboard.css` | a linha, logo abaixo do cabeçalho |
+| `js/actions.js` | as duas ações |
+| `css/components.css` | **correção de passagem**: a linha de botões do diálogo de confirmação |
+| `tests/test-local-only-notice.js` | **novo**; 36 verificações |
+| `service-worker.js` | `v65` para `v66` |
+
+### Motivo: a condição é o módulo
+
+O risco aqui não é o aviso não aparecer; é **aparecer demais**. Alerta permanente
+na tela inicial de um app de dinheiro vira ruído em uma semana e deixa de ser
+lido por quem precisa. Por isso a maior parte do trabalho — e do teste — é sobre
+quando ele **não** aparece:
+
+- sem nenhum lançamento (não há o que perder, e a tela já é outra);
+- com conta ligada (os dados não estão só aqui);
+- com backup dos últimos 30 dias (já resolvido);
+- dentro da demonstração (avisar sobre perder dado fictício seria mentira);
+- durante o carregamento;
+- dispensado nesta sessão.
+
+A dispensa é de sessão, como o aviso de armazenamento que já existia: o risco não
+deixa de existir porque a pessoa fechou o aviso, e gravar a dispensa exigiria
+campo novo no schema para resolver um incômodo que a condição já limita. E o
+aviso some **sozinho e para sempre** assim que houver conta ou backup — que é o
+objetivo dele.
+
+O tom foi tratado como requisito, não como estilo: o teste reprova as palavras de
+susto ("perigo", "cuidado!", "urgente", "você vai perder"), exige `role="status"`
+em vez de `role="alert"`, e exige que seja `<p>`, não cartão.
+
+"Proteger meus dados" reaproveita o diálogo de confirmação que já suporta três
+botões, com as duas saídas reais do produto: **Baixar backup completo** (o mesmo
+rótulo do M12) e **Criar conta e sincronizar**.
+
+### O defeito que a verificação encontrou
+
+No navegador, o diálogo com três botões **espremia os rótulos até um cobrir o
+outro**: "Criar conta e sincroniza" cortado, "Baixar backup completo" vazando
+para fora do botão. Não era do meu texto — é do próprio diálogo, que oferece
+`alternateLabel` desde antes e nunca tinha sido usado com três rótulos longos.
+
+Corrigido na folha, não no texto: a linha de ações passou a quebrar
+(`flex-wrap`) e os botões deixaram de encolher abaixo do conteúdo
+(`flex: 0 0 auto`). **Rótulo de ação não se encurta para caber no layout; é o
+layout que cede.** Vale para qualquer diálogo do app.
+
+Segundo ajuste vindo do navegador: a 390 px, dar `order` a só dois dos quatro
+filhos deixava o × sozinho no topo, antes da frase que ele fecha. Os quatro
+ganharam ordem explícita.
+
+### Compatibilidade
+
+Nenhum contrato tocado: sem schema, sem migração, sem campo persistido novo. A
+condição só lê o que já existia (`transactions`, `lastBackupAt`,
+`account.authenticated`). Quem já tem conta ou backup recente não vê diferença
+alguma.
+
+### Testes
+
+| Teste | Resultado |
+|---|---|
+| `node tests/test-local-only-notice.js` | **PASSOU**; 36 ok, a maioria sobre quando NÃO aparecer |
+| `npm run test:browser` | **PASSOU**; 18 de 18 |
+| `npm run test:pwa` | **PASSOU** |
+| `npm run lint`, `check:build`, `check:release` | **PASSOU** |
+| `npm test` | 71 arquivos; as **mesmas 5 falhas** de data, nenhuma nova |
+| Navegador real | **PASSOU**; aviso ausente sem lançamento e presente depois do primeiro, diálogo com os três botões legíveis, dispensa valendo entre telas e voltando no recarregamento, 390 px sem estouro e com o fechar em 44 px |
+
+### Status
+
+**CONCLUÍDO.**
+
+---
+
 ## Checklist de regressão
 
 Executar após **todo** módulo que toque no código. Marcar `OK` / `FALHOU` / `NÃO VALIDADO`.
@@ -3019,6 +3108,7 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
 - [ ] `node tests/test-brand.js` (marca e identificadores congelados do M22)
 - [ ] `node tests/test-onboarding.js` (cinco passos e gastos fixos do M24)
 - [ ] `node tests/test-demo-mode.js` (guardas da demonstração do M25)
+- [ ] `node tests/test-local-only-notice.js` (aviso de dados locais do M26)
 - [ ] `node tests/test-accounting-integrity.js` (invariantes contábeis do M11)
 - [ ] `node tests/test-backup-restore.js` (backup, restauração e senha do M12)
 - [ ] `node tests/test-versioning.js` (versões e matriz de compatibilidade do M13)

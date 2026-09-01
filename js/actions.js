@@ -424,6 +424,8 @@ function onClick(e) {
     case "diagnostics-clear":
       clearSafeErrors(); render(); notify("Diagnóstico apagado"); break;
     case "onb-skip": skipOnboarding(); break;
+    case "protect-data": openProtectDataDialog(); break;
+    case "local-only-dismiss": state.localOnlyDismissed = true; render(); break;
     case "demo-enter": enterDemoMode(); break;
     case "demo-exit": exitDemoMode(); break;
     case "onb-have-account": openAccountFromOnboarding(); break;

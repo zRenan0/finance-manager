@@ -52,7 +52,9 @@
 // v65: o modo demonstração entrou no pacote do aplicativo e nos estilos.
 // Sem promover, a instalação existente serviria o app.generated.js antigo, sem
 // a faixa e sem as guardas que impedem a demonstração de gravar.
-const VERSION = "v65";
+// v66: o aviso de dados somente locais entrou no pacote e nos estilos da
+// tela inicial. Sem promover, a instalação existente continuaria sem ele.
+const VERSION = "v66";
 const BUILD_ID = VERSION;
 const CACHE_NAME = "financas-cache-" + VERSION;
 // A PÁGINA COMERCIAL TEM CACHE PRÓPRIO.
