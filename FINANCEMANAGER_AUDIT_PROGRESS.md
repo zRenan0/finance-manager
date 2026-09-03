@@ -12,7 +12,9 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 
 | Campo | Valor |
 |---|---|
-| Módulo atual | **M30 e M31** (concluídos) |
+| Módulo atual | **M32 e M33** (concluídos) |
+| Status do M33 | **CONCLUÍDO** - painel por tipo de recorrência (streaming, software, academia, telefonia, moradia, educação, seguros, serviços), total anual de tudo que se repete e ficha "Revisar assinatura" com perguntas por tipo; a marcação guarda data, nunca veredito. Cache em `v70` |
+| Status do M32 | **CONCLUÍDO** - anomalias contra a própria média em janela do mesmo tamanho, com a base escrita na tela; três frases do roteiro entregues e o elogio falso do começo do mês eliminado |
 | Status do M31 | **CONCLUÍDO** - "posso comprar?" passou a responder em sobra mensal, comprometimento antes/depois e impacto na reserva, com nome do produto e leitura educativa |
 | Status do M30 | **CONCLUÍDO** - limite diário calculado a partir da meta de guardar, não do que cabe na renda; declara a fonte do alvo e avisa quando não cabe. Cache em `v69` |
 | Status do M29 | **CONCLUÍDO** - a cadeia do fechamento aparece no cartão de previsão e fecha no centavo; margem medida no pior dia do mês e risco com data. Cache em `v68` |
@@ -44,10 +46,10 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 | Status do M3 | **CONCLUÍDO** — aplicado e confirmado no banco em 2026-08-28 |
 | Status do M2 | **CONCLUÍDO** — nenhuma vulnerabilidade de autorização; invariantes travados por teste |
 | Status do M1 | **CONCLUÍDO** — aplicado e confirmado; gatilho capturado e versionado |
-| Módulos concluídos | M0 a M31 |
-| Próximo módulo | M32 - Anomalias financeiras |
+| Módulos concluídos | M0 a M33 |
+| Próximo módulo | M34 - Central de dívidas |
 | Branch | `deploy-atualizado` (árvore limpa no início do M0) |
-| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `tests/test-cloud-sync.js`, `tests/test-account-backend.js`, `tests/test-critical-actions.js`, `tests/test-coverage.js`, `tests/test-security-adversarial.js`, `tests/test-observability.js`, `tests/test-data-inventory-lgpd.js`, `tests/test-third-party-transparency.js`, `supabase/tests/verify_security_boundary.sql`, `scripts/check-deploy.js`, `scripts/serve.js`, `scripts/coverage.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/storage.js`, `js/cloud-sync.js` (M10), `js/analytics.js`, `js/forecast.js`, `js/wrapped.js`, `js/screens/analytics.js` (M11), `js/backup-crypto.js`, `js/app.js`, `js/actions.js`, `js/storage.js`, `js/screens/settings.js`, `css/components.css`, `scripts/build-app-module.js` (M12), `netlify/functions/sync.js` (M13), `js/import.js`, `netlify/functions/_shared/finance-schema.js` (M14), observabilidade em backend, frontend e Service Worker (M17), inventário e tela de Privacidade (M18), registro de terceiros e operadores (M19), `js/modules/app.generated.js` (regerado). Documentação: inventário do M8, protocolo do M10, backup protegido do M12, `docs/VERSIONAMENTO.md` do M13, observabilidade do M17, inventário LGPD do M18, terceiros do M19 e desenhos de M15 a M19. **M20 (só documentação e verificação, nenhum arquivo de produção):** `SECURITY_INCIDENT_RESPONSE.md` (novo), `tests/test-incident-response.js` (novo), `scripts/check-release.js`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. **M21:** `reportar-vulnerabilidade.html` (novo), `css/reportar.css` (novo), `SECURITY.md` (novo), `scripts/security-txt.js` (novo), `tests/test-responsible-disclosure.js` (novo), `vercel.json`, `scripts/build-dist.js`, `scripts/serve.js`, `scripts/check-release.js`, `scripts/check-deploy.js`, `landing.html`, `tests/test-landing.js`, `tests/browser/run-landing.js`, `SECURITY_INCIDENT_RESPONSE.md`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. **M22:** `docs/MARCA.md` (novo), `tests/test-brand.js` (novo), `index.html`, `manifest.webmanifest`, `landing.html`, `scripts/check-release.js`, `scripts/security-txt.js`, `SECURITY.md`, `SECURITY_INCIDENT_RESPONSE.md`, `README.md`, `CHANGELOG.md`. **M23:** `landing.html`, `css/landing.css`, `service-worker.js` (v63), `tests/test-brand.js`, `tests/test-responsible-disclosure.js`, `tests/test-third-party-transparency.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M24:** `js/screens/onboarding.js`, `js/app.js`, `js/actions.js`, `css/screens/notifications-onboarding.css`, `service-worker.js` (v64), `js/modules/app.generated.js`, `tests/test-onboarding.js`, `tests/browser/run-browser.js`, `tests/browser/run-pwa.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M30/M31:** `tests/test-daily-and-purchase.js` (novo), `js/forecast.js`, `js/insights.js`, `js/screens/calendar.js`, `js/screens/simulate.js`, `js/app.js`, `css/screens/planning.css`, `service-worker.js` (v69), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M28/M29:** `tests/test-reserve-and-close.js` (novo), `js/metrics.js`, `js/forecast.js`, `js/screens/health.js`, `js/screens/calendar.js`, `css/screens/health.css`, `css/screens/planning.css`, `service-worker.js` (v68), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M27:** `tests/test-score-explainable.js` (novo), `js/score.js`, `js/screens/health.js`, `css/screens/health.css`, `service-worker.js` (v67), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M26:** `tests/test-local-only-notice.js` (novo), `js/app.js`, `js/actions.js`, `js/screens/dashboard.js`, `css/screens/dashboard.css`, `css/components.css`, `service-worker.js` (v66), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M25:** `js/demo.js` (novo), `tests/test-demo-mode.js` (novo), `js/app.js`, `js/actions.js`, `js/screens/onboarding.js`, `css/components.css`, `service-worker.js` (v65), `scripts/build-app-module.js`, `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. |
+| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `tests/test-cloud-sync.js`, `tests/test-account-backend.js`, `tests/test-critical-actions.js`, `tests/test-coverage.js`, `tests/test-security-adversarial.js`, `tests/test-observability.js`, `tests/test-data-inventory-lgpd.js`, `tests/test-third-party-transparency.js`, `supabase/tests/verify_security_boundary.sql`, `scripts/check-deploy.js`, `scripts/serve.js`, `scripts/coverage.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/storage.js`, `js/cloud-sync.js` (M10), `js/analytics.js`, `js/forecast.js`, `js/wrapped.js`, `js/screens/analytics.js` (M11), `js/backup-crypto.js`, `js/app.js`, `js/actions.js`, `js/storage.js`, `js/screens/settings.js`, `css/components.css`, `scripts/build-app-module.js` (M12), `netlify/functions/sync.js` (M13), `js/import.js`, `netlify/functions/_shared/finance-schema.js` (M14), observabilidade em backend, frontend e Service Worker (M17), inventário e tela de Privacidade (M18), registro de terceiros e operadores (M19), `js/modules/app.generated.js` (regerado). Documentação: inventário do M8, protocolo do M10, backup protegido do M12, `docs/VERSIONAMENTO.md` do M13, observabilidade do M17, inventário LGPD do M18, terceiros do M19 e desenhos de M15 a M19. **M20 (só documentação e verificação, nenhum arquivo de produção):** `SECURITY_INCIDENT_RESPONSE.md` (novo), `tests/test-incident-response.js` (novo), `scripts/check-release.js`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. **M21:** `reportar-vulnerabilidade.html` (novo), `css/reportar.css` (novo), `SECURITY.md` (novo), `scripts/security-txt.js` (novo), `tests/test-responsible-disclosure.js` (novo), `vercel.json`, `scripts/build-dist.js`, `scripts/serve.js`, `scripts/check-release.js`, `scripts/check-deploy.js`, `landing.html`, `tests/test-landing.js`, `tests/browser/run-landing.js`, `SECURITY_INCIDENT_RESPONSE.md`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. **M22:** `docs/MARCA.md` (novo), `tests/test-brand.js` (novo), `index.html`, `manifest.webmanifest`, `landing.html`, `scripts/check-release.js`, `scripts/security-txt.js`, `SECURITY.md`, `SECURITY_INCIDENT_RESPONSE.md`, `README.md`, `CHANGELOG.md`. **M23:** `landing.html`, `css/landing.css`, `service-worker.js` (v63), `tests/test-brand.js`, `tests/test-responsible-disclosure.js`, `tests/test-third-party-transparency.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M24:** `js/screens/onboarding.js`, `js/app.js`, `js/actions.js`, `css/screens/notifications-onboarding.css`, `service-worker.js` (v64), `js/modules/app.generated.js`, `tests/test-onboarding.js`, `tests/browser/run-browser.js`, `tests/browser/run-pwa.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M32/M33:** `tests/test-anomalies-subscriptions.js` (novo), `js/analytics.js`, `js/advisor.js`, `js/recurring.js`, `js/storage.js`, `js/screens/insights.js`, `js/screens/subscriptions.js`, `js/app.js`, `js/actions.js`, `css/screens/intelligence.css`, `service-worker.js` (v70), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M30/M31:** `tests/test-daily-and-purchase.js` (novo), `js/forecast.js`, `js/insights.js`, `js/screens/calendar.js`, `js/screens/simulate.js`, `js/app.js`, `css/screens/planning.css`, `service-worker.js` (v69), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M28/M29:** `tests/test-reserve-and-close.js` (novo), `js/metrics.js`, `js/forecast.js`, `js/screens/health.js`, `js/screens/calendar.js`, `css/screens/health.css`, `css/screens/planning.css`, `service-worker.js` (v68), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M27:** `tests/test-score-explainable.js` (novo), `js/score.js`, `js/screens/health.js`, `css/screens/health.css`, `service-worker.js` (v67), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M26:** `tests/test-local-only-notice.js` (novo), `js/app.js`, `js/actions.js`, `js/screens/dashboard.js`, `css/screens/dashboard.css`, `css/components.css`, `service-worker.js` (v66), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M25:** `js/demo.js` (novo), `tests/test-demo-mode.js` (novo), `js/app.js`, `js/actions.js`, `js/screens/onboarding.js`, `css/components.css`, `service-worker.js` (v65), `scripts/build-app-module.js`, `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. |
 | Migration do M13 | `20260831120000_database_schema_version.sql` — **aplicada e confirmada em produção em 2026-08-31** (`database_schema_version = 1`; grants inalterados: só `service_role` e `postgres`). Reversível por `alter table public.cofre_sync_config drop column if exists database_schema_version;` |
 | Migrations criadas até aqui | `20260828120000_rls_auto_enable_least_privilege.sql`, `20260828130000_rls_auto_enable_versionada.sql`, `20260828140000_menor_privilegio_tabelas.sql` (as três **aplicadas e confirmadas em 2026-08-28**), `20260828150000_rls_auto_enable_gatilho.sql` (**ainda não aplicada**; é no-op em produção, onde o gatilho já existe) |
 | Versão do app | `0.30.0` (package.json) |
@@ -3390,6 +3392,146 @@ linhas; o `--check` voltou a passar.
 
 ---
 
+## M32 - Anomalias financeiras
+
+### Antes
+
+O conselheiro já comparava categorias, mas **só com o mês anterior**, e o motor
+já calculava a média de 3 meses sem nunca transformá-la em aviso. Faltava a
+terceira frase do roteiro ("despesas fixas representam X% da renda") e, sobretudo,
+faltava o requisito que dá sentido às outras duas: **períodos comparáveis**.
+
+O defeito era concreto e estava em produção: no dia 3 do mês, toda categoria
+"caiu" em relação ao mês anterior INTEIRO, e a regra `categoria-em-queda`
+parabenizava por isso ("Você economizou R$ 640 em Mercado") para quem ia gastar
+exatamente o mesmo. A mesma distorção na direção oposta escondia a alta real.
+
+### Alterações
+
+`js/analytics.js` ganhou `anExpenseByRootThroughDay()` (soma por categoria raiz
+recortada no dia N) e `anAnomalies()`. A função antiga `anExpenseByRoot()` passou
+a delegar para a nova com janela nula, para não existirem duas cópias da mesma
+regra de soma.
+
+A janela é o coração do módulo: **mês em curso compara até o dia de hoje contra
+os mesmos primeiros dias de cada mês de base**; mês fechado compara meses
+inteiros. Truncar fevereiro no dia 31 de um mês de 31 dias tiraria três dias da
+base e inventaria uma alta de calendário, então o recorte só existe onde é
+necessário.
+
+Cinco portões contra alerta irrelevante, todos nomeados em `ANOM`: `minElapsedDays`
+(5), `minBaselineMonths` (2), `minBaselineValue` (R$ 40), `minDiff` (R$ 60) e
+`minPct` (25%).
+
+`js/advisor.js` ganhou quatro regras — `anomalia-alta`, `anomalia-valor`,
+`anomalia-queda` e `despesas-fixas` — e duas guardas nas regras antigas:
+`categoria-em-queda` não fala mais em mês parcial, e as duas regras de mês
+anterior se calam quando a leitura por média comparável já nomeou a mesma
+categoria (o mesmo fato dito duas vezes é ruído).
+
+`despesas-fixas` **não** usa o "gastos fixos" do mês corrente: no dia 3 ele ainda
+não aconteceu e a conta sairia pequena justamente quando engana mais. Sai de
+`rec.committedMonthly`, que já converte cada compromisso para equivalente mensal.
+
+Na tela, `js/screens/insights.js` ganhou o cartão "Fora do seu padrão" (a
+evidência por trás da frase, com a base da comparação escrita) e um aviso na aba
+Comparar quando o mês ainda está em curso.
+
+### Motivo
+
+Uma leitura financeira errada com aparência de precisão é pior do que nenhuma
+leitura. "Você economizou R$ 640" no dia 3 ensina a ignorar o painel.
+
+### Compatibilidade
+
+Total. Nenhum campo removido, nenhum contrato alterado, nenhum schema tocado.
+`anExpenseByRoot` devolve exatamente o que devolvia (travado por teste). As duas
+guardas só **suprimem** cartão duplicado ou falso; nenhuma regra existente mudou
+de texto ou de conta.
+
+---
+
+## M33 - Recorrências e assinaturas
+
+### Antes
+
+A tela já era boa: custo anual como manchete, equivalente mensal, cadência,
+reajuste, "parar de acompanhar" e propostas de cadastro. Faltavam duas coisas do
+roteiro:
+
+1. **identificar de que tipo é cada item** (streaming, software, academia,
+   serviços). A categoria financeira responde "de que bolso sai", não isso;
+2. **"Revisar assinatura"** como ação, com a regra explícita de não afirmar que
+   uma assinatura é inútil.
+
+### Alterações
+
+`js/recurring.js` ganhou `REC_TYPES` (lista fechada e conservadora, com termos
+de 4+ letras casando por trecho e curtos como "tim"/"oi"/"gym" por palavra
+inteira), `recTypeOf()`, `recTotalsByType()` e `recDecorate()`. O modelo passou a
+devolver `byType`, `committedAnnual` e, em cada item, `typeId`/`typeLabel`/
+`reviewedAt`/`daysSinceReview`. O balde final é "Outros"; nunca se chuta
+"Serviços" para não deixar vazio.
+
+Os subtotais somam pelo **equivalente mensal**, senão um seguro anual de R$ 1.200
+lideraria a lista como se cobrasse todo mês. Teste trava que os tipos fecham com
+`committedMonthly` no centavo.
+
+`js/storage.js` ganhou o balde `review` em `defaultRecurringPrefs`,
+`normalizeRecurringPrefs` e `mergeRecurringPrefs` (a fusão vence pela data mais
+recente, como os outros três).
+
+`js/screens/subscriptions.js` ganhou o painel "Por tipo de recorrência", a linha
+"Recorrências no ano" no cabeçalho e a ficha de revisão: custo de 12 meses,
+equivalente mensal, peso na renda, tipo reconhecido, histórico de preço e as
+perguntas que só o usuário responde. **As perguntas mudam com o tipo**: "você
+assistiu alguma coisa no último mês?" para streaming, "quantas vezes você foi?"
+para academia, "o valor mudou por consumo ou por reajuste?" para conta de luz.
+Perguntar errado desmoralizaria a ficha inteira.
+
+Aluguel e conta de luz deixaram de ser chamados de assinatura no botão
+("Revisar compromisso") e na frase de fecho.
+
+### Motivo
+
+O app não sabe se a assinatura é útil: não sabe se você usa, se é da família ou
+se é ferramenta de trabalho. Pode mostrar preço, cadência, histórico e peso na
+renda, e devolver a decisão — inclusive a de não decidir.
+
+### Compatibilidade
+
+`review` entrou **sem subir o `SCHEMA_VERSION`**: é um mapa `{ chave: data }`
+dentro de `recurringPrefs`, campo que já existia e já sincronizava, e a ausência
+dele em dado antigo normaliza para `{}`. Subir o schema exigiria mexer também no
+`finance-schema.js` do servidor e em três testes que fixam o número 23, sem
+ganho. O único efeito de um cliente **antigo** ler este dado é descartar as datas
+de revisão ao normalizar; nenhum lançamento, valor ou preferência antiga é
+afetado, e a informação volta na revisão seguinte.
+
+Nenhum campo removido. `recPrefsOf`, `recPrefsWith`, `applyRecurringFlag`,
+`buildRecurringProposals` e todos os totais antigos continuam iguais; teste trava
+que revisar não muda nenhum total nem tira o item de lugar nenhum.
+
+### Testes (M32 e M33)
+
+| Teste | Resultado |
+|---|---|
+| `node tests/test-anomalies-subscriptions.js` (novo) | **PASSOU**; 92 ok |
+| `node tests/test-recurring.js` | **PASSOU**; 63 ok |
+| `node tests/test-dashboard.js` | **PASSOU**; 87 ok |
+| `node tests/test-versioning.js`, `test-pwa-cache`, `test-service-worker-update`, `test-storage-privacy-inventory` | **PASSARAM** |
+| `npm run lint`, `check:build`, `check:release` | **PASSARAM** |
+| `npm test` | 75 arquivos; as **mesmas 4 falhas de data** do baseline (`test-health`, `test-insights-engine`, `test-render`, `test-reserve-and-close`), confirmadas idênticas com `git stash` antes e depois |
+| `npm run test:browser` | **PASSOU**; 18 de 18 em Chromium, Firefox e WebKit |
+| `npm run test:pwa` | **PASSOU** |
+| Navegador real (demonstração) | **PASSOU**; painel por tipo somando R$ 3.748,58/mês, ficha de revisão com perguntas por tipo, data gravada e relida, "Fora do seu padrão" com a base escrita, aviso de mês em curso na aba Comparar, 390 px sem estouro horizontal |
+
+### Status
+
+**AMBOS CONCLUÍDOS.**
+
+---
+
 ## Checklist de regressão
 
 Executar após **todo** módulo que toque no código. Marcar `OK` / `FALHOU` / `NÃO VALIDADO`.
@@ -3409,6 +3551,7 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
 - [ ] `node tests/test-score-explainable.js` (aritmética do ganho de pontos do M27)
 - [ ] `node tests/test-reserve-and-close.js` (escada da reserva do M28 e conta do fechamento do M29)
 - [ ] `node tests/test-daily-and-purchase.js` (limite diário do M30 e leituras de compra do M31)
+- [ ] `node tests/test-anomalies-subscriptions.js` (janela comparável do M32 e tipos/revisão do M33)
 - [ ] `node tests/test-accounting-integrity.js` (invariantes contábeis do M11)
 - [ ] `node tests/test-backup-restore.js` (backup, restauração e senha do M12)
 - [ ] `node tests/test-versioning.js` (versões e matriz de compatibilidade do M13)

@@ -3477,12 +3477,18 @@ function normalizeAchievements(raw) {
 //   dismissed; proposta de cadastro recusada; o app não volta a perguntar.
 //   confirmed; proposta aceita (o efeito real vive no `recurring` dos
 //               lançamentos; aqui fica só a data, para a tela poder dizê-la).
-function defaultRecurringPrefs() { return { ignored: {}, dismissed: {}, confirmed: {} }; }
+// `review` (M33) entrou depois dos outros três e sem subir o SCHEMA_VERSION:
+// é um mapa { chave: data } dentro de um campo que já existia e já sincroniza,
+// e a ausência dele em dado antigo normaliza para {} sem perder nada. O único
+// efeito de um cliente ANTIGO ler este dado é ele descartar as datas de
+// revisão ao normalizar; nenhum lançamento, valor ou preferência antiga é
+// afetado, e a informação volta na próxima revisão.
+function defaultRecurringPrefs() { return { ignored: {}, dismissed: {}, confirmed: {}, review: {} }; }
 
 function normalizeRecurringPrefs(raw) {
   const src = raw && typeof raw === "object" ? raw : {};
   const out = defaultRecurringPrefs();
-  ["ignored", "dismissed", "confirmed"].forEach((bucket) => {
+  ["ignored", "dismissed", "confirmed", "review"].forEach((bucket) => {
     const incoming = src[bucket] && typeof src[bucket] === "object" ? src[bucket] : {};
     Object.keys(incoming).forEach((key) => {
       if (typeof key !== "string" || !key) return;
@@ -7824,7 +7830,7 @@ function mergeRecurringPrefs(a, b) {
   const left = normalizeRecurringPrefs(a);
   const right = normalizeRecurringPrefs(b);
   const out = defaultRecurringPrefs();
-  ["ignored", "dismissed", "confirmed"].forEach((bucket) => {
+  ["ignored", "dismissed", "confirmed", "review"].forEach((bucket) => {
     Object.keys(left[bucket]).forEach((k) => { out[bucket][k] = left[bucket][k]; });
     Object.keys(right[bucket]).forEach((k) => {
       const cur = out[bucket][k];
@@ -18670,6 +18676,97 @@ const REC_INCREASE_PCT = 3;
 const REC_LATE_FACTOR = 1.45;
 const REC_ENDED_FACTOR = 2.6;
 
+// ------------------------------------------------------------------------------
+// [M33] TIPO DO COMPROMISSO; streaming, software, academia, serviços
+// ------------------------------------------------------------------------------
+// A categoria financeira responde "de que bolso isso sai" (Lazer, Casa). Ela não
+// responde a pergunta do M33, que é outra: "de que TIPO de recorrência é isto?".
+// Netflix e cinema caem os dois em Lazer, e só um deles cobra sozinho todo mês.
+//
+// O reconhecimento é pelo NOME, com lista fechada e conservadora, e a tela sempre
+// declara que é inferência. Um palpite errado aqui não pode custar caro: ele muda
+// um rótulo e um subtotal de leitura, nunca um valor lançado. O balde final é
+// "Outros"; nunca chutamos "Serviços" só para não deixar vazio.
+//
+// Termos com 4 letras ou mais casam por trecho ("netflix" dentro de "netflix
+// premium"); os curtos ("tim", "oi", "gym") casam por palavra inteira, senão
+// "oi" acharia "boi" e "sushi oishi".
+const REC_TYPES = [
+  { id: "streaming", label: "Streaming", icon: "monitor",
+    terms: ["netflix", "spotify", "disney", "hbo", "globoplay", "deezer", "youtube premium", "youtube music",
+      "paramount", "apple tv", "apple music", "crunchyroll", "telecine", "looke", "mubi", "dazn",
+      "star plus", "starplus", "tidal", "amazon prime", "prime video", "streaming"] },
+  { id: "software", label: "Software e nuvem", icon: "tool",
+    terms: ["adobe", "microsoft", "office 365", "google one", "icloud", "dropbox", "notion", "figma",
+      "canva", "chatgpt", "openai", "github", "jetbrains", "autocad", "antivirus", "norton", "mcafee",
+      "kaspersky", "evernote", "slack", "zoom", "linkedin premium", "armazenamento"] },
+  { id: "academia", label: "Academia e bem-estar", icon: "dumbbell",
+    terms: ["academia", "smart fit", "smartfit", "bluefit", "selfit", "gym", "crossfit", "pilates",
+      "yoga", "natacao", "gympass", "totalpass", "wellhub", "personal trainer", "musculacao"] },
+  { id: "telecom", label: "Telefonia e internet", icon: "wifi",
+    terms: ["vivo", "claro", "tim", "oi", "nextel", "internet", "banda larga", "fibra", "celular",
+      "telefone", "plano de dados", "algar", "sky"] },
+  { id: "moradia", label: "Moradia e contas de casa", icon: "home",
+    terms: ["aluguel", "condominio", "iptu", "agua", "luz", "energia", "gas", "enel", "cemig", "copel",
+      "sabesp", "light", "saneamento", "cpfl", "equatorial"] },
+  { id: "educacao", label: "Educação", icon: "book",
+    terms: ["alura", "udemy", "coursera", "escola", "colegio", "faculdade", "universidade", "curso",
+      "mensalidade escolar", "ingles", "idiomas", "duolingo", "kindle"] },
+  { id: "seguros", label: "Seguros e saúde", icon: "shieldCheck",
+    terms: ["seguro", "plano de saude", "unimed", "amil", "sulamerica", "odonto", "dental",
+      "porto seguro", "assistencia", "hapvida"] },
+  { id: "servicos", label: "Serviços", icon: "briefcase",
+    terms: ["assinatura", "clube", "mensalidade", "limpeza", "diarista", "jardinagem", "estacionamento",
+      "contabilidade", "monitoramento", "seguranca"] },
+];
+const REC_TYPE_OTHER = Object.freeze({ id: "outros", label: "Outros", icon: "tag" });
+
+function recTypeOf(name) {
+  const nome = typeof normalizeText === "function"
+    ? normalizeText(name)
+    : String(name || "").toLowerCase();
+  if (!nome) return REC_TYPE_OTHER;
+  const palavras = nome.split(/[^a-z0-9]+/).filter(Boolean);
+  const achado = REC_TYPES.find((t) => t.terms.some((term) => (term.length >= 4
+    ? nome.indexOf(term) >= 0
+    : palavras.indexOf(term) >= 0)));
+  return achado || REC_TYPE_OTHER;
+}
+
+// Subtotais por tipo. Somam pelo EQUIVALENTE MENSAL, a mesma régua do resto da
+// tela: sem isso, um seguro anual de R$ 1.200 empurraria "Seguros" para o topo
+// da lista como se cobrasse todo mês.
+function recTotalsByType(items) {
+  const mapa = new Map();
+  (items || []).forEach((s) => {
+    const atual = mapa.get(s.typeId) || {
+      id: s.typeId, label: s.typeLabel, icon: s.typeIcon,
+      monthly: 0, annual: 0, count: 0, subscriptions: 0,
+    };
+    atual.monthly = addMoney(atual.monthly, s.monthlyEquivalent);
+    atual.annual = addMoney(atual.annual, s.annualCost);
+    atual.count += 1;
+    if (s.kind === "assinatura") atual.subscriptions += 1;
+    mapa.set(s.typeId, atual);
+  });
+  return Array.from(mapa.values()).sort((a, b) => moneyCompare(b.monthly, a.monthly));
+}
+
+// Decoração comum aos dois caminhos (evidência e declaração): tipo inferido e
+// a data da última revisão, que é preferência do usuário e não vive no item.
+function recDecorate(item, prefs) {
+  const tipo = recTypeOf(item.name);
+  const revisadoEm = (prefs.review && prefs.review[item.key]) || "";
+  return {
+    ...item,
+    typeId: tipo.id,
+    typeLabel: tipo.label,
+    typeIcon: tipo.icon,
+    reviewedAt: revisadoEm,
+    daysSinceReview: revisadoEm ? daysBetweenIso(revisadoEm, todayIso()) : null,
+  };
+}
+
 function recMedian(list) {
   if (!list.length) return 0;
   const s = [...list].sort((a, b) => a - b);
@@ -18715,6 +18812,9 @@ function recPrefsOf(data) {
     ignored: p.ignored && typeof p.ignored === "object" ? p.ignored : {},
     dismissed: p.dismissed && typeof p.dismissed === "object" ? p.dismissed : {},
     confirmed: p.confirmed && typeof p.confirmed === "object" ? p.confirmed : {},
+    // [M33] "Revisar assinatura": guarda QUANDO foi revisada, nunca um juízo
+    // sobre a assinatura. O app não decide se ela vale a pena.
+    review: p.review && typeof p.review === "object" ? p.review : {},
   };
 }
 
@@ -18939,7 +19039,7 @@ function buildRecurringModel(data, opts) {
     let item;
     try { item = recAnalyzeGroup(data, list, todayKey); }
     catch (e) { item = null; }            // um grupo com data corrompida não derruba a tela
-    if (item) all.push(item);
+    if (item) all.push(recDecorate(item, prefs));
   });
 
   const ignoredKeys = prefs.ignored;
@@ -18961,6 +19061,12 @@ function buildRecurringModel(data, opts) {
   const annualTotal = sumMoney(subscriptions, (s) => s.annualCost);
   const variableMonthly = sumMoney(variable, (s) => s.monthlyEquivalent);
   const committedMonthly = addMoney(monthlyTotal, variableMonthly);
+
+  // [M33] O ANO DE TUDO QUE SE REPETE, não só das assinaturas de preço fixo.
+  // A parte fixa é exata (`annualCost` já usa a cadência real); a variável é
+  // estimativa a partir do equivalente mensal, e a tela precisa dizer isso.
+  const committedAnnual = addMoney(annualTotal, mulMoney(variableMonthly, 12));
+  const byType = recTotalsByType(subscriptions.concat(variable));
 
   const increases = active
     .filter((s) => s.increasePct > REC_INCREASE_PCT)
@@ -18989,6 +19095,8 @@ function buildRecurringModel(data, opts) {
     annualTotal,
     variableMonthly,
     committedMonthly,
+    committedAnnual,
+    byType,
     income,
     incomeShare,
     proposals: buildRecurringProposals(data, all, prefs),
@@ -18997,6 +19105,8 @@ function buildRecurringModel(data, opts) {
       variable: variable.length,
       ended: ended.length,
       ignored: ignored.length,
+      reviewed: tracked.filter((s) => s.reviewedAt).length,
+      types: byType.length,
     },
   };
 }
@@ -19150,11 +19260,50 @@ function anRootCategory(data, id) {
   return c.parentId ? categoryById(data, c.parentId) : c;
 }
 
-// Soma dos gastos do mês por categoria raiz → Map(id → centavos).
+// ------------------------------------------------------------------------------
+// [M32] ANOMALIAS; o gasto que saiu do PRÓPRIO padrão
+// ------------------------------------------------------------------------------
+// `anCategoryDeltas` já compara com o mês anterior e já guarda a média dos três
+// meses. O que faltava é o que o M32 pede: virar ALERTA, e fazer isso com
+// PERÍODOS COMPARÁVEIS.
+//
+// O erro que este bloco existe para evitar
+// ----------------------------------------
+// No dia 3 do mês, "Mercado" somou R$ 120. O mês passado inteiro somou R$ 900.
+// Comparar os dois devolve "Mercado caiu 87%"; e o app diria isso em tom de
+// parabéns, no terceiro dia do mês, para alguém que vai gastar os mesmos R$ 900.
+// O mesmo erro na direção oposta esconde a alta real: quem já torrou R$ 700 até
+// o dia 3 continua "abaixo" do mês anterior inteiro.
+//
+// A correção é comparar JANELAS DO MESMO TAMANHO: até o dia 3 deste mês contra
+// os três primeiros dias de cada um dos meses anteriores. Mês fechado compara
+// com meses inteiros, que é o mesmo critério no caso trivial.
+//
+// Portões contra alerta irrelevante
+// ---------------------------------
+// "Evitar alertas irrelevantes" é requisito, não conselho. São cinco portões:
+// dias decorridos, meses de base, valor mínimo da base, diferença mínima em
+// reais e variação mínima em percentual. Uma categoria de R$ 12 que virou R$ 30
+// subiu 150% e não muda decisão nenhuma; ela não vira alerta.
+const ANOM = {
+  minElapsedDays: 5,      // antes disso o mês ainda não tem sinal nenhum
+  minBaselineMonths: 2,   // um mês isolado é evento, não padrão
+  minBaselineValue: 40,   // categoria minúscula produz 300% de nada
+  minDiff: 60,            // diferença que não muda decisão não vira alerta
+  minPct: 25,             // variação abaixo disso é ruído de calendário
+  strongPct: 40,          // daqui para cima o tom sobe de "observação" para "atenção"
+  maxItems: 5,
+};
 
-function anExpenseByRoot(data, monthKey) {
+// Soma por categoria raiz limitada aos N primeiros dias do mês. `throughDay`
+// nulo (ou 31) significa o mês inteiro; é assim que `anExpenseByRoot` continua
+// devolvendo exatamente o que devolvia antes.
+function anExpenseByRootThroughDay(data, monthKey, throughDay) {
+  const limit = throughDay == null ? 31 : throughDay;
   const out = new Map();
   realizedTxForMonth(data, monthKey).forEach((t) => {
+    const day = Number(String(t.date).slice(8, 10)) || 0;
+    if (day > limit) return;
     // MESMA RÉGUA de "Despesas do mês" (`realizedMonthTotals`): só consumo e
     // encargos de dívida entram, estorno entra negativo, e aporte, amortização
     // e transferência ficam de fora. Enquanto esta soma classificava por
@@ -19167,6 +19316,96 @@ function anExpenseByRoot(data, monthKey) {
     out.set(root.id, (out.get(root.id) || 0) + cents);
   });
   return out;
+}
+
+// Soma dos gastos do mês por categoria raiz -> Map(id -> centavos).
+function anExpenseByRoot(data, monthKey) {
+  return anExpenseByRootThroughDay(data, monthKey, null);
+}
+
+function anAnomalies(data, monthKey) {
+  const key = monthKey || keyOfDate(new Date());
+  const totalDays = anDaysInMonthKey(key);
+  const elapsed = anElapsedDays(key);
+  const isCurrent = key === keyOfDate(new Date());
+  const partial = isCurrent && elapsed < totalDays;
+  // Mês em curso compara só o trecho já vivido, e recorta os meses de base no
+  // MESMO dia. Mês fechado compara os meses inteiros: truncar fevereiro no
+  // dia 31 de um mês de 31 dias tiraria três dias da base e inventaria uma
+  // alta de calendário; exatamente o alerta irrelevante que os portões abaixo
+  // existem para evitar.
+  const janela = partial ? elapsed : null;
+  const through = partial ? elapsed : totalDays;
+
+  const baselineKeys = [1, 2, 3]
+    .map((n) => anMonthKeyMinus(key, n))
+    .filter((k) => realizedTxForMonth(data, k).length > 0);
+
+  const vazio = {
+    monthKey: key,
+    available: false,
+    partial,
+    throughDay: through,
+    totalDays,
+    baselineMonths: baselineKeys.length,
+    items: [], up: [], upByPct: [], down: [],
+    basis: "",
+    reason: "",
+  };
+  if (isCurrent && elapsed < ANOM.minElapsedDays) return { ...vazio, reason: "poucos-dias" };
+  if (baselineKeys.length < ANOM.minBaselineMonths) return { ...vazio, reason: "sem-base" };
+
+  const cur = anExpenseByRootThroughDay(data, key, janela);
+  const baseMaps = baselineKeys.map((k) => anExpenseByRootThroughDay(data, k, janela));
+
+  const ids = new Set(cur.keys());
+  baseMaps.forEach((mp) => { mp.forEach((_, id) => ids.add(id)); });
+
+  const items = [];
+  ids.forEach((id) => {
+    const c = categoryById(data, id);
+    const current = moneyFromCents(cur.get(id) || 0);
+    const baselineCents = baseMaps.reduce((s, mp) => s + (mp.get(id) || 0), 0);
+    const baseline = moneyFromCents(Math.round(baselineCents / baseMaps.length));
+    if (baseline < ANOM.minBaselineValue) return;
+    const diff = subMoney(current, baseline);
+    if (Math.abs(diff) < ANOM.minDiff) return;
+    const pct = safePct(diff, baseline);
+    if (Math.abs(pct) < ANOM.minPct) return;
+    items.push({
+      id, name: c.name, color: c.color, icon: c.icon,
+      current, baseline, diff, pct,
+      direction: diff > 0 ? "up" : "down",
+      // "Fora da média" não é erro: um seguro anual explica o mês. O tom sobe
+      // com o tamanho da variação, e nunca chega a "urgente" sozinho.
+      tone: diff > 0 ? (pct >= ANOM.strongPct ? "warn" : "info") : "positive",
+    });
+  });
+
+  const porValor = items.slice().sort((a, b) => moneyCompare(Math.abs(b.diff), Math.abs(a.diff)));
+  const up = porValor.filter((i) => i.direction === "up");
+  const down = porValor.filter((i) => i.direction === "down");
+
+  return {
+    monthKey: key,
+    available: porValor.length > 0,
+    partial,
+    throughDay: through,
+    totalDays,
+    baselineMonths: baselineKeys.length,
+    baselineKeys,
+    items: porValor.slice(0, ANOM.maxItems),
+    up,
+    // A maior alta em REAIS e a maior alta em PERCENTUAL raramente são a mesma
+    // categoria, e as duas leituras são verdadeiras. Guardamos as duas ordens
+    // para que quem escreve a frase escolha, em vez de reordenar por conta.
+    upByPct: up.slice().sort((a, b) => b.pct - a.pct),
+    down,
+    reason: porValor.length > 0 ? "" : "sem-anomalia",
+    basis: partial
+      ? `até o dia ${through}, contra os mesmos ${through} primeiros dias dos últimos ${baselineKeys.length} meses`
+      : `mês fechado, contra a média dos últimos ${baselineKeys.length} meses`,
+  };
 }
 
 // ------------------------------------------------------------------------------
@@ -19539,6 +19778,8 @@ function buildAnalyticsModel(data, monthKey) {
     mom: safe(() => anMonthOverMonth(data, key), null),
     yoy: safe(() => anYearOverYear(data, key), null),
     categories: safe(() => anCategoryDeltas(data, key), { grew: [], shrank: [], rows: [], baselineMonths: 0 }),
+    // [M32] Anomalias contra a própria média, em janela do mesmo tamanho.
+    anomalies: safe(() => anAnomalies(data, key), { available: false, partial: false, items: [], up: [], upByPct: [], down: [], basis: "", baselineMonths: 0 }),
     extremes: safe(() => anExtremes(data, key), { available: false }),
     dominant: safe(() => anDominant(data, key), { available: false }),
     weekday: safe(() => anWeekdayProfile(data, key), { rows: [], available: false }),
@@ -20336,6 +20577,8 @@ const ADV = {
   savingRateGood: 20,           // taxa de poupança considerada saudável
   paceOverPct: 8,               // ritmo do mês acima do mês anterior
   minSavingSuggestion: 50,      // não sugerimos "economize R$ 7"
+  fixedShareWarn: 50,           // % da renda presa em compromissos que se repetem
+  fixedShareDanger: 65,         // …daqui para cima o mês tem pouca folga para imprevisto
 };
 
 function advCard(o) {
@@ -20364,6 +20607,10 @@ const ADVISOR_RULES = [
     run({ an }) {
       const top = (an.categories.grew || [])[0];
       if (!top || !top.comparable) return null;
+      // [M32] Se a leitura por média comparável já nomeou esta categoria,
+      // este cartão se cala: é o mesmo fato com base pior.
+      const anom = an.anomalies && an.anomalies.available ? (an.anomalies.upByPct || [])[0] : null;
+      if (anom && anom.id === top.id) return null;
       if (top.pct == null || top.pct < ADV.categoryGrowthPct) return null;
       if (top.diff < ADV.categoryGrowthMin) return null;
       return advCard({
@@ -20398,6 +20645,111 @@ const ADVISOR_RULES = [
         message: `Em reais, essa é a maior variação do mês: de ${fmtBRL(byValue.previous)} para ${fmtBRL(byValue.current)}.`,
         value: byValue.diff,
         impact: byValue.diff,
+      });
+    },
+  },
+
+  // ----------------------------------------------------------------------------
+  // [M32] As três frases do roteiro, com período comparável
+  // ----------------------------------------------------------------------------
+  // As duas regras acima comparam com O MÊS ANTERIOR: um mês só, volátil, e
+  // (no mês em curso) um pedaço contra um mês inteiro. As três abaixo comparam
+  // com a MÉDIA dos últimos meses em janela do mesmo tamanho, que é o que o
+  // M32 pede. Quando as duas leituras apontam a mesma categoria, a de cima se
+  // cala; o fato é o mesmo e dizer duas vezes vira ruído.
+  {
+    id: "anomalia-alta",
+    run({ an }) {
+      const a = an.anomalies;
+      if (!a || !a.available) return null;
+      const top = (a.upByPct || [])[0];
+      if (!top) return null;
+      return advCard({
+        id: "anomalia-alta",
+        tone: top.tone === "warn" ? "warn" : "info",
+        icon: top.icon || "arrowUpRight",
+        title: `${top.name} está ${Math.abs(top.pct).toFixed(0)}% acima da sua média dos últimos ${a.baselineMonths} meses`,
+        message: `${fmtBRL(top.current)} contra uma média de ${fmtBRL(top.baseline)}; ${a.basis}. Estar fora da média não é erro: um seguro anual ou uma viagem explicam o mês.`,
+        value: top.diff,
+        impact: top.diff,
+        action: { label: "Ver análise por categoria", tab: "analytics" },
+      });
+    },
+  },
+
+  // "Seu gasto com transporte aumentou R$ 280." O mesmo fato pelo lado
+  // absoluto, e só quando a maior alta em REAIS não é a maior alta em %.
+  {
+    id: "anomalia-valor",
+    run({ an }) {
+      const a = an.anomalies;
+      if (!a || !a.available) return null;
+      const byValue = (a.up || [])[0];
+      const byPct = (a.upByPct || [])[0];
+      if (!byValue || !byPct || byValue.id === byPct.id) return null;
+      return advCard({
+        id: "anomalia-valor",
+        tone: "info",
+        icon: byValue.icon || "cart",
+        title: `Seu gasto com ${byValue.name} aumentou ${fmtBRL(byValue.diff)}`,
+        message: `Em reais, é a maior diferença do período: ${fmtBRL(byValue.current)} contra uma média de ${fmtBRL(byValue.baseline)}; ${a.basis}.`,
+        value: byValue.diff,
+        impact: byValue.diff,
+        action: { label: "Ver análise por categoria", tab: "analytics" },
+      });
+    },
+  },
+
+  // Reforço positivo COMPARÁVEL. Ele existe porque a versão do mês anterior
+  // (`categoria-em-queda`) não pode elogiar no meio do mês sem mentir: até o
+  // dia 3, tudo "caiu". Este compara janelas iguais e vale em qualquer dia.
+  {
+    id: "anomalia-queda",
+    run({ an }) {
+      const a = an.anomalies;
+      if (!a || !a.available) return null;
+      const top = (a.down || [])[0];
+      if (!top) return null;
+      return advCard({
+        id: "anomalia-queda",
+        tone: "positive",
+        icon: "arrowDownRight",
+        title: `Você está gastando ${fmtBRL(Math.abs(top.diff))} a menos com ${top.name}`,
+        message: `${fmtBRL(top.current)} contra uma média de ${fmtBRL(top.baseline)}; ${a.basis}.`,
+        value: Math.abs(top.diff),
+        impact: Math.abs(top.diff),
+      });
+    },
+  },
+
+  // [M32] "Suas despesas fixas representam 61% da renda."
+  //
+  // O número NÃO é o "gastos fixos" do mês corrente: no dia 3 ele ainda não
+  // aconteceu, e a conta sairia pequena justamente quando engana mais. Sai do
+  // motor de recorrências, que já converte cada compromisso para equivalente
+  // mensal (o seguro anual entra como 1/12, não como zero em onze meses).
+  //
+  // Convive com a regra `assinaturas` de propósito: aquela responde "quanto
+  // custa o pacote de assinaturas por ano"; esta responde "quanto da renda já
+  // está preso antes de o mês começar", e inclui as recorrentes de valor
+  // variável (luz, água, mercado semanal).
+  {
+    id: "despesas-fixas",
+    run({ rec, income }) {
+      if (!rec || income <= 0) return null;
+      if (rec.committedMonthly <= 0) return null;
+      const share = rec.incomeShare;
+      if (share < ADV.fixedShareWarn) return null;
+      const n = rec.counts.subscriptions + rec.counts.variable;
+      return advCard({
+        id: "despesas-fixas",
+        tone: share >= ADV.fixedShareDanger ? "warn" : "info",
+        icon: "refresh",
+        title: `Suas despesas fixas representam ${share.toFixed(0)}% da renda`,
+        message: `${fmtBRL(rec.committedMonthly)} por mês já estão comprometidos com ${n} ${n === 1 ? "cobrança que se repete" : "cobranças que se repetem"}, antes de qualquer gasto do dia a dia. Quanto maior essa fatia, menos o orçamento absorve um imprevisto.`,
+        value: rec.committedMonthly,
+        impact: rec.committedMonthly,
+        action: { label: "Ver recorrências", tab: "subscriptions" },
       });
     },
   },
@@ -20654,6 +21006,14 @@ const ADVISOR_RULES = [
     run({ an }) {
       const top = (an.categories.shrank || [])[0];
       if (!top || !top.comparable) return null;
+      // [M32] O ELOGIO ERRADO. No dia 3 do mês, toda categoria "caiu" em
+      // relação ao mês anterior inteiro; parabenizar por isso é o alerta
+      // irrelevante clássico. Em mês em curso quem fala é `anomalia-queda`,
+      // que compara janelas do mesmo tamanho.
+      const per = an.averages;
+      if (per && per.isCurrentMonth && per.elapsedDays < per.totalDays) return null;
+      const queda = an.anomalies && an.anomalies.available ? (an.anomalies.down || [])[0] : null;
+      if (queda && queda.id === top.id) return null;
       const saved = Math.abs(top.diff);
       if (saved < ADV.categoryGrowthMin) return null;
       if (top.pct == null || Math.abs(top.pct) < 10) return null;
@@ -30312,7 +30672,7 @@ function renderInsightsScreen() {
         ${INSIGHTS_VIEWS.map((v) => `<button class="segmented__option ${view === v.id ? "active" : ""}" data-action="ins-view" data-value="${v.id}">${v.label}</button>`).join("")}
       </div>
 
-      ${view === "ia" ? renderInsightsAdvice(adv) : ""}
+      ${view === "ia" ? renderInsightsAdvice(adv, an) : ""}
       ${view === "padroes" ? renderInsightsPatterns(an) : ""}
       ${view === "comparar" ? renderInsightsCompare(an) : ""}
       <p class="footnote">Leitura educativa baseada apenas nos dados cadastrados. Ela não conhece todo o seu contexto e não substitui orientação profissional individual.</p>
@@ -30337,15 +30697,45 @@ function renderAdvisorHeadline(adv) {
   </div>`;
 }
 
-function renderInsightsAdvice(adv) {
+function renderInsightsAdvice(adv, an) {
   const rest = adv.cards.filter((c) => c.id !== adv.headline.id);
   return `
+    ${renderAnomaliesCard(an)}
     ${adv.plan.total > 0 ? renderSavingPlanCard(adv.plan) : ""}
     ${rest.length === 0
       ? renderEmptyState("checkCircle", "Só a leitura acima por enquanto.", "Quanto mais meses registrados, mais comparações o app consegue fazer.")
       : `<div class="adv-list">${rest.map((c) => renderAdvisorItem(c)).join("")}</div>`}
     ${renderAiCard()}
   `;
+}
+
+// [M32] Fora do padrão; a evidência por trás dos cartões de anomalia.
+//
+// O cartão do conselheiro diz UMA frase ("Restaurantes está 42% acima da sua
+// média"). Aqui ficam os números que sustentam a frase e, principalmente, a
+// BASE da comparação: sem ela, "42% acima da média" é um número sem régua, e o
+// usuário não tem como discordar com fundamento.
+function renderAnomaliesCard(an) {
+  const a = an && an.anomalies;
+  if (!a || !a.available || !a.items.length) return "";
+  return `<div class="card">
+    <p class="card-title">Fora do seu padrão</p>
+    <p class="card-subtitle">Comparação com a sua própria média: ${escapeHtml(a.basis)}. As janelas têm o mesmo tamanho dos dois lados; sem isso, um mês em curso pareceria sempre mais barato do que é.</p>
+    <div class="leak-list">
+      ${a.items.map((i) => {
+        const up = i.direction === "up";
+        const color = up ? "var(--negative)" : "var(--positive)";
+        return `<div class="leak-row">
+          <span class="icon-bubble" data-ui-css="width:26px;height:26px;background:color-mix(in srgb, ${i.color} 14%, transparent); color:${i.color}">${svgIcon(i.icon, 13)}</span>
+          <span class="leak-name">${escapeHtml(i.name)}</span>
+          <span class="import-row__meta">média ${fmtBRL(i.baseline)}</span>
+          <span class="status-badge" data-ui-css="background:color-mix(in srgb, ${color} 14%, transparent); color:${color}">${svgIcon(up ? "arrowUpRight" : "arrowDownRight", 11)}${Math.abs(i.pct).toFixed(0)}%</span>
+          <span class="leak-value">${fmtBRL(i.current)}</span>
+        </div>`;
+      }).join("")}
+    </div>
+    <p class="card-subtitle" data-ui-css="margin-top:10px">Estar fora da média não é erro. Um seguro anual, uma viagem ou um mês com cinco fins de semana explicam a diferença; o app aponta onde ela está, a leitura é sua.</p>
+  </div>`;
 }
 
 function renderAdvisorItem(c) {
@@ -30508,6 +30898,9 @@ function renderInsightsCompare(an) {
     <div class="card">
       <p class="card-title">Contra o mês anterior</p>
       <p class="card-subtitle">${escapeHtml(mom.prevLabel)} ${svgIcon("arrowRight", 13)} ${escapeHtml(mom.label)}</p>
+      ${an.averages && an.averages.isCurrentMonth && an.averages.elapsedDays < an.averages.totalDays
+        ? `<p class="card-subtitle" data-ui-css="color:var(--ink-soft)">${svgIcon("info", 13)} O mês ainda está em curso (dia ${an.averages.elapsedDays} de ${an.averages.totalDays}). Este quadro compara os dois meses INTEIROS, então o mês atual aparece menor do que vai terminar. A leitura em janelas do mesmo tamanho está em "Fora do seu padrão", nas recomendações.</p>`
+        : ""}
       ${!mom.hasPrevious ? renderEmptyState("calendar", "Não há lançamentos no mês anterior para comparar.") : `
       <div class="cmp-grid">
         <div class="cmp-cell">
@@ -30722,6 +31115,8 @@ function renderSubscriptionsScreen() {
 
     ${renderSubsHero(m)}
 
+    ${renderSubsTypes(m)}
+
     ${m.proposals.length > 0 ? renderRecurringProposals(m.proposals) : ""}
 
     ${m.increases.length > 0 ? `<div class="banner">
@@ -30741,7 +31136,7 @@ function renderSubscriptionsScreen() {
 
     ${list.length === 0
       ? renderEmptyState("refresh", subsEmptyTitle(view), subsEmptyHint(view))
-      : `<div class="sub-list">${list.map((s) => renderSubItem(s, view === "ignoradas")).join("")}</div>`}
+      : `<div class="sub-list">${list.map((s) => renderSubItem(s, view === "ignoradas", m.income)).join("")}</div>`}
 
     ${view !== "ignoradas" && m.ended.length > 0 ? `<div class="card">
       <p class="card-title">Parou de cobrar</p>
@@ -30784,6 +31179,7 @@ function renderSubsHero(m) {
     <div class="health-grid">
       <div class="health-stat"><span>Recorrentes variáveis</span><b>${fmtBRL(m.variableMonthly)}</b></div>
       <div class="health-stat"><span>Comprometido por mês</span><b>${fmtBRL(m.committedMonthly)}</b></div>
+      <div class="health-stat"><span>Recorrências no ano</span><b>${fmtBRL(m.committedAnnual)}</b></div>
       ${m.income > 0 ? `<div class="health-stat"><span>Da sua renda</span><b>${m.incomeShare.toFixed(0)}%</b></div>` : ""}
       <div class="health-stat"><span>Próximos 30 dias</span><b>${fmtBRL(m.upcomingTotal)}</b></div>
     </div>
@@ -30822,6 +31218,128 @@ function renderRecurringProposals(proposals) {
   </div>`;
 }
 
+// [M33] Painel por tipo de recorrência.
+//
+// A pergunta que a tela respondia era "quanto custa cada assinatura". A que
+// faltava é "quanto do meu mês é streaming, software, academia ou serviço" -
+// que é a pergunta que se responde antes de decidir o que revisar.
+//
+// O agrupamento é INFERIDO pelo nome e a tela diz isso. Não substitui a
+// categoria financeira do lançamento, que continua exatamente onde estava.
+function renderSubsTypes(m) {
+  if (!m.byType || m.byType.length < 2) return "";
+  return `<div class="card">
+    <p class="card-title">Por tipo de recorrência</p>
+    <p class="card-subtitle">Somado pelo equivalente mensal, para que um seguro anual não pareça uma cobrança de todo mês. O tipo é reconhecido pelo nome do lançamento; a categoria de cada gasto continua a mesma.</p>
+    <div class="leak-list">
+      ${m.byType.map((t) => `<div class="leak-row">
+        <span class="icon-bubble" data-ui-css="width:26px;height:26px">${svgIcon(t.icon, 13)}</span>
+        <span class="leak-name">${escapeHtml(t.label)}</span>
+        <span class="import-row__meta">${t.count} ${t.count === 1 ? "item" : "itens"} · ${fmtBRL(t.annual)}/ano</span>
+        <span class="leak-value">${fmtBRL(t.monthly)}/mês</span>
+      </div>`).join("")}
+    </div>
+  </div>`;
+}
+
+// [M33] "Revisar assinatura".
+//
+// O roteiro é explícito: o app NÃO afirma que uma assinatura é inútil. Ele não
+// sabe. Não sabe se você usa, se é da família toda, se é ferramenta de trabalho.
+// O que ele sabe é o preço, a cadência, o histórico e o peso na renda; e é isso
+// que esta ficha coloca lado a lado, com as perguntas que só você responde.
+//
+// "Marcar como revisada" guarda uma DATA, não um veredito.
+//
+// As perguntas mudam com o tipo porque a pergunta genérica erra o alvo: "você
+// usou nos últimos 30 dias?" faz sentido para um streaming e é absurda para o
+// aluguel. Perguntar errado desmoraliza a ficha inteira.
+const SUBS_REVIEW_QUESTIONS = {
+  streaming: [
+    "Você assistiu ou ouviu alguma coisa aqui no último mês?",
+    "Existe plano anual, familiar ou com anúncios que sirva igual?",
+    "Alguém da casa já paga um serviço parecido?",
+  ],
+  software: [
+    "Você abriu esta ferramenta no último mês?",
+    "O plano contratado corresponde ao que você usa, ou sobra recurso?",
+    "Existe versão anual, gratuita ou incluída em outra assinatura que você já paga?",
+  ],
+  academia: [
+    "Quantas vezes você foi no último mês?",
+    "O plano é o que cabe na sua frequência real, ou você paga pelo ilimitado?",
+    "Há fidelidade ou multa se você quiser mudar?",
+  ],
+  telecom: [
+    "A franquia ou velocidade contratada corresponde ao seu uso real?",
+    "Há serviço extra na fatura que você não reconhece ou não usa?",
+    "Faz quanto tempo que você não revisa o plano com a operadora?",
+  ],
+  moradia: [
+    "O valor mudou por consumo, por reajuste ou por cobrança nova?",
+    "Há algo na conta que você não reconhece?",
+    "Este custo ainda corresponde ao que você precisa hoje?",
+  ],
+  seguros: [
+    "A cobertura ainda corresponde ao que você tem e a quem depende de você?",
+    "Você cotou com outra seguradora nos últimos 12 meses?",
+    "Existe franquia ou carência que você precisa lembrar antes de mexer?",
+  ],
+  educacao: [
+    "O curso ou a matrícula ainda está em andamento?",
+    "Você tem usado o acesso que está pagando?",
+    "Existe plano anual ou material incluído que evite pagar duas vezes?",
+  ],
+  servicos: [
+    "Você usou este serviço no último mês?",
+    "Existe plano menor, anual ou compartilhado que sirva igual?",
+    "Alguém da casa já paga algo que faz o mesmo?",
+  ],
+};
+const SUBS_REVIEW_DEFAULT = [
+  "Você usou ou precisou disto no último mês?",
+  "O valor cobrado corresponde ao que você contratou?",
+  "Existe opção mais simples, anual ou compartilhada que sirva igual?",
+];
+
+function subsReviewQuestions(s) {
+  return SUBS_REVIEW_QUESTIONS[s.typeId] || SUBS_REVIEW_DEFAULT;
+}
+
+// Aluguel e conta de luz são compromissos recorrentes, não assinaturas.
+// Chamá-los de assinatura no botão faria a tela parecer que não entendeu o que
+// está olhando.
+const SUBS_NOT_SUBSCRIPTION = ["moradia", "telecom", "seguros", "outros"];
+function subsReviewLabel(s) {
+  return SUBS_NOT_SUBSCRIPTION.indexOf(s.typeId) >= 0 ? "Revisar compromisso" : "Revisar assinatura";
+}
+
+function renderSubReview(s, income) {
+  const share = income > 0 ? safePct(s.monthlyEquivalent, income) : null;
+  return `<div class="sub-review">
+    <p class="field__label">Revisar ${escapeHtml(s.name)}</p>
+    <div class="health-grid">
+      <div class="health-stat"><span>Custo em 12 meses</span><b>${fmtBRL(s.annualCost)}</b></div>
+      <div class="health-stat"><span>Equivalente mensal</span><b>${fmtBRL(s.monthlyEquivalent)}</b></div>
+      ${share != null ? `<div class="health-stat"><span>Da sua renda</span><b>${share.toFixed(1)}%</b></div>` : ""}
+      <div class="health-stat"><span>Tipo reconhecido</span><b>${escapeHtml(s.typeLabel)}</b></div>
+    </div>
+    <p class="sub-item__note">${s.occurrences > 1
+      ? `${s.occurrences} cobranças registradas desde ${fmtDateShort(s.firstDate)}${s.sinceFirstPct > 3 ? `, com alta de ${s.sinceFirstPct.toFixed(0)}% no período` : ", sem reajuste relevante no período"}.`
+      : "Ainda há uma cobrança só no histórico; os números acima usam o valor lançado."}</p>
+    <p class="field__label">O que só você pode responder</p>
+    <ul class="sub-review__list">
+      ${subsReviewQuestions(s).map((q) => `<li>${escapeHtml(q)}</li>`).join("")}
+      <li>Este compromisso ocupa ${fmtBRL(s.monthlyEquivalent)} por mês do seu orçamento. O que mais poderia ocupar esse espaço?</li>
+    </ul>
+    <p class="sub-item__note">O app não diz se ${SUBS_NOT_SUBSCRIPTION.indexOf(s.typeId) >= 0 ? "este compromisso" : "esta assinatura"} vale a pena; ele não sabe o que isso significa para você. Aqui estão os números; a decisão é sua, e não decidir também é uma decisão válida.</p>
+    <div class="sub-item__actions">
+      <button class="btn btn--primary btn--sm" data-action="sub-reviewed" data-id="${escapeHtml(s.key)}">${s.reviewedAt ? "Revisei de novo hoje" : "Marcar como revisada"}</button>
+      <button class="btn btn--ghost btn--sm" data-action="sub-review" data-id="${escapeHtml(s.key)}">Fechar ficha</button>
+    </div>
+  </div>`;
+}
+
 function subStatusBadge(s) {
   if (s.status === "atrasada") {
     return `<span class="status-badge" data-ui-css="background:var(--goal-soft); color:var(--goal)">${svgIcon("clock", 11)} não veio ainda</span>`;
@@ -30832,8 +31350,9 @@ function subStatusBadge(s) {
   return "";
 }
 
-function renderSubItem(s, ignored) {
+function renderSubItem(s, ignored, income) {
   const open = state.subs.expandedKey === s.key;
+  const reviewing = open && state.subs.reviewKey === s.key;
   return `<div class="sub-item ${open ? "is-open" : ""}">
     <button class="sub-item__head" data-action="sub-expand" data-id="${escapeHtml(s.key)}" aria-expanded="${open ? "true" : "false"}">
       <span class="icon-bubble" data-ui-css="background:color-mix(in srgb, ${s.categoryColor} 14%, transparent); color:${s.categoryColor}">${svgIcon(s.categoryIcon, 16)}</span>
@@ -30854,9 +31373,11 @@ function renderSubItem(s, ignored) {
         <div class="health-stat"><span>Equivalente mensal</span><b>${fmtBRL(s.monthlyEquivalent)}</b></div>
         <div class="health-stat"><span>Cobranças registradas</span><b>${s.occurrences}</b></div>
         <div class="health-stat"><span>Acompanhando desde</span><b>${fmtDateShort(s.firstDate)}</b></div>
+        <div class="health-stat"><span>Tipo reconhecido</span><b>${escapeHtml(s.typeLabel)}</b></div>
       </div>
       ${s.sinceFirstPct > 3 ? `<p class="sub-item__note">Desde a primeira cobrança o valor subiu ${s.sinceFirstPct.toFixed(0)}%; de ${fmtBRL(s.firstAmount)} para ${fmtBRL(s.lastAmount)}.</p>` : ""}
       ${s.kind === "recorrente" ? `<p class="sub-item__note">O valor varia entre as cobranças, então este é um gasto recorrente e não uma assinatura de preço fixo. O total usa a última cobrança como referência.</p>` : ""}
+      ${s.reviewedAt ? `<p class="sub-item__note">Você revisou este item em ${fmtDateFull(s.reviewedAt)}${s.daysSinceReview > 0 ? ` (há ${s.daysSinceReview} ${s.daysSinceReview === 1 ? "dia" : "dias"})` : ""}. A marcação guarda só a data; nenhum juízo sobre a assinatura.</p>` : ""}
       ${s.declaredOnly ? `<p class="sub-item__note">Este compromisso vem da marcação "gasto fixo mensal" no lançamento, não de um histórico de cobranças. A partir da segunda cobrança o app passa a usar as datas e os valores reais.</p>` : ""}
       <div class="sub-item__actions">
         ${ignored
@@ -30864,8 +31385,10 @@ function renderSubItem(s, ignored) {
           : `${s.flaggedRecurring
               ? `<button class="btn btn--secondary btn--sm" data-action="sub-unflag" data-id="${escapeHtml(s.key)}">Desmarcar como recorrente</button>`
               : `<button class="btn btn--secondary btn--sm" data-action="rec-confirm" data-id="${escapeHtml(s.key)}">Marcar como recorrente</button>`}
+             <button class="btn btn--secondary btn--sm" data-action="sub-review" data-id="${escapeHtml(s.key)}">${reviewing ? "Fechar revisão" : subsReviewLabel(s)}</button>
              <button class="btn btn--ghost btn--sm" data-action="sub-ignore" data-id="${escapeHtml(s.key)}">Parar de acompanhar</button>`}
       </div>
+      ${reviewing && !ignored ? renderSubReview(s, income) : ""}
     </div>` : ""}
   </div>`;
 }
@@ -35003,11 +35526,28 @@ function onClick(e) {
     case "subs-view":
       state.subs.view = value || "assinaturas";
       state.subs.expandedKey = null;
+      state.subs.reviewKey = null;
       render();
       break;
     case "sub-expand":
       state.subs.expandedKey = state.subs.expandedKey === id ? null : id;
+      // A ficha de revisão pertence ao item aberto; trocar de item fecha a ficha.
+      if (state.subs.reviewKey !== state.subs.expandedKey) state.subs.reviewKey = null;
       render();
+      break;
+    // [M33] "Revisar assinatura". Abre a ficha; não muda dado nenhum.
+    case "sub-review":
+      state.subs.reviewKey = state.subs.reviewKey === id ? null : id;
+      if (state.subs.reviewKey) state.subs.expandedKey = id;
+      render();
+      break;
+    // Guarda a DATA da revisão, nunca um veredito sobre a assinatura. Nada é
+    // cancelado, marcado como inútil ou removido: quem decide é o usuário, e
+    // as ações de decidir continuam sendo as mesmas de antes.
+    case "sub-reviewed":
+      setData((d) => ({ ...d, recurringPrefs: recPrefsWith(d, "review", id, todayIso()) }));
+      state.subs.reviewKey = null;
+      notify("Revisão registrada; guardamos só a data", "success");
       break;
     case "sub-ignore":
       // "Parar de acompanhar" NÃO apaga lançamento nenhum: só registra a
@@ -36305,6 +36845,7 @@ let state = {
   subs: {
     view: "assinaturas",     // "assinaturas" | "variaveis" | "ignoradas"
     expandedKey: null,       // compromisso com o detalhe aberto
+    reviewKey: null,         // [M33] ficha de revisão aberta (memória de tela; não é persistida)
   },
   // ---- Módulo 8: central de notificações ----
   notif: {

@@ -59,6 +59,97 @@ const REC_INCREASE_PCT = 3;
 const REC_LATE_FACTOR = 1.45;
 const REC_ENDED_FACTOR = 2.6;
 
+// ------------------------------------------------------------------------------
+// [M33] TIPO DO COMPROMISSO; streaming, software, academia, serviços
+// ------------------------------------------------------------------------------
+// A categoria financeira responde "de que bolso isso sai" (Lazer, Casa). Ela não
+// responde a pergunta do M33, que é outra: "de que TIPO de recorrência é isto?".
+// Netflix e cinema caem os dois em Lazer, e só um deles cobra sozinho todo mês.
+//
+// O reconhecimento é pelo NOME, com lista fechada e conservadora, e a tela sempre
+// declara que é inferência. Um palpite errado aqui não pode custar caro: ele muda
+// um rótulo e um subtotal de leitura, nunca um valor lançado. O balde final é
+// "Outros"; nunca chutamos "Serviços" só para não deixar vazio.
+//
+// Termos com 4 letras ou mais casam por trecho ("netflix" dentro de "netflix
+// premium"); os curtos ("tim", "oi", "gym") casam por palavra inteira, senão
+// "oi" acharia "boi" e "sushi oishi".
+const REC_TYPES = [
+  { id: "streaming", label: "Streaming", icon: "monitor",
+    terms: ["netflix", "spotify", "disney", "hbo", "globoplay", "deezer", "youtube premium", "youtube music",
+      "paramount", "apple tv", "apple music", "crunchyroll", "telecine", "looke", "mubi", "dazn",
+      "star plus", "starplus", "tidal", "amazon prime", "prime video", "streaming"] },
+  { id: "software", label: "Software e nuvem", icon: "tool",
+    terms: ["adobe", "microsoft", "office 365", "google one", "icloud", "dropbox", "notion", "figma",
+      "canva", "chatgpt", "openai", "github", "jetbrains", "autocad", "antivirus", "norton", "mcafee",
+      "kaspersky", "evernote", "slack", "zoom", "linkedin premium", "armazenamento"] },
+  { id: "academia", label: "Academia e bem-estar", icon: "dumbbell",
+    terms: ["academia", "smart fit", "smartfit", "bluefit", "selfit", "gym", "crossfit", "pilates",
+      "yoga", "natacao", "gympass", "totalpass", "wellhub", "personal trainer", "musculacao"] },
+  { id: "telecom", label: "Telefonia e internet", icon: "wifi",
+    terms: ["vivo", "claro", "tim", "oi", "nextel", "internet", "banda larga", "fibra", "celular",
+      "telefone", "plano de dados", "algar", "sky"] },
+  { id: "moradia", label: "Moradia e contas de casa", icon: "home",
+    terms: ["aluguel", "condominio", "iptu", "agua", "luz", "energia", "gas", "enel", "cemig", "copel",
+      "sabesp", "light", "saneamento", "cpfl", "equatorial"] },
+  { id: "educacao", label: "Educação", icon: "book",
+    terms: ["alura", "udemy", "coursera", "escola", "colegio", "faculdade", "universidade", "curso",
+      "mensalidade escolar", "ingles", "idiomas", "duolingo", "kindle"] },
+  { id: "seguros", label: "Seguros e saúde", icon: "shieldCheck",
+    terms: ["seguro", "plano de saude", "unimed", "amil", "sulamerica", "odonto", "dental",
+      "porto seguro", "assistencia", "hapvida"] },
+  { id: "servicos", label: "Serviços", icon: "briefcase",
+    terms: ["assinatura", "clube", "mensalidade", "limpeza", "diarista", "jardinagem", "estacionamento",
+      "contabilidade", "monitoramento", "seguranca"] },
+];
+const REC_TYPE_OTHER = Object.freeze({ id: "outros", label: "Outros", icon: "tag" });
+
+function recTypeOf(name) {
+  const nome = typeof normalizeText === "function"
+    ? normalizeText(name)
+    : String(name || "").toLowerCase();
+  if (!nome) return REC_TYPE_OTHER;
+  const palavras = nome.split(/[^a-z0-9]+/).filter(Boolean);
+  const achado = REC_TYPES.find((t) => t.terms.some((term) => (term.length >= 4
+    ? nome.indexOf(term) >= 0
+    : palavras.indexOf(term) >= 0)));
+  return achado || REC_TYPE_OTHER;
+}
+
+// Subtotais por tipo. Somam pelo EQUIVALENTE MENSAL, a mesma régua do resto da
+// tela: sem isso, um seguro anual de R$ 1.200 empurraria "Seguros" para o topo
+// da lista como se cobrasse todo mês.
+function recTotalsByType(items) {
+  const mapa = new Map();
+  (items || []).forEach((s) => {
+    const atual = mapa.get(s.typeId) || {
+      id: s.typeId, label: s.typeLabel, icon: s.typeIcon,
+      monthly: 0, annual: 0, count: 0, subscriptions: 0,
+    };
+    atual.monthly = addMoney(atual.monthly, s.monthlyEquivalent);
+    atual.annual = addMoney(atual.annual, s.annualCost);
+    atual.count += 1;
+    if (s.kind === "assinatura") atual.subscriptions += 1;
+    mapa.set(s.typeId, atual);
+  });
+  return Array.from(mapa.values()).sort((a, b) => moneyCompare(b.monthly, a.monthly));
+}
+
+// Decoração comum aos dois caminhos (evidência e declaração): tipo inferido e
+// a data da última revisão, que é preferência do usuário e não vive no item.
+function recDecorate(item, prefs) {
+  const tipo = recTypeOf(item.name);
+  const revisadoEm = (prefs.review && prefs.review[item.key]) || "";
+  return {
+    ...item,
+    typeId: tipo.id,
+    typeLabel: tipo.label,
+    typeIcon: tipo.icon,
+    reviewedAt: revisadoEm,
+    daysSinceReview: revisadoEm ? daysBetweenIso(revisadoEm, todayIso()) : null,
+  };
+}
+
 function recMedian(list) {
   if (!list.length) return 0;
   const s = [...list].sort((a, b) => a - b);
@@ -104,6 +195,9 @@ function recPrefsOf(data) {
     ignored: p.ignored && typeof p.ignored === "object" ? p.ignored : {},
     dismissed: p.dismissed && typeof p.dismissed === "object" ? p.dismissed : {},
     confirmed: p.confirmed && typeof p.confirmed === "object" ? p.confirmed : {},
+    // [M33] "Revisar assinatura": guarda QUANDO foi revisada, nunca um juízo
+    // sobre a assinatura. O app não decide se ela vale a pena.
+    review: p.review && typeof p.review === "object" ? p.review : {},
   };
 }
 
@@ -328,7 +422,7 @@ function buildRecurringModel(data, opts) {
     let item;
     try { item = recAnalyzeGroup(data, list, todayKey); }
     catch (e) { item = null; }            // um grupo com data corrompida não derruba a tela
-    if (item) all.push(item);
+    if (item) all.push(recDecorate(item, prefs));
   });
 
   const ignoredKeys = prefs.ignored;
@@ -350,6 +444,12 @@ function buildRecurringModel(data, opts) {
   const annualTotal = sumMoney(subscriptions, (s) => s.annualCost);
   const variableMonthly = sumMoney(variable, (s) => s.monthlyEquivalent);
   const committedMonthly = addMoney(monthlyTotal, variableMonthly);
+
+  // [M33] O ANO DE TUDO QUE SE REPETE, não só das assinaturas de preço fixo.
+  // A parte fixa é exata (`annualCost` já usa a cadência real); a variável é
+  // estimativa a partir do equivalente mensal, e a tela precisa dizer isso.
+  const committedAnnual = addMoney(annualTotal, mulMoney(variableMonthly, 12));
+  const byType = recTotalsByType(subscriptions.concat(variable));
 
   const increases = active
     .filter((s) => s.increasePct > REC_INCREASE_PCT)
@@ -378,6 +478,8 @@ function buildRecurringModel(data, opts) {
     annualTotal,
     variableMonthly,
     committedMonthly,
+    committedAnnual,
+    byType,
     income,
     incomeShare,
     proposals: buildRecurringProposals(data, all, prefs),
@@ -386,6 +488,8 @@ function buildRecurringModel(data, opts) {
       variable: variable.length,
       ended: ended.length,
       ignored: ignored.length,
+      reviewed: tracked.filter((s) => s.reviewedAt).length,
+      types: byType.length,
     },
   };
 }

@@ -44,6 +44,8 @@ const ADV = {
   savingRateGood: 20,           // taxa de poupança considerada saudável
   paceOverPct: 8,               // ritmo do mês acima do mês anterior
   minSavingSuggestion: 50,      // não sugerimos "economize R$ 7"
+  fixedShareWarn: 50,           // % da renda presa em compromissos que se repetem
+  fixedShareDanger: 65,         // …daqui para cima o mês tem pouca folga para imprevisto
 };
 
 function advCard(o) {
@@ -72,6 +74,10 @@ const ADVISOR_RULES = [
     run({ an }) {
       const top = (an.categories.grew || [])[0];
       if (!top || !top.comparable) return null;
+      // [M32] Se a leitura por média comparável já nomeou esta categoria,
+      // este cartão se cala: é o mesmo fato com base pior.
+      const anom = an.anomalies && an.anomalies.available ? (an.anomalies.upByPct || [])[0] : null;
+      if (anom && anom.id === top.id) return null;
       if (top.pct == null || top.pct < ADV.categoryGrowthPct) return null;
       if (top.diff < ADV.categoryGrowthMin) return null;
       return advCard({
@@ -106,6 +112,111 @@ const ADVISOR_RULES = [
         message: `Em reais, essa é a maior variação do mês: de ${fmtBRL(byValue.previous)} para ${fmtBRL(byValue.current)}.`,
         value: byValue.diff,
         impact: byValue.diff,
+      });
+    },
+  },
+
+  // ----------------------------------------------------------------------------
+  // [M32] As três frases do roteiro, com período comparável
+  // ----------------------------------------------------------------------------
+  // As duas regras acima comparam com O MÊS ANTERIOR: um mês só, volátil, e
+  // (no mês em curso) um pedaço contra um mês inteiro. As três abaixo comparam
+  // com a MÉDIA dos últimos meses em janela do mesmo tamanho, que é o que o
+  // M32 pede. Quando as duas leituras apontam a mesma categoria, a de cima se
+  // cala; o fato é o mesmo e dizer duas vezes vira ruído.
+  {
+    id: "anomalia-alta",
+    run({ an }) {
+      const a = an.anomalies;
+      if (!a || !a.available) return null;
+      const top = (a.upByPct || [])[0];
+      if (!top) return null;
+      return advCard({
+        id: "anomalia-alta",
+        tone: top.tone === "warn" ? "warn" : "info",
+        icon: top.icon || "arrowUpRight",
+        title: `${top.name} está ${Math.abs(top.pct).toFixed(0)}% acima da sua média dos últimos ${a.baselineMonths} meses`,
+        message: `${fmtBRL(top.current)} contra uma média de ${fmtBRL(top.baseline)}; ${a.basis}. Estar fora da média não é erro: um seguro anual ou uma viagem explicam o mês.`,
+        value: top.diff,
+        impact: top.diff,
+        action: { label: "Ver análise por categoria", tab: "analytics" },
+      });
+    },
+  },
+
+  // "Seu gasto com transporte aumentou R$ 280." O mesmo fato pelo lado
+  // absoluto, e só quando a maior alta em REAIS não é a maior alta em %.
+  {
+    id: "anomalia-valor",
+    run({ an }) {
+      const a = an.anomalies;
+      if (!a || !a.available) return null;
+      const byValue = (a.up || [])[0];
+      const byPct = (a.upByPct || [])[0];
+      if (!byValue || !byPct || byValue.id === byPct.id) return null;
+      return advCard({
+        id: "anomalia-valor",
+        tone: "info",
+        icon: byValue.icon || "cart",
+        title: `Seu gasto com ${byValue.name} aumentou ${fmtBRL(byValue.diff)}`,
+        message: `Em reais, é a maior diferença do período: ${fmtBRL(byValue.current)} contra uma média de ${fmtBRL(byValue.baseline)}; ${a.basis}.`,
+        value: byValue.diff,
+        impact: byValue.diff,
+        action: { label: "Ver análise por categoria", tab: "analytics" },
+      });
+    },
+  },
+
+  // Reforço positivo COMPARÁVEL. Ele existe porque a versão do mês anterior
+  // (`categoria-em-queda`) não pode elogiar no meio do mês sem mentir: até o
+  // dia 3, tudo "caiu". Este compara janelas iguais e vale em qualquer dia.
+  {
+    id: "anomalia-queda",
+    run({ an }) {
+      const a = an.anomalies;
+      if (!a || !a.available) return null;
+      const top = (a.down || [])[0];
+      if (!top) return null;
+      return advCard({
+        id: "anomalia-queda",
+        tone: "positive",
+        icon: "arrowDownRight",
+        title: `Você está gastando ${fmtBRL(Math.abs(top.diff))} a menos com ${top.name}`,
+        message: `${fmtBRL(top.current)} contra uma média de ${fmtBRL(top.baseline)}; ${a.basis}.`,
+        value: Math.abs(top.diff),
+        impact: Math.abs(top.diff),
+      });
+    },
+  },
+
+  // [M32] "Suas despesas fixas representam 61% da renda."
+  //
+  // O número NÃO é o "gastos fixos" do mês corrente: no dia 3 ele ainda não
+  // aconteceu, e a conta sairia pequena justamente quando engana mais. Sai do
+  // motor de recorrências, que já converte cada compromisso para equivalente
+  // mensal (o seguro anual entra como 1/12, não como zero em onze meses).
+  //
+  // Convive com a regra `assinaturas` de propósito: aquela responde "quanto
+  // custa o pacote de assinaturas por ano"; esta responde "quanto da renda já
+  // está preso antes de o mês começar", e inclui as recorrentes de valor
+  // variável (luz, água, mercado semanal).
+  {
+    id: "despesas-fixas",
+    run({ rec, income }) {
+      if (!rec || income <= 0) return null;
+      if (rec.committedMonthly <= 0) return null;
+      const share = rec.incomeShare;
+      if (share < ADV.fixedShareWarn) return null;
+      const n = rec.counts.subscriptions + rec.counts.variable;
+      return advCard({
+        id: "despesas-fixas",
+        tone: share >= ADV.fixedShareDanger ? "warn" : "info",
+        icon: "refresh",
+        title: `Suas despesas fixas representam ${share.toFixed(0)}% da renda`,
+        message: `${fmtBRL(rec.committedMonthly)} por mês já estão comprometidos com ${n} ${n === 1 ? "cobrança que se repete" : "cobranças que se repetem"}, antes de qualquer gasto do dia a dia. Quanto maior essa fatia, menos o orçamento absorve um imprevisto.`,
+        value: rec.committedMonthly,
+        impact: rec.committedMonthly,
+        action: { label: "Ver recorrências", tab: "subscriptions" },
       });
     },
   },
@@ -362,6 +473,14 @@ const ADVISOR_RULES = [
     run({ an }) {
       const top = (an.categories.shrank || [])[0];
       if (!top || !top.comparable) return null;
+      // [M32] O ELOGIO ERRADO. No dia 3 do mês, toda categoria "caiu" em
+      // relação ao mês anterior inteiro; parabenizar por isso é o alerta
+      // irrelevante clássico. Em mês em curso quem fala é `anomalia-queda`,
+      // que compara janelas do mesmo tamanho.
+      const per = an.averages;
+      if (per && per.isCurrentMonth && per.elapsedDays < per.totalDays) return null;
+      const queda = an.anomalies && an.anomalies.available ? (an.anomalies.down || [])[0] : null;
+      if (queda && queda.id === top.id) return null;
       const saved = Math.abs(top.diff);
       if (saved < ADV.categoryGrowthMin) return null;
       if (top.pct == null || Math.abs(top.pct) < 10) return null;

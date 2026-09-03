@@ -61,7 +61,9 @@
 // entraram no pacote e nas folhas de Saúde e Planejamento.
 // v69: limite diário (M30) e as leituras mensais do "posso comprar?" (M31)
 // entraram no pacote e na folha de Planejamento.
-const VERSION = "v69";
+// v70: anomalias em janela comparável (M32) e o painel por tipo de recorrência
+// com a ficha de revisão (M33) entraram no pacote e na folha de Inteligência.
+const VERSION = "v70";
 const BUILD_ID = VERSION;
 const CACHE_NAME = "financas-cache-" + VERSION;
 // A PÁGINA COMERCIAL TEM CACHE PRÓPRIO.

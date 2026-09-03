@@ -253,6 +253,7 @@ let state = {
   subs: {
     view: "assinaturas",     // "assinaturas" | "variaveis" | "ignoradas"
     expandedKey: null,       // compromisso com o detalhe aberto
+    reviewKey: null,         // [M33] ficha de revisão aberta (memória de tela; não é persistida)
   },
   // ---- Módulo 8: central de notificações ----
   notif: {

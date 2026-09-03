@@ -1140,11 +1140,28 @@ function onClick(e) {
     case "subs-view":
       state.subs.view = value || "assinaturas";
       state.subs.expandedKey = null;
+      state.subs.reviewKey = null;
       render();
       break;
     case "sub-expand":
       state.subs.expandedKey = state.subs.expandedKey === id ? null : id;
+      // A ficha de revisão pertence ao item aberto; trocar de item fecha a ficha.
+      if (state.subs.reviewKey !== state.subs.expandedKey) state.subs.reviewKey = null;
       render();
+      break;
+    // [M33] "Revisar assinatura". Abre a ficha; não muda dado nenhum.
+    case "sub-review":
+      state.subs.reviewKey = state.subs.reviewKey === id ? null : id;
+      if (state.subs.reviewKey) state.subs.expandedKey = id;
+      render();
+      break;
+    // Guarda a DATA da revisão, nunca um veredito sobre a assinatura. Nada é
+    // cancelado, marcado como inútil ou removido: quem decide é o usuário, e
+    // as ações de decidir continuam sendo as mesmas de antes.
+    case "sub-reviewed":
+      setData((d) => ({ ...d, recurringPrefs: recPrefsWith(d, "review", id, todayIso()) }));
+      state.subs.reviewKey = null;
+      notify("Revisão registrada; guardamos só a data", "success");
       break;
     case "sub-ignore":
       // "Parar de acompanhar" NÃO apaga lançamento nenhum: só registra a

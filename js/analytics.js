@@ -76,11 +76,50 @@ function anRootCategory(data, id) {
   return c.parentId ? categoryById(data, c.parentId) : c;
 }
 
-// Soma dos gastos do mês por categoria raiz → Map(id → centavos).
+// ------------------------------------------------------------------------------
+// [M32] ANOMALIAS; o gasto que saiu do PRÓPRIO padrão
+// ------------------------------------------------------------------------------
+// `anCategoryDeltas` já compara com o mês anterior e já guarda a média dos três
+// meses. O que faltava é o que o M32 pede: virar ALERTA, e fazer isso com
+// PERÍODOS COMPARÁVEIS.
+//
+// O erro que este bloco existe para evitar
+// ----------------------------------------
+// No dia 3 do mês, "Mercado" somou R$ 120. O mês passado inteiro somou R$ 900.
+// Comparar os dois devolve "Mercado caiu 87%"; e o app diria isso em tom de
+// parabéns, no terceiro dia do mês, para alguém que vai gastar os mesmos R$ 900.
+// O mesmo erro na direção oposta esconde a alta real: quem já torrou R$ 700 até
+// o dia 3 continua "abaixo" do mês anterior inteiro.
+//
+// A correção é comparar JANELAS DO MESMO TAMANHO: até o dia 3 deste mês contra
+// os três primeiros dias de cada um dos meses anteriores. Mês fechado compara
+// com meses inteiros, que é o mesmo critério no caso trivial.
+//
+// Portões contra alerta irrelevante
+// ---------------------------------
+// "Evitar alertas irrelevantes" é requisito, não conselho. São cinco portões:
+// dias decorridos, meses de base, valor mínimo da base, diferença mínima em
+// reais e variação mínima em percentual. Uma categoria de R$ 12 que virou R$ 30
+// subiu 150% e não muda decisão nenhuma; ela não vira alerta.
+const ANOM = {
+  minElapsedDays: 5,      // antes disso o mês ainda não tem sinal nenhum
+  minBaselineMonths: 2,   // um mês isolado é evento, não padrão
+  minBaselineValue: 40,   // categoria minúscula produz 300% de nada
+  minDiff: 60,            // diferença que não muda decisão não vira alerta
+  minPct: 25,             // variação abaixo disso é ruído de calendário
+  strongPct: 40,          // daqui para cima o tom sobe de "observação" para "atenção"
+  maxItems: 5,
+};
 
-function anExpenseByRoot(data, monthKey) {
+// Soma por categoria raiz limitada aos N primeiros dias do mês. `throughDay`
+// nulo (ou 31) significa o mês inteiro; é assim que `anExpenseByRoot` continua
+// devolvendo exatamente o que devolvia antes.
+function anExpenseByRootThroughDay(data, monthKey, throughDay) {
+  const limit = throughDay == null ? 31 : throughDay;
   const out = new Map();
   realizedTxForMonth(data, monthKey).forEach((t) => {
+    const day = Number(String(t.date).slice(8, 10)) || 0;
+    if (day > limit) return;
     // MESMA RÉGUA de "Despesas do mês" (`realizedMonthTotals`): só consumo e
     // encargos de dívida entram, estorno entra negativo, e aporte, amortização
     // e transferência ficam de fora. Enquanto esta soma classificava por
@@ -93,6 +132,96 @@ function anExpenseByRoot(data, monthKey) {
     out.set(root.id, (out.get(root.id) || 0) + cents);
   });
   return out;
+}
+
+// Soma dos gastos do mês por categoria raiz -> Map(id -> centavos).
+function anExpenseByRoot(data, monthKey) {
+  return anExpenseByRootThroughDay(data, monthKey, null);
+}
+
+function anAnomalies(data, monthKey) {
+  const key = monthKey || keyOfDate(new Date());
+  const totalDays = anDaysInMonthKey(key);
+  const elapsed = anElapsedDays(key);
+  const isCurrent = key === keyOfDate(new Date());
+  const partial = isCurrent && elapsed < totalDays;
+  // Mês em curso compara só o trecho já vivido, e recorta os meses de base no
+  // MESMO dia. Mês fechado compara os meses inteiros: truncar fevereiro no
+  // dia 31 de um mês de 31 dias tiraria três dias da base e inventaria uma
+  // alta de calendário; exatamente o alerta irrelevante que os portões abaixo
+  // existem para evitar.
+  const janela = partial ? elapsed : null;
+  const through = partial ? elapsed : totalDays;
+
+  const baselineKeys = [1, 2, 3]
+    .map((n) => anMonthKeyMinus(key, n))
+    .filter((k) => realizedTxForMonth(data, k).length > 0);
+
+  const vazio = {
+    monthKey: key,
+    available: false,
+    partial,
+    throughDay: through,
+    totalDays,
+    baselineMonths: baselineKeys.length,
+    items: [], up: [], upByPct: [], down: [],
+    basis: "",
+    reason: "",
+  };
+  if (isCurrent && elapsed < ANOM.minElapsedDays) return { ...vazio, reason: "poucos-dias" };
+  if (baselineKeys.length < ANOM.minBaselineMonths) return { ...vazio, reason: "sem-base" };
+
+  const cur = anExpenseByRootThroughDay(data, key, janela);
+  const baseMaps = baselineKeys.map((k) => anExpenseByRootThroughDay(data, k, janela));
+
+  const ids = new Set(cur.keys());
+  baseMaps.forEach((mp) => { mp.forEach((_, id) => ids.add(id)); });
+
+  const items = [];
+  ids.forEach((id) => {
+    const c = categoryById(data, id);
+    const current = moneyFromCents(cur.get(id) || 0);
+    const baselineCents = baseMaps.reduce((s, mp) => s + (mp.get(id) || 0), 0);
+    const baseline = moneyFromCents(Math.round(baselineCents / baseMaps.length));
+    if (baseline < ANOM.minBaselineValue) return;
+    const diff = subMoney(current, baseline);
+    if (Math.abs(diff) < ANOM.minDiff) return;
+    const pct = safePct(diff, baseline);
+    if (Math.abs(pct) < ANOM.minPct) return;
+    items.push({
+      id, name: c.name, color: c.color, icon: c.icon,
+      current, baseline, diff, pct,
+      direction: diff > 0 ? "up" : "down",
+      // "Fora da média" não é erro: um seguro anual explica o mês. O tom sobe
+      // com o tamanho da variação, e nunca chega a "urgente" sozinho.
+      tone: diff > 0 ? (pct >= ANOM.strongPct ? "warn" : "info") : "positive",
+    });
+  });
+
+  const porValor = items.slice().sort((a, b) => moneyCompare(Math.abs(b.diff), Math.abs(a.diff)));
+  const up = porValor.filter((i) => i.direction === "up");
+  const down = porValor.filter((i) => i.direction === "down");
+
+  return {
+    monthKey: key,
+    available: porValor.length > 0,
+    partial,
+    throughDay: through,
+    totalDays,
+    baselineMonths: baselineKeys.length,
+    baselineKeys,
+    items: porValor.slice(0, ANOM.maxItems),
+    up,
+    // A maior alta em REAIS e a maior alta em PERCENTUAL raramente são a mesma
+    // categoria, e as duas leituras são verdadeiras. Guardamos as duas ordens
+    // para que quem escreve a frase escolha, em vez de reordenar por conta.
+    upByPct: up.slice().sort((a, b) => b.pct - a.pct),
+    down,
+    reason: porValor.length > 0 ? "" : "sem-anomalia",
+    basis: partial
+      ? `até o dia ${through}, contra os mesmos ${through} primeiros dias dos últimos ${baselineKeys.length} meses`
+      : `mês fechado, contra a média dos últimos ${baselineKeys.length} meses`,
+  };
 }
 
 // ------------------------------------------------------------------------------
@@ -465,6 +594,8 @@ function buildAnalyticsModel(data, monthKey) {
     mom: safe(() => anMonthOverMonth(data, key), null),
     yoy: safe(() => anYearOverYear(data, key), null),
     categories: safe(() => anCategoryDeltas(data, key), { grew: [], shrank: [], rows: [], baselineMonths: 0 }),
+    // [M32] Anomalias contra a própria média, em janela do mesmo tamanho.
+    anomalies: safe(() => anAnomalies(data, key), { available: false, partial: false, items: [], up: [], upByPct: [], down: [], basis: "", baselineMonths: 0 }),
     extremes: safe(() => anExtremes(data, key), { available: false }),
     dominant: safe(() => anDominant(data, key), { available: false }),
     weekday: safe(() => anWeekdayProfile(data, key), { rows: [], available: false }),

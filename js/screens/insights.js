@@ -54,7 +54,7 @@ function renderInsightsScreen() {
         ${INSIGHTS_VIEWS.map((v) => `<button class="segmented__option ${view === v.id ? "active" : ""}" data-action="ins-view" data-value="${v.id}">${v.label}</button>`).join("")}
       </div>
 
-      ${view === "ia" ? renderInsightsAdvice(adv) : ""}
+      ${view === "ia" ? renderInsightsAdvice(adv, an) : ""}
       ${view === "padroes" ? renderInsightsPatterns(an) : ""}
       ${view === "comparar" ? renderInsightsCompare(an) : ""}
       <p class="footnote">Leitura educativa baseada apenas nos dados cadastrados. Ela não conhece todo o seu contexto e não substitui orientação profissional individual.</p>
@@ -79,15 +79,45 @@ function renderAdvisorHeadline(adv) {
   </div>`;
 }
 
-function renderInsightsAdvice(adv) {
+function renderInsightsAdvice(adv, an) {
   const rest = adv.cards.filter((c) => c.id !== adv.headline.id);
   return `
+    ${renderAnomaliesCard(an)}
     ${adv.plan.total > 0 ? renderSavingPlanCard(adv.plan) : ""}
     ${rest.length === 0
       ? renderEmptyState("checkCircle", "Só a leitura acima por enquanto.", "Quanto mais meses registrados, mais comparações o app consegue fazer.")
       : `<div class="adv-list">${rest.map((c) => renderAdvisorItem(c)).join("")}</div>`}
     ${renderAiCard()}
   `;
+}
+
+// [M32] Fora do padrão; a evidência por trás dos cartões de anomalia.
+//
+// O cartão do conselheiro diz UMA frase ("Restaurantes está 42% acima da sua
+// média"). Aqui ficam os números que sustentam a frase e, principalmente, a
+// BASE da comparação: sem ela, "42% acima da média" é um número sem régua, e o
+// usuário não tem como discordar com fundamento.
+function renderAnomaliesCard(an) {
+  const a = an && an.anomalies;
+  if (!a || !a.available || !a.items.length) return "";
+  return `<div class="card">
+    <p class="card-title">Fora do seu padrão</p>
+    <p class="card-subtitle">Comparação com a sua própria média: ${escapeHtml(a.basis)}. As janelas têm o mesmo tamanho dos dois lados; sem isso, um mês em curso pareceria sempre mais barato do que é.</p>
+    <div class="leak-list">
+      ${a.items.map((i) => {
+        const up = i.direction === "up";
+        const color = up ? "var(--negative)" : "var(--positive)";
+        return `<div class="leak-row">
+          <span class="icon-bubble" data-ui-css="width:26px;height:26px;background:color-mix(in srgb, ${i.color} 14%, transparent); color:${i.color}">${svgIcon(i.icon, 13)}</span>
+          <span class="leak-name">${escapeHtml(i.name)}</span>
+          <span class="import-row__meta">média ${fmtBRL(i.baseline)}</span>
+          <span class="status-badge" data-ui-css="background:color-mix(in srgb, ${color} 14%, transparent); color:${color}">${svgIcon(up ? "arrowUpRight" : "arrowDownRight", 11)}${Math.abs(i.pct).toFixed(0)}%</span>
+          <span class="leak-value">${fmtBRL(i.current)}</span>
+        </div>`;
+      }).join("")}
+    </div>
+    <p class="card-subtitle" data-ui-css="margin-top:10px">Estar fora da média não é erro. Um seguro anual, uma viagem ou um mês com cinco fins de semana explicam a diferença; o app aponta onde ela está, a leitura é sua.</p>
+  </div>`;
 }
 
 function renderAdvisorItem(c) {
@@ -250,6 +280,9 @@ function renderInsightsCompare(an) {
     <div class="card">
       <p class="card-title">Contra o mês anterior</p>
       <p class="card-subtitle">${escapeHtml(mom.prevLabel)} ${svgIcon("arrowRight", 13)} ${escapeHtml(mom.label)}</p>
+      ${an.averages && an.averages.isCurrentMonth && an.averages.elapsedDays < an.averages.totalDays
+        ? `<p class="card-subtitle" data-ui-css="color:var(--ink-soft)">${svgIcon("info", 13)} O mês ainda está em curso (dia ${an.averages.elapsedDays} de ${an.averages.totalDays}). Este quadro compara os dois meses INTEIROS, então o mês atual aparece menor do que vai terminar. A leitura em janelas do mesmo tamanho está em "Fora do seu padrão", nas recomendações.</p>`
+        : ""}
       ${!mom.hasPrevious ? renderEmptyState("calendar", "Não há lançamentos no mês anterior para comparar.") : `
       <div class="cmp-grid">
         <div class="cmp-cell">

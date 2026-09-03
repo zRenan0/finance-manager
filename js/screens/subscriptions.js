@@ -35,6 +35,8 @@ function renderSubscriptionsScreen() {
 
     ${renderSubsHero(m)}
 
+    ${renderSubsTypes(m)}
+
     ${m.proposals.length > 0 ? renderRecurringProposals(m.proposals) : ""}
 
     ${m.increases.length > 0 ? `<div class="banner">
@@ -54,7 +56,7 @@ function renderSubscriptionsScreen() {
 
     ${list.length === 0
       ? renderEmptyState("refresh", subsEmptyTitle(view), subsEmptyHint(view))
-      : `<div class="sub-list">${list.map((s) => renderSubItem(s, view === "ignoradas")).join("")}</div>`}
+      : `<div class="sub-list">${list.map((s) => renderSubItem(s, view === "ignoradas", m.income)).join("")}</div>`}
 
     ${view !== "ignoradas" && m.ended.length > 0 ? `<div class="card">
       <p class="card-title">Parou de cobrar</p>
@@ -97,6 +99,7 @@ function renderSubsHero(m) {
     <div class="health-grid">
       <div class="health-stat"><span>Recorrentes variáveis</span><b>${fmtBRL(m.variableMonthly)}</b></div>
       <div class="health-stat"><span>Comprometido por mês</span><b>${fmtBRL(m.committedMonthly)}</b></div>
+      <div class="health-stat"><span>Recorrências no ano</span><b>${fmtBRL(m.committedAnnual)}</b></div>
       ${m.income > 0 ? `<div class="health-stat"><span>Da sua renda</span><b>${m.incomeShare.toFixed(0)}%</b></div>` : ""}
       <div class="health-stat"><span>Próximos 30 dias</span><b>${fmtBRL(m.upcomingTotal)}</b></div>
     </div>
@@ -135,6 +138,128 @@ function renderRecurringProposals(proposals) {
   </div>`;
 }
 
+// [M33] Painel por tipo de recorrência.
+//
+// A pergunta que a tela respondia era "quanto custa cada assinatura". A que
+// faltava é "quanto do meu mês é streaming, software, academia ou serviço" -
+// que é a pergunta que se responde antes de decidir o que revisar.
+//
+// O agrupamento é INFERIDO pelo nome e a tela diz isso. Não substitui a
+// categoria financeira do lançamento, que continua exatamente onde estava.
+function renderSubsTypes(m) {
+  if (!m.byType || m.byType.length < 2) return "";
+  return `<div class="card">
+    <p class="card-title">Por tipo de recorrência</p>
+    <p class="card-subtitle">Somado pelo equivalente mensal, para que um seguro anual não pareça uma cobrança de todo mês. O tipo é reconhecido pelo nome do lançamento; a categoria de cada gasto continua a mesma.</p>
+    <div class="leak-list">
+      ${m.byType.map((t) => `<div class="leak-row">
+        <span class="icon-bubble" data-ui-css="width:26px;height:26px">${svgIcon(t.icon, 13)}</span>
+        <span class="leak-name">${escapeHtml(t.label)}</span>
+        <span class="import-row__meta">${t.count} ${t.count === 1 ? "item" : "itens"} · ${fmtBRL(t.annual)}/ano</span>
+        <span class="leak-value">${fmtBRL(t.monthly)}/mês</span>
+      </div>`).join("")}
+    </div>
+  </div>`;
+}
+
+// [M33] "Revisar assinatura".
+//
+// O roteiro é explícito: o app NÃO afirma que uma assinatura é inútil. Ele não
+// sabe. Não sabe se você usa, se é da família toda, se é ferramenta de trabalho.
+// O que ele sabe é o preço, a cadência, o histórico e o peso na renda; e é isso
+// que esta ficha coloca lado a lado, com as perguntas que só você responde.
+//
+// "Marcar como revisada" guarda uma DATA, não um veredito.
+//
+// As perguntas mudam com o tipo porque a pergunta genérica erra o alvo: "você
+// usou nos últimos 30 dias?" faz sentido para um streaming e é absurda para o
+// aluguel. Perguntar errado desmoraliza a ficha inteira.
+const SUBS_REVIEW_QUESTIONS = {
+  streaming: [
+    "Você assistiu ou ouviu alguma coisa aqui no último mês?",
+    "Existe plano anual, familiar ou com anúncios que sirva igual?",
+    "Alguém da casa já paga um serviço parecido?",
+  ],
+  software: [
+    "Você abriu esta ferramenta no último mês?",
+    "O plano contratado corresponde ao que você usa, ou sobra recurso?",
+    "Existe versão anual, gratuita ou incluída em outra assinatura que você já paga?",
+  ],
+  academia: [
+    "Quantas vezes você foi no último mês?",
+    "O plano é o que cabe na sua frequência real, ou você paga pelo ilimitado?",
+    "Há fidelidade ou multa se você quiser mudar?",
+  ],
+  telecom: [
+    "A franquia ou velocidade contratada corresponde ao seu uso real?",
+    "Há serviço extra na fatura que você não reconhece ou não usa?",
+    "Faz quanto tempo que você não revisa o plano com a operadora?",
+  ],
+  moradia: [
+    "O valor mudou por consumo, por reajuste ou por cobrança nova?",
+    "Há algo na conta que você não reconhece?",
+    "Este custo ainda corresponde ao que você precisa hoje?",
+  ],
+  seguros: [
+    "A cobertura ainda corresponde ao que você tem e a quem depende de você?",
+    "Você cotou com outra seguradora nos últimos 12 meses?",
+    "Existe franquia ou carência que você precisa lembrar antes de mexer?",
+  ],
+  educacao: [
+    "O curso ou a matrícula ainda está em andamento?",
+    "Você tem usado o acesso que está pagando?",
+    "Existe plano anual ou material incluído que evite pagar duas vezes?",
+  ],
+  servicos: [
+    "Você usou este serviço no último mês?",
+    "Existe plano menor, anual ou compartilhado que sirva igual?",
+    "Alguém da casa já paga algo que faz o mesmo?",
+  ],
+};
+const SUBS_REVIEW_DEFAULT = [
+  "Você usou ou precisou disto no último mês?",
+  "O valor cobrado corresponde ao que você contratou?",
+  "Existe opção mais simples, anual ou compartilhada que sirva igual?",
+];
+
+function subsReviewQuestions(s) {
+  return SUBS_REVIEW_QUESTIONS[s.typeId] || SUBS_REVIEW_DEFAULT;
+}
+
+// Aluguel e conta de luz são compromissos recorrentes, não assinaturas.
+// Chamá-los de assinatura no botão faria a tela parecer que não entendeu o que
+// está olhando.
+const SUBS_NOT_SUBSCRIPTION = ["moradia", "telecom", "seguros", "outros"];
+function subsReviewLabel(s) {
+  return SUBS_NOT_SUBSCRIPTION.indexOf(s.typeId) >= 0 ? "Revisar compromisso" : "Revisar assinatura";
+}
+
+function renderSubReview(s, income) {
+  const share = income > 0 ? safePct(s.monthlyEquivalent, income) : null;
+  return `<div class="sub-review">
+    <p class="field__label">Revisar ${escapeHtml(s.name)}</p>
+    <div class="health-grid">
+      <div class="health-stat"><span>Custo em 12 meses</span><b>${fmtBRL(s.annualCost)}</b></div>
+      <div class="health-stat"><span>Equivalente mensal</span><b>${fmtBRL(s.monthlyEquivalent)}</b></div>
+      ${share != null ? `<div class="health-stat"><span>Da sua renda</span><b>${share.toFixed(1)}%</b></div>` : ""}
+      <div class="health-stat"><span>Tipo reconhecido</span><b>${escapeHtml(s.typeLabel)}</b></div>
+    </div>
+    <p class="sub-item__note">${s.occurrences > 1
+      ? `${s.occurrences} cobranças registradas desde ${fmtDateShort(s.firstDate)}${s.sinceFirstPct > 3 ? `, com alta de ${s.sinceFirstPct.toFixed(0)}% no período` : ", sem reajuste relevante no período"}.`
+      : "Ainda há uma cobrança só no histórico; os números acima usam o valor lançado."}</p>
+    <p class="field__label">O que só você pode responder</p>
+    <ul class="sub-review__list">
+      ${subsReviewQuestions(s).map((q) => `<li>${escapeHtml(q)}</li>`).join("")}
+      <li>Este compromisso ocupa ${fmtBRL(s.monthlyEquivalent)} por mês do seu orçamento. O que mais poderia ocupar esse espaço?</li>
+    </ul>
+    <p class="sub-item__note">O app não diz se ${SUBS_NOT_SUBSCRIPTION.indexOf(s.typeId) >= 0 ? "este compromisso" : "esta assinatura"} vale a pena; ele não sabe o que isso significa para você. Aqui estão os números; a decisão é sua, e não decidir também é uma decisão válida.</p>
+    <div class="sub-item__actions">
+      <button class="btn btn--primary btn--sm" data-action="sub-reviewed" data-id="${escapeHtml(s.key)}">${s.reviewedAt ? "Revisei de novo hoje" : "Marcar como revisada"}</button>
+      <button class="btn btn--ghost btn--sm" data-action="sub-review" data-id="${escapeHtml(s.key)}">Fechar ficha</button>
+    </div>
+  </div>`;
+}
+
 function subStatusBadge(s) {
   if (s.status === "atrasada") {
     return `<span class="status-badge" data-ui-css="background:var(--goal-soft); color:var(--goal)">${svgIcon("clock", 11)} não veio ainda</span>`;
@@ -145,8 +270,9 @@ function subStatusBadge(s) {
   return "";
 }
 
-function renderSubItem(s, ignored) {
+function renderSubItem(s, ignored, income) {
   const open = state.subs.expandedKey === s.key;
+  const reviewing = open && state.subs.reviewKey === s.key;
   return `<div class="sub-item ${open ? "is-open" : ""}">
     <button class="sub-item__head" data-action="sub-expand" data-id="${escapeHtml(s.key)}" aria-expanded="${open ? "true" : "false"}">
       <span class="icon-bubble" data-ui-css="background:color-mix(in srgb, ${s.categoryColor} 14%, transparent); color:${s.categoryColor}">${svgIcon(s.categoryIcon, 16)}</span>
@@ -167,9 +293,11 @@ function renderSubItem(s, ignored) {
         <div class="health-stat"><span>Equivalente mensal</span><b>${fmtBRL(s.monthlyEquivalent)}</b></div>
         <div class="health-stat"><span>Cobranças registradas</span><b>${s.occurrences}</b></div>
         <div class="health-stat"><span>Acompanhando desde</span><b>${fmtDateShort(s.firstDate)}</b></div>
+        <div class="health-stat"><span>Tipo reconhecido</span><b>${escapeHtml(s.typeLabel)}</b></div>
       </div>
       ${s.sinceFirstPct > 3 ? `<p class="sub-item__note">Desde a primeira cobrança o valor subiu ${s.sinceFirstPct.toFixed(0)}%; de ${fmtBRL(s.firstAmount)} para ${fmtBRL(s.lastAmount)}.</p>` : ""}
       ${s.kind === "recorrente" ? `<p class="sub-item__note">O valor varia entre as cobranças, então este é um gasto recorrente e não uma assinatura de preço fixo. O total usa a última cobrança como referência.</p>` : ""}
+      ${s.reviewedAt ? `<p class="sub-item__note">Você revisou este item em ${fmtDateFull(s.reviewedAt)}${s.daysSinceReview > 0 ? ` (há ${s.daysSinceReview} ${s.daysSinceReview === 1 ? "dia" : "dias"})` : ""}. A marcação guarda só a data; nenhum juízo sobre a assinatura.</p>` : ""}
       ${s.declaredOnly ? `<p class="sub-item__note">Este compromisso vem da marcação "gasto fixo mensal" no lançamento, não de um histórico de cobranças. A partir da segunda cobrança o app passa a usar as datas e os valores reais.</p>` : ""}
       <div class="sub-item__actions">
         ${ignored
@@ -177,8 +305,10 @@ function renderSubItem(s, ignored) {
           : `${s.flaggedRecurring
               ? `<button class="btn btn--secondary btn--sm" data-action="sub-unflag" data-id="${escapeHtml(s.key)}">Desmarcar como recorrente</button>`
               : `<button class="btn btn--secondary btn--sm" data-action="rec-confirm" data-id="${escapeHtml(s.key)}">Marcar como recorrente</button>`}
+             <button class="btn btn--secondary btn--sm" data-action="sub-review" data-id="${escapeHtml(s.key)}">${reviewing ? "Fechar revisão" : subsReviewLabel(s)}</button>
              <button class="btn btn--ghost btn--sm" data-action="sub-ignore" data-id="${escapeHtml(s.key)}">Parar de acompanhar</button>`}
       </div>
+      ${reviewing && !ignored ? renderSubReview(s, income) : ""}
     </div>` : ""}
   </div>`;
 }

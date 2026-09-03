@@ -1507,12 +1507,18 @@ function normalizeAchievements(raw) {
 //   dismissed; proposta de cadastro recusada; o app não volta a perguntar.
 //   confirmed; proposta aceita (o efeito real vive no `recurring` dos
 //               lançamentos; aqui fica só a data, para a tela poder dizê-la).
-function defaultRecurringPrefs() { return { ignored: {}, dismissed: {}, confirmed: {} }; }
+// `review` (M33) entrou depois dos outros três e sem subir o SCHEMA_VERSION:
+// é um mapa { chave: data } dentro de um campo que já existia e já sincroniza,
+// e a ausência dele em dado antigo normaliza para {} sem perder nada. O único
+// efeito de um cliente ANTIGO ler este dado é ele descartar as datas de
+// revisão ao normalizar; nenhum lançamento, valor ou preferência antiga é
+// afetado, e a informação volta na próxima revisão.
+function defaultRecurringPrefs() { return { ignored: {}, dismissed: {}, confirmed: {}, review: {} }; }
 
 function normalizeRecurringPrefs(raw) {
   const src = raw && typeof raw === "object" ? raw : {};
   const out = defaultRecurringPrefs();
-  ["ignored", "dismissed", "confirmed"].forEach((bucket) => {
+  ["ignored", "dismissed", "confirmed", "review"].forEach((bucket) => {
     const incoming = src[bucket] && typeof src[bucket] === "object" ? src[bucket] : {};
     Object.keys(incoming).forEach((key) => {
       if (typeof key !== "string" || !key) return;
@@ -5854,7 +5860,7 @@ function mergeRecurringPrefs(a, b) {
   const left = normalizeRecurringPrefs(a);
   const right = normalizeRecurringPrefs(b);
   const out = defaultRecurringPrefs();
-  ["ignored", "dismissed", "confirmed"].forEach((bucket) => {
+  ["ignored", "dismissed", "confirmed", "review"].forEach((bucket) => {
     Object.keys(left[bucket]).forEach((k) => { out[bucket][k] = left[bucket][k]; });
     Object.keys(right[bucket]).forEach((k) => {
       const cur = out[bucket][k];

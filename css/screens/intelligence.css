@@ -160,6 +160,20 @@ div.plan-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12p
 .sub-item__actions .btn { flex: 1 1 auto; }
 @keyframes sub-open { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 
+/* ---- [M33] Ficha de revisão de assinatura ---- */
+.sub-review {
+  margin-top: 12px; padding: 12px;
+  border-radius: var(--radius-sm); border: 1px solid var(--border-soft);
+  background: var(--paper-alt);
+  animation: sub-open var(--dur) var(--ease);
+}
+.sub-review .field__label { margin: 0 0 8px; }
+.sub-review .health-grid + .field__label { margin-top: 14px; }
+.sub-review__list {
+  margin: 8px 0 0; padding-left: 18px; display: grid; gap: 6px;
+  font-size: 0.75rem; color: var(--ink-soft); line-height: 1.5;
+}
+
 /* ---- Propostas de cadastro (§9) ---- */
 .card--proposal { border-color: color-mix(in srgb, var(--brand) 30%, var(--border)); }
 .rec-proposals { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
@@ -280,6 +294,6 @@ div.plan-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12p
 
 @media (prefers-reduced-motion: reduce) {
   .sub-item, .heat-cell, .barlist__fill, .diverge__fill { transition: none; }
-  .sub-item__body { animation: none; }
+  .sub-item__body, .sub-review { animation: none; }
   .heat-cell.is-selected, .heat-cell:hover:not(:disabled) { transform: none; }
 }

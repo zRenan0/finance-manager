@@ -2,6 +2,37 @@
 
 ## Não publicado
 
+### O M32 passou a comparar períodos do mesmo tamanho
+
+- Cartão novo nas recomendações, "Fora do seu padrão": as categorias que fugiram
+  da **sua própria média** dos últimos três meses, com a base da comparação
+  escrita na tela ("até o dia 12, contra os mesmos 12 primeiros dias").
+- Três frases que faltavam: "Alimentação está 42% acima da sua média dos últimos
+  3 meses", "Seu gasto com Transporte aumentou R$ 280,00" e "Suas despesas fixas
+  representam 61% da renda".
+- **O elogio errado foi embora.** No dia 3 do mês, toda categoria "caiu" em
+  relação ao mês anterior inteiro, e o app parabenizava por isso. Agora, em mês
+  em curso, quem fala é a leitura por janelas iguais; em mês fechado, nada mudou.
+- A aba Comparar avisa quando o mês ainda está em curso, em vez de deixar o
+  "−7% de gastos" do dia 3 parecer economia.
+- Cinco portões contra alerta irrelevante: dias decorridos, meses de base, valor
+  mínimo da base, diferença em reais e variação em percentual. Uma categoria de
+  R$ 12 que virou R$ 30 subiu 150% e não vira aviso.
+
+### O M33 mostrou de que tipo são as suas recorrências
+
+- Painel novo em Assinaturas: quanto do seu mês é streaming, software, academia,
+  telefonia, moradia, educação, seguro ou serviço. O tipo é reconhecido pelo nome
+  do lançamento, e a tela diz isso; a categoria de cada gasto continua a mesma.
+- O ano inteiro das recorrências ao lado do mês: R$ X por mês, R$ Y em doze meses.
+- **"Revisar assinatura"**: uma ficha com o custo de 12 meses, o equivalente
+  mensal, o peso na renda, o histórico de preço e as perguntas que só você pode
+  responder; diferentes para streaming, academia, conta de luz ou seguro.
+- O app **não** diz que uma assinatura é inútil, porque não sabe. "Marcar como
+  revisada" guarda uma data, nunca um veredito, e nada é cancelado ou apagado.
+- Aluguel e conta de luz deixaram de ser chamados de assinatura no botão.
+- O cache offline subiu para `v70`.
+
 ### O M30 trocou o teto diário por um limite com meta
 
 - Junto da conta do fechamento, uma linha nova: "Para terminar o mês com
