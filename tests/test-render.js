@@ -109,6 +109,12 @@ ctx.self = ctx;
 ctx.globalThis = ctx;
 vm.createContext(ctx);
 
+// Relógio congelado: as telas do Módulo 7 (mapa de calor, padrões, central) só
+// desenham o que JÁ aconteceu no mês, e as fixtures lançam no dia 10. Ver
+// `tests/helpers/fixed-clock.js`.
+const relogio = require("./helpers/fixed-clock").congelar(ctx);
+const Date = relogio.DataFixa;
+
 [
   "js/utils.js", "js/perf.js", "js/router.js", "js/icons.js", "js/rules.js", "js/layout.js", "js/safe-errors.js", "js/storage.js", "js/backup-crypto.js", "js/accounts.js", "js/movements.js", "js/data-sources.js", "js/debts.js", "js/budgets.js", "js/charts.js",
   "js/import.js", "js/nlp.js", "js/score.js", "js/metrics.js", "js/health.js", "js/wealth.js",

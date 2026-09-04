@@ -16,6 +16,11 @@ ctx.addEventListener = () => {};
 ctx.fetch = () => Promise.reject(new Error("offline"));
 vm.createContext(ctx);
 
+// Relógio congelado: os cenários precisam de dias JÁ VIVIDOS no mês corrente
+// (mapa de calor, dia da semana, média diária). Ver `tests/helpers/fixed-clock.js`.
+const relogio = require("./helpers/fixed-clock").congelar(ctx);
+const Date = relogio.DataFixa;
+
 ["js/utils.js", "js/rules.js", "js/layout.js", "js/storage.js", "js/budgets.js", "js/import.js", "js/score.js",
  "js/metrics.js", "js/recurring.js", "js/analytics.js", "js/insights.js",
  "js/assistant.js", "js/advisor.js"]

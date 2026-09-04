@@ -13,6 +13,12 @@ const ctx = { console, module: { exports: {} }, indexedDB: undefined, localStora
 ctx.window = ctx;
 vm.createContext(ctx);
 
+// Relógio congelado: as fixtures deste arquivo lançam no dia 10 do mês corrente,
+// e o app (corretamente) ignora o que ainda não aconteceu. Ver o cabeçalho de
+// `tests/helpers/fixed-clock.js`.
+const relogio = require("./helpers/fixed-clock").congelar(ctx);
+const Date = relogio.DataFixa;
+
 ["js/utils.js", "js/rules.js", "js/layout.js", "js/storage.js", "js/accounts.js", "js/budgets.js", "js/score.js", "js/metrics.js", "js/health.js"]
   .forEach((f) => vm.runInContext(readSrc(f), ctx, { filename: f }));
 

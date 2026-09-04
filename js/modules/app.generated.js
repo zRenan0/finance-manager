@@ -17986,7 +17986,20 @@ function buildForecast(data, refIso) {
   const remainingCurrent = Math.max(0, moneyToCents(baseline.monthly) - moneyToCents(spentSoFar));
   const [cy, cm] = currentKey.split("-").map(Number);
   const daysLeftInMonth = Math.max(1, daysInMonthOf(cy, cm - 1) - Number(today.slice(8, 10)));
-  const dailyCurrent = Math.round(remainingCurrent / daysLeftInMonth);
+  // A ESTIMATIVA DO MÊS CORRENTE É DISTRIBUÍDA EM CENTAVOS INTEIROS.
+  //
+  // Arredondar por dia e repetir o valor pelos dias que faltam sobra até meio
+  // centavo por dia. No dia 20 sobram dez dias e a diferença passa despercebida;
+  // no dia 3 sobram 27, e a caminhada diária terminava 13 centavos longe da soma
+  // das quatro parcelas que o cartão do M29 mostra. Duas rotas para o mesmo
+  // número precisam chegar ao mesmo centavo: uma conta escrita na tela que não
+  // fecha destrói a confiança no resto do cartão.
+  //
+  // Piso mais resto nos primeiros dias: a soma dos dias volta a ser exatamente
+  // `remainingCurrent`, qualquer que seja o dia de hoje.
+  const dailyCurrent = Math.floor(remainingCurrent / daysLeftInMonth);
+  const dailyCurrentRest = remainingCurrent - dailyCurrent * daysLeftInMonth;
+  let currentMonthDays = 0;
 
   const days = [];
   let balanceC = moneyToCents(start);
@@ -18001,7 +18014,13 @@ function buildForecast(data, refIso) {
     const row = byDay.get(iso) || { income: 0, expense: 0 };
 
     const dim = daysInMonthOf(cursor.getFullYear(), cursor.getMonth());
-    const variableC = key === currentKey ? dailyCurrent : Math.round(moneyToCents(baseline.monthly) / dim);
+    let variableC;
+    if (key === currentKey) {
+      currentMonthDays += 1;
+      variableC = dailyCurrent + (currentMonthDays <= dailyCurrentRest ? 1 : 0);
+    } else {
+      variableC = Math.round(moneyToCents(baseline.monthly) / dim);
+    }
 
     const deltaC = row.income - row.expense - variableC;
     balanceC += deltaC;
@@ -18080,15 +18099,15 @@ function monthCloseForecast(forecast) {
 
   // O NÚMERO MOSTRADO É O DA PRÓPRIA CONTA, NÃO O DA CAMINHADA DIÁRIA.
   //
-  // As duas rotas chegam ao mesmo lugar, mas não ao mesmo centavo: a caminhada
-  // dia a dia arredonda a cada passo e a soma das parcelas arredonda uma vez.
-  // No conjunto da demonstração a diferença é de três centavos.
+  // As duas rotas chegam ao mesmo lugar: a caminhada dia a dia soma centavos
+  // inteiros e a distribuição da estimativa variável espalha o resto nos
+  // primeiros dias, então o total do mês é exatamente o mesmo dos dois lados.
+  // (Antes não era: arredondar a cota diária e repeti-la deixava a caminhada até
+  // treze centavos longe da soma quando o mês ainda tinha muitos dias.)
   //
-  // Três centavos não mudam decisão nenhuma, mas uma conta escrita na tela que
-  // não fecha destrói a confiança no resto do cartão. Então o card exibe o
-  // resultado da SOMA que ele mostra, e a caminhada fica ao lado como
-  // conferência: `divergencia` existe para o teste travar que as duas rotas
-  // continuam concordando, e não para aparecer na tela.
+  // Ainda assim o cartão exibe o resultado da SOMA que ele mostra, e a caminhada
+  // fica ao lado como conferência: `divergencia` existe para o teste travar que
+  // as duas rotas continuam concordando, e não para aparecer na tela.
   const projetado = roundMoney(subMoney(subMoney(addMoney(saldoAtual, receitas), contas), variaveis));
   const projetadoDiario = roundMoney(ultimo.balance);
 
@@ -20581,6 +20600,45 @@ const ADV = {
   fixedShareDanger: 65,         // …daqui para cima o mês tem pouca folga para imprevisto
 };
 
+// ------------------------------------------------------------------------------
+// [M32] Quem fala sobre uma categoria quando as duas leituras concordam
+// ------------------------------------------------------------------------------
+// Existem duas comparações verdadeiras sobre a mesma categoria: contra o MÊS
+// ANTERIOR (um mês só, volátil) e contra a MÉDIA dos últimos meses em janela do
+// mesmo tamanho. Quando as duas apontam o mesmo gasto, dois cartões com dois
+// percentuais diferentes leem como erro de cálculo. A regra é: a do mês anterior
+// fala e absorve a frase da média; a da média se cala só nesse caso.
+//
+// As três funções abaixo existem para as regras não divergirem sobre "o outro
+// cartão vai falar?". Os portões ficam definidos uma vez só.
+function advMomGrowth(an) {
+  const top = ((an.categories && an.categories.grew) || [])[0];
+  if (!top || !top.comparable) return null;
+  if (top.pct == null || top.pct < ADV.categoryGrowthPct) return null;
+  if (top.diff < ADV.categoryGrowthMin) return null;
+  return top;
+}
+
+function advMomDrop(an) {
+  const top = ((an.categories && an.categories.shrank) || [])[0];
+  if (!top || !top.comparable) return null;
+  // O ELOGIO ERRADO. No dia 3 do mês, toda categoria "caiu" em relação ao mês
+  // anterior INTEIRO; parabenizar por isso é o alerta irrelevante clássico. Em
+  // mês em curso quem fala é `anomalia-queda`, que compara janelas iguais.
+  const per = an.averages;
+  if (per && per.isCurrentMonth && per.elapsedDays < per.totalDays) return null;
+  if (Math.abs(top.diff) < ADV.categoryGrowthMin) return null;
+  if (top.pct == null || Math.abs(top.pct) < 10) return null;
+  return top;
+}
+
+function advSameAnomaly(an, lista, id) {
+  const a = an.anomalies;
+  if (!a || !a.available) return null;
+  const top = (a[lista] || [])[0];
+  return top && top.id === id ? top : null;
+}
+
 function advCard(o) {
   return {
     id: o.id,
@@ -20605,20 +20663,21 @@ const ADVISOR_RULES = [
   {
     id: "categoria-em-alta",
     run({ an }) {
-      const top = (an.categories.grew || [])[0];
-      if (!top || !top.comparable) return null;
-      // [M32] Se a leitura por média comparável já nomeou esta categoria,
-      // este cartão se cala: é o mesmo fato com base pior.
-      const anom = an.anomalies && an.anomalies.available ? (an.anomalies.upByPct || [])[0] : null;
-      if (anom && anom.id === top.id) return null;
-      if (top.pct == null || top.pct < ADV.categoryGrowthPct) return null;
-      if (top.diff < ADV.categoryGrowthMin) return null;
+      const top = advMomGrowth(an);
+      if (!top) return null;
+      // [M32] Quando a leitura por média comparável aponta a MESMA categoria,
+      // as duas frases viram uma só. Dois cartões com dois percentuais sobre o
+      // mesmo gasto leem como erro de cálculo; e a leitura da média é a que
+      // separa "tendência" de "mês atípico", então ela entra aqui em vez de
+      // sumir.
+      const anom = advSameAnomaly(an, "upByPct", top.id);
       return advCard({
         id: "categoria-em-alta",
         tone: top.pct >= 40 ? "warn" : "info",
         icon: top.icon || "arrowUpRight",
         title: `Você gastou ${top.pct.toFixed(0)}% a mais com ${top.name}`,
-        message: `Foram ${fmtBRL(top.current)} contra ${fmtBRL(top.previous)} no mês anterior. ${fmtBRL(top.diff)} a mais.`,
+        message: `Foram ${fmtBRL(top.current)} contra ${fmtBRL(top.previous)} no mês anterior. ${fmtBRL(top.diff)} a mais.`
+          + (anom ? ` Também está ${Math.abs(anom.pct).toFixed(0)}% acima da sua média dos últimos ${an.anomalies.baselineMonths} meses, então não é só um mês fora da curva.` : ""),
         value: top.diff,
         impact: top.diff,
         action: { label: "Ver análise por categoria", tab: "analytics" },
@@ -20664,6 +20723,10 @@ const ADVISOR_RULES = [
       if (!a || !a.available) return null;
       const top = (a.upByPct || [])[0];
       if (!top) return null;
+      // A leitura do mês anterior vai nomear esta categoria e já leva a frase da
+      // média junto; dizer de novo aqui seria o mesmo fato duas vezes.
+      const mom = advMomGrowth(an);
+      if (mom && mom.id === top.id) return null;
       return advCard({
         id: "anomalia-alta",
         tone: top.tone === "warn" ? "warn" : "info",
@@ -20710,6 +20773,8 @@ const ADVISOR_RULES = [
       if (!a || !a.available) return null;
       const top = (a.down || [])[0];
       if (!top) return null;
+      const mom = advMomDrop(an);
+      if (mom && mom.id === top.id) return null;
       return advCard({
         id: "anomalia-queda",
         tone: "positive",
@@ -21004,25 +21069,17 @@ const ADVISOR_RULES = [
   {
     id: "categoria-em-queda",
     run({ an }) {
-      const top = (an.categories.shrank || [])[0];
-      if (!top || !top.comparable) return null;
-      // [M32] O ELOGIO ERRADO. No dia 3 do mês, toda categoria "caiu" em
-      // relação ao mês anterior inteiro; parabenizar por isso é o alerta
-      // irrelevante clássico. Em mês em curso quem fala é `anomalia-queda`,
-      // que compara janelas do mesmo tamanho.
-      const per = an.averages;
-      if (per && per.isCurrentMonth && per.elapsedDays < per.totalDays) return null;
-      const queda = an.anomalies && an.anomalies.available ? (an.anomalies.down || [])[0] : null;
-      if (queda && queda.id === top.id) return null;
+      const top = advMomDrop(an);
+      if (!top) return null;
       const saved = Math.abs(top.diff);
-      if (saved < ADV.categoryGrowthMin) return null;
-      if (top.pct == null || Math.abs(top.pct) < 10) return null;
+      const anom = advSameAnomaly(an, "down", top.id);
       return advCard({
         id: "categoria-em-queda",
         tone: "positive",
         icon: "arrowDownRight",
         title: `Você economizou ${fmtBRL(saved)} em ${top.name}`,
-        message: `Caiu ${Math.abs(top.pct).toFixed(0)}% em relação ao mês anterior. Mantido o ritmo, são ${fmtBRL(mulMoney(saved, 12))} em um ano.`,
+        message: `Caiu ${Math.abs(top.pct).toFixed(0)}% em relação ao mês anterior. Mantido o ritmo, são ${fmtBRL(mulMoney(saved, 12))} em um ano.`
+          + (anom ? ` Também está abaixo da sua média dos últimos ${an.anomalies.baselineMonths} meses, então não é só um mês mais barato.` : ""),
         value: saved,
         impact: saved,
       });

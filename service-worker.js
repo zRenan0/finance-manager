@@ -63,6 +63,8 @@
 // entraram no pacote e na folha de Planejamento.
 // v70: anomalias em janela comparável (M32) e o painel por tipo de recorrência
 // com a ficha de revisão (M33) entraram no pacote e na folha de Inteligência.
+// Vai junto a correção do arredondamento da estimativa diária em `forecast.js`,
+// que fazia a caminhada do fechamento divergir da soma das parcelas.
 const VERSION = "v70";
 const BUILD_ID = VERSION;
 const CACHE_NAME = "financas-cache-" + VERSION;

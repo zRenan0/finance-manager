@@ -192,16 +192,23 @@ section("4. [M32] O elogio errado no meio do mês");
   check("mês fechado continua elogiando como antes",
     regra("categoria-em-queda").run({ an: anFechado }) !== null);
 
+  // Quando as duas leituras apontam a MESMA categoria, existe um cartão só: o do
+  // mês anterior fala e absorve a frase da média. Dois percentuais diferentes
+  // sobre o mesmo gasto leem como erro de cálculo.
   const anDuplicado = {
     ...anFechado,
     anomalies: {
-      available: true, up: [], upByPct: [],
+      available: true, up: [], upByPct: [], baselineMonths: 3,
       down: [{ id: "mercado", name: "Mercado", diff: -300, current: 700, baseline: 1000 }],
       basis: "mês fechado, contra a média dos últimos 3 meses",
     },
   };
-  check("o mesmo fato não é dito duas vezes (queda)",
-    regra("categoria-em-queda").run({ an: anDuplicado }) === null);
+  const fundidoQueda = regra("categoria-em-queda").run({ an: anDuplicado });
+  check("o mesmo fato vira um cartão só (queda)",
+    !!fundidoQueda && /abaixo da sua média dos últimos 3 meses/.test(txt(fundidoQueda.message)),
+    fundidoQueda && fundidoQueda.message);
+  check("e a leitura por média se cala nesse caso (queda)",
+    regra("anomalia-queda").run({ an: anDuplicado }) === null);
 
   const anAlta = {
     categories: { grew: [{ id: "transporte", name: "Transporte", comparable: true, diff: 300, pct: 30 }], shrank: [] },
@@ -213,8 +220,14 @@ section("4. [M32] O elogio errado no meio do mês");
       basis: "mês fechado, contra a média dos últimos 3 meses", baselineMonths: 3,
     },
   };
-  check("o mesmo fato não é dito duas vezes (alta)",
-    regra("categoria-em-alta").run({ an: anAlta }) === null);
+  const fundidoAlta = regra("categoria-em-alta").run({ an: anAlta });
+  check("o mesmo fato vira um cartão só (alta)",
+    !!fundidoAlta && /30% acima da sua média dos últimos 3 meses/.test(txt(fundidoAlta.message)),
+    fundidoAlta && fundidoAlta.message);
+  check("a fusão mantém o título antigo, que outros testes já cobram",
+    /Você gastou 30% a mais com Transporte/.test(txt(fundidoAlta.title)), fundidoAlta.title);
+  check("e a leitura por média se cala nesse caso (alta)",
+    regra("anomalia-alta").run({ an: anAlta }) === null);
 
   const anQueda = {
     categories: { grew: [], shrank: [] },

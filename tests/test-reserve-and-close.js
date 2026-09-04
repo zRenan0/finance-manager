@@ -24,6 +24,12 @@ const ctx = {
 };
 ctx.window = ctx; ctx.self = ctx; ctx.globalThis = ctx;
 vm.createContext(ctx);
+
+// Relógio congelado. O fechamento do mês não existe no último dia do mês (não
+// sobra nenhum dia para projetar), e a escada da reserva depende de meses de
+// histórico. Ver `tests/helpers/fixed-clock.js`.
+const relogio = require("./helpers/fixed-clock").congelar(ctx);
+const Date = relogio.DataFixa;
 [
   "js/utils.js", "js/rules.js", "js/layout.js", "js/storage.js", "js/accounts.js", "js/budgets.js",
   "js/debts.js", "js/metrics.js", "js/wealth.js", "js/goals.js", "js/forecast.js", "js/score.js", "js/demo.js",

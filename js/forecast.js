@@ -359,7 +359,20 @@ function buildForecast(data, refIso) {
   const remainingCurrent = Math.max(0, moneyToCents(baseline.monthly) - moneyToCents(spentSoFar));
   const [cy, cm] = currentKey.split("-").map(Number);
   const daysLeftInMonth = Math.max(1, daysInMonthOf(cy, cm - 1) - Number(today.slice(8, 10)));
-  const dailyCurrent = Math.round(remainingCurrent / daysLeftInMonth);
+  // A ESTIMATIVA DO MÊS CORRENTE É DISTRIBUÍDA EM CENTAVOS INTEIROS.
+  //
+  // Arredondar por dia e repetir o valor pelos dias que faltam sobra até meio
+  // centavo por dia. No dia 20 sobram dez dias e a diferença passa despercebida;
+  // no dia 3 sobram 27, e a caminhada diária terminava 13 centavos longe da soma
+  // das quatro parcelas que o cartão do M29 mostra. Duas rotas para o mesmo
+  // número precisam chegar ao mesmo centavo: uma conta escrita na tela que não
+  // fecha destrói a confiança no resto do cartão.
+  //
+  // Piso mais resto nos primeiros dias: a soma dos dias volta a ser exatamente
+  // `remainingCurrent`, qualquer que seja o dia de hoje.
+  const dailyCurrent = Math.floor(remainingCurrent / daysLeftInMonth);
+  const dailyCurrentRest = remainingCurrent - dailyCurrent * daysLeftInMonth;
+  let currentMonthDays = 0;
 
   const days = [];
   let balanceC = moneyToCents(start);
@@ -374,7 +387,13 @@ function buildForecast(data, refIso) {
     const row = byDay.get(iso) || { income: 0, expense: 0 };
 
     const dim = daysInMonthOf(cursor.getFullYear(), cursor.getMonth());
-    const variableC = key === currentKey ? dailyCurrent : Math.round(moneyToCents(baseline.monthly) / dim);
+    let variableC;
+    if (key === currentKey) {
+      currentMonthDays += 1;
+      variableC = dailyCurrent + (currentMonthDays <= dailyCurrentRest ? 1 : 0);
+    } else {
+      variableC = Math.round(moneyToCents(baseline.monthly) / dim);
+    }
 
     const deltaC = row.income - row.expense - variableC;
     balanceC += deltaC;
@@ -453,15 +472,15 @@ function monthCloseForecast(forecast) {
 
   // O NÚMERO MOSTRADO É O DA PRÓPRIA CONTA, NÃO O DA CAMINHADA DIÁRIA.
   //
-  // As duas rotas chegam ao mesmo lugar, mas não ao mesmo centavo: a caminhada
-  // dia a dia arredonda a cada passo e a soma das parcelas arredonda uma vez.
-  // No conjunto da demonstração a diferença é de três centavos.
+  // As duas rotas chegam ao mesmo lugar: a caminhada dia a dia soma centavos
+  // inteiros e a distribuição da estimativa variável espalha o resto nos
+  // primeiros dias, então o total do mês é exatamente o mesmo dos dois lados.
+  // (Antes não era: arredondar a cota diária e repeti-la deixava a caminhada até
+  // treze centavos longe da soma quando o mês ainda tinha muitos dias.)
   //
-  // Três centavos não mudam decisão nenhuma, mas uma conta escrita na tela que
-  // não fecha destrói a confiança no resto do cartão. Então o card exibe o
-  // resultado da SOMA que ele mostra, e a caminhada fica ao lado como
-  // conferência: `divergencia` existe para o teste travar que as duas rotas
-  // continuam concordando, e não para aparecer na tela.
+  // Ainda assim o cartão exibe o resultado da SOMA que ele mostra, e a caminhada
+  // fica ao lado como conferência: `divergencia` existe para o teste travar que
+  // as duas rotas continuam concordando, e não para aparecer na tela.
   const projetado = roundMoney(subMoney(subMoney(addMoney(saldoAtual, receitas), contas), variaveis));
   const projetadoDiario = roundMoney(ultimo.balance);
 

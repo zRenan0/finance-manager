@@ -2,6 +2,20 @@
 
 ## Não publicado
 
+### A conta do fechamento do mês voltou a fechar no centavo
+
+- A previsão distribuía a estimativa de gasto variável arredondando a cota diária
+  e repetindo-a. Sobrava até meio centavo por dia: no fim do mês passava
+  despercebido, no começo a caminhada dia a dia terminava **treze centavos** longe
+  da soma das quatro parcelas mostradas no cartão.
+- Agora o resto é espalhado nos primeiros dias, em centavos inteiros. As duas
+  rotas chegam ao mesmo número em qualquer dia do mês.
+- A suíte automatizada passou a **congelar o relógio** nos cenários que dependiam
+  do dia: quatro arquivos reprovavam nos dez primeiros dias de cada mês porque as
+  fixtures lançam no dia 10 e o app (corretamente) ignora o que ainda não
+  aconteceu. `npm test` passa inteiro pela primeira vez desde o início da
+  auditoria.
+
 ### O M32 passou a comparar períodos do mesmo tamanho
 
 - Cartão novo nas recomendações, "Fora do seu padrão": as categorias que fugiram
@@ -15,6 +29,10 @@
   em curso, quem fala é a leitura por janelas iguais; em mês fechado, nada mudou.
 - A aba Comparar avisa quando o mês ainda está em curso, em vez de deixar o
   "−7% de gastos" do dia 3 parecer economia.
+- Quando as duas leituras apontam a mesma categoria, elas viram **um cartão só**:
+  "Você gastou 30% a mais com Transporte… e também está 28% acima da sua média
+  dos últimos 3 meses, então não é só um mês fora da curva." Dois percentuais
+  diferentes sobre o mesmo gasto leem como erro de cálculo.
 - Cinco portões contra alerta irrelevante: dias decorridos, meses de base, valor
   mínimo da base, diferença em reais e variação em percentual. Uma categoria de
   R$ 12 que virou R$ 30 subiu 150% e não vira aviso.
