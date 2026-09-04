@@ -291,6 +291,26 @@ function decodeSgmlEntities(value) {
     .replace(/&amp;/gi, "&");
 }
 
+// [M35] O saldo que o BANCO declara no próprio arquivo (`<LEDGERBAL>`), com a
+// data a que ele se refere. Não vira lançamento e não entra em conta nenhuma:
+// serve só para oferecer a conciliação já preenchida, que é a diferença entre
+// "informar o saldo" e "importar o saldo". Ausente na maioria dos CSV e em OFX
+// incompletos, então tudo que depende dele é opcional.
+function parseOfxLedgerBalance(text) {
+  const bloco = String(text || "").split(/<LEDGERBAL>/i)[1];
+  if (!bloco) return null;
+  const escopo = bloco.split(/<\/LEDGERBAL>/i)[0];
+  const get = (tag) => {
+    const m = escopo.match(new RegExp(`<${tag}>([^<\r\n]+)`, "i"));
+    return m ? m[1].trim() : null;
+  };
+  const amount = parseBrNumber(get("BALAMT"));
+  if (!Number.isFinite(amount)) return null;
+  const dt = get("DTASOF");
+  const date = dt && /^\d{8}/.test(dt) ? `${dt.slice(0, 4)}-${dt.slice(4, 6)}-${dt.slice(6, 8)}` : null;
+  return { amount, date: date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null };
+}
+
 function parseOfxStatement(text) {
   const blocks = text.split(/<STMTTRN>/i).slice(1);
   if (blocks.length === 0) throw new ImportError("NO_ROWS", "Nenhuma transação encontrada no OFX. O arquivo pode estar incompleto.");
@@ -327,7 +347,7 @@ function parseOfxStatement(text) {
     out.push({ date, amount, description: memo, externalId: fitid ? String(fitid).slice(0, 120) : null });
   }
   if (out.length === 0) throw new ImportError("NO_ROWS", "O OFX foi lido, mas nenhuma transação válida foi encontrada.");
-  return { rows: out, skipped, format: "ofx" };
+  return { rows: out, skipped, format: "ofx", statementBalance: parseOfxLedgerBalance(text) };
 }
 
 // Detecta o formato pelo conteúdo (não confia só na extensão) e delega.
@@ -467,6 +487,8 @@ function prepareImportRows(rawFile, filename, data) {
     pageCount: parsed.pageCount || null,
     roles: roleCounts,
     duplicates: duplicateCounts,
+    // [M35] Só existe quando o arquivo declara o saldo (OFX com `<LEDGERBAL>`).
+    statementBalance: parsed.statementBalance || null,
   };
   return prepared;
 }

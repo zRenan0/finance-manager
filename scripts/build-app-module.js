@@ -21,6 +21,7 @@ const SOURCES = Object.freeze([
   "js/accounts.js",
   "js/movements.js",
   "js/data-sources.js",
+  "js/reconcile.js",
   "js/debts.js",
   "js/budgets.js",
   "js/charts.js",

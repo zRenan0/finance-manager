@@ -5,6 +5,17 @@ function showFormErrors(errors, summary) {
   notify(summary || Object.values(errors)[0] || "Revise os campos indicados", "warn");
 }
 
+// [M35] A data da conferência. Vazio significa hoje (é o caminho de sempre);
+// data futura é recusada em vez de corrigida em silêncio, porque conferir
+// contra um saldo que ainda não existe produziria diferença inventada e, pior,
+// um ajuste datado no futuro.
+function reconcileCheckDate() {
+  const informada = String(state.accountsUi.reconcileDate || "").slice(0, 10);
+  if (!informada) return todayIso();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(informada) || informada > todayIso()) return null;
+  return informada;
+}
+
 function removeTransactionsWithIntegrity(data, ids) {
   const idSet = new Set(ids || []);
   let next = data;
@@ -815,6 +826,7 @@ function onClick(e) {
         onConfirm: () => {
           setData((d) => removeAccountWithIntegrity(d, id));
           if (state.accountsUi.reconcileId === id) { state.accountsUi.reconcileId = null; state.accountsUi.reconcileValue = ""; }
+          state.accountsUi.reconcileReview = null;
           if (state.accountsUi.accountForm && state.accountsUi.accountForm.id === id) state.accountsUi.accountForm = null;
           state.accountsUi.transferForm = null;
           state.accountsUi.payment = null;
@@ -825,15 +837,43 @@ function onClick(e) {
     }
     case "account-reconcile-open": {
       const a = accountById(state.data,id); if (!a) break;
-      state.accountsUi.reconcileId = id; state.accountsUi.reconcileValue = moneyDraft(accountBalance(state.data,id,todayIso())); render(); break;
+      state.accountsUi.reconcileId = id; state.accountsUi.reconcileReview = null;
+      state.accountsUi.reconcileDate = todayIso();
+      state.accountsUi.reconcileValue = moneyDraft(accountBalance(state.data,id,todayIso())); render(); break;
     }
-    case "account-reconcile-cancel": state.accountsUi.reconcileId = null; state.accountsUi.reconcileValue = ""; render(); break;
+    case "account-reconcile-cancel": state.accountsUi.reconcileId = null; state.accountsUi.reconcileValue = ""; state.accountsUi.reconcileDate = ""; state.accountsUi.reconcileReview = null; render(); break;
+    // [M35] O passo que faltava. Compara e PROCURA a causa; não grava nada. A
+    // gravação continua sendo `account-reconcile-save`, agora sempre precedida
+    // por esta tela, que é onde a diferença ganha explicação possível.
+    case "account-reconcile-check": {
+      const actual = parseMoneyInput(state.accountsUi.reconcileValue);
+      if (!moneyWithinMax(actual)) { showFormErrors({ "reconcile-balance-input": Number.isFinite(actual) ? moneyMaxMessage("Saldo") : "Informe o saldo visto no banco." }); break; }
+      const quando = reconcileCheckDate();
+      if (!quando) { showFormErrors({ "reconcile-date-input": "Informe uma data até hoje." }); break; }
+      const review = buildReconciliationModel(state.data, id, actual, quando);
+      if (!review) break;
+      state.accountsUi.reconcileReview = review; render(); break;
+    }
+    case "account-reconcile-edit": state.accountsUi.reconcileReview = null; render(); break;
+    // Levar para a lista de movimentos JÁ FILTRADA pela conta é o que
+    // transforma a hipótese em conferência: sem o filtro, quem sai daqui cai
+    // numa lista de tudo e desiste de procurar.
+    case "account-reconcile-inspect": {
+      state.analyticsView = "movements";
+      state.movementFilters = { ...state.movementFilters, accountId: id, type: "all", categoryId: "", source: "" };
+      state.analyticsLimit = 30;
+      setState({ tab: "analytics" });
+      EventBus.emit(APP_EVENTS.TAB_CHANGED, { tab: "analytics" });
+      break;
+    }
     case "account-reconcile-save": {
       const actual = parseMoneyInput(state.accountsUi.reconcileValue);
       if (!moneyWithinMax(actual)) { showFormErrors({ "reconcile-balance-input": Number.isFinite(actual) ? moneyMaxMessage("Saldo") : "Informe o saldo visto no banco." }); break; }
-      const result = reconcileAccount(state.data,id,actual,todayIso());
+      const quando = reconcileCheckDate();
+      if (!quando) { showFormErrors({ "reconcile-date-input": "Informe uma data até hoje." }); break; }
+      const result = reconcileAccount(state.data,id,actual,quando);
       setData(() => result.data);
-      state.accountsUi.reconcileId = null; state.accountsUi.reconcileValue = "";
+      state.accountsUi.reconcileId = null; state.accountsUi.reconcileValue = ""; state.accountsUi.reconcileDate = ""; state.accountsUi.reconcileReview = null;
       notify(result.adjustment ? `Conciliação registrada (${fmtBRL(result.adjustment.amount)})` : "O saldo já estava conciliado"); break;
     }
     case "card-new": state.revealTarget = "card-form"; state.accountsUi.cardForm = freshCardForm(); state.accountsUi.accountForm = null; render(); break;
@@ -2147,6 +2187,18 @@ function onClick(e) {
         transferIds: newTransfers.map((transfer) => transfer.id),
       };
       saveImportUndo(state.importUndo);
+      // [M35] O OFX costuma declarar o saldo da conta (`<LEDGERBAL>`). Ele não
+      // vira lançamento nem ajuste: deixa a conferência daquela conta ABERTA e
+      // já preenchida com o número do banco, para a pessoa comparar quando
+      // chegar em Contas. Nada é gravado por isso: o passo de revisão do M35
+      // continua no meio do caminho.
+      const saldoDoExtrato = meta.statementBalance;
+      if (saldoDoExtrato && documentKind === "account" && destinationId) {
+        state.accountsUi.reconcileId = destinationId;
+        state.accountsUi.reconcileValue = moneyDraft(saldoDoExtrato.amount);
+        state.accountsUi.reconcileDate = saldoDoExtrato.date && saldoDoExtrato.date <= todayIso() ? saldoDoExtrato.date : todayIso();
+        state.accountsUi.reconcileReview = null;
+      }
       state.importRows = null; state.importFilename = null; state.importDestinationId = ""; state.importVisible = IMPORT_PAGE_SIZE;
       const importedParts = [];
       if (newTx.length) importedParts.push(plural(newTx.length, "lançamento importado", "lançamentos importados"));

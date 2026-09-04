@@ -12,7 +12,8 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 
 | Campo | Valor |
 |---|---|
-| Módulo atual | **M34** (concluído) |
+| Módulo atual | **M35** (concluído) |
+| Status do M35 | **CONCLUÍDO** - a conciliação ganhou o passo de revisão: compara os dois saldos, procura o movimento que fecharia a diferença no centavo (repetido, transferência, fatura, ajuste anterior, sinal invertido, fatura vencida) e só grava o ajuste depois do pedido. O saldo do OFX (`LEDGERBAL`) abre a conferência preenchida sem virar lançamento. Cache em `v72` |
 | Status do M34 | **CONCLUÍDO** - atraso e encargos do contrato entraram na Central de Dívidas, e a escolha entre avalanche e bola de neve virou comparação com vantagem, desvantagem e os números da pessoa; ordem que não quita é avisada antes da escolha. Cache em `v71` |
 | Status do M33 | **CONCLUÍDO** - painel por tipo de recorrência (streaming, software, academia, telefonia, moradia, educação, seguros, serviços), total anual de tudo que se repete e ficha "Revisar assinatura" com perguntas por tipo; a marcação guarda data, nunca veredito. Cache em `v70` |
 | Status do M32 | **CONCLUÍDO** - anomalias contra a própria média em janela do mesmo tamanho, com a base escrita na tela; três frases do roteiro entregues e o elogio falso do começo do mês eliminado |
@@ -47,10 +48,10 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 | Status do M3 | **CONCLUÍDO** — aplicado e confirmado no banco em 2026-08-28 |
 | Status do M2 | **CONCLUÍDO** — nenhuma vulnerabilidade de autorização; invariantes travados por teste |
 | Status do M1 | **CONCLUÍDO** — aplicado e confirmado; gatilho capturado e versionado |
-| Módulos concluídos | M0 a M34 |
-| Próximo módulo | M35 - Conciliação financeira |
+| Módulos concluídos | M0 a M35 |
+| Próximo módulo | M36 - Metas e inflação |
 | Branch | `deploy-atualizado` (árvore limpa no início do M0) |
-| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `tests/test-cloud-sync.js`, `tests/test-account-backend.js`, `tests/test-critical-actions.js`, `tests/test-coverage.js`, `tests/test-security-adversarial.js`, `tests/test-observability.js`, `tests/test-data-inventory-lgpd.js`, `tests/test-third-party-transparency.js`, `supabase/tests/verify_security_boundary.sql`, `scripts/check-deploy.js`, `scripts/serve.js`, `scripts/coverage.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/storage.js`, `js/cloud-sync.js` (M10), `js/analytics.js`, `js/forecast.js`, `js/wrapped.js`, `js/screens/analytics.js` (M11), `js/backup-crypto.js`, `js/app.js`, `js/actions.js`, `js/storage.js`, `js/screens/settings.js`, `css/components.css`, `scripts/build-app-module.js` (M12), `netlify/functions/sync.js` (M13), `js/import.js`, `netlify/functions/_shared/finance-schema.js` (M14), observabilidade em backend, frontend e Service Worker (M17), inventário e tela de Privacidade (M18), registro de terceiros e operadores (M19), `js/modules/app.generated.js` (regerado). Documentação: inventário do M8, protocolo do M10, backup protegido do M12, `docs/VERSIONAMENTO.md` do M13, observabilidade do M17, inventário LGPD do M18, terceiros do M19 e desenhos de M15 a M19. **M20 (só documentação e verificação, nenhum arquivo de produção):** `SECURITY_INCIDENT_RESPONSE.md` (novo), `tests/test-incident-response.js` (novo), `scripts/check-release.js`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. **M21:** `reportar-vulnerabilidade.html` (novo), `css/reportar.css` (novo), `SECURITY.md` (novo), `scripts/security-txt.js` (novo), `tests/test-responsible-disclosure.js` (novo), `vercel.json`, `scripts/build-dist.js`, `scripts/serve.js`, `scripts/check-release.js`, `scripts/check-deploy.js`, `landing.html`, `tests/test-landing.js`, `tests/browser/run-landing.js`, `SECURITY_INCIDENT_RESPONSE.md`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. **M22:** `docs/MARCA.md` (novo), `tests/test-brand.js` (novo), `index.html`, `manifest.webmanifest`, `landing.html`, `scripts/check-release.js`, `scripts/security-txt.js`, `SECURITY.md`, `SECURITY_INCIDENT_RESPONSE.md`, `README.md`, `CHANGELOG.md`. **M23:** `landing.html`, `css/landing.css`, `service-worker.js` (v63), `tests/test-brand.js`, `tests/test-responsible-disclosure.js`, `tests/test-third-party-transparency.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M24:** `js/screens/onboarding.js`, `js/app.js`, `js/actions.js`, `css/screens/notifications-onboarding.css`, `service-worker.js` (v64), `js/modules/app.generated.js`, `tests/test-onboarding.js`, `tests/browser/run-browser.js`, `tests/browser/run-pwa.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M34:** `tests/test-debt-center.js` (novo), `js/debts.js`, `js/storage.js`, `js/screens/debts.js`, `js/app.js`, `js/actions.js`, `css/base.css`, `service-worker.js` (v71), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M32/M33:** `tests/test-anomalies-subscriptions.js` (novo), `tests/helpers/fixed-clock.js` (novo), `tests/test-health.js`, `tests/test-insights-engine.js`, `tests/test-render.js`, `tests/test-reserve-and-close.js`, `js/forecast.js`, `js/analytics.js`, `js/advisor.js`, `js/recurring.js`, `js/storage.js`, `js/screens/insights.js`, `js/screens/subscriptions.js`, `js/app.js`, `js/actions.js`, `css/screens/intelligence.css`, `service-worker.js` (v70), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M30/M31:** `tests/test-daily-and-purchase.js` (novo), `js/forecast.js`, `js/insights.js`, `js/screens/calendar.js`, `js/screens/simulate.js`, `js/app.js`, `css/screens/planning.css`, `service-worker.js` (v69), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M28/M29:** `tests/test-reserve-and-close.js` (novo), `js/metrics.js`, `js/forecast.js`, `js/screens/health.js`, `js/screens/calendar.js`, `css/screens/health.css`, `css/screens/planning.css`, `service-worker.js` (v68), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M27:** `tests/test-score-explainable.js` (novo), `js/score.js`, `js/screens/health.js`, `css/screens/health.css`, `service-worker.js` (v67), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M26:** `tests/test-local-only-notice.js` (novo), `js/app.js`, `js/actions.js`, `js/screens/dashboard.js`, `css/screens/dashboard.css`, `css/components.css`, `service-worker.js` (v66), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M25:** `js/demo.js` (novo), `tests/test-demo-mode.js` (novo), `js/app.js`, `js/actions.js`, `js/screens/onboarding.js`, `css/components.css`, `service-worker.js` (v65), `scripts/build-app-module.js`, `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. |
+| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `tests/test-cloud-sync.js`, `tests/test-account-backend.js`, `tests/test-critical-actions.js`, `tests/test-coverage.js`, `tests/test-security-adversarial.js`, `tests/test-observability.js`, `tests/test-data-inventory-lgpd.js`, `tests/test-third-party-transparency.js`, `supabase/tests/verify_security_boundary.sql`, `scripts/check-deploy.js`, `scripts/serve.js`, `scripts/coverage.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/storage.js`, `js/cloud-sync.js` (M10), `js/analytics.js`, `js/forecast.js`, `js/wrapped.js`, `js/screens/analytics.js` (M11), `js/backup-crypto.js`, `js/app.js`, `js/actions.js`, `js/storage.js`, `js/screens/settings.js`, `css/components.css`, `scripts/build-app-module.js` (M12), `netlify/functions/sync.js` (M13), `js/import.js`, `netlify/functions/_shared/finance-schema.js` (M14), observabilidade em backend, frontend e Service Worker (M17), inventário e tela de Privacidade (M18), registro de terceiros e operadores (M19), `js/modules/app.generated.js` (regerado). Documentação: inventário do M8, protocolo do M10, backup protegido do M12, `docs/VERSIONAMENTO.md` do M13, observabilidade do M17, inventário LGPD do M18, terceiros do M19 e desenhos de M15 a M19. **M20 (só documentação e verificação, nenhum arquivo de produção):** `SECURITY_INCIDENT_RESPONSE.md` (novo), `tests/test-incident-response.js` (novo), `scripts/check-release.js`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. **M21:** `reportar-vulnerabilidade.html` (novo), `css/reportar.css` (novo), `SECURITY.md` (novo), `scripts/security-txt.js` (novo), `tests/test-responsible-disclosure.js` (novo), `vercel.json`, `scripts/build-dist.js`, `scripts/serve.js`, `scripts/check-release.js`, `scripts/check-deploy.js`, `landing.html`, `tests/test-landing.js`, `tests/browser/run-landing.js`, `SECURITY_INCIDENT_RESPONSE.md`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. **M22:** `docs/MARCA.md` (novo), `tests/test-brand.js` (novo), `index.html`, `manifest.webmanifest`, `landing.html`, `scripts/check-release.js`, `scripts/security-txt.js`, `SECURITY.md`, `SECURITY_INCIDENT_RESPONSE.md`, `README.md`, `CHANGELOG.md`. **M23:** `landing.html`, `css/landing.css`, `service-worker.js` (v63), `tests/test-brand.js`, `tests/test-responsible-disclosure.js`, `tests/test-third-party-transparency.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M24:** `js/screens/onboarding.js`, `js/app.js`, `js/actions.js`, `css/screens/notifications-onboarding.css`, `service-worker.js` (v64), `js/modules/app.generated.js`, `tests/test-onboarding.js`, `tests/browser/run-browser.js`, `tests/browser/run-pwa.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M35:** `js/reconcile.js` (novo), `tests/test-reconciliation.js` (novo), `js/screens/accounts.js`, `js/actions.js`, `js/app.js`, `js/import.js`, `js/screens/import.js`, `css/utilities.css`, `scripts/build-app-module.js`, `service-worker.js` (v72), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M34:** `tests/test-debt-center.js` (novo), `js/debts.js`, `js/storage.js`, `js/screens/debts.js`, `js/app.js`, `js/actions.js`, `css/base.css`, `service-worker.js` (v71), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M32/M33:** `tests/test-anomalies-subscriptions.js` (novo), `tests/helpers/fixed-clock.js` (novo), `tests/test-health.js`, `tests/test-insights-engine.js`, `tests/test-render.js`, `tests/test-reserve-and-close.js`, `js/forecast.js`, `js/analytics.js`, `js/advisor.js`, `js/recurring.js`, `js/storage.js`, `js/screens/insights.js`, `js/screens/subscriptions.js`, `js/app.js`, `js/actions.js`, `css/screens/intelligence.css`, `service-worker.js` (v70), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M30/M31:** `tests/test-daily-and-purchase.js` (novo), `js/forecast.js`, `js/insights.js`, `js/screens/calendar.js`, `js/screens/simulate.js`, `js/app.js`, `css/screens/planning.css`, `service-worker.js` (v69), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M28/M29:** `tests/test-reserve-and-close.js` (novo), `js/metrics.js`, `js/forecast.js`, `js/screens/health.js`, `js/screens/calendar.js`, `css/screens/health.css`, `css/screens/planning.css`, `service-worker.js` (v68), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M27:** `tests/test-score-explainable.js` (novo), `js/score.js`, `js/screens/health.js`, `css/screens/health.css`, `service-worker.js` (v67), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M26:** `tests/test-local-only-notice.js` (novo), `js/app.js`, `js/actions.js`, `js/screens/dashboard.js`, `css/screens/dashboard.css`, `css/components.css`, `service-worker.js` (v66), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M25:** `js/demo.js` (novo), `tests/test-demo-mode.js` (novo), `js/app.js`, `js/actions.js`, `js/screens/onboarding.js`, `css/components.css`, `service-worker.js` (v65), `scripts/build-app-module.js`, `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. |
 | Migration do M13 | `20260831120000_database_schema_version.sql` — **aplicada e confirmada em produção em 2026-08-31** (`database_schema_version = 1`; grants inalterados: só `service_role` e `postgres`). Reversível por `alter table public.cofre_sync_config drop column if exists database_schema_version;` |
 | Migrations criadas até aqui | `20260828120000_rls_auto_enable_least_privilege.sql`, `20260828130000_rls_auto_enable_versionada.sql`, `20260828140000_menor_privilegio_tabelas.sql` (as três **aplicadas e confirmadas em 2026-08-28**), `20260828150000_rls_auto_enable_gatilho.sql` (**ainda não aplicada**; é no-op em produção, onde o gatilho já existe) |
 | Versão do app | `0.30.0` (package.json) |
@@ -3643,6 +3644,126 @@ comprometimento e nenhuma informação dele foi perdida.
 
 ---
 
+## M35 - Conciliação financeira
+
+### Antes
+
+A conciliação existia e funcionava: `reconcileAccount` em `js/accounts.js` recebia
+o saldo visto no banco, calculava a diferença contra `accountBalance`, gravava um
+lançamento `accountAdjustments` com a nota "Conciliação de saldo" e marcava
+`reconciledAt`. A tela era um campo e um botão "Conciliar".
+
+O defeito não era de cálculo, era de sequência: **informar o saldo e gravar o
+ajuste eram o mesmo clique**. Três consequências, todas silenciosas:
+
+1. quem digitava R$ 1.880 nunca descobria POR QUE o app dizia R$ 1.760. O ajuste
+   faz o saldo bater e **esconde a causa**;
+2. um lançamento digitado duas vezes vira ajuste, o mês seguinte repete a
+   diferença, e a base apodrece debaixo de ajustes que ninguém entende;
+3. o caso mais comum de todos - a fatura que o banco já debitou e o app não sabe -
+   virava ajuste de saldo em vez de pagamento de fatura, e a fatura ficava aberta
+   para sempre.
+
+O roteiro do módulo pede exatamente o passo que faltava: comparar, mostrar a
+diferença, ajudar a localizar a causa e **não modificar nada sem aprovação**.
+
+### Alterações
+
+**`js/reconcile.js` (novo, puro, não grava nada).** `buildReconciliationModel`
+devolve saldo calculado, saldo informado, diferença em centavos, direção, a
+janela procurada e as causas possíveis. `accountCashEntries` espelha
+`accountBalance` item por item (transação, transferência nas duas pontas,
+pagamento de fatura e ajuste), com o efeito COM SINAL sobre o saldo.
+
+**A procura é aritmética, não adivinhação.** `alvo = -diferença` é o efeito do
+movimento que, se não existisse, faria os dois números baterem. Quem fecha a
+conta no centavo vira hipótese, classificada pelo que é:
+
+| Causa | Como é reconhecida |
+|---|---|
+| `duplicado` | efeito igual ao alvo E existe gêmeo (mesmo efeito, mesma descrição normalizada, até 3 dias) |
+| `transferencia` | efeito igual ao alvo, movimento é transferência |
+| `fatura` | efeito igual ao alvo, movimento é pagamento de fatura registrado aqui |
+| `ajuste` | efeito igual ao alvo, movimento é conciliação anterior |
+| `lancamento` | efeito igual ao alvo, transação comum |
+| `fatura-aberta` | fatura vencida, sem pagamento, com o valor exato da falta (só quando o banco tem MENOS) |
+| `sinal` | efeito igual à METADE do alvo: inverter o sinal muda o saldo em duas vezes o valor |
+| `ausente` | sempre presente, sempre por último |
+
+**A janela é declarada na tela.** Procura desde a última conferência quando ela é
+mais antiga que 90 dias, senão 90 dias; a data de abertura da conta é o piso
+absoluto (antes dela o saldo inicial já embute tudo). A tela diz o intervalo e
+quantos movimentos foram varridos, para a ausência de hipótese não parecer
+descuido.
+
+**A tela ganhou dois passos** (`renderReconcilePanel` em `js/screens/accounts.js`):
+informar saldo + data → **Comparar** (`account-reconcile-check`, que não grava) →
+painel com os dois saldos, a diferença, as hipóteses e três saídas: "Registrar
+ajuste de R$ X", "Alterar valor" e "Vou corrigir o lançamento" (fecha sem tocar em
+nada). Quando os saldos batem, o botão vira "Marcar como conferida" e nenhuma
+hipótese é mostrada.
+
+**A conferência ganhou data** (`reconcileCheckDate` em `js/actions.js`). Existe
+porque o extrato importado declara o saldo de uma data que pode não ser hoje;
+comparar saldo de terça com cálculo de quinta acusaria diferença inventada. Data
+futura é recusada, não corrigida em silêncio.
+
+**Saldo declarado pelo extrato (OFX).** `parseOfxLedgerBalance` lê `<LEDGERBAL>`
+(valor e `DTASOF`) e o carrega em `meta.statementBalance`. Ele **não vira
+lançamento nem ajuste**: a pré-visualização avisa que o arquivo traz o saldo, e
+depois de confirmar a importação a conferência daquela conta abre em Contas já
+preenchida com o número do banco. É o "importa saldo real" do roteiro sem dar ao
+arquivo poder de escrever no saldo.
+
+**"Ver na lista"** leva às movimentações já filtradas pela conta
+(`account-reconcile-inspect`), que é onde a hipótese vira conferência.
+
+### O que ficou de fora, de propósito
+
+- **Nada é corrigido automaticamente.** O app não apaga a duplicata que ele mesmo
+  apontou, não inverte sinal e não registra pagamento de fatura sozinho. Toda
+  hipótese termina numa ação da pessoa.
+- **`reconcileAccount` não mudou.** Mesma assinatura, mesmo comportamento, mesmos
+  testes. O passo novo é anterior a ela.
+- **Nenhum campo novo em dado persistido.** O diagnóstico é calculado na hora e
+  vive só em `state.accountsUi.reconcileReview`.
+
+### Compatibilidade
+
+Sem migração e sem mudança de schema: `SCHEMA_VERSION` continua em 23, `DB_VERSION`
+em 4. `accountAdjustments` continua com o mesmo formato e a mesma nota
+("Conciliação de saldo"), então ajuste gravado por versão anterior é lido igual e
+o servidor não vê diferença. Três campos novos de UI (`reconcileDate`,
+`reconcileReview` e o `statementBalance` da importação) são de sessão e morrem no
+recarregamento. Cliente antigo que receba os mesmos dados se comporta como sempre.
+Cache do Service Worker promovido para `v72` (o pacote e a folha de utilidades
+mudaram).
+
+### Testes
+
+| Teste | Resultado |
+|---|---|
+| `node tests/test-reconciliation.js` (novo) | **PASSOU**; 63 ok |
+| `node tests/test-accounts.js`, `test-movements.js`, `test-import-duplicates.js` | **PASSARAM** |
+| `npm run lint` | **PASSOU** (pegou quatro travessões meus) |
+| `npm run check:build` | **PASSOU**; 73 fontes |
+| `npm test` | **77 arquivos, 0 falhas** |
+| `npm run check:release` | **PASSOU** (só os dois avisos legais de sempre) |
+| `npm run build:dist` | **PASSOU**; 40 arquivos |
+| `npm run test:browser:chromium` | **PASSOU**; 18 de 18 |
+| Navegador real (roteiro do M35, Chromium 390 px) | **PASSOU**; 18 verificações. Duas despesas iguais de R$ 120 lançadas pelo formulário: a conferência abriu preenchida com R$ 1.760,00, informar R$ 1.880,00 produziu "O banco tem R$ 120,00 a mais", as duas cópias saíram como hipótese com o texto de hipótese, sair por "Vou corrigir o lançamento" não mudou saldo, lançamento nem a linha "Conferida: nunca"; só o pedido explícito gravou o ajuste e levou o saldo a R$ 1.880,00; a conferência seguinte, sem diferença, ofereceu apenas "Marcar como conferida"; sem rolagem horizontal e sem erro de console |
+
+**Não validado:** Firefox e WebKit (rodei só o Chromium), `npm run test:pwa` e o
+caminho do `<LEDGERBAL>` com arquivo OFX real de banco - a leitura está coberta por
+teste de unidade e por asserção de contrato, mas nenhum extrato verdadeiro passou
+por ela nesta sessão.
+
+### Status
+
+**CONCLUÍDO.**
+
+---
+
 ## Checklist de regressão
 
 Executar após **todo** módulo que toque no código. Marcar `OK` / `FALHOU` / `NÃO VALIDADO`.
@@ -3664,6 +3785,7 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
 - [ ] `node tests/test-daily-and-purchase.js` (limite diário do M30 e leituras de compra do M31)
 - [ ] `node tests/test-anomalies-subscriptions.js` (janela comparável do M32 e tipos/revisão do M33)
 - [ ] `node tests/test-debt-center.js` (atraso, encargos e estratégias do M34)
+- [ ] `node tests/test-reconciliation.js` (comparação, causas e não gravar do M35)
 - [ ] `node tests/test-accounting-integrity.js` (invariantes contábeis do M11)
 - [ ] `node tests/test-backup-restore.js` (backup, restauração e senha do M12)
 - [ ] `node tests/test-versioning.js` (versões e matriz de compatibilidade do M13)
@@ -3699,6 +3821,7 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
 - [ ] **Pagamento de fatura não vira nova despesa quando as compras já foram lançadas**
 - [ ] **A soma das categorias em Relatórios fecha com "Despesas do mês"** (aporte, amortização e transferência ficam fora dos dois lados)
 - [ ] Ajuste de saldo de conta
+- [ ] **Conciliação (M35): informar o saldo do banco mostra a diferença e as causas ANTES de gravar; sair por "Vou corrigir o lançamento" não altera saldo, lançamento nem a data de conferência**
 - [ ] Criar meta; criar item de patrimônio; criar dívida
 - [ ] Criar recorrência e ver o lançamento previsto aparecer
 - [ ] Categorias: criar, renomear, excluir

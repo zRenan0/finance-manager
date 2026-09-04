@@ -47,7 +47,7 @@ psql <URL_DE_STAGING> -v ON_ERROR_STOP=1 -f supabase/tests/verify_security_bound
 ```
 
 O processo de homologação, publicação e retorno está em `docs/RELEASE.md`. O schema
-de dados está na versão 23 e o cache offline na versão 71. O inventário técnico
+de dados está na versão 23 e o cache offline na versão 72. O inventário técnico
 do armazenamento está em `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`; o inventário de
 tratamento da LGPD está em `docs/INVENTARIO-DE-DADOS.md`; e o registro dos
 serviços externos está em `docs/TERCEIROS-E-OPERADORES.md`.
@@ -1419,6 +1419,8 @@ index.html
 ├── js/storage.js       FinanceStore (adapters, espelho, backup, regras de negócio)
 │                       + [M3] modelo de bens/dívidas e agregações de patrimônio
 ├── js/budgets.js       [NOVO] motor de orçamentos (puro, sem DOM)
+├── js/reconcile.js     [M35] conciliação: compara os dois saldos e procura a
+│                       causa da diferença (puro, sem DOM, não grava nada)
 ├── js/charts.js        gráficos em SVG
 ├── js/import.js        importação de extratos OFX/CSV
 ├── js/pdf.js           [NOVO] escritor de PDF e extrato impresso (puro, sem DOM)

@@ -12197,6 +12197,295 @@ function buildDataSourcesModel(data) {
 
 if (typeof module !== "undefined" && module.exports) module.exports = { DATA_SOURCE_ORDER, sourceTimestamp, buildDataSourcesModel };
 
+// source: js/reconcile.js
+// js/reconcile.js. [M35] Conciliação: o saldo do app contra o saldo do banco.
+//
+// A conciliação já existia em `accounts.js` (`reconcileAccount`) e continua lá,
+// intacta. O que faltava era o passo do meio: o app recebia o saldo visto no
+// banco e gravava o ajuste na mesma batida. Quem digitava R$ 1.200 nunca sabia
+// POR QUE o número dele era outro; ganhava uma linha "Conciliação de saldo" que
+// esconde o erro em vez de mostrá-lo. Um lançamento digitado duas vezes vira
+// ajuste, o mês seguinte repete a diferença, e a base vai apodrecendo debaixo de
+// ajustes que ninguém entende.
+//
+// Este arquivo não grava nada. Ele COMPARA e PROCURA:
+//
+//   comparar   saldo calculado, saldo informado e a diferença entre os dois;
+//   procurar   qual movimento explicaria essa diferença exatamente.
+//
+// A regra do módulo é a mesma do M34: número e hipótese, nunca veredito. O app
+// diz "se este lançamento for cópia, a diferença fecha"; quem decide é a pessoa,
+// e o ajuste só é gravado depois de ela pedir.
+"use strict";
+
+// Sem conferência anterior, procura-se 90 dias para trás. Com conferência
+// anterior mais antiga que isso, procura-se desde ela: o erro entrou depois da
+// última vez que os dois números bateram, então essa é a janela verdadeira.
+const RECONCILE_LOOKBACK_DAYS = 90;
+// Mesma folga da importação (`DUPLICATE_WINDOW_DAYS`): dois movimentos iguais a
+// até três dias são candidatos a "digitei duas vezes".
+const RECONCILE_TWIN_WINDOW_DAYS = 3;
+const RECONCILE_MAX_CANDIDATES = 6;
+
+function reconcileDescriptionKey(value) {
+  return normalizeText(value || "").replace(/[^a-z0-9 ]/g, "").replace(/\s+/g, " ").trim();
+}
+
+function reconcileShiftIso(iso, days) {
+  const base = dateFromIso(iso);
+  base.setDate(base.getDate() + days);
+  return isoOfDate(base);
+}
+
+// ==============================================================================
+// MOVIMENTOS QUE MEXEM NO SALDO DESTA CONTA
+// ==============================================================================
+// Espelha `accountBalance` item por item, de propósito, e mora ao lado dela na
+// mesma lista de fontes. Se um dia a regra do saldo mudar e esta não, a
+// conciliação passa a procurar a causa no lugar errado, pior que não procurar.
+//
+// `effectCents` é o efeito COM SINAL sobre o saldo. É ele, e não o valor
+// digitado, que permite a única pergunta que interessa aqui: "tirar este
+// movimento faria os dois números baterem?".
+function accountCashEntries(data, accountId, asOf) {
+  const account = accountById(data, accountId);
+  if (!account) return [];
+  const limit = asOf || todayIso();
+  const dentro = (date) => String(date) <= limit && String(date) >= account.openingDate;
+  const out = [];
+  (data.transactions || []).forEach((t) => {
+    if (t.accountId !== accountId || t.creditCardId || !dentro(t.date)) return;
+    const cents = moneyToCents(t.amount);
+    out.push({
+      id: t.id, kind: "transaction", type: t.type, date: t.date,
+      description: t.description || (t.type === "income" ? "Receita" : "Despesa"),
+      amount: moneyFromCents(Math.abs(cents)),
+      effectCents: t.type === "income" ? cents : -cents,
+    });
+  });
+  (data.accountTransfers || []).forEach((t) => {
+    if (!dentro(t.date)) return;
+    const cents = moneyToCents(t.amount);
+    const saida = t.fromAccountId === accountId;
+    const entrada = t.toAccountId === accountId;
+    if (!saida && !entrada) return;
+    out.push({
+      id: t.id, kind: "transfer", type: saida ? "transfer-out" : "transfer-in", date: t.date,
+      description: t.description || "Transferência entre contas",
+      amount: moneyFromCents(Math.abs(cents)),
+      effectCents: saida ? -cents : cents,
+    });
+  });
+  (data.cardPayments || []).forEach((p) => {
+    if (p.accountId !== accountId || !dentro(p.date)) return;
+    const card = creditCardById(data, p.creditCardId);
+    const cents = moneyToCents(p.amount);
+    out.push({
+      id: p.id, kind: "card-payment", type: "card-payment", date: p.date,
+      description: `Pagamento da fatura ${card ? card.name : "do cartão"}`,
+      amount: moneyFromCents(Math.abs(cents)), effectCents: -cents,
+    });
+  });
+  (data.accountAdjustments || []).forEach((a) => {
+    if (a.accountId !== accountId || !dentro(a.date)) return;
+    const cents = moneyToCents(a.amount);
+    out.push({
+      id: a.id, kind: "adjustment", type: "adjustment", date: a.date,
+      description: a.note || "Conciliação de saldo",
+      amount: moneyFromCents(Math.abs(cents)), effectCents: cents,
+    });
+  });
+  return out.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+}
+
+// Desde quando procurar. A data de abertura é o piso absoluto: antes dela o
+// saldo inicial já embute tudo, e acusar um movimento de lá seria acusar o que
+// nem entra na conta.
+function reconciliationSearchStart(account, checkedAt) {
+  const padrao = reconcileShiftIso(checkedAt, -RECONCILE_LOOKBACK_DAYS);
+  const anterior = account.reconciledAt && account.reconciledAt < padrao ? account.reconciledAt : padrao;
+  return anterior < account.openingDate ? account.openingDate : anterior;
+}
+
+// ==============================================================================
+// CAUSAS POSSÍVEIS
+// ==============================================================================
+// `alvo` é o efeito do movimento que, se não existisse, faria os dois números
+// baterem. Diferença positiva (banco tem mais) procura uma SAÍDA a mais no app;
+// negativa procura uma ENTRADA a mais. É aritmética, não adivinhação: quando a
+// conta fecha no centavo, a hipótese vale a pena ser mostrada.
+function reconciliationCandidates(data, account, differenceCents, entries, checkedAt) {
+  const alvo = -differenceCents;
+  const porChave = new Map();
+  entries.forEach((e) => {
+    const chave = `${e.effectCents}|${reconcileDescriptionKey(e.description)}`;
+    if (!porChave.has(chave)) porChave.set(chave, []);
+    porChave.get(chave).push(e);
+  });
+  const temGemeo = (e) => {
+    const chave = `${e.effectCents}|${reconcileDescriptionKey(e.description)}`;
+    return (porChave.get(chave) || []).some((o) => o.id !== e.id
+      && Math.abs(daysBetweenIso(o.date, e.date)) <= RECONCILE_TWIN_WINDOW_DAYS);
+  };
+
+  const out = [];
+  entries.forEach((e) => {
+    if (e.effectCents === alvo) out.push(reconciliationExactCandidate(e, temGemeo(e)));
+    // Sinal invertido muda o saldo em DUAS vezes o valor do lançamento: sai de
+    // -100 e vai para +100. Por isso o valor procurado aqui é a metade.
+    else if (alvo % 2 === 0 && e.effectCents !== 0 && e.effectCents * 2 === alvo) out.push(reconciliationSignCandidate(e));
+  });
+  if (differenceCents < 0) out.push(...reconciliationStatementCandidates(data, account, -differenceCents, checkedAt));
+  out.push(reconciliationMissingCandidate(differenceCents));
+
+  return out
+    .sort((a, b) => a.rank - b.rank || String(b.date || "").localeCompare(String(a.date || "")))
+    .slice(0, RECONCILE_MAX_CANDIDATES);
+}
+
+const RECONCILE_KIND_LABEL = Object.freeze({
+  transaction: "Lançamento",
+  transfer: "Transferência",
+  "card-payment": "Pagamento de fatura",
+  adjustment: "Ajuste anterior",
+});
+
+function reconciliationExactCandidate(entry, gemeo) {
+  const quando = fmtDateFull(entry.date);
+  const valor = fmtBRL(entry.amount);
+  if (gemeo) {
+    return {
+      id: `duplicado:${entry.id}`, cause: "duplicado", rank: 0, entryId: entry.id, entryKind: entry.kind,
+      date: entry.date, amount: entry.amount,
+      title: `Possível lançamento repetido: ${entry.description}`,
+      detail: `${valor} em ${quando}. Existe outro movimento igual a poucos dias daqui. Se um dos dois for cópia, apagá-lo fecha a diferença no centavo.`,
+    };
+  }
+  if (entry.kind === "transfer") {
+    return {
+      id: `transferencia:${entry.id}`, cause: "transferencia", rank: 0, entryId: entry.id, entryKind: entry.kind,
+      date: entry.date, amount: entry.amount,
+      title: `Transferência de ${valor} em ${quando}`,
+      detail: "Confira se ela aconteceu mesmo nesta conta e se o outro lado não foi lançado também como receita ou despesa. Contada duas vezes, ela explica a diferença inteira.",
+    };
+  }
+  if (entry.kind === "card-payment") {
+    return {
+      id: `fatura:${entry.id}`, cause: "fatura", rank: 0, entryId: entry.id, entryKind: entry.kind,
+      date: entry.date, amount: entry.amount,
+      title: `${entry.description}: ${valor} em ${quando}`,
+      detail: "O pagamento está registrado aqui. Se o banco ainda não debitou (ou debitou outro valor), é ele que separa os dois saldos.",
+    };
+  }
+  if (entry.kind === "adjustment") {
+    return {
+      id: `ajuste:${entry.id}`, cause: "ajuste", rank: 0, entryId: entry.id, entryKind: entry.kind,
+      date: entry.date, amount: entry.amount,
+      title: `Ajuste de conciliação de ${quando}`,
+      detail: `${valor} registrados numa conferência anterior. Se aquele saldo foi digitado errado, é este ajuste que está sobrando hoje, e um ajuste novo por cima esconderia os dois.`,
+    };
+  }
+  return {
+    id: `lancamento:${entry.id}`, cause: "lancamento", rank: 0, entryId: entry.id, entryKind: entry.kind,
+    date: entry.date, amount: entry.amount,
+    title: `${entry.type === "income" ? "Receita" : "Despesa"} de ${valor}: ${entry.description}`,
+    detail: `Lançada em ${quando}. Confira valor e data no extrato: sem ela, ou com o valor certo, os dois saldos batem exatamente.`,
+  };
+}
+
+function reconciliationSignCandidate(entry) {
+  const era = entry.effectCents > 0 ? "entrada" : "saída";
+  const seria = entry.effectCents > 0 ? "saída" : "entrada";
+  return {
+    id: `sinal:${entry.id}`, cause: "sinal", rank: 1, entryId: entry.id, entryKind: entry.kind,
+    date: entry.date, amount: entry.amount,
+    title: `Sinal invertido? ${entry.description}`,
+    detail: `${fmtBRL(entry.amount)} em ${fmtDateFull(entry.date)}, lançados como ${era}. Se na verdade for ${seria}, a diferença fecha no centavo.`,
+  };
+}
+
+// Fatura vencida sem pagamento registrado e com o valor exato da diferença: o
+// caso clássico de "o banco já debitou e o app não sabe". Vale só quando o banco
+// tem MENOS que o app, que é o sentido de um débito não registrado.
+function reconciliationStatementCandidates(data, account, faltaCents, checkedAt) {
+  const out = [];
+  (data.creditCards || []).forEach((card) => {
+    if (card.accountId !== account.id) return;
+    cardStatements(data, card.id).forEach((s) => {
+      if (s.dueDate > checkedAt || moneyToCents(s.outstanding) !== faltaCents) return;
+      out.push({
+        id: `fatura-aberta:${card.id}:${s.key}`, cause: "fatura-aberta", rank: 0,
+        entryId: null, entryKind: "statement", cardId: card.id, statementKey: s.key,
+        date: s.dueDate, amount: s.outstanding,
+        title: `Fatura do ${card.name} em aberto: ${fmtBRL(s.outstanding)}`,
+        detail: `Venceu em ${fmtDateFull(s.dueDate)} e não tem pagamento registrado aqui. Se o banco já debitou, registre o pagamento da fatura: assim a fatura fecha junto, o que um ajuste de saldo não faria.`,
+      });
+    });
+  });
+  return out;
+}
+
+// Sempre presente, e sempre por último. Quando nenhuma hipótese fecha a conta, a
+// resposta honesta é que falta um movimento, e dizer qual seria o formato dele
+// é mais útil que oferecer um ajuste.
+function reconciliationMissingCandidate(differenceCents) {
+  const valor = fmtBRL(moneyFromCents(Math.abs(differenceCents)));
+  const entrada = differenceCents > 0;
+  return {
+    id: "ausente", cause: "ausente", rank: 2, entryId: null, entryKind: null, date: null,
+    amount: moneyFromCents(Math.abs(differenceCents)),
+    title: `${entrada ? "Entrada" : "Saída"} de ${valor} ainda não registrada`,
+    detail: entrada
+      ? "O banco tem mais do que o app. Procure no extrato um crédito que não foi lançado: salário, estorno, rendimento ou uma transferência recebida."
+      : "O banco tem menos do que o app. Procure no extrato um débito que não foi lançado: tarifa, compra no débito, boleto ou uma transferência enviada.",
+  };
+}
+
+// ==============================================================================
+// O MODELO DA TELA
+// ==============================================================================
+function buildReconciliationModel(data, accountId, informedBalance, date) {
+  const account = accountById(data, accountId);
+  if (!account) return null;
+  const checkedAt = date || todayIso();
+  const calculated = accountBalance(data, accountId, checkedAt);
+  const informed = moneyFromCents(moneyToCents(informedBalance));
+  const differenceCents = moneyToCents(informed) - moneyToCents(calculated);
+  const searchFrom = reconciliationSearchStart(account, checkedAt);
+  const scanned = accountCashEntries(data, accountId, checkedAt).filter((e) => e.date >= searchFrom);
+  return {
+    accountId, accountName: account.name, date: checkedAt,
+    calculated, informed,
+    difference: moneyFromCents(differenceCents),
+    differenceCents,
+    matched: differenceCents === 0,
+    // Nome do ponto de vista de quem lê o extrato, não do banco de dados.
+    direction: differenceCents === 0 ? null : (differenceCents > 0 ? "banco-maior" : "banco-menor"),
+    searchFrom, scannedCount: scanned.length,
+    lastReconciledAt: account.reconciledAt || null,
+    candidates: differenceCents === 0 ? [] : reconciliationCandidates(data, account, differenceCents, scanned, checkedAt),
+  };
+}
+
+// A frase de topo. Fica aqui, e não na tela, porque é ela que carrega a régua do
+// módulo: descrever a diferença sem culpar ninguém e sem prometer explicação.
+function reconciliationHeadline(model) {
+  if (!model) return "";
+  if (model.matched) return "O saldo do aplicativo já é igual ao do banco. Nada foi alterado.";
+  const valor = fmtBRL(moneyFromCents(Math.abs(model.differenceCents)));
+  return model.differenceCents > 0
+    ? `O banco tem ${valor} a mais do que o aplicativo calculou.`
+    : `O aplicativo calculou ${valor} a mais do que o banco mostra.`;
+}
+
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = {
+    RECONCILE_LOOKBACK_DAYS, RECONCILE_TWIN_WINDOW_DAYS, RECONCILE_KIND_LABEL,
+    accountCashEntries, reconciliationSearchStart, reconciliationCandidates,
+    buildReconciliationModel, reconciliationHeadline, reconcileDescriptionKey,
+  };
+}
+
 // source: js/debts.js
 // debts.js; cálculos puros e modelo da Central de Dívidas
 "use strict";
@@ -14316,6 +14605,26 @@ function decodeSgmlEntities(value) {
     .replace(/&amp;/gi, "&");
 }
 
+// [M35] O saldo que o BANCO declara no próprio arquivo (`<LEDGERBAL>`), com a
+// data a que ele se refere. Não vira lançamento e não entra em conta nenhuma:
+// serve só para oferecer a conciliação já preenchida, que é a diferença entre
+// "informar o saldo" e "importar o saldo". Ausente na maioria dos CSV e em OFX
+// incompletos, então tudo que depende dele é opcional.
+function parseOfxLedgerBalance(text) {
+  const bloco = String(text || "").split(/<LEDGERBAL>/i)[1];
+  if (!bloco) return null;
+  const escopo = bloco.split(/<\/LEDGERBAL>/i)[0];
+  const get = (tag) => {
+    const m = escopo.match(new RegExp(`<${tag}>([^<\r\n]+)`, "i"));
+    return m ? m[1].trim() : null;
+  };
+  const amount = parseBrNumber(get("BALAMT"));
+  if (!Number.isFinite(amount)) return null;
+  const dt = get("DTASOF");
+  const date = dt && /^\d{8}/.test(dt) ? `${dt.slice(0, 4)}-${dt.slice(4, 6)}-${dt.slice(6, 8)}` : null;
+  return { amount, date: date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null };
+}
+
 function parseOfxStatement(text) {
   const blocks = text.split(/<STMTTRN>/i).slice(1);
   if (blocks.length === 0) throw new ImportError("NO_ROWS", "Nenhuma transação encontrada no OFX. O arquivo pode estar incompleto.");
@@ -14352,7 +14661,7 @@ function parseOfxStatement(text) {
     out.push({ date, amount, description: memo, externalId: fitid ? String(fitid).slice(0, 120) : null });
   }
   if (out.length === 0) throw new ImportError("NO_ROWS", "O OFX foi lido, mas nenhuma transação válida foi encontrada.");
-  return { rows: out, skipped, format: "ofx" };
+  return { rows: out, skipped, format: "ofx", statementBalance: parseOfxLedgerBalance(text) };
 }
 
 // Detecta o formato pelo conteúdo (não confia só na extensão) e delega.
@@ -14492,6 +14801,8 @@ function prepareImportRows(rawFile, filename, data) {
     pageCount: parsed.pageCount || null,
     roles: roleCounts,
     duplicates: duplicateCounts,
+    // [M35] Só existe quando o arquivo declara o saldo (OFX com `<LEDGERBAL>`).
+    statementBalance: parsed.statementBalance || null,
   };
   return prepared;
 }
@@ -26878,8 +27189,49 @@ function renderAccountRow(a, sourceStats) {
     <div class="account-row__info"><b>${escapeHtml(a.name)}</b><span>${ACCOUNT_TYPE_LABELS[a.type] || "Conta"}${a.archived ? ", arquivada" : ""}</span><small>${stats.movementCount} ${stats.movementCount === 1 ? "movimentação" : "movimentações"} · última ${stats.lastMovementAt ? formatMovementTimestamp(stats.lastMovementAt) : "não registrada"}</small><small>Conferida: ${stats.reconciledAt ? formatMovementTimestamp(stats.reconciledAt) : "nunca"}${stats.pendingCount ? ` · ${stats.pendingCount} ${stats.pendingCount === 1 ? "pendência" : "pendências"}` : ""}</small>${foraDoSaldo ? `<small class="account-row__note">${svgIcon("info",12)} ${foraDoSaldo} ${foraDoSaldo === 1 ? "lançamento é anterior" : "lançamentos são anteriores"} à abertura em ${fmtDateFull(a.openingDate)} e ${foraDoSaldo === 1 ? "não entra" : "não entram"} neste saldo${moneyToCents(fora.amount) ? ` (${fmtBRL(fora.amount)}). O saldo inicial informado já deveria contê-${foraDoSaldo === 1 ? "lo" : "los"}; se não contém, corrija a data de abertura ou o valor inicial` : ""}</small>` : ""}</div>
     <strong class="account-row__value">${fmtBRL(a.balance)}</strong>
     <div class="account-row__actions"><button class="icon-btn" data-action="account-reconcile-open" data-id="${a.id}" aria-label="Conciliar ${escapeHtml(a.name)}">${svgIcon("refresh",15)}</button><button class="icon-btn" data-action="account-edit" data-id="${a.id}" aria-label="Editar ${escapeHtml(a.name)}">${svgIcon("pencil",15)}</button><button class="icon-btn" data-action="account-archive" data-id="${a.id}" aria-label="${a.archived ? "Reativar" : "Arquivar"} ${escapeHtml(a.name)}">${svgIcon(a.archived ? "checkCircle" : "archive",15)}</button><button class="icon-btn icon-btn--danger" data-action="account-delete" data-id="${a.id}" aria-label="Excluir ${escapeHtml(a.name)}">${svgIcon("trash",15)}</button></div>
-    ${reconciling ? `<div class="account-reconcile"><label class="field__label" for="reconcile-balance-input">Saldo visto no banco hoje</label><div class="account-reconcile__line"><input id="reconcile-balance-input" class="input" data-field="reconcile-value" value="${escapeHtml(state.accountsUi.reconcileValue)}" inputmode="decimal" placeholder="0,00" /><button class="btn btn--primary btn--sm" data-action="account-reconcile-save" data-id="${a.id}">Conciliar</button><button class="btn btn--ghost btn--sm" data-action="account-reconcile-cancel">Cancelar</button></div></div>` : ""}
+    ${reconciling ? renderReconcilePanel(a) : ""}
   </div>`;
+}
+
+// [M35] A conciliação passou a ter dois passos. O primeiro continua sendo o
+// mesmo campo de antes; o segundo é o que faltava: mostrar a diferença e o que
+// pode tê-la causado ANTES de qualquer gravação. Enquanto o painel de revisão
+// está aberto, nada foi alterado: nem o ajuste, nem a data de conferência.
+function renderReconcilePanel(account) {
+  const review = state.accountsUi.reconcileReview;
+  const emRevisao = review && review.accountId === account.id;
+  if (!emRevisao) {
+    const quando = state.accountsUi.reconcileDate || todayIso();
+    return `<div class="account-reconcile"><label class="field__label" for="reconcile-balance-input">Saldo visto no banco</label><div class="account-reconcile__line"><input id="reconcile-balance-input" class="input" data-field="reconcile-value" value="${escapeHtml(state.accountsUi.reconcileValue)}" inputmode="decimal" placeholder="0,00" aria-label="Saldo visto no banco" /><input id="reconcile-date-input" type="date" class="input" data-field="reconcile-date" value="${escapeHtml(quando)}" max="${todayIso()}" aria-label="Data do saldo informado" /><button class="btn btn--primary btn--sm" data-action="account-reconcile-check" data-id="${account.id}">Comparar</button><button class="btn btn--ghost btn--sm" data-action="account-reconcile-cancel">Cancelar</button></div><p class="field-hint">A data é a do saldo que você está informando; o aplicativo compara com o que calculou até ela e mostra a diferença antes de gravar qualquer coisa.</p></div>`;
+  }
+  const diferenca = fmtBRL(moneyFromCents(Math.abs(review.differenceCents)));
+  return `<div class="account-reconcile"${review.matched ? "" : ' data-reconcile-diff="1"'}>
+    <div class="reconcile-figures">
+      <div><span>No aplicativo em ${fmtDateShort(review.date)}</span><b>${fmtBRL(review.calculated)}</b></div>
+      <div><span>No banco em ${fmtDateShort(review.date)}</span><b>${fmtBRL(review.informed)}</b></div>
+      <div class="${review.matched ? "" : "reconcile-figures__diff"}"><span>Diferença</span><b>${review.matched ? fmtBRL(0) : diferenca}</b></div>
+    </div>
+    <p class="reconcile-headline">${escapeHtml(reconciliationHeadline(review))}</p>
+    ${review.matched ? "" : `
+    <p class="field-hint">Procuramos a causa entre ${fmtDateFull(review.searchFrom)} e ${fmtDateFull(review.date)}: ${review.scannedCount} ${review.scannedCount === 1 ? "movimento" : "movimentos"} nesta conta.${review.lastReconciledAt ? ` Última conferência em ${fmtDateFull(review.lastReconciledAt)}.` : ""}</p>
+    <ul class="reconcile-causes">${review.candidates.map((c) => `<li class="reconcile-cause reconcile-cause--${c.cause}"><div><b>${escapeHtml(c.title)}</b><small>${escapeHtml(c.detail)}</small></div>${renderReconcileCauseAction(c, review)}</li>`).join("")}</ul>`}
+    <div class="reconcile-actions">
+      ${review.matched
+        ? `<button class="btn btn--primary btn--sm" data-action="account-reconcile-save" data-id="${account.id}">Marcar como conferida</button>`
+        : `<button class="btn btn--primary btn--sm" data-action="account-reconcile-save" data-id="${account.id}">Registrar ajuste de ${diferenca}</button>`}
+      <button class="btn btn--secondary btn--sm" data-action="account-reconcile-edit" data-id="${account.id}">Alterar valor</button>
+      <button class="btn btn--ghost btn--sm" data-action="account-reconcile-cancel">${review.matched ? "Fechar" : "Vou corrigir o lançamento"}</button>
+    </div>
+    ${review.matched ? "" : `<p class="field-hint">O ajuste registra a diferença como um lançamento de conciliação em ${fmtDateFull(review.date)}; ele faz o saldo bater, mas não corrige a causa. Se uma das hipóteses acima for o caso, corrigir o lançamento é melhor. Até aqui nada foi alterado.</p>`}
+  </div>`;
+}
+
+function renderReconcileCauseAction(candidate, review) {
+  if (candidate.cause === "fatura-aberta") {
+    return `<button class="btn btn--secondary btn--sm" data-action="card-pay-open" data-id="${candidate.cardId}" data-value="${candidate.statementKey}">Registrar pagamento</button>`;
+  }
+  if (!candidate.entryId) return "";
+  return `<button class="btn btn--ghost btn--sm" data-action="account-reconcile-inspect" data-id="${review.accountId}">Ver na lista</button>`;
 }
 
 function renderCardRow(c, sourceStats) {
@@ -32318,6 +32670,11 @@ function importReviewSummary(rows, context) {
       ? `<div class="import-notice">${svgIcon("info", 16)}<div><b>${anterioresAoSaldo} ${anterioresAoSaldo === 1 ? "lançamento é anterior" : "lançamentos são anteriores"} à abertura de ${escapeHtml(contaDestino.name)} em ${fmtDateFull(aberturaConta)}.</b><span>${anterioresAoSaldo === 1 ? "Ele entra" : "Eles entram"} nas despesas, categorias e gráficos, mas não ${anterioresAoSaldo === 1 ? "altera" : "alteram"} o saldo da conta: o saldo inicial que você informou já inclui esse período. Se aquele saldo era o do dia ${fmtDateFull(aberturaConta)} e não o de antes do extrato, recue a abertura para que ${anterioresAoSaldo === 1 ? "ele conte" : "eles contem"} no saldo.</span>${primeiraDataDoArquivo ? `<button class="btn btn--ghost btn--sm" data-action="import-backdate-account" data-id="${escapeHtml(primeiraDataDoArquivo)}">Recuar abertura para ${fmtDateFull(primeiraDataDoArquivo)}</button>` : ""}</div></div>` : "",
     transferenciasAntesDaAbertura
       ? `<div class="import-notice">${svgIcon("info", 16)}<div><b>${transferenciasAntesDaAbertura === 1 ? "Uma transferência está" : `${transferenciasAntesDaAbertura} transferências estão`} fora do período acompanhado por uma das contas.</b><span>O saldo inicial dessa conta já inclui o movimento, então somente a ponta dentro do período será recalculada.</span></div></div>` : "",
+    // [M35] O arquivo trouxe o saldo declarado pelo banco. Ele não é importado
+    // como lançamento nem vira ajuste: fica reservado para a conferência, que
+    // abre preenchida em Contas depois da importação.
+    meta.statementBalance && ctx.documentKind === "account"
+      ? `<div class="import-notice">${svgIcon("shieldCheck", 16)}<div><b>O extrato informa saldo de ${fmtBRL(meta.statementBalance.amount)}${meta.statementBalance.date ? ` em ${fmtDateFull(meta.statementBalance.date)}` : ""}.</b><span>Esse número não é importado como lançamento. Depois de confirmar, a conferência dessa conta abre em Contas já preenchida com ele, para você comparar com o saldo calculado aqui.</span></div></div>` : "",
   ].join("");
 
   return {
@@ -34741,6 +35098,17 @@ function showFormErrors(errors, summary) {
   notify(summary || Object.values(errors)[0] || "Revise os campos indicados", "warn");
 }
 
+// [M35] A data da conferência. Vazio significa hoje (é o caminho de sempre);
+// data futura é recusada em vez de corrigida em silêncio, porque conferir
+// contra um saldo que ainda não existe produziria diferença inventada e, pior,
+// um ajuste datado no futuro.
+function reconcileCheckDate() {
+  const informada = String(state.accountsUi.reconcileDate || "").slice(0, 10);
+  if (!informada) return todayIso();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(informada) || informada > todayIso()) return null;
+  return informada;
+}
+
 function removeTransactionsWithIntegrity(data, ids) {
   const idSet = new Set(ids || []);
   let next = data;
@@ -35551,6 +35919,7 @@ function onClick(e) {
         onConfirm: () => {
           setData((d) => removeAccountWithIntegrity(d, id));
           if (state.accountsUi.reconcileId === id) { state.accountsUi.reconcileId = null; state.accountsUi.reconcileValue = ""; }
+          state.accountsUi.reconcileReview = null;
           if (state.accountsUi.accountForm && state.accountsUi.accountForm.id === id) state.accountsUi.accountForm = null;
           state.accountsUi.transferForm = null;
           state.accountsUi.payment = null;
@@ -35561,15 +35930,43 @@ function onClick(e) {
     }
     case "account-reconcile-open": {
       const a = accountById(state.data,id); if (!a) break;
-      state.accountsUi.reconcileId = id; state.accountsUi.reconcileValue = moneyDraft(accountBalance(state.data,id,todayIso())); render(); break;
+      state.accountsUi.reconcileId = id; state.accountsUi.reconcileReview = null;
+      state.accountsUi.reconcileDate = todayIso();
+      state.accountsUi.reconcileValue = moneyDraft(accountBalance(state.data,id,todayIso())); render(); break;
     }
-    case "account-reconcile-cancel": state.accountsUi.reconcileId = null; state.accountsUi.reconcileValue = ""; render(); break;
+    case "account-reconcile-cancel": state.accountsUi.reconcileId = null; state.accountsUi.reconcileValue = ""; state.accountsUi.reconcileDate = ""; state.accountsUi.reconcileReview = null; render(); break;
+    // [M35] O passo que faltava. Compara e PROCURA a causa; não grava nada. A
+    // gravação continua sendo `account-reconcile-save`, agora sempre precedida
+    // por esta tela, que é onde a diferença ganha explicação possível.
+    case "account-reconcile-check": {
+      const actual = parseMoneyInput(state.accountsUi.reconcileValue);
+      if (!moneyWithinMax(actual)) { showFormErrors({ "reconcile-balance-input": Number.isFinite(actual) ? moneyMaxMessage("Saldo") : "Informe o saldo visto no banco." }); break; }
+      const quando = reconcileCheckDate();
+      if (!quando) { showFormErrors({ "reconcile-date-input": "Informe uma data até hoje." }); break; }
+      const review = buildReconciliationModel(state.data, id, actual, quando);
+      if (!review) break;
+      state.accountsUi.reconcileReview = review; render(); break;
+    }
+    case "account-reconcile-edit": state.accountsUi.reconcileReview = null; render(); break;
+    // Levar para a lista de movimentos JÁ FILTRADA pela conta é o que
+    // transforma a hipótese em conferência: sem o filtro, quem sai daqui cai
+    // numa lista de tudo e desiste de procurar.
+    case "account-reconcile-inspect": {
+      state.analyticsView = "movements";
+      state.movementFilters = { ...state.movementFilters, accountId: id, type: "all", categoryId: "", source: "" };
+      state.analyticsLimit = 30;
+      setState({ tab: "analytics" });
+      EventBus.emit(APP_EVENTS.TAB_CHANGED, { tab: "analytics" });
+      break;
+    }
     case "account-reconcile-save": {
       const actual = parseMoneyInput(state.accountsUi.reconcileValue);
       if (!moneyWithinMax(actual)) { showFormErrors({ "reconcile-balance-input": Number.isFinite(actual) ? moneyMaxMessage("Saldo") : "Informe o saldo visto no banco." }); break; }
-      const result = reconcileAccount(state.data,id,actual,todayIso());
+      const quando = reconcileCheckDate();
+      if (!quando) { showFormErrors({ "reconcile-date-input": "Informe uma data até hoje." }); break; }
+      const result = reconcileAccount(state.data,id,actual,quando);
       setData(() => result.data);
-      state.accountsUi.reconcileId = null; state.accountsUi.reconcileValue = "";
+      state.accountsUi.reconcileId = null; state.accountsUi.reconcileValue = ""; state.accountsUi.reconcileDate = ""; state.accountsUi.reconcileReview = null;
       notify(result.adjustment ? `Conciliação registrada (${fmtBRL(result.adjustment.amount)})` : "O saldo já estava conciliado"); break;
     }
     case "card-new": state.revealTarget = "card-form"; state.accountsUi.cardForm = freshCardForm(); state.accountsUi.accountForm = null; render(); break;
@@ -36883,6 +37280,18 @@ function onClick(e) {
         transferIds: newTransfers.map((transfer) => transfer.id),
       };
       saveImportUndo(state.importUndo);
+      // [M35] O OFX costuma declarar o saldo da conta (`<LEDGERBAL>`). Ele não
+      // vira lançamento nem ajuste: deixa a conferência daquela conta ABERTA e
+      // já preenchida com o número do banco, para a pessoa comparar quando
+      // chegar em Contas. Nada é gravado por isso: o passo de revisão do M35
+      // continua no meio do caminho.
+      const saldoDoExtrato = meta.statementBalance;
+      if (saldoDoExtrato && documentKind === "account" && destinationId) {
+        state.accountsUi.reconcileId = destinationId;
+        state.accountsUi.reconcileValue = moneyDraft(saldoDoExtrato.amount);
+        state.accountsUi.reconcileDate = saldoDoExtrato.date && saldoDoExtrato.date <= todayIso() ? saldoDoExtrato.date : todayIso();
+        state.accountsUi.reconcileReview = null;
+      }
       state.importRows = null; state.importFilename = null; state.importDestinationId = ""; state.importVisible = IMPORT_PAGE_SIZE;
       const importedParts = [];
       if (newTx.length) importedParts.push(plural(newTx.length, "lançamento importado", "lançamentos importados"));
@@ -37212,6 +37621,14 @@ let state = {
     transferForm: null,
     reconcileId: null,
     reconcileValue: "",
+    // [M35] Data a que o saldo informado se refere. Existe porque o extrato
+    // importado declara o saldo de uma data que pode não ser hoje; comparar um
+    // saldo de terça com o cálculo de quinta acusaria diferença inventada.
+    reconcileDate: "",
+    // [M35] Diagnóstico da conciliação em revisão (comparação + causas
+    // possíveis). Enquanto ele existe, NADA foi gravado: é a tela de aprovação
+    // que separa "informei o saldo do banco" de "quero um ajuste".
+    reconcileReview: null,
     payment: null,
   },
   debtsUi: {
@@ -38841,6 +39258,7 @@ function onInput(e) {
     case "transfer-date": if (state.accountsUi.transferForm) state.accountsUi.transferForm.date = val; break;
     case "transfer-description": if (state.accountsUi.transferForm) state.accountsUi.transferForm.description = val; break;
     case "reconcile-value": state.accountsUi.reconcileValue = val; break;
+    case "reconcile-date": state.accountsUi.reconcileDate = val; break;
     case "payment-amount": if (state.accountsUi.payment) state.accountsUi.payment.amount = val; break;
     case "payment-date": if (state.accountsUi.payment) state.accountsUi.payment.date = val; break;
     case "debt-name": if (state.debtsUi.form) state.debtsUi.form.name = val; break;

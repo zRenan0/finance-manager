@@ -67,8 +67,49 @@ function renderAccountRow(a, sourceStats) {
     <div class="account-row__info"><b>${escapeHtml(a.name)}</b><span>${ACCOUNT_TYPE_LABELS[a.type] || "Conta"}${a.archived ? ", arquivada" : ""}</span><small>${stats.movementCount} ${stats.movementCount === 1 ? "movimentação" : "movimentações"} · última ${stats.lastMovementAt ? formatMovementTimestamp(stats.lastMovementAt) : "não registrada"}</small><small>Conferida: ${stats.reconciledAt ? formatMovementTimestamp(stats.reconciledAt) : "nunca"}${stats.pendingCount ? ` · ${stats.pendingCount} ${stats.pendingCount === 1 ? "pendência" : "pendências"}` : ""}</small>${foraDoSaldo ? `<small class="account-row__note">${svgIcon("info",12)} ${foraDoSaldo} ${foraDoSaldo === 1 ? "lançamento é anterior" : "lançamentos são anteriores"} à abertura em ${fmtDateFull(a.openingDate)} e ${foraDoSaldo === 1 ? "não entra" : "não entram"} neste saldo${moneyToCents(fora.amount) ? ` (${fmtBRL(fora.amount)}). O saldo inicial informado já deveria contê-${foraDoSaldo === 1 ? "lo" : "los"}; se não contém, corrija a data de abertura ou o valor inicial` : ""}</small>` : ""}</div>
     <strong class="account-row__value">${fmtBRL(a.balance)}</strong>
     <div class="account-row__actions"><button class="icon-btn" data-action="account-reconcile-open" data-id="${a.id}" aria-label="Conciliar ${escapeHtml(a.name)}">${svgIcon("refresh",15)}</button><button class="icon-btn" data-action="account-edit" data-id="${a.id}" aria-label="Editar ${escapeHtml(a.name)}">${svgIcon("pencil",15)}</button><button class="icon-btn" data-action="account-archive" data-id="${a.id}" aria-label="${a.archived ? "Reativar" : "Arquivar"} ${escapeHtml(a.name)}">${svgIcon(a.archived ? "checkCircle" : "archive",15)}</button><button class="icon-btn icon-btn--danger" data-action="account-delete" data-id="${a.id}" aria-label="Excluir ${escapeHtml(a.name)}">${svgIcon("trash",15)}</button></div>
-    ${reconciling ? `<div class="account-reconcile"><label class="field__label" for="reconcile-balance-input">Saldo visto no banco hoje</label><div class="account-reconcile__line"><input id="reconcile-balance-input" class="input" data-field="reconcile-value" value="${escapeHtml(state.accountsUi.reconcileValue)}" inputmode="decimal" placeholder="0,00" /><button class="btn btn--primary btn--sm" data-action="account-reconcile-save" data-id="${a.id}">Conciliar</button><button class="btn btn--ghost btn--sm" data-action="account-reconcile-cancel">Cancelar</button></div></div>` : ""}
+    ${reconciling ? renderReconcilePanel(a) : ""}
   </div>`;
+}
+
+// [M35] A conciliação passou a ter dois passos. O primeiro continua sendo o
+// mesmo campo de antes; o segundo é o que faltava: mostrar a diferença e o que
+// pode tê-la causado ANTES de qualquer gravação. Enquanto o painel de revisão
+// está aberto, nada foi alterado: nem o ajuste, nem a data de conferência.
+function renderReconcilePanel(account) {
+  const review = state.accountsUi.reconcileReview;
+  const emRevisao = review && review.accountId === account.id;
+  if (!emRevisao) {
+    const quando = state.accountsUi.reconcileDate || todayIso();
+    return `<div class="account-reconcile"><label class="field__label" for="reconcile-balance-input">Saldo visto no banco</label><div class="account-reconcile__line"><input id="reconcile-balance-input" class="input" data-field="reconcile-value" value="${escapeHtml(state.accountsUi.reconcileValue)}" inputmode="decimal" placeholder="0,00" aria-label="Saldo visto no banco" /><input id="reconcile-date-input" type="date" class="input" data-field="reconcile-date" value="${escapeHtml(quando)}" max="${todayIso()}" aria-label="Data do saldo informado" /><button class="btn btn--primary btn--sm" data-action="account-reconcile-check" data-id="${account.id}">Comparar</button><button class="btn btn--ghost btn--sm" data-action="account-reconcile-cancel">Cancelar</button></div><p class="field-hint">A data é a do saldo que você está informando; o aplicativo compara com o que calculou até ela e mostra a diferença antes de gravar qualquer coisa.</p></div>`;
+  }
+  const diferenca = fmtBRL(moneyFromCents(Math.abs(review.differenceCents)));
+  return `<div class="account-reconcile"${review.matched ? "" : ' data-reconcile-diff="1"'}>
+    <div class="reconcile-figures">
+      <div><span>No aplicativo em ${fmtDateShort(review.date)}</span><b>${fmtBRL(review.calculated)}</b></div>
+      <div><span>No banco em ${fmtDateShort(review.date)}</span><b>${fmtBRL(review.informed)}</b></div>
+      <div class="${review.matched ? "" : "reconcile-figures__diff"}"><span>Diferença</span><b>${review.matched ? fmtBRL(0) : diferenca}</b></div>
+    </div>
+    <p class="reconcile-headline">${escapeHtml(reconciliationHeadline(review))}</p>
+    ${review.matched ? "" : `
+    <p class="field-hint">Procuramos a causa entre ${fmtDateFull(review.searchFrom)} e ${fmtDateFull(review.date)}: ${review.scannedCount} ${review.scannedCount === 1 ? "movimento" : "movimentos"} nesta conta.${review.lastReconciledAt ? ` Última conferência em ${fmtDateFull(review.lastReconciledAt)}.` : ""}</p>
+    <ul class="reconcile-causes">${review.candidates.map((c) => `<li class="reconcile-cause reconcile-cause--${c.cause}"><div><b>${escapeHtml(c.title)}</b><small>${escapeHtml(c.detail)}</small></div>${renderReconcileCauseAction(c, review)}</li>`).join("")}</ul>`}
+    <div class="reconcile-actions">
+      ${review.matched
+        ? `<button class="btn btn--primary btn--sm" data-action="account-reconcile-save" data-id="${account.id}">Marcar como conferida</button>`
+        : `<button class="btn btn--primary btn--sm" data-action="account-reconcile-save" data-id="${account.id}">Registrar ajuste de ${diferenca}</button>`}
+      <button class="btn btn--secondary btn--sm" data-action="account-reconcile-edit" data-id="${account.id}">Alterar valor</button>
+      <button class="btn btn--ghost btn--sm" data-action="account-reconcile-cancel">${review.matched ? "Fechar" : "Vou corrigir o lançamento"}</button>
+    </div>
+    ${review.matched ? "" : `<p class="field-hint">O ajuste registra a diferença como um lançamento de conciliação em ${fmtDateFull(review.date)}; ele faz o saldo bater, mas não corrige a causa. Se uma das hipóteses acima for o caso, corrigir o lançamento é melhor. Até aqui nada foi alterado.</p>`}
+  </div>`;
+}
+
+function renderReconcileCauseAction(candidate, review) {
+  if (candidate.cause === "fatura-aberta") {
+    return `<button class="btn btn--secondary btn--sm" data-action="card-pay-open" data-id="${candidate.cardId}" data-value="${candidate.statementKey}">Registrar pagamento</button>`;
+  }
+  if (!candidate.entryId) return "";
+  return `<button class="btn btn--ghost btn--sm" data-action="account-reconcile-inspect" data-id="${review.accountId}">Ver na lista</button>`;
 }
 
 function renderCardRow(c, sourceStats) {

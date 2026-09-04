@@ -68,7 +68,11 @@
 // v71: a Central de Dívidas passou a ler atraso, multa e mora do contrato e a
 // comparar avalanche e bola de neve com vantagem, desvantagem e os números da
 // pessoa.
-const VERSION = "v71";
+// v72: a conciliação (M35) ganhou o passo de revisão antes de gravar: compara
+// os dois saldos, procura o movimento que explicaria a diferença e só grava o
+// ajuste depois de a pessoa pedir. Vai junto a folha de utilidades, porque o
+// painel novo mora nela.
+const VERSION = "v72";
 const BUILD_ID = VERSION;
 const CACHE_NAME = "financas-cache-" + VERSION;
 // A PÁGINA COMERCIAL TEM CACHE PRÓPRIO.

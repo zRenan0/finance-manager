@@ -268,6 +268,14 @@ let state = {
     transferForm: null,
     reconcileId: null,
     reconcileValue: "",
+    // [M35] Data a que o saldo informado se refere. Existe porque o extrato
+    // importado declara o saldo de uma data que pode não ser hoje; comparar um
+    // saldo de terça com o cálculo de quinta acusaria diferença inventada.
+    reconcileDate: "",
+    // [M35] Diagnóstico da conciliação em revisão (comparação + causas
+    // possíveis). Enquanto ele existe, NADA foi gravado: é a tela de aprovação
+    // que separa "informei o saldo do banco" de "quero um ajuste".
+    reconcileReview: null,
     payment: null,
   },
   debtsUi: {
@@ -1897,6 +1905,7 @@ function onInput(e) {
     case "transfer-date": if (state.accountsUi.transferForm) state.accountsUi.transferForm.date = val; break;
     case "transfer-description": if (state.accountsUi.transferForm) state.accountsUi.transferForm.description = val; break;
     case "reconcile-value": state.accountsUi.reconcileValue = val; break;
+    case "reconcile-date": state.accountsUi.reconcileDate = val; break;
     case "payment-amount": if (state.accountsUi.payment) state.accountsUi.payment.amount = val; break;
     case "payment-date": if (state.accountsUi.payment) state.accountsUi.payment.date = val; break;
     case "debt-name": if (state.debtsUi.form) state.debtsUi.form.name = val; break;

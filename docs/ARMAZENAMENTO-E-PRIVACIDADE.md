@@ -16,7 +16,7 @@ exclusão de cada classe, está em `docs/INVENTARIO-DE-DADOS.md` e na estrutura
 | Schema lógico dos dados | 23 | `SCHEMA_VERSION` em `js/storage.js` e `netlify/functions/_shared/finance-schema.js` |
 | Estrutura física do IndexedDB | 4 | `DB_VERSION` em `js/storage.js` |
 | Protocolo de sincronização | 3 | `CLOUD_SYNC_PROTOCOL` no cliente e `SYNC_PROTOCOL` no servidor |
-| Pacote do cache offline | v71 | `VERSION` em `service-worker.js` |
+| Pacote do cache offline | v72 | `VERSION` em `service-worker.js` |
 
 As duas primeiras versões não são a mesma coisa. O schema lógico sobe quando o
 formato ou o significado dos dados muda. A versão física sobe somente quando um
@@ -118,12 +118,12 @@ repetir com segurança uma chamada cuja resposta possa ter se perdido.
 
 | Cache | Conteúdo |
 |---|---|
-| `financas-cache-v71` | HTML do app, CSS, JavaScript, PDF.js, fontes locais, manifesto e ícones |
-| `financas-pages-v71` | Landing e outras navegações públicas |
-| `financas-fonts-v71` | Reserva para fontes externas; vazio hoje porque `FONT_HOSTS` está vazio |
+| `financas-cache-v72` | HTML do app, CSS, JavaScript, PDF.js, fontes locais, manifesto e ícones |
+| `financas-pages-v72` | Landing e outras navegações públicas |
+| `financas-fonts-v72` | Reserva para fontes externas; vazio hoje porque `FONT_HOSTS` está vazio |
 
 No pacote publicado, cada nome recebe ainda o SHA-256 integral da publicação
-depois de `v71`. Isso faz duas versões coexistirem durante a instalação sem que
+depois de `v72`. Isso faz duas versões coexistirem durante a instalação sem que
 a nova escrita altere o cache usado pelo worker anterior.
 
 Somente requisições GET podem entrar no service worker. Qualquer caminho sob

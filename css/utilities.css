@@ -475,6 +475,25 @@
 .account-reconcile { grid-column: 1 / -1; padding: 12px; border-radius: var(--radius-sm); background: var(--card-alt); }
 .account-reconcile__line { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .account-reconcile__line .input { flex: 1 1 150px; }
+
+/* [M35] Painel de revisão da conciliação: comparação, causas possíveis e as
+   saídas. Nasce dentro do mesmo `.account-reconcile` do passo anterior para a
+   linha da conta não pular de altura entre um passo e outro. */
+.account-reconcile[data-reconcile-diff] { border: 1px solid color-mix(in srgb, var(--negative) 24%, var(--border)); }
+.reconcile-figures { display: flex; flex-wrap: wrap; gap: 8px; }
+.reconcile-figures > div { flex: 1 1 96px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--card); display: grid; gap: 2px; }
+.reconcile-figures span { color: var(--ink-faint); font-size: 11px; }
+.reconcile-figures b { font-family: var(--font-num); font-size: 14px; white-space: nowrap; }
+.reconcile-figures__diff { border-color: color-mix(in srgb, var(--negative) 38%, var(--border)); background: var(--negative-soft); }
+.reconcile-figures__diff b { color: var(--negative-ink); }
+.reconcile-headline { margin: 10px 0 2px; font-size: 13px; font-weight: 600; }
+.reconcile-causes { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 8px; }
+.reconcile-cause { display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--card); }
+.reconcile-cause > div { flex: 1 1 190px; display: grid; gap: 3px; }
+.reconcile-cause b { font-size: 12.5px; }
+.reconcile-cause small { color: var(--ink-faint); font-size: 11.5px; line-height: 1.45; }
+.reconcile-cause--ausente { background: var(--card-alt); }
+.reconcile-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .account-card-item { display: grid; gap: 13px; margin-bottom: 12px; }
 .account-card-head { display: flex; align-items: center; gap: 11px; }
 .account-card-head > div:nth-child(2) { flex: 1; }

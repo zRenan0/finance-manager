@@ -209,6 +209,11 @@ function importReviewSummary(rows, context) {
       ? `<div class="import-notice">${svgIcon("info", 16)}<div><b>${anterioresAoSaldo} ${anterioresAoSaldo === 1 ? "lançamento é anterior" : "lançamentos são anteriores"} à abertura de ${escapeHtml(contaDestino.name)} em ${fmtDateFull(aberturaConta)}.</b><span>${anterioresAoSaldo === 1 ? "Ele entra" : "Eles entram"} nas despesas, categorias e gráficos, mas não ${anterioresAoSaldo === 1 ? "altera" : "alteram"} o saldo da conta: o saldo inicial que você informou já inclui esse período. Se aquele saldo era o do dia ${fmtDateFull(aberturaConta)} e não o de antes do extrato, recue a abertura para que ${anterioresAoSaldo === 1 ? "ele conte" : "eles contem"} no saldo.</span>${primeiraDataDoArquivo ? `<button class="btn btn--ghost btn--sm" data-action="import-backdate-account" data-id="${escapeHtml(primeiraDataDoArquivo)}">Recuar abertura para ${fmtDateFull(primeiraDataDoArquivo)}</button>` : ""}</div></div>` : "",
     transferenciasAntesDaAbertura
       ? `<div class="import-notice">${svgIcon("info", 16)}<div><b>${transferenciasAntesDaAbertura === 1 ? "Uma transferência está" : `${transferenciasAntesDaAbertura} transferências estão`} fora do período acompanhado por uma das contas.</b><span>O saldo inicial dessa conta já inclui o movimento, então somente a ponta dentro do período será recalculada.</span></div></div>` : "",
+    // [M35] O arquivo trouxe o saldo declarado pelo banco. Ele não é importado
+    // como lançamento nem vira ajuste: fica reservado para a conferência, que
+    // abre preenchida em Contas depois da importação.
+    meta.statementBalance && ctx.documentKind === "account"
+      ? `<div class="import-notice">${svgIcon("shieldCheck", 16)}<div><b>O extrato informa saldo de ${fmtBRL(meta.statementBalance.amount)}${meta.statementBalance.date ? ` em ${fmtDateFull(meta.statementBalance.date)}` : ""}.</b><span>Esse número não é importado como lançamento. Depois de confirmar, a conferência dessa conta abre em Contas já preenchida com ele, para você comparar com o saldo calculado aqui.</span></div></div>` : "",
   ].join("");
 
   return {

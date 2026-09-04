@@ -2,6 +2,35 @@
 
 ## Não publicado
 
+### O M35 pôs um passo de revisão entre o saldo do banco e o ajuste
+
+- **Conciliação em dois passos.** Informar o saldo visto no banco gravava o ajuste
+  na mesma batida. Agora o app primeiro **compara** (saldo calculado, saldo
+  informado e a diferença) e só grava se você pedir. Enquanto o painel está
+  aberto, nada foi alterado: nem o ajuste, nem a data da conferência.
+- **O app procura a causa.** Ele varre os movimentos da conta na janela desde a
+  última conferência (no mínimo 90 dias) e mostra o que fecharia a diferença no
+  centavo: lançamento repetido, transferência contada duas vezes, pagamento de
+  fatura, ajuste de uma conferência anterior, valor com sinal invertido (metade da
+  diferença) e fatura vencida sem pagamento registrado.
+- **Hipótese, não veredito.** Cada linha diz o que aconteceria se aquela fosse a
+  causa ("se um dos dois for cópia, apagá-lo fecha a diferença"). Nenhum dado é
+  alterado por conta disso, e quando nada fecha a conta o app diz isso em vez de
+  inventar culpado: procure no extrato uma entrada ou uma saída daquele valor.
+- **A fatura vencida leva ao pagamento, não ao ajuste.** Se o banco já debitou a
+  fatura e o app não sabe, o caminho oferecido é registrar o pagamento, que fecha
+  a fatura junto. Um ajuste de saldo faria o número bater e deixaria a fatura
+  aberta para sempre.
+- **A conferência ganhou data.** O saldo informado pode ser o de outro dia (o do
+  extrato, por exemplo); o app compara com o que calculou até aquela data. Data
+  futura é recusada.
+- **Saldo do extrato (OFX).** Quando o arquivo declara o saldo da conta
+  (`LEDGERBAL`), ele não vira lançamento nenhum: depois da importação, a
+  conferência daquela conta abre em Contas já preenchida com o número do banco.
+- **"Ver na lista"** leva às movimentações já filtradas pela conta, que é onde a
+  hipótese vira conferência.
+- O cache offline subiu para `v72`.
+
 ### O M34 tirou a Central de Dívidas do saldo devedor
 
 - **Atraso.** A dívida vencida aparece na lista com "vencida há N dias" e um aviso
