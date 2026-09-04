@@ -297,6 +297,179 @@ function simulateDebtPayoff(debtsOrData, options) {
   };
 }
 
+// ------------------------------------------------------------------------------
+// [M34] ATRASO E MULTA
+// ------------------------------------------------------------------------------
+// Saldo devedor é a pergunta errada quando a dívida está vencida: o que muda a
+// urgência é o RELÓGIO. Uma dívida de R$ 800 vencida há 40 dias pode custar mais
+// por mês que uma de R$ 4.000 em dia.
+//
+// O que o app pode afirmar e o que não pode
+// -----------------------------------------
+// Pode afirmar que a data informada de vencimento já passou. NÃO pode afirmar
+// que a pessoa está inadimplente: ela pode ter pago e não ter atualizado o
+// campo. Por isso um pagamento registrado depois do vencimento derruba o alerta
+// e vira outro recado ("atualize a data"), em vez de acusar atraso.
+//
+// A multa e os juros de mora saem do CONTRATO, nunca de um padrão presumido.
+// Sem os dois campos preenchidos, a tela mostra o atraso e diz que não dá para
+// estimar o custo; assumir 2% porque o CDC limita a multa a 2% seria transformar
+// um teto legal em cobrança real de um contrato que ninguém leu aqui.
+function debtLateInfo(debt, payments, todayRef) {
+  const hoje = todayRef || todayIso();
+  const venc = String(debt && debt.nextDueDate ? debt.nextDueDate : "");
+  const vazio = {
+    late: false, dueIso: venc, daysLate: 0, likelyPaid: false, installment: 0,
+    fine: null, moraInterest: null, estimatedCost: null, costKnown: false, missing: [],
+  };
+  if (!venc || venc >= hoje) return vazio;
+
+  // Pagamento lançado a partir do vencimento: a evidência aponta para campo
+  // desatualizado, não para inadimplência.
+  const pagouDepois = (payments || []).some((p) => p.debtId === debt.id && String(p.date) >= venc);
+  const dias = daysBetweenIso(venc, hoje);
+  if (pagouDepois) return { ...vazio, dueIso: venc, daysLate: dias, likelyPaid: true };
+
+  const parcela = Math.max(0, roundMoney(debt.monthlyPayment));
+  const multaPct = debt.lateFeePct == null ? null : Number(debt.lateFeePct);
+  const moraPct = debt.lateInterestMonthlyPct == null ? null : Number(debt.lateInterestMonthlyPct);
+  const missing = [];
+  if (!parcela) missing.push("parcela");
+  if (multaPct == null) missing.push("multa");
+  if (moraPct == null) missing.push("mora");
+
+  // A multa incide UMA VEZ sobre a parcela vencida; a mora corre por dia. Tratar
+  // as duas como mensais dobraria o custo do primeiro mês.
+  const fine = parcela && multaPct != null ? roundMoney(parcela * multaPct / 100) : null;
+  const mora = parcela && moraPct != null ? roundMoney(parcela * (moraPct / 100) * (dias / 30)) : null;
+  const costKnown = fine != null && mora != null;
+  return {
+    late: true,
+    dueIso: venc,
+    daysLate: dias,
+    likelyPaid: false,
+    installment: parcela,
+    fine,
+    moraInterest: mora,
+    estimatedCost: costKnown ? addMoney(fine, mora) : null,
+    costKnown,
+    missing,
+  };
+}
+
+// ------------------------------------------------------------------------------
+// [M34] AVALANCHE x BOLA DE NEVE, SEM VENCEDOR UNIVERSAL
+// ------------------------------------------------------------------------------
+// As duas estratégias já eram simuladas; o que faltava era a comparação HONESTA.
+// Dizer "avalanche é a melhor" é meia verdade: ela é a mais barata em juros, e a
+// bola de neve tira dívidas da lista mais cedo, que é o que faz muita gente
+// continuar no plano. Quem abandona o plano ótimo no terceiro mês termina mais
+// caro do que quem leva o plano subótimo até o fim.
+//
+// Então a comparação devolve NÚMEROS: quanto custa a mais em reais, quantos
+// meses a mais, e quantas dívidas somem antes em cada uma. E devolve também se a
+// diferença é grande o bastante para a escolha importar: quando dá quarenta
+// reais e um mês, a resposta honesta é "escolha a que você consegue manter".
+const DEBT_DIFF_MONEY = 300;   // diferença em juros que muda a decisão
+const DEBT_DIFF_MONTHS = 2;    // …ou diferença de prazo
+
+function debtClearedStats(sim) {
+  const limpos = (sim.perDebt || []).filter((r) => r.clearedMonth != null);
+  const primeiro = limpos.length ? Math.min(...limpos.map((r) => r.clearedMonth)) : null;
+  return {
+    months: sim.months,
+    interest: sim.totalInterest,
+    firstCleared: primeiro,
+    clearedIn12: limpos.filter((r) => r.clearedMonth <= 12).length,
+    total: (sim.perDebt || []).length,
+    // `complete` separa "juros até quitar" de "juros até a simulação desistir".
+    complete: !!sim.complete,
+    stalled: !!sim.stalled,
+    capped: !!sim.capped,
+  };
+}
+
+function debtStrategyComparison(avalanche, snowball) {
+  const a = debtClearedStats(avalanche);
+  const s = debtClearedStats(snowball);
+  // COMPARAR JUROS DE UMA SIMULAÇÃO QUE TRAVOU É PIOR QUE NÃO COMPARAR.
+  //
+  // Quando uma ordem deixa a parcela abaixo dos juros da dívida prioritária, o
+  // saldo cresce e a simulação para; o `totalInterest` dela é "juros até
+  // desistir", não "juros até quitar". Confrontado com o total de uma rota que
+  // chega ao fim, o número menor parecia a estratégia mais barata, e ela é
+  // justamente a que nunca acaba. O teste do M34 pegou esta inversão com uma
+  // dívida a 12% ao mês: a bola de neve aparecia R$ 40 mil "mais barata".
+  const ambasCompletam = a.complete && s.complete;
+  const jurosComparavel = a.interest != null && s.interest != null && ambasCompletam;
+  const prazoComparavel = a.months != null && s.months != null;
+  const stalls = a.complete === s.complete ? null : (a.complete ? "snowball" : "avalanche");
+  // Positivo = a bola de neve custa isso a mais em juros.
+  const interestDiff = jurosComparavel ? roundMoney(subMoney(s.interest, a.interest)) : null;
+  const monthsDiff = prazoComparavel ? s.months - a.months : null;
+  const firstDiff = a.firstCleared != null && s.firstCleared != null ? a.firstCleared - s.firstCleared : null;
+
+  // O vencedor sai dos números, não da fama. Com taxa desconhecida em alguma
+  // dívida as duas podem empatar, e afirmar que a avalanche ganha seria chute.
+  const cheaper = interestDiff == null ? null
+    : interestDiff > 0.004 ? "avalanche" : interestDiff < -0.004 ? "snowball" : "empate";
+  const faster = monthsDiff == null ? null
+    : monthsDiff > 0 ? "avalanche" : monthsDiff < 0 ? "snowball" : "empate";
+  const firstWin = firstDiff == null ? null
+    : firstDiff > 0 ? "snowball" : firstDiff < 0 ? "avalanche" : "empate";
+
+  return {
+    avalanche: a,
+    snowball: s,
+    interestDiff,
+    monthsDiff,
+    firstDiff,
+    cheaper,
+    faster,
+    firstWin,
+    // Uma das ordens não quita nunca com o orçamento atual. É a informação mais
+    // importante da tela quando acontece, e não um detalhe da comparação.
+    stalls,
+    // A diferença muda a decisão? Se não muda, a tela precisa dizer isso em vez
+    // de fingir que a escolha é importante.
+    meaningful: (interestDiff != null && Math.abs(interestDiff) >= DEBT_DIFF_MONEY)
+      || (monthsDiff != null && Math.abs(monthsDiff) >= DEBT_DIFF_MONTHS),
+    comparable: jurosComparavel || prazoComparavel,
+  };
+}
+
+// ------------------------------------------------------------------------------
+// [M34] COMPROMETIMENTO DA RENDA
+// ------------------------------------------------------------------------------
+// O percentual sozinho não diz nada a quem não tem a régua. As faixas abaixo são
+// REFERÊNCIA DE MERCADO, e a tela precisa dizer isso: a margem legal do
+// consignado é 35% da renda (mais 5% para o cartão consignado) e credores usam
+// algo perto de 30% como limite para conceder crédito novo. Não é lei para toda
+// dívida, não é meta pessoal, e ninguém está errado por estar acima; é o ponto em
+// que o orçamento deixa de absorver imprevisto.
+const DEBT_BURDEN_BANDS = [
+  { max: 15, level: "ok", label: "Dentro do que o orçamento absorve",
+    note: "As parcelas cabem sem apertar o mês. Ainda vale olhar a taxa: pouca parcela cara continua sendo dinheiro caro." },
+  { max: 30, level: "atencao", label: "Perto da referência usada por credores",
+    note: "Em torno de 30% da renda é o limite que bancos costumam usar para liberar crédito novo. Não é uma regra sua; é a régua deles." },
+  { max: 50, level: "alto", label: "Comprometimento alto",
+    note: "Metade da renda presa em parcela deixa pouca margem para imprevisto, e imprevisto é o que costuma virar dívida nova. Renegociar prazo ou taxa tende a render mais do que apertar o resto do orçamento." },
+  { max: Infinity, level: "critico", label: "Comprometimento crítico",
+    note: "Acima de 50% o orçamento não absorve um mês ruim. Antes de qualquer ordem de pagamento, o caminho costuma ser renegociação: prazo, taxa ou portabilidade. Procon e mutirões de renegociação atendem sem cobrar." },
+];
+
+function debtBurdenReading(pct) {
+  if (pct == null || !Number.isFinite(Number(pct))) {
+    return {
+      available: false, level: "desconhecido", label: "Sem renda informada",
+      note: "Informe sua renda mensal para o app medir quanto dela está comprometida com parcelas.",
+    };
+  }
+  const valor = Number(pct);
+  const faixa = DEBT_BURDEN_BANDS.find((b) => valor < b.max) || DEBT_BURDEN_BANDS[DEBT_BURDEN_BANDS.length - 1];
+  return { available: true, pct: valor, level: faixa.level, label: faixa.label, note: faixa.note };
+}
+
 function monthsFromTodayIso(months, fromIso) {
   if (months == null) return null;
   const base = new Date(`${fromIso || todayIso()}T12:00:00`);
@@ -343,6 +516,15 @@ function buildDebtModel(data, options) {
   const monthlyPayment = sumMoney(debts, (d) => d.monthlyPayment);
   const payments = (data.transactions || []).filter((t) => t.type === "expense" && t.debtId);
   const accountSummary = typeof accountsSummary === "function" ? accountsSummary(data) : null;
+  // [M34] O atraso é medido contra os pagamentos já registrados, para o app
+  // não acusar inadimplência de quem só esqueceu de atualizar a data.
+  const lateById = new Map(debts.map((d) => [d.id, debtLateInfo(d, payments)]));
+  const overdue = debts.filter((d) => lateById.get(d.id).late);
+  const overdueCost = overdue.reduce((soma, d) => {
+    const info = lateById.get(d.id);
+    return info.costKnown ? addMoney(soma, info.estimatedCost) : soma;
+  }, 0);
+  const burdenPct = income > 0 ? monthlyPayment / income * 100 : null;
   return {
     debts,
     ordered: orderDebts(debts, plan.strategy),
@@ -353,7 +535,15 @@ function buildDebtModel(data, options) {
     totalBalance: sumMoney(debts, (d) => d.value),
     monthlyPayment,
     income,
-    burdenPct: income > 0 ? monthlyPayment / income * 100 : null,
+    burdenPct,
+    // [M34] Régua para o percentual, atraso por dívida e a comparação entre
+    // as duas estratégias com os números desta pessoa.
+    burden: debtBurdenReading(burdenPct),
+    late: Object.fromEntries(Array.from(lateById.entries())),
+    overdueIds: overdue.map((d) => d.id),
+    overdueTotal: sumMoney(overdue, (d) => d.value),
+    overdueEstimatedCost: overdue.some((d) => lateById.get(d.id).costKnown) ? roundMoney(overdueCost) : null,
+    comparison: debtStrategyComparison(avalanche, snowball),
     estimatedDebtFreeAt: debts.length ? monthsFromTodayIso(simulation.months) : null,
     payments,
     staleIds: debts.filter((d) => isStaleDebtBalance(d)).map((d) => d.id),
@@ -378,7 +568,8 @@ function updateDebtBalance(debt, value, date) {
 
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
-    DEBT_TYPE_LABELS, DEBT_AMORTIZATION_LABELS, activeDebts, debtMonthlyRateInfo,
+    DEBT_TYPE_LABELS, DEBT_AMORTIZATION_LABELS, DEBT_BURDEN_BANDS, activeDebts, debtMonthlyRateInfo,
+    debtLateInfo, debtStrategyComparison, debtBurdenReading, debtClearedStats,
     orderDebts, simulateDebtPayoff, monthsFromTodayIso, nextDueDateForDebt,
     isStaleDebtBalance, buildDebtModel, isDuplicateDebtPayment, updateDebtBalance,
   };

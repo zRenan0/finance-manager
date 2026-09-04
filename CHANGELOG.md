@@ -2,6 +2,33 @@
 
 ## Não publicado
 
+### O M34 tirou a Central de Dívidas do saldo devedor
+
+- **Atraso.** A dívida vencida aparece na lista com "vencida há N dias" e um aviso
+  com a data. Se houver pagamento registrado depois do vencimento, o app **não
+  acusa atraso**: pede para atualizar a data, porque campo velho não é
+  inadimplência.
+- **Multa e mora** entraram como campos opcionais do contrato. Preenchidos, o app
+  estima quanto o atraso já custou (a multa uma vez, a mora proporcional aos dias).
+  Vazios, ele diz que não dá para estimar — não assume os 2% do CDC, que é teto
+  legal e não a cobrança do seu contrato.
+- **Avalanche x bola de neve, com vantagem E desvantagem.** Cada estratégia mostra
+  prazo, juros no total, em que mês a primeira dívida some e quantas somem em 12
+  meses. A avalanche economiza juros; a bola de neve risca nomes da lista antes.
+  As duas com o defeito dito em voz alta.
+- **Nenhuma é apresentada como a certa.** Quando a diferença é pequena, o app diz
+  que é pequena: "não existe estratégia universal, e nesse tamanho de diferença a
+  melhor é a que você consegue manter até o fim". E quando não há valor extra por
+  mês, ele avisa que as duas ordens dão o mesmo resultado, porque não há sobra
+  para direcionar.
+- **Quando uma ordem não quita nunca**, isso vira o aviso principal: a dívida que
+  fica por último recebe menos do que os próprios juros, e o caminho é liberar
+  parcela ou renegociar a taxa, não escolher entre as duas listas.
+- **Comprometimento da renda** ganhou régua: a faixa, o que ela significa e de
+  onde vem (a margem do consignado é 35%; credores usam algo perto de 30% para
+  liberar crédito novo). Declarado como referência de mercado, não como meta sua.
+- O cache offline subiu para `v71`.
+
 ### A conta do fechamento do mês voltou a fechar no centavo
 
 - A previsão distribuía a estimativa de gasto variável arredondando a cota diária

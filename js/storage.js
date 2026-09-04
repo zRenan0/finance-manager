@@ -1253,6 +1253,13 @@ function makeAsset(partial) {
     ratePct: isDebt ? normalizeOptionalPositive(partial.ratePct, 1000) : null,
     ratePeriod: isDebt && DEBT_RATE_PERIODS.includes(partial.ratePeriod) ? partial.ratePeriod : (isDebt ? "unknown" : ""),
     cetAnnualPct: isDebt ? normalizeOptionalPositive(partial.cetAnnualPct, 10000) : null,
+    // [M34] Encargos de ATRASO, direto do contrato. Ficam nulos por padrão de
+    // propósito: o CDC limita a multa a 2% em relação de consumo, mas teto legal
+    // não é a cobrança do contrato de ninguém, e assumir um número aqui viraria
+    // um custo estimado que o credor nunca cobrou. Dado antigo entra como nulo e
+    // a tela diz que não dá para estimar.
+    lateFeePct: isDebt ? normalizeOptionalPositive(partial.lateFeePct, 100) : null,
+    lateInterestMonthlyPct: isDebt ? normalizeOptionalPositive(partial.lateInterestMonthlyPct, 100) : null,
     remainingInstallments: isDebt ? (() => {
       const n = normalizeOptionalPositive(partial.remainingInstallments, 1200);
       return n == null ? null : Math.round(n);

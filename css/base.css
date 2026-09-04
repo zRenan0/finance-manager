@@ -234,6 +234,31 @@
 .inline-alert { margin:12px 0; padding:10px 12px; border-radius:10px; background:color-mix(in srgb,var(--brand) 9%,transparent); color:var(--ink-soft); font-size:.78rem; line-height:1.45; }
 .inline-alert--warn { background:color-mix(in srgb,var(--goal) 13%,transparent); color:var(--ink); }
 .inline-alert--danger { background:color-mix(in srgb,var(--negative) 12%,transparent); color:var(--negative); }
+/* ---- [M34] Estratégias, atraso e comprometimento ---- */
+.debt-strategies { display:grid; gap:12px; margin:14px 0 4px; }
+.debt-strategy { padding:13px; border:1px solid var(--border); border-radius:14px; background:var(--card-alt); }
+.debt-strategy.is-active { border-color:color-mix(in srgb,var(--brand) 40%,var(--border)); background:color-mix(in srgb,var(--brand) 6%,var(--card-alt)); }
+.debt-strategy__head { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+.debt-strategy__name { margin:0; font-weight:700; color:var(--ink); }
+.debt-strategy__call { margin:2px 0 0; font-size:.76rem; color:var(--ink-faint); }
+.debt-strategy__stats { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin:11px 0; }
+.debt-strategy__stats span { display:block; color:var(--ink-faint); font-size:.7rem; }
+.debt-strategy__stats b { color:var(--ink); font-size:.84rem; }
+.debt-strategy__pro,.debt-strategy__con { display:flex; gap:7px; margin:6px 0 0; font-size:.76rem; line-height:1.45; }
+.debt-strategy__pro { color:var(--positive); }
+.debt-strategy__con { color:var(--ink-soft); }
+.debt-strategy__pro svg,.debt-strategy__con svg { flex:0 0 auto; margin-top:2px; }
+.debt-strategy__verdict { display:flex; gap:8px; margin:14px 0 0; padding:11px 12px; border-radius:11px; background:color-mix(in srgb,var(--brand) 9%,transparent); color:var(--ink-soft); font-size:.78rem; line-height:1.5; }
+.debt-strategy__verdict svg { flex:0 0 auto; margin-top:2px; }
+.debt-late-flag { color:var(--negative); font-weight:700; }
+.debt-burden__value { margin:10px 0 0; font-size:1.6rem; font-weight:800; color:var(--ink); letter-spacing:-0.02em; }
+.debt-burden__label { margin:2px 0 8px; font-size:.8rem; font-weight:700; }
+.debt-burden--ok { color:var(--positive); }
+.debt-burden--atencao { color:var(--brand); }
+.debt-burden--alto { color:var(--goal); }
+.debt-burden--critico { color:var(--negative); }
+.debt-burden--desconhecido { color:var(--ink-faint); }
+@media (min-width:760px) { .debt-strategies { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media (max-width:700px) {
   .debt-plan-summary,.debt-facts { grid-template-columns:1fr; }
   .debt-row__main { grid-template-columns:30px minmax(0,1fr) 16px; }

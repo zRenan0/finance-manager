@@ -12,7 +12,8 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 
 | Campo | Valor |
 |---|---|
-| Módulo atual | **M32 e M33** (concluídos) |
+| Módulo atual | **M34** (concluído) |
+| Status do M34 | **CONCLUÍDO** - atraso e encargos do contrato entraram na Central de Dívidas, e a escolha entre avalanche e bola de neve virou comparação com vantagem, desvantagem e os números da pessoa; ordem que não quita é avisada antes da escolha. Cache em `v71` |
 | Status do M33 | **CONCLUÍDO** - painel por tipo de recorrência (streaming, software, academia, telefonia, moradia, educação, seguros, serviços), total anual de tudo que se repete e ficha "Revisar assinatura" com perguntas por tipo; a marcação guarda data, nunca veredito. Cache em `v70` |
 | Status do M32 | **CONCLUÍDO** - anomalias contra a própria média em janela do mesmo tamanho, com a base escrita na tela; três frases do roteiro entregues e o elogio falso do começo do mês eliminado |
 | Status do M31 | **CONCLUÍDO** - "posso comprar?" passou a responder em sobra mensal, comprometimento antes/depois e impacto na reserva, com nome do produto e leitura educativa |
@@ -46,10 +47,10 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 | Status do M3 | **CONCLUÍDO** — aplicado e confirmado no banco em 2026-08-28 |
 | Status do M2 | **CONCLUÍDO** — nenhuma vulnerabilidade de autorização; invariantes travados por teste |
 | Status do M1 | **CONCLUÍDO** — aplicado e confirmado; gatilho capturado e versionado |
-| Módulos concluídos | M0 a M33 |
-| Próximo módulo | M34 - Central de dívidas |
+| Módulos concluídos | M0 a M34 |
+| Próximo módulo | M35 - Conciliação financeira |
 | Branch | `deploy-atualizado` (árvore limpa no início do M0) |
-| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `tests/test-cloud-sync.js`, `tests/test-account-backend.js`, `tests/test-critical-actions.js`, `tests/test-coverage.js`, `tests/test-security-adversarial.js`, `tests/test-observability.js`, `tests/test-data-inventory-lgpd.js`, `tests/test-third-party-transparency.js`, `supabase/tests/verify_security_boundary.sql`, `scripts/check-deploy.js`, `scripts/serve.js`, `scripts/coverage.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/storage.js`, `js/cloud-sync.js` (M10), `js/analytics.js`, `js/forecast.js`, `js/wrapped.js`, `js/screens/analytics.js` (M11), `js/backup-crypto.js`, `js/app.js`, `js/actions.js`, `js/storage.js`, `js/screens/settings.js`, `css/components.css`, `scripts/build-app-module.js` (M12), `netlify/functions/sync.js` (M13), `js/import.js`, `netlify/functions/_shared/finance-schema.js` (M14), observabilidade em backend, frontend e Service Worker (M17), inventário e tela de Privacidade (M18), registro de terceiros e operadores (M19), `js/modules/app.generated.js` (regerado). Documentação: inventário do M8, protocolo do M10, backup protegido do M12, `docs/VERSIONAMENTO.md` do M13, observabilidade do M17, inventário LGPD do M18, terceiros do M19 e desenhos de M15 a M19. **M20 (só documentação e verificação, nenhum arquivo de produção):** `SECURITY_INCIDENT_RESPONSE.md` (novo), `tests/test-incident-response.js` (novo), `scripts/check-release.js`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. **M21:** `reportar-vulnerabilidade.html` (novo), `css/reportar.css` (novo), `SECURITY.md` (novo), `scripts/security-txt.js` (novo), `tests/test-responsible-disclosure.js` (novo), `vercel.json`, `scripts/build-dist.js`, `scripts/serve.js`, `scripts/check-release.js`, `scripts/check-deploy.js`, `landing.html`, `tests/test-landing.js`, `tests/browser/run-landing.js`, `SECURITY_INCIDENT_RESPONSE.md`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. **M22:** `docs/MARCA.md` (novo), `tests/test-brand.js` (novo), `index.html`, `manifest.webmanifest`, `landing.html`, `scripts/check-release.js`, `scripts/security-txt.js`, `SECURITY.md`, `SECURITY_INCIDENT_RESPONSE.md`, `README.md`, `CHANGELOG.md`. **M23:** `landing.html`, `css/landing.css`, `service-worker.js` (v63), `tests/test-brand.js`, `tests/test-responsible-disclosure.js`, `tests/test-third-party-transparency.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M24:** `js/screens/onboarding.js`, `js/app.js`, `js/actions.js`, `css/screens/notifications-onboarding.css`, `service-worker.js` (v64), `js/modules/app.generated.js`, `tests/test-onboarding.js`, `tests/browser/run-browser.js`, `tests/browser/run-pwa.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M32/M33:** `tests/test-anomalies-subscriptions.js` (novo), `tests/helpers/fixed-clock.js` (novo), `tests/test-health.js`, `tests/test-insights-engine.js`, `tests/test-render.js`, `tests/test-reserve-and-close.js`, `js/forecast.js`, `js/analytics.js`, `js/advisor.js`, `js/recurring.js`, `js/storage.js`, `js/screens/insights.js`, `js/screens/subscriptions.js`, `js/app.js`, `js/actions.js`, `css/screens/intelligence.css`, `service-worker.js` (v70), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M30/M31:** `tests/test-daily-and-purchase.js` (novo), `js/forecast.js`, `js/insights.js`, `js/screens/calendar.js`, `js/screens/simulate.js`, `js/app.js`, `css/screens/planning.css`, `service-worker.js` (v69), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M28/M29:** `tests/test-reserve-and-close.js` (novo), `js/metrics.js`, `js/forecast.js`, `js/screens/health.js`, `js/screens/calendar.js`, `css/screens/health.css`, `css/screens/planning.css`, `service-worker.js` (v68), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M27:** `tests/test-score-explainable.js` (novo), `js/score.js`, `js/screens/health.js`, `css/screens/health.css`, `service-worker.js` (v67), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M26:** `tests/test-local-only-notice.js` (novo), `js/app.js`, `js/actions.js`, `js/screens/dashboard.js`, `css/screens/dashboard.css`, `css/components.css`, `service-worker.js` (v66), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M25:** `js/demo.js` (novo), `tests/test-demo-mode.js` (novo), `js/app.js`, `js/actions.js`, `js/screens/onboarding.js`, `css/components.css`, `service-worker.js` (v65), `scripts/build-app-module.js`, `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. |
+| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `tests/test-cloud-sync.js`, `tests/test-account-backend.js`, `tests/test-critical-actions.js`, `tests/test-coverage.js`, `tests/test-security-adversarial.js`, `tests/test-observability.js`, `tests/test-data-inventory-lgpd.js`, `tests/test-third-party-transparency.js`, `supabase/tests/verify_security_boundary.sql`, `scripts/check-deploy.js`, `scripts/serve.js`, `scripts/coverage.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/storage.js`, `js/cloud-sync.js` (M10), `js/analytics.js`, `js/forecast.js`, `js/wrapped.js`, `js/screens/analytics.js` (M11), `js/backup-crypto.js`, `js/app.js`, `js/actions.js`, `js/storage.js`, `js/screens/settings.js`, `css/components.css`, `scripts/build-app-module.js` (M12), `netlify/functions/sync.js` (M13), `js/import.js`, `netlify/functions/_shared/finance-schema.js` (M14), observabilidade em backend, frontend e Service Worker (M17), inventário e tela de Privacidade (M18), registro de terceiros e operadores (M19), `js/modules/app.generated.js` (regerado). Documentação: inventário do M8, protocolo do M10, backup protegido do M12, `docs/VERSIONAMENTO.md` do M13, observabilidade do M17, inventário LGPD do M18, terceiros do M19 e desenhos de M15 a M19. **M20 (só documentação e verificação, nenhum arquivo de produção):** `SECURITY_INCIDENT_RESPONSE.md` (novo), `tests/test-incident-response.js` (novo), `scripts/check-release.js`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. **M21:** `reportar-vulnerabilidade.html` (novo), `css/reportar.css` (novo), `SECURITY.md` (novo), `scripts/security-txt.js` (novo), `tests/test-responsible-disclosure.js` (novo), `vercel.json`, `scripts/build-dist.js`, `scripts/serve.js`, `scripts/check-release.js`, `scripts/check-deploy.js`, `landing.html`, `tests/test-landing.js`, `tests/browser/run-landing.js`, `SECURITY_INCIDENT_RESPONSE.md`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. **M22:** `docs/MARCA.md` (novo), `tests/test-brand.js` (novo), `index.html`, `manifest.webmanifest`, `landing.html`, `scripts/check-release.js`, `scripts/security-txt.js`, `SECURITY.md`, `SECURITY_INCIDENT_RESPONSE.md`, `README.md`, `CHANGELOG.md`. **M23:** `landing.html`, `css/landing.css`, `service-worker.js` (v63), `tests/test-brand.js`, `tests/test-responsible-disclosure.js`, `tests/test-third-party-transparency.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M24:** `js/screens/onboarding.js`, `js/app.js`, `js/actions.js`, `css/screens/notifications-onboarding.css`, `service-worker.js` (v64), `js/modules/app.generated.js`, `tests/test-onboarding.js`, `tests/browser/run-browser.js`, `tests/browser/run-pwa.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M34:** `tests/test-debt-center.js` (novo), `js/debts.js`, `js/storage.js`, `js/screens/debts.js`, `js/app.js`, `js/actions.js`, `css/base.css`, `service-worker.js` (v71), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M32/M33:** `tests/test-anomalies-subscriptions.js` (novo), `tests/helpers/fixed-clock.js` (novo), `tests/test-health.js`, `tests/test-insights-engine.js`, `tests/test-render.js`, `tests/test-reserve-and-close.js`, `js/forecast.js`, `js/analytics.js`, `js/advisor.js`, `js/recurring.js`, `js/storage.js`, `js/screens/insights.js`, `js/screens/subscriptions.js`, `js/app.js`, `js/actions.js`, `css/screens/intelligence.css`, `service-worker.js` (v70), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M30/M31:** `tests/test-daily-and-purchase.js` (novo), `js/forecast.js`, `js/insights.js`, `js/screens/calendar.js`, `js/screens/simulate.js`, `js/app.js`, `css/screens/planning.css`, `service-worker.js` (v69), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M28/M29:** `tests/test-reserve-and-close.js` (novo), `js/metrics.js`, `js/forecast.js`, `js/screens/health.js`, `js/screens/calendar.js`, `css/screens/health.css`, `css/screens/planning.css`, `service-worker.js` (v68), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M27:** `tests/test-score-explainable.js` (novo), `js/score.js`, `js/screens/health.js`, `css/screens/health.css`, `service-worker.js` (v67), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M26:** `tests/test-local-only-notice.js` (novo), `js/app.js`, `js/actions.js`, `js/screens/dashboard.js`, `css/screens/dashboard.css`, `css/components.css`, `service-worker.js` (v66), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M25:** `js/demo.js` (novo), `tests/test-demo-mode.js` (novo), `js/app.js`, `js/actions.js`, `js/screens/onboarding.js`, `css/components.css`, `service-worker.js` (v65), `scripts/build-app-module.js`, `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. |
 | Migration do M13 | `20260831120000_database_schema_version.sql` — **aplicada e confirmada em produção em 2026-08-31** (`database_schema_version = 1`; grants inalterados: só `service_role` e `postgres`). Reversível por `alter table public.cofre_sync_config drop column if exists database_schema_version;` |
 | Migrations criadas até aqui | `20260828120000_rls_auto_enable_least_privilege.sql`, `20260828130000_rls_auto_enable_versionada.sql`, `20260828140000_menor_privilegio_tabelas.sql` (as três **aplicadas e confirmadas em 2026-08-28**), `20260828150000_rls_auto_enable_gatilho.sql` (**ainda não aplicada**; é no-op em produção, onde o gatilho já existe) |
 | Versão do app | `0.30.0` (package.json) |
@@ -3552,6 +3553,96 @@ as duas regras não divergirem sobre quem fala.
 
 ---
 
+## M34 - Central de dívidas
+
+### Antes
+
+O motor já era o mais completo do app: taxa contratual separada do CET (com o
+motivo escrito no código), cronograma Price e SAC, saldo de quitação pelo valor
+presente (CDC art. 52, §2º), avalanche e bola de neve simuladas, comprometimento
+da renda, saldo velho sinalizado e alerta de amortização negativa.
+
+Faltavam duas coisas da lista do roteiro e uma que o roteiro pede em outras
+palavras:
+
+1. **atraso e multa** não existiam em lugar nenhum. `nextDueDate` só servia para
+   dizer qual é o próximo vencimento;
+2. **as estratégias não eram explicadas.** A tela mostrava "Avalanche: 26 meses"
+   e "Bola de neve: 28 meses" lado a lado. Isso faz parecer que existe resposta
+   certa e que ela é sempre a mesma;
+3. o **comprometimento da renda** era um percentual sem régua: 23,5% não diz nada
+   a quem não sabe com o que comparar.
+
+### Alterações
+
+`js/debts.js` ganhou `debtLateInfo()`, `debtStrategyComparison()`,
+`debtClearedStats()` e `debtBurdenReading()`. `buildDebtModel` passou a devolver
+`late`, `overdueIds`, `overdueTotal`, `overdueEstimatedCost`, `comparison` e
+`burden`. Nenhum campo antigo saiu.
+
+**O atraso é medido contra os pagamentos registrados.** Se existe pagamento com
+data igual ou posterior ao vencimento, o app não acusa atraso: pede para atualizar
+a data. Campo velho não é inadimplência, e essa é a única acusação que este módulo
+poderia fazer errado.
+
+**Multa e mora entraram como campos opcionais** (`lateFeePct`,
+`lateInterestMonthlyPct`), nulos por padrão. Sem eles a tela mostra o atraso e diz
+que não estima o custo. Assumir 2% porque o CDC limita a multa a 2% seria
+transformar teto legal em cobrança real de um contrato que ninguém leu aqui. A
+multa incide uma vez sobre a parcela; a mora corre por dia, proporcional ao mês.
+
+**A comparação devolve números, não veredito.** Prazo, juros no total, mês da
+primeira quitação e quantas dívidas somem em 12 meses, para cada estratégia, com
+a vantagem e a desvantagem de cada uma escritas. `meaningful` diz se a diferença
+é grande o bastante para a escolha importar (R$ 300 em juros ou 2 meses); quando
+não é, a tela fala isso em vez de fingir que a decisão é decisiva.
+
+Duas leituras que só apareceram com dados reais e viraram texto:
+
+- **sem valor extra por mês, as duas ordens são idênticas** (não há sobra para
+  direcionar). A tela diz isso e aponta o campo do valor extra, em vez de mostrar
+  dois blocos com números iguais;
+- **quando uma das ordens não quita nunca**, ela vira o aviso principal.
+
+### O erro que o teste pegou
+
+A primeira versão de `debtStrategyComparison` comparava `totalInterest` das duas
+simulações direto. Com uma dívida a 12% ao mês e orçamento curto, a avalanche
+quitava em 45 meses com R$ 43.618 de juros e a bola de neve **travava** (a parcela
+não cobre os juros da última da fila) parando com R$ 3.473 acumulados. O app
+anunciava a bola de neve como "R$ 40 mil mais barata" — e ela é justamente a que
+nunca termina. Juros de simulação travada são "juros até desistir", não "juros até
+quitar": agora só entram na comparação quando as duas completam, e o travamento
+vira `stalls` e aviso na tela. O caso virou teste.
+
+### Compatibilidade
+
+Dois campos novos e opcionais no schema local do lado da dívida, normalizados como
+os que já existiam (`normalizeOptionalPositive`, nulo quando ausente). Dado antigo
+entra com nulo e a tela declara o que falta; nada é presumido. **Sem subir o
+`SCHEMA_VERSION`**: o servidor valida assets por nome, tipo e valor e repassa o
+resto, então os campos atravessam a sincronização; um cliente antigo apenas os
+descarta ao normalizar, sem afetar saldo, parcela ou qualquer campo anterior.
+Quatro funções novas e puras; o cartão "Comparação" antigo virou a coluna de
+comprometimento e nenhuma informação dele foi perdida.
+
+### Testes
+
+| Teste | Resultado |
+|---|---|
+| `node tests/test-debt-center.js` (novo) | **PASSOU**; 69 ok |
+| `node tests/test-debts.js` | **PASSOU**; 34 ok |
+| `node tests/test-render.js` | **PASSOU**; 737 ok |
+| `npm run lint`, `check:build` | **PASSARAM** (o lint pegou um travessão meu em `debts.js`) |
+| `npm test` | **76 arquivos, 0 falhas** |
+| Navegador real | **PASSOU**; dívida cadastrada pelo formulário com multa 2% e mora 1% venceu há 22 dias e o app estimou R$ 14,21 (R$ 10,40 + R$ 3,81), conferido na mão; sem valor extra as duas estratégias saíram idênticas e a tela disse isso; com R$ 800 extra a avalanche saiu R$ 82,08 mais barata e a bola de neve quitou a primeira no mês 2 contra o mês 5; 390 px sem estouro |
+
+### Status
+
+**CONCLUÍDO.**
+
+---
+
 ## Checklist de regressão
 
 Executar após **todo** módulo que toque no código. Marcar `OK` / `FALHOU` / `NÃO VALIDADO`.
@@ -3572,6 +3663,7 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
 - [ ] `node tests/test-reserve-and-close.js` (escada da reserva do M28 e conta do fechamento do M29)
 - [ ] `node tests/test-daily-and-purchase.js` (limite diário do M30 e leituras de compra do M31)
 - [ ] `node tests/test-anomalies-subscriptions.js` (janela comparável do M32 e tipos/revisão do M33)
+- [ ] `node tests/test-debt-center.js` (atraso, encargos e estratégias do M34)
 - [ ] `node tests/test-accounting-integrity.js` (invariantes contábeis do M11)
 - [ ] `node tests/test-backup-restore.js` (backup, restauração e senha do M12)
 - [ ] `node tests/test-versioning.js` (versões e matriz de compatibilidade do M13)

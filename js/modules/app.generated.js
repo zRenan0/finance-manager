@@ -3223,6 +3223,13 @@ function makeAsset(partial) {
     ratePct: isDebt ? normalizeOptionalPositive(partial.ratePct, 1000) : null,
     ratePeriod: isDebt && DEBT_RATE_PERIODS.includes(partial.ratePeriod) ? partial.ratePeriod : (isDebt ? "unknown" : ""),
     cetAnnualPct: isDebt ? normalizeOptionalPositive(partial.cetAnnualPct, 10000) : null,
+    // [M34] Encargos de ATRASO, direto do contrato. Ficam nulos por padrão de
+    // propósito: o CDC limita a multa a 2% em relação de consumo, mas teto legal
+    // não é a cobrança do contrato de ninguém, e assumir um número aqui viraria
+    // um custo estimado que o credor nunca cobrou. Dado antigo entra como nulo e
+    // a tela diz que não dá para estimar.
+    lateFeePct: isDebt ? normalizeOptionalPositive(partial.lateFeePct, 100) : null,
+    lateInterestMonthlyPct: isDebt ? normalizeOptionalPositive(partial.lateInterestMonthlyPct, 100) : null,
     remainingInstallments: isDebt ? (() => {
       const n = normalizeOptionalPositive(partial.remainingInstallments, 1200);
       return n == null ? null : Math.round(n);
@@ -12490,6 +12497,179 @@ function simulateDebtPayoff(debtsOrData, options) {
   };
 }
 
+// ------------------------------------------------------------------------------
+// [M34] ATRASO E MULTA
+// ------------------------------------------------------------------------------
+// Saldo devedor é a pergunta errada quando a dívida está vencida: o que muda a
+// urgência é o RELÓGIO. Uma dívida de R$ 800 vencida há 40 dias pode custar mais
+// por mês que uma de R$ 4.000 em dia.
+//
+// O que o app pode afirmar e o que não pode
+// -----------------------------------------
+// Pode afirmar que a data informada de vencimento já passou. NÃO pode afirmar
+// que a pessoa está inadimplente: ela pode ter pago e não ter atualizado o
+// campo. Por isso um pagamento registrado depois do vencimento derruba o alerta
+// e vira outro recado ("atualize a data"), em vez de acusar atraso.
+//
+// A multa e os juros de mora saem do CONTRATO, nunca de um padrão presumido.
+// Sem os dois campos preenchidos, a tela mostra o atraso e diz que não dá para
+// estimar o custo; assumir 2% porque o CDC limita a multa a 2% seria transformar
+// um teto legal em cobrança real de um contrato que ninguém leu aqui.
+function debtLateInfo(debt, payments, todayRef) {
+  const hoje = todayRef || todayIso();
+  const venc = String(debt && debt.nextDueDate ? debt.nextDueDate : "");
+  const vazio = {
+    late: false, dueIso: venc, daysLate: 0, likelyPaid: false, installment: 0,
+    fine: null, moraInterest: null, estimatedCost: null, costKnown: false, missing: [],
+  };
+  if (!venc || venc >= hoje) return vazio;
+
+  // Pagamento lançado a partir do vencimento: a evidência aponta para campo
+  // desatualizado, não para inadimplência.
+  const pagouDepois = (payments || []).some((p) => p.debtId === debt.id && String(p.date) >= venc);
+  const dias = daysBetweenIso(venc, hoje);
+  if (pagouDepois) return { ...vazio, dueIso: venc, daysLate: dias, likelyPaid: true };
+
+  const parcela = Math.max(0, roundMoney(debt.monthlyPayment));
+  const multaPct = debt.lateFeePct == null ? null : Number(debt.lateFeePct);
+  const moraPct = debt.lateInterestMonthlyPct == null ? null : Number(debt.lateInterestMonthlyPct);
+  const missing = [];
+  if (!parcela) missing.push("parcela");
+  if (multaPct == null) missing.push("multa");
+  if (moraPct == null) missing.push("mora");
+
+  // A multa incide UMA VEZ sobre a parcela vencida; a mora corre por dia. Tratar
+  // as duas como mensais dobraria o custo do primeiro mês.
+  const fine = parcela && multaPct != null ? roundMoney(parcela * multaPct / 100) : null;
+  const mora = parcela && moraPct != null ? roundMoney(parcela * (moraPct / 100) * (dias / 30)) : null;
+  const costKnown = fine != null && mora != null;
+  return {
+    late: true,
+    dueIso: venc,
+    daysLate: dias,
+    likelyPaid: false,
+    installment: parcela,
+    fine,
+    moraInterest: mora,
+    estimatedCost: costKnown ? addMoney(fine, mora) : null,
+    costKnown,
+    missing,
+  };
+}
+
+// ------------------------------------------------------------------------------
+// [M34] AVALANCHE x BOLA DE NEVE, SEM VENCEDOR UNIVERSAL
+// ------------------------------------------------------------------------------
+// As duas estratégias já eram simuladas; o que faltava era a comparação HONESTA.
+// Dizer "avalanche é a melhor" é meia verdade: ela é a mais barata em juros, e a
+// bola de neve tira dívidas da lista mais cedo, que é o que faz muita gente
+// continuar no plano. Quem abandona o plano ótimo no terceiro mês termina mais
+// caro do que quem leva o plano subótimo até o fim.
+//
+// Então a comparação devolve NÚMEROS: quanto custa a mais em reais, quantos
+// meses a mais, e quantas dívidas somem antes em cada uma. E devolve também se a
+// diferença é grande o bastante para a escolha importar: quando dá quarenta
+// reais e um mês, a resposta honesta é "escolha a que você consegue manter".
+const DEBT_DIFF_MONEY = 300;   // diferença em juros que muda a decisão
+const DEBT_DIFF_MONTHS = 2;    // …ou diferença de prazo
+
+function debtClearedStats(sim) {
+  const limpos = (sim.perDebt || []).filter((r) => r.clearedMonth != null);
+  const primeiro = limpos.length ? Math.min(...limpos.map((r) => r.clearedMonth)) : null;
+  return {
+    months: sim.months,
+    interest: sim.totalInterest,
+    firstCleared: primeiro,
+    clearedIn12: limpos.filter((r) => r.clearedMonth <= 12).length,
+    total: (sim.perDebt || []).length,
+    // `complete` separa "juros até quitar" de "juros até a simulação desistir".
+    complete: !!sim.complete,
+    stalled: !!sim.stalled,
+    capped: !!sim.capped,
+  };
+}
+
+function debtStrategyComparison(avalanche, snowball) {
+  const a = debtClearedStats(avalanche);
+  const s = debtClearedStats(snowball);
+  // COMPARAR JUROS DE UMA SIMULAÇÃO QUE TRAVOU É PIOR QUE NÃO COMPARAR.
+  //
+  // Quando uma ordem deixa a parcela abaixo dos juros da dívida prioritária, o
+  // saldo cresce e a simulação para; o `totalInterest` dela é "juros até
+  // desistir", não "juros até quitar". Confrontado com o total de uma rota que
+  // chega ao fim, o número menor parecia a estratégia mais barata, e ela é
+  // justamente a que nunca acaba. O teste do M34 pegou esta inversão com uma
+  // dívida a 12% ao mês: a bola de neve aparecia R$ 40 mil "mais barata".
+  const ambasCompletam = a.complete && s.complete;
+  const jurosComparavel = a.interest != null && s.interest != null && ambasCompletam;
+  const prazoComparavel = a.months != null && s.months != null;
+  const stalls = a.complete === s.complete ? null : (a.complete ? "snowball" : "avalanche");
+  // Positivo = a bola de neve custa isso a mais em juros.
+  const interestDiff = jurosComparavel ? roundMoney(subMoney(s.interest, a.interest)) : null;
+  const monthsDiff = prazoComparavel ? s.months - a.months : null;
+  const firstDiff = a.firstCleared != null && s.firstCleared != null ? a.firstCleared - s.firstCleared : null;
+
+  // O vencedor sai dos números, não da fama. Com taxa desconhecida em alguma
+  // dívida as duas podem empatar, e afirmar que a avalanche ganha seria chute.
+  const cheaper = interestDiff == null ? null
+    : interestDiff > 0.004 ? "avalanche" : interestDiff < -0.004 ? "snowball" : "empate";
+  const faster = monthsDiff == null ? null
+    : monthsDiff > 0 ? "avalanche" : monthsDiff < 0 ? "snowball" : "empate";
+  const firstWin = firstDiff == null ? null
+    : firstDiff > 0 ? "snowball" : firstDiff < 0 ? "avalanche" : "empate";
+
+  return {
+    avalanche: a,
+    snowball: s,
+    interestDiff,
+    monthsDiff,
+    firstDiff,
+    cheaper,
+    faster,
+    firstWin,
+    // Uma das ordens não quita nunca com o orçamento atual. É a informação mais
+    // importante da tela quando acontece, e não um detalhe da comparação.
+    stalls,
+    // A diferença muda a decisão? Se não muda, a tela precisa dizer isso em vez
+    // de fingir que a escolha é importante.
+    meaningful: (interestDiff != null && Math.abs(interestDiff) >= DEBT_DIFF_MONEY)
+      || (monthsDiff != null && Math.abs(monthsDiff) >= DEBT_DIFF_MONTHS),
+    comparable: jurosComparavel || prazoComparavel,
+  };
+}
+
+// ------------------------------------------------------------------------------
+// [M34] COMPROMETIMENTO DA RENDA
+// ------------------------------------------------------------------------------
+// O percentual sozinho não diz nada a quem não tem a régua. As faixas abaixo são
+// REFERÊNCIA DE MERCADO, e a tela precisa dizer isso: a margem legal do
+// consignado é 35% da renda (mais 5% para o cartão consignado) e credores usam
+// algo perto de 30% como limite para conceder crédito novo. Não é lei para toda
+// dívida, não é meta pessoal, e ninguém está errado por estar acima; é o ponto em
+// que o orçamento deixa de absorver imprevisto.
+const DEBT_BURDEN_BANDS = [
+  { max: 15, level: "ok", label: "Dentro do que o orçamento absorve",
+    note: "As parcelas cabem sem apertar o mês. Ainda vale olhar a taxa: pouca parcela cara continua sendo dinheiro caro." },
+  { max: 30, level: "atencao", label: "Perto da referência usada por credores",
+    note: "Em torno de 30% da renda é o limite que bancos costumam usar para liberar crédito novo. Não é uma regra sua; é a régua deles." },
+  { max: 50, level: "alto", label: "Comprometimento alto",
+    note: "Metade da renda presa em parcela deixa pouca margem para imprevisto, e imprevisto é o que costuma virar dívida nova. Renegociar prazo ou taxa tende a render mais do que apertar o resto do orçamento." },
+  { max: Infinity, level: "critico", label: "Comprometimento crítico",
+    note: "Acima de 50% o orçamento não absorve um mês ruim. Antes de qualquer ordem de pagamento, o caminho costuma ser renegociação: prazo, taxa ou portabilidade. Procon e mutirões de renegociação atendem sem cobrar." },
+];
+
+function debtBurdenReading(pct) {
+  if (pct == null || !Number.isFinite(Number(pct))) {
+    return {
+      available: false, level: "desconhecido", label: "Sem renda informada",
+      note: "Informe sua renda mensal para o app medir quanto dela está comprometida com parcelas.",
+    };
+  }
+  const valor = Number(pct);
+  const faixa = DEBT_BURDEN_BANDS.find((b) => valor < b.max) || DEBT_BURDEN_BANDS[DEBT_BURDEN_BANDS.length - 1];
+  return { available: true, pct: valor, level: faixa.level, label: faixa.label, note: faixa.note };
+}
+
 function monthsFromTodayIso(months, fromIso) {
   if (months == null) return null;
   const base = new Date(`${fromIso || todayIso()}T12:00:00`);
@@ -12536,6 +12716,15 @@ function buildDebtModel(data, options) {
   const monthlyPayment = sumMoney(debts, (d) => d.monthlyPayment);
   const payments = (data.transactions || []).filter((t) => t.type === "expense" && t.debtId);
   const accountSummary = typeof accountsSummary === "function" ? accountsSummary(data) : null;
+  // [M34] O atraso é medido contra os pagamentos já registrados, para o app
+  // não acusar inadimplência de quem só esqueceu de atualizar a data.
+  const lateById = new Map(debts.map((d) => [d.id, debtLateInfo(d, payments)]));
+  const overdue = debts.filter((d) => lateById.get(d.id).late);
+  const overdueCost = overdue.reduce((soma, d) => {
+    const info = lateById.get(d.id);
+    return info.costKnown ? addMoney(soma, info.estimatedCost) : soma;
+  }, 0);
+  const burdenPct = income > 0 ? monthlyPayment / income * 100 : null;
   return {
     debts,
     ordered: orderDebts(debts, plan.strategy),
@@ -12546,7 +12735,15 @@ function buildDebtModel(data, options) {
     totalBalance: sumMoney(debts, (d) => d.value),
     monthlyPayment,
     income,
-    burdenPct: income > 0 ? monthlyPayment / income * 100 : null,
+    burdenPct,
+    // [M34] Régua para o percentual, atraso por dívida e a comparação entre
+    // as duas estratégias com os números desta pessoa.
+    burden: debtBurdenReading(burdenPct),
+    late: Object.fromEntries(Array.from(lateById.entries())),
+    overdueIds: overdue.map((d) => d.id),
+    overdueTotal: sumMoney(overdue, (d) => d.value),
+    overdueEstimatedCost: overdue.some((d) => lateById.get(d.id).costKnown) ? roundMoney(overdueCost) : null,
+    comparison: debtStrategyComparison(avalanche, snowball),
     estimatedDebtFreeAt: debts.length ? monthsFromTodayIso(simulation.months) : null,
     payments,
     staleIds: debts.filter((d) => isStaleDebtBalance(d)).map((d) => d.id),
@@ -12571,7 +12768,8 @@ function updateDebtBalance(debt, value, date) {
 
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
-    DEBT_TYPE_LABELS, DEBT_AMORTIZATION_LABELS, activeDebts, debtMonthlyRateInfo,
+    DEBT_TYPE_LABELS, DEBT_AMORTIZATION_LABELS, DEBT_BURDEN_BANDS, activeDebts, debtMonthlyRateInfo,
+    debtLateInfo, debtStrategyComparison, debtBurdenReading, debtClearedStats,
     orderDebts, simulateDebtPayoff, monthsFromTodayIso, nextDueDateForDebt,
     isStaleDebtBalance, buildDebtModel, isDuplicateDebtPayment, updateDebtBalance,
   };
@@ -26781,6 +26979,7 @@ function renderDebtForm() {
       <div class="field-row"><div class="field"><label class="field__label" for="debt-cet">CET anual (%)</label><input id="debt-cet" class="input" data-field="debt-cet" value="${escapeHtml(f.cetAnnualPct)}" inputmode="decimal" placeholder="Ex: 28,5" /><p class="field-hint">Se informado, o CET tem preferência no cálculo.</p></div><div class="field"><label class="field__label" for="debt-rate">Taxa de juros (%)</label><div class="debt-rate-row"><input id="debt-rate" class="input" data-field="debt-rate" value="${escapeHtml(f.ratePct)}" inputmode="decimal" placeholder="Ex: 2,1" /><select class="input" data-action-select="debt-rate-period"><option value="unknown" ${f.ratePeriod === "unknown" ? "selected" : ""}>Período</option><option value="month" ${f.ratePeriod === "month" ? "selected" : ""}>ao mês</option><option value="year" ${f.ratePeriod === "year" ? "selected" : ""}>ao ano</option></select></div></div></div>
       <div class="field-row"><div class="field"><label class="field__label" for="debt-original">Valor contratado</label><input id="debt-original" class="input" data-field="debt-original" value="${escapeHtml(f.originalPrincipal)}" inputmode="decimal" placeholder="0,00" /></div><div class="field"><label class="field__label" for="debt-installments">Parcelas restantes</label><input id="debt-installments" class="input" data-field="debt-installments" value="${escapeHtml(f.remainingInstallments)}" inputmode="numeric" placeholder="Ex: 24" /></div></div>
       <div class="field-row"><div class="field"><label class="field__label" for="debt-system">Amortização</label><select id="debt-system" class="input" data-action-select="debt-system">${Object.entries(DEBT_AMORTIZATION_LABELS).map(([id,label]) => `<option value="${id}" ${f.amortizationSystem === id ? "selected" : ""}>${label}</option>`).join("")}</select></div><div class="field"><label class="field__label" for="debt-status">Situação</label><select id="debt-status" class="input" data-action-select="debt-status"><option value="active" ${f.debtStatus === "active" ? "selected" : ""}>Ativa</option><option value="negotiating" ${f.debtStatus === "negotiating" ? "selected" : ""}>Em negociação</option><option value="paid" ${f.debtStatus === "paid" ? "selected" : ""}>Quitada</option></select></div></div>
+      <div class="field-row"><div class="field"><label class="field__label" for="debt-late-fee">Multa por atraso (%)</label><input id="debt-late-fee" class="input" data-field="debt-late-fee" value="${escapeHtml(f.lateFeePct)}" inputmode="decimal" placeholder="Ex: 2" /><p class="field-hint">Do seu contrato. Em relação de consumo o CDC limita a multa a 2%, mas o app não presume esse número: sem preenchimento, ele não estima o custo do atraso.</p></div><div class="field"><label class="field__label" for="debt-late-mora">Juros de mora (% ao mês)</label><input id="debt-late-mora" class="input" data-field="debt-late-mora" value="${escapeHtml(f.lateInterestMonthlyPct)}" inputmode="decimal" placeholder="Ex: 1" /><p class="field-hint">Cobrado por dia de atraso, proporcional ao mês.</p></div></div>
       <div class="field"><label class="field__label" for="debt-note">Observação</label><input id="debt-note" class="input" data-field="debt-note" value="${escapeHtml(f.note)}" maxlength="140" placeholder="Contrato, garantia ou contato" /></div>
     </details>
     <div class="form-actions"><button class="btn btn--ghost" data-action="debt-form-cancel">Cancelar</button><button class="btn btn--primary" data-action="debt-save">${f.id ? "Salvar alterações" : "Cadastrar dívida"}</button></div>
@@ -26820,10 +27019,12 @@ function renderDebtList(model) {
   return `<div class="card span-3"><div class="settings-row-header"><div><p class="card-title" data-ui-css="margin:0">Ordem de pagamento</p><p class="card-subtitle">Todas recebem a parcela mínima; o valor livre vai para a primeira da lista.</p></div><span class="badge">${model.debts.length}</span></div><div class="debt-list">${model.ordered.map((d,index) => {
     const rate = debtMonthlyRateInfo(d);
     const due = nextDueDateForDebt(d);
+    const late = model.late[d.id];
     const expanded = state.debtsUi.expandedId === d.id;
     const paid = model.payments.filter((p) => p.debtId === d.id).sort((a,b) => b.date.localeCompare(a.date));
-    return `<div class="debt-row ${expanded ? "is-open" : ""}"><button class="debt-row__main" data-action="debt-toggle" data-id="${d.id}" aria-expanded="${expanded}"><span class="debt-rank">${index + 1}</span><span class="debt-row__text"><b>${escapeHtml(d.name)}</b><small>${escapeHtml(d.creditor || DEBT_TYPE_LABELS[d.debtType] || "Dívida")} · ${rate.known ? `${fmtDec(rate.annualPct, 2)}% a.a. ${rate.source === "cet" ? "CET" : "efetivos"}` : "custo não informado"}</small></span><span class="debt-row__values"><b>${fmtBRL(d.value)}</b><small>${d.monthlyPayment > 0 ? `${fmtBRL(d.monthlyPayment)}/mês` : "sem parcela mínima"}</small></span>${svgIcon(expanded ? "chevronUp" : "chevronDown",15)}</button>
+    return `<div class="debt-row ${expanded ? "is-open" : ""}"><button class="debt-row__main" data-action="debt-toggle" data-id="${d.id}" aria-expanded="${expanded}"><span class="debt-rank">${index + 1}</span><span class="debt-row__text"><b>${escapeHtml(d.name)}</b><small>${escapeHtml(d.creditor || DEBT_TYPE_LABELS[d.debtType] || "Dívida")} · ${rate.known ? `${fmtDec(rate.annualPct, 2)}% a.a. ${rate.source === "cet" ? "CET" : "efetivos"}` : "custo não informado"}${late && late.late ? ` · <b class="debt-late-flag">vencida há ${late.daysLate} ${late.daysLate === 1 ? "dia" : "dias"}</b>` : ""}</small></span><span class="debt-row__values"><b>${fmtBRL(d.value)}</b><small>${d.monthlyPayment > 0 ? `${fmtBRL(d.monthlyPayment)}/mês` : "sem parcela mínima"}</small></span>${svgIcon(expanded ? "chevronUp" : "chevronDown",15)}</button>
       ${expanded ? `<div class="debt-row__detail"><div class="debt-facts"><div><span>Próximo vencimento</span><b>${due ? fmtDateFull(due) : "Não informado"}</b></div><div><span>Saldo conferido</span><b>${d.balanceCheckedAt ? fmtDateFull(d.balanceCheckedAt) : "Nunca"}</b></div><div><span>Situação</span><b>${d.debtStatus === "negotiating" ? "Em negociação" : "Ativa"}</b></div></div>
+        ${renderDebtLate(model.late[d.id])}
         ${model.staleIds.includes(d.id) ? `<div class="inline-alert inline-alert--warn">Saldo sem conferência há mais de 60 dias. Atualize ao registrar o próximo pagamento.</div>` : ""}
         ${model.simulation.negativeAmortizationIds.includes(d.id) ? `<div class="inline-alert inline-alert--danger">A parcela pode ser menor ou igual aos juros do mês. O saldo pode não cair.</div>` : ""}
         ${paid.length ? `<div class="debt-payment-history"><p class="field__label">Pagamentos vinculados</p>${paid.slice(0,5).map((p) => `<div><span>${fmtDateShort(p.date)}</span><b>${fmtBRL(p.amount)}</b></div>`).join("")}</div>` : ""}
@@ -26832,18 +27033,110 @@ function renderDebtList(model) {
   }).join("")}</div></div>`;
 }
 
+// ==================================================================
+// [M34] QUAL ESTRATÉGIA USAR
+// ------------------------------------------------------------------
+// O cartão antigo mostrava o prazo de cada estratégia e nada mais, o que faz
+// parecer que existe uma resposta certa e que ela é sempre a mesma. Não existe.
+// A avalanche é a mais barata em juros; a bola de neve tira dívidas da lista mais
+// cedo, e é isso que faz muita gente não desistir no terceiro mês.
+//
+// Então este cartão mostra vantagem E desvantagem das duas, com os números desta
+// pessoa, e quando a diferença é pequena ele diz que é pequena em vez de fingir
+// que a escolha é decisiva.
+function debtStrategyMonths(n) {
+  return n == null ? "sem prazo calculável" : `${n} ${n === 1 ? "mês" : "meses"}`;
+}
+
+function renderDebtStrategyCard(model) {
+  const c = model.comparison;
+  const atual = model.plan.strategy;
+  const jurosA = c.avalanche.interest;
+  const jurosS = c.snowball.interest;
+  const diff = c.interestDiff;
+  // SEM DINHEIRO EXTRA NÃO EXISTE ESTRATÉGIA.
+  //
+  // Quando cada dívida recebe só a parcela mínima, a ordem não muda nada: não há
+  // sobra para direcionar. Os dois lados do cartão saem idênticos, e deixar o
+  // usuário escolher entre dois números iguais é fingir uma decisão. A conta que
+  // importa nesse caso é outra, e o campo dela está logo acima.
+  const semExtra = model.plan.extraMonthly <= 0 && c.interestDiff === 0 && c.monthsDiff === 0;
+  const veredito = c.stalls
+    ? `Com o orçamento de hoje, a ordem "${c.stalls === "snowball" ? "bola de neve" : "avalanche"}" não chega ao fim: a dívida que fica por último recebe menos do que os juros dela e o saldo cresce. Antes de escolher entre as duas, o caminho é liberar mais parcela por mês ou renegociar a taxa dessa dívida.`
+    : semExtra
+      ? "Enquanto cada dívida receber só a parcela mínima, as duas ordens dão exatamente o mesmo resultado: não sobra nada para direcionar. A escolha entre avalanche e bola de neve só passa a valer alguma coisa quando existe um valor extra por mês, no campo acima."
+    : !c.comparable
+    ? "Falta a taxa de alguma dívida, então ainda não dá para comparar o custo das duas. Preencha a taxa ou o CET no cadastro para o app parar de chutar."
+    : !c.meaningful
+      ? `Com as suas dívidas, a diferença entre as duas é ${diff == null ? "pequena" : `de ${fmtBRL(Math.abs(diff))} em juros`}${c.monthsDiff ? ` e ${Math.abs(c.monthsDiff)} ${Math.abs(c.monthsDiff) === 1 ? "mês" : "meses"}` : ""}. Não existe estratégia universal, e nesse tamanho de diferença a melhor é simplesmente a que você consegue manter até o fim.`
+      : `Com as suas dívidas, a avalanche economiza ${fmtBRL(Math.abs(diff || 0))} em juros${c.monthsDiff ? ` e termina ${Math.abs(c.monthsDiff)} ${Math.abs(c.monthsDiff) === 1 ? "mês" : "meses"} antes` : ""}${c.firstDiff > 0 ? `, mas a bola de neve risca a primeira dívida da lista ${c.firstDiff} ${c.firstDiff === 1 ? "mês" : "meses"} antes` : ""}. As duas são planos válidos; o que muda é o que pesa mais para você.`;
+
+  const bloco = (id, titulo, chamada, vantagem, desvantagem, stats) => `
+    <div class="debt-strategy ${atual === id ? "is-active" : ""}">
+      <div class="debt-strategy__head">
+        <div>
+          <p class="debt-strategy__name">${titulo}</p>
+          <p class="debt-strategy__call">${chamada}</p>
+        </div>
+        ${atual === id
+          ? `<span class="status-badge" data-ui-css="background:var(--brand-soft); color:var(--brand)">em uso</span>`
+          : `<button class="btn btn--secondary btn--sm" data-action="debt-strategy" data-value="${id}">Usar esta</button>`}
+      </div>
+      <div class="debt-strategy__stats">${stats}</div>
+      <p class="debt-strategy__pro">${svgIcon("checkCircle", 13)} ${vantagem}</p>
+      <p class="debt-strategy__con">${svgIcon("alertTriangle", 13)} ${desvantagem}</p>
+    </div>`;
+
+  const stat = (rotulo, valor) => `<div><span>${rotulo}</span><b>${valor}</b></div>`;
+  const jurosTexto = (v) => (v == null ? "incompleto" : fmtBRL(v));
+  const primeiro = (n) => (n == null ? "não calculável" : `mês ${n}`);
+
+  return `<div class="card span-2">
+    <p class="card-title">Qual estratégia usar</p>
+    <p class="card-subtitle">As duas pagam a parcela mínima de todas as dívidas; o que muda é para onde vai o dinheiro que sobra. Ambas funcionam, e nenhuma é a certa para todo mundo.</p>
+    <div class="debt-strategies">
+      ${bloco("avalanche", "Avalanche", "Financeiramente mais eficiente",
+        "Ataca primeiro o dinheiro mais caro, então o total de juros é o menor possível.",
+        "As dívidas grandes saem por último: a lista pode ficar meses sem encolher, e é aí que muita gente abandona o plano.",
+        stat("Prazo", debtStrategyMonths(c.avalanche.months)) + stat("Juros no total", jurosTexto(jurosA)) + stat("Primeira quitada", primeiro(c.avalanche.firstCleared)) + stat("Quitadas em 12 meses", `${c.avalanche.clearedIn12} de ${c.avalanche.total}`))}
+      ${bloco("snowball", "Bola de neve", "Mais simples para reduzir o número de dívidas",
+        "Risca nomes da lista mais cedo, e cada dívida que some libera a parcela dela para a próxima.",
+        `Ignora a taxa, então costuma custar mais em juros${diff != null && diff > 0 ? ` (aqui, ${fmtBRL(diff)} a mais)` : ""}.`,
+        stat("Prazo", debtStrategyMonths(c.snowball.months)) + stat("Juros no total", jurosTexto(jurosS)) + stat("Primeira quitada", primeiro(c.snowball.firstCleared)) + stat("Quitadas em 12 meses", `${c.snowball.clearedIn12} de ${c.snowball.total}`))}
+    </div>
+    <p class="debt-strategy__verdict">${svgIcon("info", 14)} ${veredito}</p>
+    <p class="footnote">Comparação educativa feita com os saldos e taxas que você cadastrou. Nenhuma das duas ordens vale mais que renegociar uma taxa alta: trocar 14% ao mês por 4% muda mais o resultado do que qualquer ordem de pagamento.</p>
+  </div>`;
+}
+
+// [M34] Atraso: o que o app viu, e o que ele não pode afirmar.
+function renderDebtLate(info) {
+  if (!info || (!info.late && !info.likelyPaid)) return "";
+  if (info.likelyPaid) {
+    return `<div class="inline-alert">O vencimento informado (${fmtDateFull(info.dueIso)}) já passou, mas há pagamento registrado depois dele. Atualize a data do próximo vencimento para o plano voltar a acertar o calendário.</div>`;
+  }
+  const custo = info.costKnown
+    ? `Pelos encargos que você cadastrou, o atraso já soma cerca de ${fmtBRL(info.estimatedCost)} (multa de ${fmtBRL(info.fine)} mais ${fmtBRL(info.moraInterest)} de mora).`
+    : `Cadastre a multa e os juros de mora do contrato para o app estimar quanto o atraso está custando. Sem eles, ele não inventa o número.`;
+  return `<div class="inline-alert inline-alert--danger">
+    Vencida há ${info.daysLate} ${info.daysLate === 1 ? "dia" : "dias"} (venceu em ${fmtDateFull(info.dueIso)}) e sem pagamento registrado depois disso. ${custo}
+    ${info.late ? " Dívida vencida costuma andar mais rápido que qualquer outra: renegociar antes de acumular tende a custar menos que pagar depois." : ""}
+  </div>`;
+}
+
 function renderDebtsScreen() {
   const model = debtsModel();
   const s = model.simulation;
-  const warningCount = s.unknownRateIds.length + s.missingPaymentIds.length + s.negativeAmortizationIds.length + model.staleIds.length;
+  const warningCount = s.unknownRateIds.length + s.missingPaymentIds.length + s.negativeAmortizationIds.length + model.staleIds.length + model.overdueIds.length;
   return `<div class="screen"><div class="screen-header"><div class="back-header"><button class="icon-btn" data-action="back" data-tab="dashboard" aria-label="Voltar">${svgIcon("chevronLeft",19)}</button><div><h1 class="page-title">Central de Dívidas</h1><p class="card-subtitle">Um plano baseado nos mesmos saldos do Patrimônio</p></div></div><button class="btn btn--primary btn--sm" data-action="debt-new">${svgIcon("plus",15)} Dívida</button></div>
-    <div class="grid-dashboard"><div class="card card--hero span-3 debt-hero"><div class="hero-glow"></div><div class="hero-label-row"><p class="hero-label">Saldo devedor total</p>${renderCalculationButton("debts")}</div><p class="hero-value">${fmtBRL(model.totalBalance)}</p>${model.estimatedDebtFreeAt ? `<p class="hero-reserved">${svgIcon("calendar",14)} Quitação estimada em ${fmtDateFull(model.estimatedDebtFreeAt)}</p>` : ""}<div class="hero-chips"><div class="hero-chip"><div><span class="hero-chip__label">Parcelas mínimas</span><span class="hero-chip__value">${fmtBRL(model.monthlyPayment)}</span></div></div><div class="hero-chip"><div><span class="hero-chip__label">Comprometimento da renda</span><span class="hero-chip__value">${model.burdenPct == null ? "Sem renda" : `${fmtDec(model.burdenPct, 1)}%`}</span></div></div><div class="hero-chip ${warningCount ? "hero-chip--warn" : "hero-chip--save"}"><div><span class="hero-chip__label">Pontos a revisar</span><span class="hero-chip__value">${warningCount}</span></div></div></div></div>
+    <div class="grid-dashboard"><div class="card card--hero span-3 debt-hero"><div class="hero-glow"></div><div class="hero-label-row"><p class="hero-label">Saldo devedor total</p>${renderCalculationButton("debts")}</div><p class="hero-value">${fmtBRL(model.totalBalance)}</p>${model.estimatedDebtFreeAt ? `<p class="hero-reserved">${svgIcon("calendar",14)} Quitação estimada em ${fmtDateFull(model.estimatedDebtFreeAt)}</p>` : ""}<div class="hero-chips"><div class="hero-chip"><div><span class="hero-chip__label">Parcelas mínimas</span><span class="hero-chip__value">${fmtBRL(model.monthlyPayment)}</span></div></div><div class="hero-chip"><div><span class="hero-chip__label">Comprometimento da renda</span><span class="hero-chip__value">${model.burdenPct == null ? "Sem renda" : `${fmtDec(model.burdenPct, 1)}%`}</span></div></div>${model.overdueIds.length ? `<div class="hero-chip hero-chip--warn"><div><span class="hero-chip__label">${model.overdueIds.length === 1 ? "Dívida vencida" : "Dívidas vencidas"}</span><span class="hero-chip__value">${fmtBRL(model.overdueTotal)}</span></div></div>` : ""}<div class="hero-chip ${warningCount ? "hero-chip--warn" : "hero-chip--save"}"><div><span class="hero-chip__label">Pontos a revisar</span><span class="hero-chip__value">${warningCount}</span></div></div></div></div>
       ${renderDebtForm()}${renderDebtPaymentForm(model)}
       ${!model.debts.length && (model.shortTermCards.due > 0 || model.shortTermCards.future > 0)
         ? `<div class="card span-3"><div class="inline-alert">Você ainda não cadastrou nenhuma dívida, mas tem ${fmtBRL(model.shortTermCards.due)} em faturas abertas e ${fmtBRL(model.shortTermCards.future)} em parcelas futuras. Elas já contam no Patrimônio; aqui só entram se a fatura virou rotativo ou parcelamento com juros.</div></div>`
         : ""}
       ${model.debts.length ? renderDebtProjection(model) : ""}
-      ${model.debts.length ? `<div class="card span-1"><p class="card-title">Comparação</p><div class="debt-compare"><div><span>Avalanche</span><b>${model.avalanche.months == null ? "Sem prazo" : `${model.avalanche.months} meses`}</b><small>Prioriza o maior custo</small></div><div><span>Bola de neve</span><b>${model.snowball.months == null ? "Sem prazo" : `${model.snowball.months} meses`}</b><small>Prioriza o menor saldo</small></div></div>${model.shortTermCards.due > 0 || model.shortTermCards.future > 0 ? `<div class="inline-alert">Cartões à parte: ${fmtBRL(model.shortTermCards.due)} em faturas abertas e ${fmtBRL(model.shortTermCards.future)} futuras. Só cadastre aqui se a fatura virou rotativo ou parcelamento.</div>` : ""}</div>` : ""}
+      ${model.debts.length ? renderDebtStrategyCard(model) : ""}
+      ${model.debts.length ? `<div class="card span-1"><p class="card-title">Comprometimento da renda</p><p class="debt-burden__value">${model.burdenPct == null ? "Sem renda informada" : `${fmtDec(model.burdenPct, 1)}%`}</p><p class="debt-burden__label debt-burden--${model.burden.level}">${escapeHtml(model.burden.label)}</p><p class="card-subtitle">${escapeHtml(model.burden.note)}</p>${model.shortTermCards.due > 0 || model.shortTermCards.future > 0 ? `<div class="inline-alert">Cartões à parte: ${fmtBRL(model.shortTermCards.due)} em faturas abertas e ${fmtBRL(model.shortTermCards.future)} futuras. Só cadastre aqui se a fatura virou rotativo ou parcelamento.</div>` : ""}</div>` : ""}
       ${renderDebtList(model)}
     </div></div>`;
 }
@@ -35404,6 +35697,7 @@ function onClick(e) {
         id:d.id, name:d.name, value:moneyDraft(d.value), debtType:d.debtType || "outro", creditor:d.creditor || "",
         originalPrincipal:draftMoney(d.originalPrincipal), monthlyPayment:draftMoney(d.monthlyPayment), ratePct:draftMoney(d.ratePct),
         ratePeriod:d.ratePeriod || "unknown", cetAnnualPct:draftMoney(d.cetAnnualPct), remainingInstallments:d.remainingInstallments == null ? "" : String(d.remainingInstallments),
+        lateFeePct:draftMoney(d.lateFeePct), lateInterestMonthlyPct:draftMoney(d.lateInterestMonthlyPct),
         amortizationSystem:d.amortizationSystem || "unknown", nextDueDate:d.nextDueDate || "", debtStatus:d.debtStatus || "active",
         balanceCheckedAt:d.balanceCheckedAt || "", note:d.note || "",
       };
@@ -35427,6 +35721,7 @@ function onClick(e) {
           debtType:f.debtType, creditor:f.creditor, originalPrincipal:optional(f.originalPrincipal),
           monthlyPayment:Number.isFinite(paymentNum) ? paymentNum : 0, ratePct:optional(f.ratePct), ratePeriod:f.ratePeriod,
           cetAnnualPct:optional(f.cetAnnualPct), remainingInstallments:optional(f.remainingInstallments), amortizationSystem:f.amortizationSystem,
+          lateFeePct:optional(f.lateFeePct), lateInterestMonthlyPct:optional(f.lateInterestMonthlyPct),
           nextDueDate:f.nextDueDate, debtStatus:f.debtStatus, balanceCheckedAt:f.balanceCheckedAt || todayIso(), note:f.note,
           history:old && old.history, createdAt:old && old.createdAt,
         });
@@ -36683,6 +36978,7 @@ function freshDebtForm() {
   return {
     id: null, name: "", value: "", debtType: "outro", creditor: "", originalPrincipal: "",
     monthlyPayment: "", ratePct: "", ratePeriod: "unknown", cetAnnualPct: "",
+    lateFeePct: "", lateInterestMonthlyPct: "",
     remainingInstallments: "", amortizationSystem: "unknown", nextDueDate: "",
     debtStatus: "active", balanceCheckedAt: todayIso(), note: "",
   };
@@ -38554,6 +38850,8 @@ function onInput(e) {
     case "debt-next-due": if (state.debtsUi.form) state.debtsUi.form.nextDueDate = val; break;
     case "debt-cet": if (state.debtsUi.form) state.debtsUi.form.cetAnnualPct = val; break;
     case "debt-rate": if (state.debtsUi.form) state.debtsUi.form.ratePct = val; break;
+    case "debt-late-fee": if (state.debtsUi.form) state.debtsUi.form.lateFeePct = val; break;
+    case "debt-late-mora": if (state.debtsUi.form) state.debtsUi.form.lateInterestMonthlyPct = val; break;
     case "debt-original": if (state.debtsUi.form) state.debtsUi.form.originalPrincipal = val; break;
     case "debt-installments": if (state.debtsUi.form) state.debtsUi.form.remainingInstallments = val.replace(/[^0-9]/g, "").slice(0,4); break;
     case "debt-note": if (state.debtsUi.form) state.debtsUi.form.note = val; break;

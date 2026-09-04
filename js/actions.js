@@ -961,6 +961,7 @@ function onClick(e) {
         id:d.id, name:d.name, value:moneyDraft(d.value), debtType:d.debtType || "outro", creditor:d.creditor || "",
         originalPrincipal:draftMoney(d.originalPrincipal), monthlyPayment:draftMoney(d.monthlyPayment), ratePct:draftMoney(d.ratePct),
         ratePeriod:d.ratePeriod || "unknown", cetAnnualPct:draftMoney(d.cetAnnualPct), remainingInstallments:d.remainingInstallments == null ? "" : String(d.remainingInstallments),
+        lateFeePct:draftMoney(d.lateFeePct), lateInterestMonthlyPct:draftMoney(d.lateInterestMonthlyPct),
         amortizationSystem:d.amortizationSystem || "unknown", nextDueDate:d.nextDueDate || "", debtStatus:d.debtStatus || "active",
         balanceCheckedAt:d.balanceCheckedAt || "", note:d.note || "",
       };
@@ -984,6 +985,7 @@ function onClick(e) {
           debtType:f.debtType, creditor:f.creditor, originalPrincipal:optional(f.originalPrincipal),
           monthlyPayment:Number.isFinite(paymentNum) ? paymentNum : 0, ratePct:optional(f.ratePct), ratePeriod:f.ratePeriod,
           cetAnnualPct:optional(f.cetAnnualPct), remainingInstallments:optional(f.remainingInstallments), amortizationSystem:f.amortizationSystem,
+          lateFeePct:optional(f.lateFeePct), lateInterestMonthlyPct:optional(f.lateInterestMonthlyPct),
           nextDueDate:f.nextDueDate, debtStatus:f.debtStatus, balanceCheckedAt:f.balanceCheckedAt || todayIso(), note:f.note,
           history:old && old.history, createdAt:old && old.createdAt,
         });

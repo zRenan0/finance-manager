@@ -34,6 +34,7 @@ function freshDebtForm() {
   return {
     id: null, name: "", value: "", debtType: "outro", creditor: "", originalPrincipal: "",
     monthlyPayment: "", ratePct: "", ratePeriod: "unknown", cetAnnualPct: "",
+    lateFeePct: "", lateInterestMonthlyPct: "",
     remainingInstallments: "", amortizationSystem: "unknown", nextDueDate: "",
     debtStatus: "active", balanceCheckedAt: todayIso(), note: "",
   };
@@ -1905,6 +1906,8 @@ function onInput(e) {
     case "debt-next-due": if (state.debtsUi.form) state.debtsUi.form.nextDueDate = val; break;
     case "debt-cet": if (state.debtsUi.form) state.debtsUi.form.cetAnnualPct = val; break;
     case "debt-rate": if (state.debtsUi.form) state.debtsUi.form.ratePct = val; break;
+    case "debt-late-fee": if (state.debtsUi.form) state.debtsUi.form.lateFeePct = val; break;
+    case "debt-late-mora": if (state.debtsUi.form) state.debtsUi.form.lateInterestMonthlyPct = val; break;
     case "debt-original": if (state.debtsUi.form) state.debtsUi.form.originalPrincipal = val; break;
     case "debt-installments": if (state.debtsUi.form) state.debtsUi.form.remainingInstallments = val.replace(/[^0-9]/g, "").slice(0,4); break;
     case "debt-note": if (state.debtsUi.form) state.debtsUi.form.note = val; break;

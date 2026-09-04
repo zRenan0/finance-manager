@@ -65,7 +65,10 @@
 // com a ficha de revisão (M33) entraram no pacote e na folha de Inteligência.
 // Vai junto a correção do arredondamento da estimativa diária em `forecast.js`,
 // que fazia a caminhada do fechamento divergir da soma das parcelas.
-const VERSION = "v70";
+// v71: a Central de Dívidas passou a ler atraso, multa e mora do contrato e a
+// comparar avalanche e bola de neve com vantagem, desvantagem e os números da
+// pessoa.
+const VERSION = "v71";
 const BUILD_ID = VERSION;
 const CACHE_NAME = "financas-cache-" + VERSION;
 // A PÁGINA COMERCIAL TEM CACHE PRÓPRIO.
