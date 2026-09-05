@@ -4051,6 +4051,16 @@ function migrate(parsed) {
       // NECESSÁRIO (derivado do prazo) e do ritmo REAL (derivado dos lançamentos).
       // Os três são exibidos lado a lado; nenhum é inventado a partir do outro.
       monthlyPlan: Math.max(0, roundMoney(g.monthlyPlan)),
+      // ---- M36: corrigir o alvo pela inflação ao mostrar o esforço mensal ----
+      // Entrou como campo OPCIONAL, sem subir o SCHEMA_VERSION, pelo mesmo
+      // critério do `review` das recorrências (M33): é um booleano novo dentro
+      // de um registro que já sincroniza, ausência normaliza para `false` e
+      // nenhum valor, aporte, prazo ou saldo depende dele. O alvo gravado
+      // continua sendo o preço de HOJE; a correção é só leitura de tela.
+      // Efeito de um cliente ANTIGO ler esta meta: ele descarta a marcação ao
+      // normalizar e a meta volta a exibir só o alvo nominal. Nada se perde
+      // além da marcação, que é remarcável em um toque.
+      inflationAdjusted: g.inflationAdjusted === true,
       syncRev: normalizeSyncRev(g.syncRev),
     };
   });
@@ -17748,6 +17758,83 @@ if (typeof module !== "undefined" && module.exports) {
 
 const GOAL_PACE_MONTHS = 6;      // janela do ritmo real
 const GOAL_ETA_MAX_MONTHS = 600; // 50 anos; acima disso a estimativa é ruído
+const GOAL_INFLATION_MIN_DAYS = 30; // abaixo de um mês a correção não muda nada
+
+/* ==============================================================================
+ * [M36] INFLAÇÃO NA META
+ * ==============================================================================
+ * O alvo que a pessoa digita é o preço de HOJE. Quando o prazo é longo, esse
+ * número deixa de ser o objetivo: guardar R$ 5.000 para um notebook daqui a dois
+ * anos não compra o notebook se ele custar R$ 5.512 lá.
+ *
+ * Três decisões que separam isto de um chute:
+ *
+ *   1. É OPT-IN por meta (`goal.inflationAdjusted`). Nada muda em meta antiga, e
+ *      o app não decide sozinho que o objetivo de alguém encarece.
+ *   2. A taxa NÃO é inventada aqui. Sai da mesma premissa de IPCA que os
+ *      simuladores usam (Ajustes > Premissas de mercado), que já é editável,
+ *      datada e com fonte declarada. Uma segunda inflação escondida na tela de
+ *      metas poderia discordar da primeira, e aí nenhum dos dois números valeria
+ *      nada.
+ *   3. O alvo GRAVADO continua sendo o de hoje. Progresso, total guardado,
+ *      "faltam X" e "meta concluída" seguem medindo contra ele. A correção entra
+ *      como LEITURA ADICIONAL ("para manter o poder de compra seriam R$ Y/mês"),
+ *      nunca reescrevendo o que a pessoa digitou.
+ */
+
+// Premissa anual de inflação, em % ao ano. Lê a mesma fonte dos simuladores e
+// tolera a ausência do módulo de carteira (o motor de metas roda isolado nos
+// testes de unidade).
+function goalInflationPct(data) {
+  if (typeof marketRatesOf === "function") return Number(marketRatesOf(data || {}).ipca) || 0;
+  if (typeof normalizeMarketRates === "function") return Number(normalizeMarketRates(data && data.marketRates).ipca) || 0;
+  return 0;
+}
+
+// Preço estimado, daqui a N anos, de um valor de hoje. Juro composto, não regra
+// de três: 5% ao ano por dois anos são 10,25%, não 10%.
+function inflateMoney(value, annualPct, years) {
+  const pct = Number(annualPct) || 0;
+  const y = Number(years) || 0;
+  if (pct <= 0 || y <= 0) return roundMoney(value);
+  return mulMoney(value, Math.pow(1 + pct / 100, y));
+}
+
+// Bloco de inflação de UMA meta. Devolve sempre um objeto, com `reason` dizendo
+// por que não há correção; a tela precisa explicar a ausência, não escondê-la.
+function goalInflationView(goal, base) {
+  const on = !!(goal && goal.inflationAdjusted);
+  const pct = Number(base && base.inflationPct) || 0;
+  const view = {
+    on, pct,
+    reason: "off",
+    years: 0,
+    targetAtDeadline: base.target,
+    extra: 0,
+    remaining: base.remaining,
+    requiredMonthly: null,
+    gap: 0,
+    covers: null,
+  };
+  if (!on) return view;
+  if (base.done) { view.reason = "concluida"; return view; }
+  if (!goal.deadline) { view.reason = "sem-prazo"; return view; }
+  if (base.daysLeft == null || base.daysLeft < GOAL_INFLATION_MIN_DAYS) { view.reason = "prazo-curto"; return view; }
+  if (pct <= 0) { view.reason = "sem-taxa"; return view; }
+
+  view.years = base.daysLeft / 365.25;
+  view.targetAtDeadline = inflateMoney(base.target, pct, view.years);
+  view.extra = Math.max(0, subMoney(view.targetAtDeadline, base.target));
+  view.remaining = Math.max(0, subMoney(view.targetAtDeadline, base.saved));
+  view.requiredMonthly = base.monthsLeft ? divMoney(view.remaining, base.monthsLeft) : null;
+  // Quanto o ritmo de hoje deixa de cobrir por causa da correção; positivo = falta.
+  if (view.requiredMonthly != null && base.projectionRate >= 0) {
+    view.gap = Math.max(0, subMoney(view.requiredMonthly, base.projectionRate));
+    view.covers = moneyCompare(base.projectionRate, view.requiredMonthly) >= 0;
+  }
+  view.reason = "ok";
+  return view;
+}
 
 // Modelos prontos de meta. Só sugestão de nome/ícone/prazo; nada é criado
 // sozinho, e o usuário edita tudo antes de salvar.
@@ -17806,6 +17893,8 @@ function createGoalWithInitialBalance(data, draft, initialSource, accountId) {
     icon: draft.icon || "piggy",
     createdAt,
     monthlyPlan: Math.max(0, roundMoney(draft.monthlyPlan)),
+    // [M36] Marcação opcional; ausente ou `false` deixa a meta idêntica à de antes.
+    inflationAdjusted: draft.inflationAdjusted === true,
   };
   const seed = amount > 0 && source === "cash" ? makeTransaction({
     id: `goal-upfront:${goalId}`,
@@ -17968,6 +18057,13 @@ function buildGoalModel(data, goal, ctx) {
 
   const gap = required != null && projectionRate >= 0 ? Math.max(0, subMoney(required, projectionRate)) : 0;
 
+  // [M36] Correção pela inflação. Calculada DEPOIS de tudo que já existia, e sem
+  // alterar nenhum dos números acima: é leitura adicional, não novo alvo.
+  const inflation = goalInflationView(goal, {
+    target, saved, remaining, done, daysLeft, monthsLeft, projectionRate,
+    inflationPct: (ctx && ctx.inflationPct != null) ? ctx.inflationPct : goalInflationPct(data),
+  });
+
   return {
     id: goal.id,
     goal,
@@ -17984,6 +18080,7 @@ function buildGoalModel(data, goal, ctx) {
     etaLate: !!(etaIso && goal.deadline && etaIso > goal.deadline),
     gap,
     contributedThisMonth,
+    inflation,
     series,
     status,
     statusLabel: GOAL_STATUS[status].label,
@@ -18019,7 +18116,9 @@ function buildGoalsModel(data, refDate) {
   const ref = refDate instanceof Date ? refDate : new Date();
   const today = todayIso();
   const ledger = goalMonthlyLedger(data);
-  const ctx = { ledger, refDate: ref, today };
+  // [M36] A premissa de inflação é lida UMA vez por render; ela é a mesma para
+  // todas as metas, e recalculá-la por meta só multiplicaria trabalho.
+  const ctx = { ledger, refDate: ref, today, inflationPct: goalInflationPct(data) };
 
   const models = (data.goals || []).map((g) => buildGoalModel(data, g, ctx));
 
@@ -18102,6 +18201,20 @@ function goalsAdvice(models, plan) {
     });
   }
 
+  // [M36] A meta que fecha o valor de hoje mas não o preço estimado no prazo. É
+  // a única situação em que a correção muda uma decisão: sem ela a tela diria
+  // "no ritmo" para quem vai chegar lá com dinheiro insuficiente.
+  const inflacaoAperta = models.find((m) => m.inflation && m.inflation.reason === "ok"
+    && m.inflation.covers === false && m.requiredMonthly != null
+    && moneyCompare(m.projectionRate, m.requiredMonthly) >= 0);
+  if (inflacaoAperta && out.length < 3) {
+    const inf = inflacaoAperta.inflation;
+    out.push({
+      tone: "warn", icon: "trendUp",
+      text: `“${inflacaoAperta.goal.name}” fecha os ${fmtBRL(inflacaoAperta.target)} de hoje no prazo, mas pela premissa de ${fmtNum(inf.pct)}% ao ano o mesmo objetivo custaria ${fmtBRL(inf.targetAtDeadline)} lá. Manter o poder de compra pediria ${fmtBRL(inf.requiredMonthly)}/mês. É estimativa, não previsão.`,
+    });
+  }
+
   const idle = models.find((m) => m.status === "idle");
   if (idle && out.length < 3) {
     out.push({
@@ -18130,7 +18243,7 @@ function goalsAdvice(models, plan) {
 }
 
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { buildGoalsModel, buildGoalModel, goalMonthlyLedger, goalSeries, goalPace, savingCapacity, GOAL_TEMPLATES };
+  module.exports = { buildGoalsModel, buildGoalModel, goalMonthlyLedger, goalSeries, goalPace, savingCapacity, goalInflationView, goalInflationPct, inflateMoney, GOAL_TEMPLATES };
 }
 
 // source: js/forecast.js
@@ -28778,6 +28891,8 @@ function renderGoalForm(gf, editing) {
       : "Se informar um valor inicial, você escolherá se ele sai do saldo agora ou se já estava guardado antes."}</p>
     <p class="field-hint">O aporte planejado é o seu compromisso. O app compara ele com o que você realmente guardou e com o que o prazo exige.</p>
 
+    ${renderGoalInflationField(gf)}
+
     <div class="field"><p class="field__label">Ícone</p>
       <div class="icon-picker">${GOAL_ICON_OPTIONS.map((k) => `<button class="icon-picker__btn ${gf.icon === k ? "active" : ""}" data-action="set-goal-icon" data-value="${k}" aria-label="Escolher ícone ${k}" aria-pressed="${gf.icon === k ? "true" : "false"}">${svgIcon(k, 19)}</button>`).join("")}</div>
     </div>
@@ -28789,6 +28904,62 @@ function renderGoalForm(gf, editing) {
   </div>`;
 }
 
+
+
+// [M36] A leitura corrigida, dentro do cartão da meta. Só aparece para quem
+// marcou a opção, e sempre com a taxa escrita na frase: um número de dois anos
+// à frente sem a premissa que o gerou é palpite disfarçado de projeção.
+function renderGoalInflationLine(m) {
+  const inf = m.inflation;
+  if (!inf || !inf.on) return "";
+  if (inf.reason === "sem-prazo") {
+    return `<p class="goal-eta">${svgIcon("info", 13)}<span>Correção pela inflação ligada, mas esta meta não tem prazo. Defina uma data para o app estimar o preço lá na frente.</span></p>`;
+  }
+  if (inf.reason === "sem-taxa") {
+    return `<p class="goal-eta">${svgIcon("info", 13)}<span>Correção pela inflação ligada, mas a premissa de IPCA está em zero. Ajuste-a em Ajustes &gt; Premissas de mercado.</span></p>`;
+  }
+  if (inf.reason !== "ok") return "";
+
+  const alerta = inf.covers === false && m.requiredMonthly != null && moneyCompare(m.projectionRate, m.requiredMonthly) >= 0;
+  return `<p class="goal-eta ${alerta ? "is-late" : ""}">${svgIcon(alerta ? "alertTriangle" : "trendUp", 13)}<span>Com IPCA de ${fmtNum(inf.pct)}% ao ano, ${fmtBRL(m.target)} de hoje viram <b>${fmtBRL(inf.targetAtDeadline)}</b> em ${fmtDateFull(m.deadline)}${inf.requiredMonthly != null ? `; manter o poder de compra pede <b>${fmtBRL(inf.requiredMonthly)}</b>/mês` : ""}. Estimativa pela premissa do app, não preço garantido.</span></p>`;
+}
+// [M36] Correção do alvo pela inflação. É uma marcação, não um campo de taxa: a
+// taxa mora em Ajustes > Premissas de mercado, junto com Selic, CDI e TR, e os
+// simuladores leem a mesma. Duas inflações em telas diferentes acabariam
+// discordando, e aí nenhuma das duas valeria nada.
+//
+// A prévia usa o que já está digitado no formulário, então a pessoa vê o efeito
+// antes de salvar. Sem prazo não há horizonte para corrigir, e o texto diz isso
+// em vez de esconder a opção.
+function renderGoalInflationField(gf) {
+  const pct = goalInflationPct(state.data);
+  const alvo = parseMoneyInput(gf.target);
+  const dias = gf.deadline ? daysBetweenIso(todayIso(), gf.deadline) : null;
+  const anos = dias != null && dias >= GOAL_INFLATION_MIN_DAYS ? dias / 365.25 : 0;
+  const estimado = alvo > 0 && anos > 0 ? inflateMoney(alvo, pct, anos) : 0;
+
+  let previa;
+  if (pct <= 0) {
+    previa = "A premissa de inflação está em zero. Ajuste o IPCA nas premissas de mercado para a correção ter efeito.";
+  } else if (!gf.deadline) {
+    previa = `Sem prazo não há horizonte para corrigir. Defina uma data e o app estima o preço com o IPCA de ${fmtNum(pct)}% ao ano.`;
+  } else if (anos <= 0) {
+    previa = "O prazo é curto demais para a correção mudar alguma coisa.";
+  } else if (!(alvo > 0)) {
+    previa = `Informe o valor alvo e o app estima quanto ele custaria em ${fmtDateFull(gf.deadline)} com o IPCA de ${fmtNum(pct)}% ao ano.`;
+  } else {
+    previa = `${fmtBRL(alvo)} hoje ≈ <b>${fmtBRL(estimado)}</b> em ${fmtDateFull(gf.deadline)}, com o IPCA de ${fmtNum(pct)}% ao ano. É estimativa, não preço garantido.`;
+  }
+
+  return `<div class="field">
+    <label class="legal-consent">
+      <input type="checkbox" data-action-select="goal-inflation" ${gf.inflationAdjusted ? "checked" : ""} />
+      <span>Corrigir o alvo pela inflação estimada<small>O valor gravado continua sendo o preço de hoje; o app passa a mostrar também quanto seria preciso guardar para manter o poder de compra até o prazo.</small></span>
+    </label>
+    <p class="field-hint">${previa}</p>
+    <button type="button" class="field__link" data-action="goal-inflation-rate">${svgIcon("trendUp", 13)} Ajustar a premissa de inflação</button>
+  </div>`;
+}
 // Sugere quanto aportar por mês para bater a meta até o prazo, com base no
 // valor que ainda falta e nos meses restantes até o deadline.
 function goalMonthlySuggestion(g) {
@@ -28848,6 +29019,7 @@ function renderGoalCard(m) {
     </p>` : ""}
     ${!m.done && !m.etaIso ? `<p class="goal-eta">${svgIcon("info", 13)}<span>Sem aportes nem plano definido, não dá para estimar a conclusão.</span></p>` : ""}
     ${!m.done && m.gap > 0 ? `<p class="goal-eta is-late">${svgIcon("alertTriangle", 13)}<span>Faltam <b>${fmtBRL(m.gap)}</b> por mês para o prazo fechar.</span></p>` : ""}
+    ${renderGoalInflationLine(m)}
 
     ${m.series.some((s) => s.contributed !== 0) ? `<div class="goal-spark">
       ${renderSparkline(m.series.map((s) => ({ value: s.balance })), ringColor, 300, 46)}
@@ -36832,6 +37004,7 @@ function onClick(e) {
         deadline: g.deadline || "",
         icon: GOAL_ICON_OPTIONS.includes(g.icon) ? g.icon : "piggy",
         monthlyPlan: g.monthlyPlan ? g.monthlyPlan.toFixed(2).replace(".", ",") : "",
+        inflationAdjusted: g.inflationAdjusted === true,
       };
       state.expandedGoalId = null;
       render();
@@ -36860,13 +37033,13 @@ function onClick(e) {
       const commitGoal = (initialSource) => {
         if (editingId) {
           setData((d) => ({ ...d, goals: d.goals.map((g) => (g.id === editingId
-            ? { ...g, name: gf.name.trim(), target, deadline: gf.deadline, icon: gf.icon, monthlyPlan }
+            ? { ...g, name: gf.name.trim(), target, deadline: gf.deadline, icon: gf.icon, monthlyPlan, inflationAdjusted: gf.inflationAdjusted === true }
             : g)) }));
           notify("Meta atualizada");
         } else {
           setData((d) => createGoalWithInitialBalance(d, {
             name: gf.name.trim(), target, savedUpfront, deadline: gf.deadline,
-            icon: gf.icon, monthlyPlan,
+            icon: gf.icon, monthlyPlan, inflationAdjusted: gf.inflationAdjusted === true,
           }, initialSource || "cash", defaultCashAccountId()));
           notify("Meta criada");
         }
@@ -36969,6 +37142,14 @@ function onClick(e) {
     case "settings-section":
       state.settingsSection = state.settingsSection === value ? null : value;
       render();
+      break;
+    // [M36] Atalho do formulário de meta para a premissa de inflação. Abre o
+    // tópico certo em vez de largar a pessoa no índice de Ajustes; a taxa fica
+    // num único lugar, e este é o caminho até ele.
+    case "goal-inflation-rate":
+      state.settingsSection = "mercado";
+      setState({ tab: "settings" });
+      EventBus.emit(APP_EVENTS.TAB_CHANGED, { tab: "settings" });
       break;
     case "toggle-theme": setData((d) => ({ ...d, theme: d.theme === "dark" ? "light" : "dark" })); break;
     case "toggle-gamification": {
@@ -37414,7 +37595,7 @@ function defaultImportDestinationId(documentKind) {
 // componente cria, edita e é pré-preenchido por modelo; três caminhos que
 // precisam voltar exatamente ao mesmo ponto de partida ao serem cancelados.
 function freshGoalForm() {
-  return { show: false, name: "", target: "", savedUpfront: "", deadline: "", icon: "piggy", monthlyPlan: "" };
+  return { show: false, name: "", target: "", savedUpfront: "", deadline: "", icon: "piggy", monthlyPlan: "", inflationAdjusted: false };
 }
 
 // Feature 1; verifica, ao vivo enquanto o usuário preenche o formulário, se o
@@ -37464,7 +37645,7 @@ let state = {
   form: null,
   editingTxId: null,
   editingTxReturnTab: "dashboard",
-  goalForm: { show: false, name: "", target: "", savedUpfront: "", deadline: "", icon: "piggy", monthlyPlan: "" },
+  goalForm: { show: false, name: "", target: "", savedUpfront: "", deadline: "", icon: "piggy", monthlyPlan: "", inflationAdjusted: false },
   expandedGoalId: null,
   goalActionMode: "aportar", // "aportar" | "resgatar"
   goalContribution: "",
@@ -39473,6 +39654,8 @@ function onChange(e) {
   if (actionSelect === "review-payment-card") { state.movementReviewCard.creditCardId = e.target.value; return; }
   if (actionSelect === "onb-acc-type") { state.onboarding.account.type = e.target.value; return; }
   if (actionSelect === "onb-legal") { state.onboarding.legalAccepted = !!e.target.checked; render(); return; }
+  // [M36] Corrigir o alvo da meta pela inflação: marcação do formulário, não do dado.
+  if (actionSelect === "goal-inflation") { state.goalForm.inflationAdjusted = !!e.target.checked; render(); return; }
   if (actionSelect === "ai-preview-field") { toggleAiPreviewField(e.target.dataset.value, !!e.target.checked); return; }
   if (actionSelect === "privacy-ai-field") {
     const campo = e.target.dataset.value;
@@ -39545,7 +39728,10 @@ function onChange(e) {
   if (field === "period-custom-start") { state.analyticsCustomStart = e.target.value; render(); }
   if (field === "period-custom-end") { state.analyticsCustomEnd = e.target.value; render(); }
   if (field === "tx-date") { state.form.date = e.target.value; }
-  if (field === "goal-deadline") { state.goalForm.deadline = e.target.value; }
+  // [M36] O prazo repinta a tela: a prévia da correção pela inflação depende
+  // dele, e um seletor de data é escolha confirmada, não digitação por tecla.
+  // O campo tem `id`, então o foco volta para ele (ver focusKeyOf).
+  if (field === "goal-deadline") { state.goalForm.deadline = e.target.value; render(); }
 
   // Campos numéricos das simulações (ex-sliders): recalcula a projeção ao confirmar.
 
@@ -39601,6 +39787,10 @@ function onFocusOut(e) {
       }
     }
   }
+  // [M36] O valor alvo confirma no blur para a prévia da inflação sair do
+  // número já digitado. Só repinta com a correção ligada; sem ela nada na tela
+  // depende deste campo antes de salvar, e repintar seria trabalho à toa.
+  if (field === "goal-target" && state.goalForm.show && state.goalForm.inflationAdjusted) render();
   if (field === "credit-limit") {
     if (state.creditLimitInput !== null) {
       const n = moneyOrZero(state.creditLimitInput);

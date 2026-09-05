@@ -47,7 +47,7 @@ psql <URL_DE_STAGING> -v ON_ERROR_STOP=1 -f supabase/tests/verify_security_bound
 ```
 
 O processo de homologação, publicação e retorno está em `docs/RELEASE.md`. O schema
-de dados está na versão 23 e o cache offline na versão 72. O inventário técnico
+de dados está na versão 23 e o cache offline na versão 73. O inventário técnico
 do armazenamento está em `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`; o inventário de
 tratamento da LGPD está em `docs/INVENTARIO-DE-DADOS.md`; e o registro dos
 serviços externos está em `docs/TERCEIROS-E-OPERADORES.md`.
@@ -992,6 +992,34 @@ Detalhes que valem explicação:
   saldo da meta passaria a discordar dos lançamentos que o alimentaram.
 - Seis **modelos de meta** (reserva, viagem, carro, imóvel, notebook, estudos) que
   pré-preenchem nome, ícone e um prazo sugerido. Nada é criado sem confirmação.
+
+#### Correção pela inflação (M36)
+
+O valor alvo que você digita é o preço de **hoje**. Em prazo longo isso deixa de
+ser o objetivo: R$ 5.000 guardados para um notebook daqui a dois anos não compram
+o notebook se ele custar R$ 5.512 lá.
+
+A meta tem uma marcação opcional, **"Corrigir o alvo pela inflação estimada"**
+(`goal.inflationAdjusted`). Ligada, o cartão passa a mostrar quanto o mesmo
+objetivo custaria no prazo e quanto seria preciso guardar por mês para manter o
+poder de compra. Quatro decisões sustentam isso:
+
+- **É opt-in e o padrão é desligado.** Meta antiga não muda de comportamento, e o
+  app não decide sozinho que o objetivo de alguém encarece.
+- **O alvo gravado continua sendo o de hoje.** Progresso, "faltam R$ X", total
+  guardado e "meta concluída" seguem medindo contra ele. A correção é leitura
+  adicional, nunca reescrita do que você definiu.
+- **A taxa não nasce aqui.** É a premissa de IPCA de Ajustes → Premissas de
+  mercado, a mesma dos simuladores: editável, datada e com fonte no IBGE. Uma
+  segunda inflação escondida na tela de metas acabaria discordando da primeira.
+- **Juro composto, e sempre com a taxa escrita na frase.** 5% ao ano por dois anos
+  são 10,25%, não 10%. Sem prazo, com prazo abaixo de 30 dias ou com a premissa em
+  zero, o app diz por que não há correção em vez de inventar um número.
+
+O aviso que muda decisão é o do ritmo que fecha o valor de hoje e **não** o preço
+estimado no prazo: sem ele a tela diria "no ritmo" para quem vai chegar lá com
+dinheiro insuficiente. Nada é apresentado como previsão. Verificado em
+`tests/test-goals-inflation.js`.
 
 ### Calendário financeiro (`js/calendar.js`)
 

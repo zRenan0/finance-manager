@@ -153,6 +153,8 @@ function renderGoalForm(gf, editing) {
       : "Se informar um valor inicial, você escolherá se ele sai do saldo agora ou se já estava guardado antes."}</p>
     <p class="field-hint">O aporte planejado é o seu compromisso. O app compara ele com o que você realmente guardou e com o que o prazo exige.</p>
 
+    ${renderGoalInflationField(gf)}
+
     <div class="field"><p class="field__label">Ícone</p>
       <div class="icon-picker">${GOAL_ICON_OPTIONS.map((k) => `<button class="icon-picker__btn ${gf.icon === k ? "active" : ""}" data-action="set-goal-icon" data-value="${k}" aria-label="Escolher ícone ${k}" aria-pressed="${gf.icon === k ? "true" : "false"}">${svgIcon(k, 19)}</button>`).join("")}</div>
     </div>
@@ -164,6 +166,62 @@ function renderGoalForm(gf, editing) {
   </div>`;
 }
 
+
+
+// [M36] A leitura corrigida, dentro do cartão da meta. Só aparece para quem
+// marcou a opção, e sempre com a taxa escrita na frase: um número de dois anos
+// à frente sem a premissa que o gerou é palpite disfarçado de projeção.
+function renderGoalInflationLine(m) {
+  const inf = m.inflation;
+  if (!inf || !inf.on) return "";
+  if (inf.reason === "sem-prazo") {
+    return `<p class="goal-eta">${svgIcon("info", 13)}<span>Correção pela inflação ligada, mas esta meta não tem prazo. Defina uma data para o app estimar o preço lá na frente.</span></p>`;
+  }
+  if (inf.reason === "sem-taxa") {
+    return `<p class="goal-eta">${svgIcon("info", 13)}<span>Correção pela inflação ligada, mas a premissa de IPCA está em zero. Ajuste-a em Ajustes &gt; Premissas de mercado.</span></p>`;
+  }
+  if (inf.reason !== "ok") return "";
+
+  const alerta = inf.covers === false && m.requiredMonthly != null && moneyCompare(m.projectionRate, m.requiredMonthly) >= 0;
+  return `<p class="goal-eta ${alerta ? "is-late" : ""}">${svgIcon(alerta ? "alertTriangle" : "trendUp", 13)}<span>Com IPCA de ${fmtNum(inf.pct)}% ao ano, ${fmtBRL(m.target)} de hoje viram <b>${fmtBRL(inf.targetAtDeadline)}</b> em ${fmtDateFull(m.deadline)}${inf.requiredMonthly != null ? `; manter o poder de compra pede <b>${fmtBRL(inf.requiredMonthly)}</b>/mês` : ""}. Estimativa pela premissa do app, não preço garantido.</span></p>`;
+}
+// [M36] Correção do alvo pela inflação. É uma marcação, não um campo de taxa: a
+// taxa mora em Ajustes > Premissas de mercado, junto com Selic, CDI e TR, e os
+// simuladores leem a mesma. Duas inflações em telas diferentes acabariam
+// discordando, e aí nenhuma das duas valeria nada.
+//
+// A prévia usa o que já está digitado no formulário, então a pessoa vê o efeito
+// antes de salvar. Sem prazo não há horizonte para corrigir, e o texto diz isso
+// em vez de esconder a opção.
+function renderGoalInflationField(gf) {
+  const pct = goalInflationPct(state.data);
+  const alvo = parseMoneyInput(gf.target);
+  const dias = gf.deadline ? daysBetweenIso(todayIso(), gf.deadline) : null;
+  const anos = dias != null && dias >= GOAL_INFLATION_MIN_DAYS ? dias / 365.25 : 0;
+  const estimado = alvo > 0 && anos > 0 ? inflateMoney(alvo, pct, anos) : 0;
+
+  let previa;
+  if (pct <= 0) {
+    previa = "A premissa de inflação está em zero. Ajuste o IPCA nas premissas de mercado para a correção ter efeito.";
+  } else if (!gf.deadline) {
+    previa = `Sem prazo não há horizonte para corrigir. Defina uma data e o app estima o preço com o IPCA de ${fmtNum(pct)}% ao ano.`;
+  } else if (anos <= 0) {
+    previa = "O prazo é curto demais para a correção mudar alguma coisa.";
+  } else if (!(alvo > 0)) {
+    previa = `Informe o valor alvo e o app estima quanto ele custaria em ${fmtDateFull(gf.deadline)} com o IPCA de ${fmtNum(pct)}% ao ano.`;
+  } else {
+    previa = `${fmtBRL(alvo)} hoje ≈ <b>${fmtBRL(estimado)}</b> em ${fmtDateFull(gf.deadline)}, com o IPCA de ${fmtNum(pct)}% ao ano. É estimativa, não preço garantido.`;
+  }
+
+  return `<div class="field">
+    <label class="legal-consent">
+      <input type="checkbox" data-action-select="goal-inflation" ${gf.inflationAdjusted ? "checked" : ""} />
+      <span>Corrigir o alvo pela inflação estimada<small>O valor gravado continua sendo o preço de hoje; o app passa a mostrar também quanto seria preciso guardar para manter o poder de compra até o prazo.</small></span>
+    </label>
+    <p class="field-hint">${previa}</p>
+    <button type="button" class="field__link" data-action="goal-inflation-rate">${svgIcon("trendUp", 13)} Ajustar a premissa de inflação</button>
+  </div>`;
+}
 // Sugere quanto aportar por mês para bater a meta até o prazo, com base no
 // valor que ainda falta e nos meses restantes até o deadline.
 function goalMonthlySuggestion(g) {
@@ -223,6 +281,7 @@ function renderGoalCard(m) {
     </p>` : ""}
     ${!m.done && !m.etaIso ? `<p class="goal-eta">${svgIcon("info", 13)}<span>Sem aportes nem plano definido, não dá para estimar a conclusão.</span></p>` : ""}
     ${!m.done && m.gap > 0 ? `<p class="goal-eta is-late">${svgIcon("alertTriangle", 13)}<span>Faltam <b>${fmtBRL(m.gap)}</b> por mês para o prazo fechar.</span></p>` : ""}
+    ${renderGoalInflationLine(m)}
 
     ${m.series.some((s) => s.contributed !== 0) ? `<div class="goal-spark">
       ${renderSparkline(m.series.map((s) => ({ value: s.balance })), ringColor, 300, 46)}

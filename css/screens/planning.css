@@ -287,6 +287,14 @@
 .goal-eta.is-late { color: var(--negative); }
 .goal-spark { margin-top: 14px; }
 
+/* [M36] A marcação de inflação reaproveita `.legal-consent` (caixa + texto, já
+   usada no consentimento). O único acréscimo é dar bloco ao complemento, que ali
+   não existia; nenhum outro uso da classe tem <small>. */
+.legal-consent small {
+  display: block; margin-top: 3px;
+  color: var(--ink-faint); font-size: 11.5px; font-weight: 500; line-height: 1.4;
+}
+
 /* ---- Viabilidade do plano ---- */
 .plan-verdict { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
 .plan-meter {

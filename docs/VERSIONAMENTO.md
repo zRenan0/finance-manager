@@ -18,7 +18,7 @@ do que documentação nenhuma.
 | `INDEXEDDB_VERSION` | `js/storage.js` (`DB_VERSION`) | `4` | O próprio navegador, no `indexedDB.open()` |
 | `SYNC_PROTOCOL_VERSION` | `js/storage.js` (`CLOUD_SYNC_PROTOCOL`) e `netlify/functions/sync.js` (`PROTOCOL`) | `3` (mínimo de escrita `2`, leitura legada `1`) | O backend, pelo cabeçalho `X-Sync-Protocol` e pelo campo `protocol` do corpo |
 | `DATABASE_SCHEMA_VERSION` | `cofre_sync_config.database_schema_version` | `1` | Ninguém: é declarativa. Publicada em `/api/sync/health` |
-| `SERVICE_WORKER_VERSION` | `service-worker.js` (`VERSION`) | `v72` + digest do pacote | `scripts/build-dist.js`, que injeta o SHA-256 de todo o pacote publicado |
+| `SERVICE_WORKER_VERSION` | `service-worker.js` (`VERSION`) | `v73` + digest do pacote | `scripts/build-dist.js`, que injeta o SHA-256 de todo o pacote publicado |
 
 Versões menores, com regra própria:
 
@@ -36,6 +36,14 @@ Versões menores, com regra própria:
   campo com outro significado, entidade nova). Junto com ela entra o bloco
   correspondente em `migrate()`, que só sobe de versão e nunca apaga o que não
   reconhece sem substituto.
+  **Exceção deliberada, usada duas vezes:** um campo OPCIONAL, aditivo, dentro de
+  um registro que já sincroniza, cuja ausência normaliza para um padrão inerte e
+  do qual nenhum valor depende, entra sem subir a versão — subir cortaria todos
+  os clientes antigos do servidor (`schema_mismatch`) para acrescentar um
+  booleano. Foi o caso do `review` das recorrências (M33) e do
+  `inflationAdjusted` das metas (M36). O preço é conhecido e está documentado no
+  código: um cliente antigo que grave aquele registro descarta o campo. Nos dois
+  casos o que se perde é uma marcação remarcável em um toque, nunca um valor.
 - **`INDEXEDDB_VERSION`**: só quando um object store ou índice for criado. O
   `onupgradeneeded` usa `contains()` em tudo, então bancos antigos ganham apenas
   a coleção nova e os dados gravados não são tocados.

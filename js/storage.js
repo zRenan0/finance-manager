@@ -2081,6 +2081,16 @@ function migrate(parsed) {
       // NECESSÁRIO (derivado do prazo) e do ritmo REAL (derivado dos lançamentos).
       // Os três são exibidos lado a lado; nenhum é inventado a partir do outro.
       monthlyPlan: Math.max(0, roundMoney(g.monthlyPlan)),
+      // ---- M36: corrigir o alvo pela inflação ao mostrar o esforço mensal ----
+      // Entrou como campo OPCIONAL, sem subir o SCHEMA_VERSION, pelo mesmo
+      // critério do `review` das recorrências (M33): é um booleano novo dentro
+      // de um registro que já sincroniza, ausência normaliza para `false` e
+      // nenhum valor, aporte, prazo ou saldo depende dele. O alvo gravado
+      // continua sendo o preço de HOJE; a correção é só leitura de tela.
+      // Efeito de um cliente ANTIGO ler esta meta: ele descarta a marcação ao
+      // normalizar e a meta volta a exibir só o alvo nominal. Nada se perde
+      // além da marcação, que é remarcável em um toque.
+      inflationAdjusted: g.inflationAdjusted === true,
       syncRev: normalizeSyncRev(g.syncRev),
     };
   });

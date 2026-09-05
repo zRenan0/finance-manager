@@ -72,7 +72,10 @@
 // os dois saldos, procura o movimento que explicaria a diferença e só grava o
 // ajuste depois de a pessoa pedir. Vai junto a folha de utilidades, porque o
 // painel novo mora nela.
-const VERSION = "v72";
+// v73: as metas (M36) ganharam a correção opcional do alvo pela inflação, com a
+// taxa lida das premissas de mercado e o alvo gravado intacto. Vai junto a folha
+// de planejamento, onde mora o complemento da marcação.
+const VERSION = "v73";
 const BUILD_ID = VERSION;
 const CACHE_NAME = "financas-cache-" + VERSION;
 // A PÁGINA COMERCIAL TEM CACHE PRÓPRIO.

@@ -1739,6 +1739,7 @@ function onClick(e) {
         deadline: g.deadline || "",
         icon: GOAL_ICON_OPTIONS.includes(g.icon) ? g.icon : "piggy",
         monthlyPlan: g.monthlyPlan ? g.monthlyPlan.toFixed(2).replace(".", ",") : "",
+        inflationAdjusted: g.inflationAdjusted === true,
       };
       state.expandedGoalId = null;
       render();
@@ -1767,13 +1768,13 @@ function onClick(e) {
       const commitGoal = (initialSource) => {
         if (editingId) {
           setData((d) => ({ ...d, goals: d.goals.map((g) => (g.id === editingId
-            ? { ...g, name: gf.name.trim(), target, deadline: gf.deadline, icon: gf.icon, monthlyPlan }
+            ? { ...g, name: gf.name.trim(), target, deadline: gf.deadline, icon: gf.icon, monthlyPlan, inflationAdjusted: gf.inflationAdjusted === true }
             : g)) }));
           notify("Meta atualizada");
         } else {
           setData((d) => createGoalWithInitialBalance(d, {
             name: gf.name.trim(), target, savedUpfront, deadline: gf.deadline,
-            icon: gf.icon, monthlyPlan,
+            icon: gf.icon, monthlyPlan, inflationAdjusted: gf.inflationAdjusted === true,
           }, initialSource || "cash", defaultCashAccountId()));
           notify("Meta criada");
         }
@@ -1876,6 +1877,14 @@ function onClick(e) {
     case "settings-section":
       state.settingsSection = state.settingsSection === value ? null : value;
       render();
+      break;
+    // [M36] Atalho do formulário de meta para a premissa de inflação. Abre o
+    // tópico certo em vez de largar a pessoa no índice de Ajustes; a taxa fica
+    // num único lugar, e este é o caminho até ele.
+    case "goal-inflation-rate":
+      state.settingsSection = "mercado";
+      setState({ tab: "settings" });
+      EventBus.emit(APP_EVENTS.TAB_CHANGED, { tab: "settings" });
       break;
     case "toggle-theme": setData((d) => ({ ...d, theme: d.theme === "dark" ? "light" : "dark" })); break;
     case "toggle-gamification": {

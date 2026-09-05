@@ -2,6 +2,31 @@
 
 ## Não publicado
 
+### O M36 deu prazo ao alvo da meta
+
+- **Correção pela inflação, opcional por meta.** No formulário da meta há uma
+  marcação: "Corrigir o alvo pela inflação estimada". Ligada, o app passa a
+  mostrar quanto o mesmo objetivo custaria no prazo e quanto seria preciso
+  guardar por mês para manter o poder de compra. Desligada — o padrão, e o que
+  toda meta existente continua sendo —, nada muda.
+- **O alvo que você digitou continua sendo o alvo.** O valor gravado é o preço de
+  hoje. Progresso, "faltam R$ X", total guardado e "meta concluída" seguem
+  medindo contra ele; a correção é uma leitura a mais, nunca uma reescrita do que
+  você definiu.
+- **A taxa é a sua, e é uma só.** Sai da premissa de IPCA em Ajustes > Premissas
+  de mercado, a mesma que os simuladores usam — editável, datada e com a fonte no
+  IBGE. O formulário leva até ela por um atalho. Não existe uma segunda inflação
+  escondida na tela de metas.
+- **Juro composto, não regra de três.** R$ 5.000 a 5% ao ano por dois anos são
+  R$ 5.512,50, não R$ 5.500.
+- **O aviso que muda decisão.** Quando o seu ritmo fecha o valor de hoje mas não
+  o preço estimado lá na frente, o app diz isso — em vez de escrever "no ritmo"
+  para quem vai chegar com dinheiro insuficiente.
+- **Nada é apresentado como previsão.** Toda frase carrega a taxa usada e a
+  palavra "estimativa"; sem prazo, com prazo curto ou com a premissa em zero, o
+  app explica por que não há correção em vez de inventar um número.
+- O cache offline subiu para `v73`.
+
 ### O M35 pôs um passo de revisão entre o saldo do banco e o ajuste
 
 - **Conciliação em dois passos.** Informar o saldo visto no banco gravava o ajuste

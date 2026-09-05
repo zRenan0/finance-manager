@@ -23,6 +23,83 @@
 
 const GOAL_PACE_MONTHS = 6;      // janela do ritmo real
 const GOAL_ETA_MAX_MONTHS = 600; // 50 anos; acima disso a estimativa é ruído
+const GOAL_INFLATION_MIN_DAYS = 30; // abaixo de um mês a correção não muda nada
+
+/* ==============================================================================
+ * [M36] INFLAÇÃO NA META
+ * ==============================================================================
+ * O alvo que a pessoa digita é o preço de HOJE. Quando o prazo é longo, esse
+ * número deixa de ser o objetivo: guardar R$ 5.000 para um notebook daqui a dois
+ * anos não compra o notebook se ele custar R$ 5.512 lá.
+ *
+ * Três decisões que separam isto de um chute:
+ *
+ *   1. É OPT-IN por meta (`goal.inflationAdjusted`). Nada muda em meta antiga, e
+ *      o app não decide sozinho que o objetivo de alguém encarece.
+ *   2. A taxa NÃO é inventada aqui. Sai da mesma premissa de IPCA que os
+ *      simuladores usam (Ajustes > Premissas de mercado), que já é editável,
+ *      datada e com fonte declarada. Uma segunda inflação escondida na tela de
+ *      metas poderia discordar da primeira, e aí nenhum dos dois números valeria
+ *      nada.
+ *   3. O alvo GRAVADO continua sendo o de hoje. Progresso, total guardado,
+ *      "faltam X" e "meta concluída" seguem medindo contra ele. A correção entra
+ *      como LEITURA ADICIONAL ("para manter o poder de compra seriam R$ Y/mês"),
+ *      nunca reescrevendo o que a pessoa digitou.
+ */
+
+// Premissa anual de inflação, em % ao ano. Lê a mesma fonte dos simuladores e
+// tolera a ausência do módulo de carteira (o motor de metas roda isolado nos
+// testes de unidade).
+function goalInflationPct(data) {
+  if (typeof marketRatesOf === "function") return Number(marketRatesOf(data || {}).ipca) || 0;
+  if (typeof normalizeMarketRates === "function") return Number(normalizeMarketRates(data && data.marketRates).ipca) || 0;
+  return 0;
+}
+
+// Preço estimado, daqui a N anos, de um valor de hoje. Juro composto, não regra
+// de três: 5% ao ano por dois anos são 10,25%, não 10%.
+function inflateMoney(value, annualPct, years) {
+  const pct = Number(annualPct) || 0;
+  const y = Number(years) || 0;
+  if (pct <= 0 || y <= 0) return roundMoney(value);
+  return mulMoney(value, Math.pow(1 + pct / 100, y));
+}
+
+// Bloco de inflação de UMA meta. Devolve sempre um objeto, com `reason` dizendo
+// por que não há correção; a tela precisa explicar a ausência, não escondê-la.
+function goalInflationView(goal, base) {
+  const on = !!(goal && goal.inflationAdjusted);
+  const pct = Number(base && base.inflationPct) || 0;
+  const view = {
+    on, pct,
+    reason: "off",
+    years: 0,
+    targetAtDeadline: base.target,
+    extra: 0,
+    remaining: base.remaining,
+    requiredMonthly: null,
+    gap: 0,
+    covers: null,
+  };
+  if (!on) return view;
+  if (base.done) { view.reason = "concluida"; return view; }
+  if (!goal.deadline) { view.reason = "sem-prazo"; return view; }
+  if (base.daysLeft == null || base.daysLeft < GOAL_INFLATION_MIN_DAYS) { view.reason = "prazo-curto"; return view; }
+  if (pct <= 0) { view.reason = "sem-taxa"; return view; }
+
+  view.years = base.daysLeft / 365.25;
+  view.targetAtDeadline = inflateMoney(base.target, pct, view.years);
+  view.extra = Math.max(0, subMoney(view.targetAtDeadline, base.target));
+  view.remaining = Math.max(0, subMoney(view.targetAtDeadline, base.saved));
+  view.requiredMonthly = base.monthsLeft ? divMoney(view.remaining, base.monthsLeft) : null;
+  // Quanto o ritmo de hoje deixa de cobrir por causa da correção; positivo = falta.
+  if (view.requiredMonthly != null && base.projectionRate >= 0) {
+    view.gap = Math.max(0, subMoney(view.requiredMonthly, base.projectionRate));
+    view.covers = moneyCompare(base.projectionRate, view.requiredMonthly) >= 0;
+  }
+  view.reason = "ok";
+  return view;
+}
 
 // Modelos prontos de meta. Só sugestão de nome/ícone/prazo; nada é criado
 // sozinho, e o usuário edita tudo antes de salvar.
@@ -81,6 +158,8 @@ function createGoalWithInitialBalance(data, draft, initialSource, accountId) {
     icon: draft.icon || "piggy",
     createdAt,
     monthlyPlan: Math.max(0, roundMoney(draft.monthlyPlan)),
+    // [M36] Marcação opcional; ausente ou `false` deixa a meta idêntica à de antes.
+    inflationAdjusted: draft.inflationAdjusted === true,
   };
   const seed = amount > 0 && source === "cash" ? makeTransaction({
     id: `goal-upfront:${goalId}`,
@@ -243,6 +322,13 @@ function buildGoalModel(data, goal, ctx) {
 
   const gap = required != null && projectionRate >= 0 ? Math.max(0, subMoney(required, projectionRate)) : 0;
 
+  // [M36] Correção pela inflação. Calculada DEPOIS de tudo que já existia, e sem
+  // alterar nenhum dos números acima: é leitura adicional, não novo alvo.
+  const inflation = goalInflationView(goal, {
+    target, saved, remaining, done, daysLeft, monthsLeft, projectionRate,
+    inflationPct: (ctx && ctx.inflationPct != null) ? ctx.inflationPct : goalInflationPct(data),
+  });
+
   return {
     id: goal.id,
     goal,
@@ -259,6 +345,7 @@ function buildGoalModel(data, goal, ctx) {
     etaLate: !!(etaIso && goal.deadline && etaIso > goal.deadline),
     gap,
     contributedThisMonth,
+    inflation,
     series,
     status,
     statusLabel: GOAL_STATUS[status].label,
@@ -294,7 +381,9 @@ function buildGoalsModel(data, refDate) {
   const ref = refDate instanceof Date ? refDate : new Date();
   const today = todayIso();
   const ledger = goalMonthlyLedger(data);
-  const ctx = { ledger, refDate: ref, today };
+  // [M36] A premissa de inflação é lida UMA vez por render; ela é a mesma para
+  // todas as metas, e recalculá-la por meta só multiplicaria trabalho.
+  const ctx = { ledger, refDate: ref, today, inflationPct: goalInflationPct(data) };
 
   const models = (data.goals || []).map((g) => buildGoalModel(data, g, ctx));
 
@@ -377,6 +466,20 @@ function goalsAdvice(models, plan) {
     });
   }
 
+  // [M36] A meta que fecha o valor de hoje mas não o preço estimado no prazo. É
+  // a única situação em que a correção muda uma decisão: sem ela a tela diria
+  // "no ritmo" para quem vai chegar lá com dinheiro insuficiente.
+  const inflacaoAperta = models.find((m) => m.inflation && m.inflation.reason === "ok"
+    && m.inflation.covers === false && m.requiredMonthly != null
+    && moneyCompare(m.projectionRate, m.requiredMonthly) >= 0);
+  if (inflacaoAperta && out.length < 3) {
+    const inf = inflacaoAperta.inflation;
+    out.push({
+      tone: "warn", icon: "trendUp",
+      text: `“${inflacaoAperta.goal.name}” fecha os ${fmtBRL(inflacaoAperta.target)} de hoje no prazo, mas pela premissa de ${fmtNum(inf.pct)}% ao ano o mesmo objetivo custaria ${fmtBRL(inf.targetAtDeadline)} lá. Manter o poder de compra pediria ${fmtBRL(inf.requiredMonthly)}/mês. É estimativa, não previsão.`,
+    });
+  }
+
   const idle = models.find((m) => m.status === "idle");
   if (idle && out.length < 3) {
     out.push({
@@ -405,5 +508,5 @@ function goalsAdvice(models, plan) {
 }
 
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { buildGoalsModel, buildGoalModel, goalMonthlyLedger, goalSeries, goalPace, savingCapacity, GOAL_TEMPLATES };
+  module.exports = { buildGoalsModel, buildGoalModel, goalMonthlyLedger, goalSeries, goalPace, savingCapacity, goalInflationView, goalInflationPct, inflateMoney, GOAL_TEMPLATES };
 }

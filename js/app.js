@@ -61,7 +61,7 @@ function defaultImportDestinationId(documentKind) {
 // componente cria, edita e é pré-preenchido por modelo; três caminhos que
 // precisam voltar exatamente ao mesmo ponto de partida ao serem cancelados.
 function freshGoalForm() {
-  return { show: false, name: "", target: "", savedUpfront: "", deadline: "", icon: "piggy", monthlyPlan: "" };
+  return { show: false, name: "", target: "", savedUpfront: "", deadline: "", icon: "piggy", monthlyPlan: "", inflationAdjusted: false };
 }
 
 // Feature 1; verifica, ao vivo enquanto o usuário preenche o formulário, se o
@@ -111,7 +111,7 @@ let state = {
   form: null,
   editingTxId: null,
   editingTxReturnTab: "dashboard",
-  goalForm: { show: false, name: "", target: "", savedUpfront: "", deadline: "", icon: "piggy", monthlyPlan: "" },
+  goalForm: { show: false, name: "", target: "", savedUpfront: "", deadline: "", icon: "piggy", monthlyPlan: "", inflationAdjusted: false },
   expandedGoalId: null,
   goalActionMode: "aportar", // "aportar" | "resgatar"
   goalContribution: "",
@@ -2120,6 +2120,8 @@ function onChange(e) {
   if (actionSelect === "review-payment-card") { state.movementReviewCard.creditCardId = e.target.value; return; }
   if (actionSelect === "onb-acc-type") { state.onboarding.account.type = e.target.value; return; }
   if (actionSelect === "onb-legal") { state.onboarding.legalAccepted = !!e.target.checked; render(); return; }
+  // [M36] Corrigir o alvo da meta pela inflação: marcação do formulário, não do dado.
+  if (actionSelect === "goal-inflation") { state.goalForm.inflationAdjusted = !!e.target.checked; render(); return; }
   if (actionSelect === "ai-preview-field") { toggleAiPreviewField(e.target.dataset.value, !!e.target.checked); return; }
   if (actionSelect === "privacy-ai-field") {
     const campo = e.target.dataset.value;
@@ -2192,7 +2194,10 @@ function onChange(e) {
   if (field === "period-custom-start") { state.analyticsCustomStart = e.target.value; render(); }
   if (field === "period-custom-end") { state.analyticsCustomEnd = e.target.value; render(); }
   if (field === "tx-date") { state.form.date = e.target.value; }
-  if (field === "goal-deadline") { state.goalForm.deadline = e.target.value; }
+  // [M36] O prazo repinta a tela: a prévia da correção pela inflação depende
+  // dele, e um seletor de data é escolha confirmada, não digitação por tecla.
+  // O campo tem `id`, então o foco volta para ele (ver focusKeyOf).
+  if (field === "goal-deadline") { state.goalForm.deadline = e.target.value; render(); }
 
   // Campos numéricos das simulações (ex-sliders): recalcula a projeção ao confirmar.
 
@@ -2248,6 +2253,10 @@ function onFocusOut(e) {
       }
     }
   }
+  // [M36] O valor alvo confirma no blur para a prévia da inflação sair do
+  // número já digitado. Só repinta com a correção ligada; sem ela nada na tela
+  // depende deste campo antes de salvar, e repintar seria trabalho à toa.
+  if (field === "goal-target" && state.goalForm.show && state.goalForm.inflationAdjusted) render();
   if (field === "credit-limit") {
     if (state.creditLimitInput !== null) {
       const n = moneyOrZero(state.creditLimitInput);
