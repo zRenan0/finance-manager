@@ -2,6 +2,40 @@
 
 ## Não publicado
 
+### O M37 desenhou o limite do que a IA pode dizer
+
+- **A IA deixou de se apresentar como consultor.** O pedido enviado ao modelo
+  dizia "Você é um consultor financeiro pessoal". Com renda, saldo, parcelas e
+  metas no mesmo pacote, isso é o desenho de uma recomendação individualizada, e
+  recomendação individualizada de valores mobiliários é atividade regulada. O
+  papel passou a ser o que o app entrega de verdade: organizar, explicar, resumir
+  e apontar padrões.
+- **Proibição escrita, e não só implícita.** O pedido agora veta nomear ativo,
+  ticker, fundo, ETF, FII, criptomoeda, CDB, LCI, LCA, debênture, Tesouro
+  Direto, previdência, corretora ou instituição, vetar percentual de carteira
+  ("40% em X") e prometer rentabilidade.
+- **Uma segunda barreira, porque instrução não é garantia.** A resposta passa por
+  um filtro determinístico: o campo que nomeia produto sai vazio e o item de
+  lista some. Nada é reescrito, e o que sobra continua aparecendo.
+- **O filtro roda também no seu aparelho.** A mesma verificação é aplicada ao que
+  chega, para que resposta de uma versão antiga da função, de um proxy ou de
+  cache não passe por cima do limite.
+- **A educação sobre risco continua permitida.** "Para um objetivo de curto
+  prazo, ativos de alta volatilidade podem apresentar risco incompatível com a
+  necessidade de usar o dinheiro em breve" passa inteira. O filtro olha produto
+  nomeado, não a palavra "risco".
+- **Toda análise sai com a natureza declarada:** conteúdo educativo, gerado por
+  IA, em que todo valor futuro é estimativa e não previsão, com link para a
+  educação do investidor da CVM. A ressalva é escrita pelo aplicativo, não pedida
+  ao modelo.
+- **Se a resposta inteira for descartada, a tela diz isso** em vez de mostrar um
+  cartão vazio que pareceria defeito.
+- **Correção de rota:** o pedido chamava os dados enviados de "AGREGADOS e
+  ANÔNIMOS". O app já tinha corrigido essa palavra em toda parte (o pacote leva
+  nomes de categoria e de meta escolhidos por você) menos ali. Agora ele diz que
+  são agregados e que não são anônimos.
+- O cache offline subiu para `v74`.
+
 ### O M36 deu prazo ao alvo da meta
 
 - **Correção pela inflação, opcional por meta.** No formulário da meta há uma
@@ -25,7 +59,7 @@
 - **Nada é apresentado como previsão.** Toda frase carrega a taxa usada e a
   palavra "estimativa"; sem prazo, com prazo curto ou com a premissa em zero, o
   app explica por que não há correção em vez de inventar um número.
-- O cache offline subiu para `v73`.
+- Vai junto no pacote do `v74`.
 
 ### O M35 pôs um passo de revisão entre o saldo do banco e o ajuste
 

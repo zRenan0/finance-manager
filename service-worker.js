@@ -75,7 +75,10 @@
 // v73: as metas (M36) ganharam a correção opcional do alvo pela inflação, com a
 // taxa lida das premissas de mercado e o alvo gravado intacto. Vai junto a folha
 // de planejamento, onde mora o complemento da marcação.
-const VERSION = "v73";
+// v74: a IA (M37) ganhou limite declarado. O prompt deixou de pedir um
+// "consultor financeiro" e passou a proibir recomendação de investimento; a
+// saída é filtrada nas duas pontas e a tela carrega a ressalva de natureza.
+const VERSION = "v74";
 const BUILD_ID = VERSION;
 const CACHE_NAME = "financas-cache-" + VERSION;
 // A PÁGINA COMERCIAL TEM CACHE PRÓPRIO.

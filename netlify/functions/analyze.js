@@ -18,6 +18,9 @@ const api = require("./_shared/supabase-rest");
 const { requireSession } = require("./account");
 const rateLimit = require("./_shared/rate-limit");
 const { observeHandler } = require("./_shared/observability");
+// [M37] Segunda barreira do texto da IA: o prompt pede, isto confere. Ver o
+// cabeçalho de _shared/ai-boundaries.js.
+const boundaries = require("./_shared/ai-boundaries");
 
 const MODEL = process.env.ANALYZE_MODEL || "claude-haiku-4-5-20251001";
 const MAX_CATEGORIES = 24;
@@ -216,10 +219,31 @@ function normalizeEntry(a, ctx) {
 }
 
 // ---------- Prompt ----------
+// [M37] A PERSONA DELIMITA O QUE O TEXTO PODE SER.
+//
+// Este prompt dizia "Você é um consultor financeiro pessoal". Com renda, saldo,
+// parcelas e metas nominais no mesmo pacote, é exatamente o desenho de uma
+// recomendação individualizada, e recomendação individualizada de valores
+// mobiliários é atividade regulada. O papel aqui passa a ser o que o aplicativo
+// de fato entrega e sabe sustentar: organizar, explicar, resumir e apontar
+// padrões nos números que a pessoa já registrou.
+//
+// O prompt é a PRIMEIRA barreira, não a única. `stripAdvicePatterns` filtra a
+// saída depois, porque instrução não é garantia. Ver `js/insights.js`, que
+// repete o filtro no cliente.
 function buildPrompt(d) {
-  return `Você é um consultor financeiro pessoal brasileiro, direto e prático, especializado em orçamento doméstico (métodos 50/30/20 e orçamento base zero).
+  return `Você é um organizador de orçamento doméstico brasileiro, direto e prático, especializado em explicar para onde o dinheiro do mês foi (métodos 50/30/20 e orçamento base zero).
 
-Analise os dados AGREGADOS e ANÔNIMOS abaixo (todos os valores em reais):
+O QUE VOCÊ FAZ: explica, resume, organiza, aponta padrões e ensina.
+O QUE VOCÊ NÃO FAZ: recomendação de investimento. Você não indica ativo, produto,
+instituição, corretora, percentual de carteira nem momento de compra ou venda,
+ainda que os dados pareçam sugerir isso e ainda que a pessoa se beneficiasse.
+Isso não é uma limitação de conhecimento: é o limite do que este texto pode ser.
+
+Analise os dados AGREGADOS abaixo (todos os valores em reais). Eles são
+agregados, mas NÃO são anônimos: nomes de categoria e de meta foram escolhidos
+pelo usuário e podem revelar contexto pessoal. Não comente os nomes, use-os
+apenas para se referir aos valores.
 
 ${JSON.stringify(d, null, 2)}
 
@@ -248,7 +272,19 @@ Regras:
 - Em "riscos", inclua APENAS o que os números sustentam. Se não houver risco
   aparente, devolva uma lista vazia. Não invente preocupação para preencher
   espaço: alarme sem base destrói a confiança no que é alarme de verdade.
-- Em "recomendacoes", no máximo 4, e só o que couber nos dados enviados.
+- Em "recomendacoes", no máximo 4, e só o que couber nos dados enviados. Elas
+  são sobre ORÇAMENTO (gasto, prazo, prioridade, organização), nunca sobre onde
+  aplicar dinheiro.
+- PROIBIDO recomendar investimento. Não cite ação, ticker, fundo, ETF, FII,
+  criptomoeda, CDB, LCI, LCA, debênture, Tesouro Direto, previdência privada,
+  corretora ou instituição, e não sugira percentual de carteira ("40% em X").
+  Não prometa rentabilidade, retorno ou valorização.
+- Quando o assunto for risco, fale de PRAZO, VOLATILIDADE e da necessidade de
+  usar o dinheiro, sem nomear produto. Exemplo do que é aceitável: "para um
+  objetivo de curto prazo, ativos de alta volatilidade podem apresentar risco
+  incompatível com a necessidade de usar o dinheiro em breve".
+- Todo número sobre o FUTURO é hipótese. Escreva-o como estimativa, com a
+  premissa à vista; nunca como o que vai acontecer.
 - Português do Brasil, tom direto, sem jargão, sem asteriscos.
 - Interprete os números (não os repita literalmente).
 - Se faltar dado para alguma seção, diga que falta dado em vez de estimar.`;
@@ -466,11 +502,36 @@ async function route(event, session) {
 
     if (!parsed) {
       // Degradação graciosa: devolve o texto bruto para a UI não ficar vazia.
-      return json(200, { ok: true, estruturado: false, insight: text || "Não foi possível gerar uma análise no momento.", analise: null });
+      //
+      // [M37] Este é o caminho MAIS exposto de todos: texto do modelo indo
+      // direto para a tela, sem passar pelo contrato de campos. Se ele violar o
+      // limite, não há trecho a preservar: some inteiro e a tela diz que não
+      // deu. Metade de uma recomendação de investimento não é meia violação.
+      const bruto = text || "";
+      const violou = boundaries.violates(bruto);
+      return json(200, {
+        ok: true, estruturado: false, analise: null,
+        insight: violou || !bruto ? "Não foi possível gerar uma análise no momento." : bruto,
+        natureza: boundaries.AI_NATURE,
+        ...(violou ? { filtrados: { [boundaries.adviceViolation(bruto)]: 1 } } : {}),
+      });
     }
 
-    const analise = normalizeAnalysis(parsed);
-    return json(200, { ok: true, estruturado: true, analise, insight: toPlainText(analise), modelo: MODEL });
+    // [M37] Normaliza, DEPOIS filtra. A ordem importa: `normalizeAnalysis` corta
+    // tamanho e fecha as whitelists de `situacao`/`nivel`; o filtro trabalha em
+    // cima do texto já cortado, que é exatamente o que iria para a tela.
+    //
+    // `filtrados` leva só o NOME do padrão e quantas vezes ele apareceu. O texto
+    // removido não viaja e não é registrado em lugar nenhum: ele é conteúdo
+    // financeiro da pessoa, e log de conteúdo é proibido aqui (M17).
+    const { analise, removidos } = boundaries.stripAdvicePatterns(normalizeAnalysis(parsed));
+    return json(200, {
+      ok: true, estruturado: true, analise,
+      insight: toPlainText(analise),
+      natureza: boundaries.AI_NATURE,
+      ...(Object.keys(removidos).length ? { filtrados: removidos } : {}),
+      modelo: MODEL,
+    });
   } catch (err) {
     const aborted = err && err.name === "AbortError";
     return json(aborted ? 504 : 500, {

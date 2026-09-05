@@ -18970,6 +18970,11 @@ function renderFinancialNotice(topic) {
     consorcio: { text: "Estimativa educativa. A contemplação, os reajustes, o fundo de reserva e os custos seguem o regulamento e o contrato do grupo.", links: [["Banco Central sobre consórcios", "https://www.bcb.gov.br/meubc/faqs/s/consorcios"]] },
     fgts: { text: "Estimativa educativa. Regras de saque, retorno de modalidade e remuneração podem mudar. Confirme as condições vigentes nos canais oficiais.", links: [["FGTS na Caixa", "https://www.caixa.gov.br/beneficios-trabalhador/fgts/Paginas/default.aspx"]] },
     juros: { text: "Projeção matemática, sem garantia de rendimento. Taxas, impostos, custos e inflação alteram o resultado real.", links: [["Educação do investidor na CVM", "https://www.gov.br/cvm/pt-br/assuntos/educacao/"]] },
+    // [M37] Natureza do texto gerado por IA. Ele fica ao lado das outras
+    // ressalvas de propósito: a análise da IA é do mesmo tipo de conteúdo que a
+    // simulação de juros (educativa, com premissa, sem garantia) e merece a
+    // mesma moldura em vez de um rodapé próprio, menor e mais fácil de ignorar.
+    ia: { text: "Conteúdo educativo gerado por IA a partir dos números que você enviou. Não é recomendação de investimento nem consultoria financeira: o app não indica ativo, produto, instituição nem percentual de carteira. Todo valor futuro citado é estimativa, não previsão.", links: [["Educação do investidor na CVM", "https://www.gov.br/cvm/pt-br/assuntos/educacao/"]] },
   };
   const notice = notices[topic] || notices.juros;
   return `<aside class="financial-notice" aria-label="Limites da simulação">${svgIcon("info", 16)}<div><p>${escapeHtml(notice.text)}</p><div class="source-links">${notice.links.map(([label, url]) => `<a href="${url}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`).join("")}</div><small>Referências revisadas em ${fmtDateFull(LEGAL_REVIEW_DATE)}.</small></div></aside>`;
@@ -20757,6 +20762,86 @@ class InsightError extends Error {
 const round2 = (n) => roundMoney(n);   // alias histórico; a regra vive em utils.js
 
 // ------------------------------------------------------------------------------
+// [M37] LIMITE DO CONTEÚDO DA IA, DO LADO DO NAVEGADOR
+// ------------------------------------------------------------------------------
+// Esta lista é a CÓPIA ESPELHADA de `netlify/functions/_shared/ai-boundaries.js`,
+// onde estão o raciocínio inteiro e a explicação de cada padrão. Ela existe aqui
+// pelo mesmo motivo que a whitelist de `situacao`/`nivel` já é repetida em
+// `js/screens/analytics.js`: a resposta é entrada não confiável mesmo vindo do
+// nosso backend. Uma função publicada numa versão anterior, um proxy no meio ou
+// um Service Worker devolvendo resposta guardada furariam um filtro que só
+// existisse no servidor.
+//
+// O navegador não carrega código de `netlify/`, então a duplicação é inevitável.
+// O que NÃO é inevitável é a divergência: `tests/test-ai-boundaries.js` compara
+// as duas listas termo a termo e reprova se uma andar sem a outra.
+const AI_ADVICE_PATTERNS = [
+  ["ticker", "\\b[A-Z]{4}\\d{1,2}\\b"],
+  ["acao-nomeada", "\\b[AaÁá](?:ç|c)(?:(?:õ|o)es|(?:ã|a)o)\\s+(?:d[aeo]s?\\s+)?[A-ZÀ-Þ][\\wÀ-ÿ]{2,}"],
+  ["fundo-produto", "\\bfundos?\\s+(?:de\\s+investimento|imobili(?:á|a)ri[oa]s?|cambia(?:l|is)|multimercado|de\\s+(?:a(?:ç|c)(?:õ|o)es|renda\\s+fixa)|DI\\b)"],
+  ["sigla-produto", "\\b(?:ETF|FII|CDB|RDB|LCI|LCA|LCD|CRI|CRA|COE|PGBL|VGBL|BDR)s?\\b"],
+  ["renda-fixa-nomeada", "\\b(?:tesouro\\s+(?:direto|selic|ipca|prefixado)|deb(?:ê|e)ntures?|previd(?:ê|e)ncia\\s+privada)\\b"],
+  ["cripto", "\\b(?:bitcoin|ethereum|criptomoedas?|cripto\\b|stablecoins?)"],
+  ["intermediario", "\\b(?:corretoras?|home\\s+broker|day\\s+trade|banco\\s+de\\s+investimento)\\b"],
+  ["alocacao-percentual", "\\d{1,3}\\s*%\\s+(?:em|n[oa]s?|para)\\s+(?!necessidades|desejos|futuro|nenhum)[\\wÀ-ÿ]"],
+  ["ordem-de-mercado", "\\b(?:compre|venda|invista|aplique|aloque|realoque|migre)\\s+(?:\\S+\\s+){0,3}?(?:a(?:ç|c)(?:õ|o)es|fundos?|cripto|bitcoin|tesouro|CDB|ETF|FII)\\b"],
+];
+
+// O rótulo de natureza local. O servidor manda o dele, mas a tela nunca depende
+// disso: resposta antiga sem o campo continuaria aparecendo sem aviso nenhum, e
+// é justamente a resposta antiga que este arquivo não confia.
+const AI_NATURE = Object.freeze({
+  tipo: "educacional",
+  texto: "Conteúdo educativo gerado por IA a partir dos números que você enviou. Não é recomendação de investimento nem consultoria financeira, e todo valor futuro citado é estimativa, não previsão.",
+});
+
+// Espelho de `AI_CASE_SENSITIVE`: "PETR4" é ativo e "casa4" não é; "ações da
+// Vale" é empresa e "ações que você pode tomar" é o sentido comum da palavra.
+// Nos dois casos é a maiúscula que separa um do outro.
+const AI_CASE_SENSITIVE = ["ticker", "acao-nomeada"];
+
+function aiAdviceViolation(text) {
+  const value = String(text == null ? "" : text);
+  if (!value.trim()) return null;
+  for (let i = 0; i < AI_ADVICE_PATTERNS.length; i++) {
+    const [id, source] = AI_ADVICE_PATTERNS[i];
+    const re = new RegExp(source, AI_CASE_SENSITIVE.indexOf(id) === -1 ? "iu" : "u");
+    if (re.test(value)) return id;
+  }
+  return null;
+}
+
+function aiViolatesBoundaries(text) { return aiAdviceViolation(text) !== null; }
+
+// Sobrou alguma coisa depois do filtro? Uma análise em que todo campo saiu vazio
+// e toda lista ficou zerada não é uma análise; é um cartão em branco.
+function aiAnalysisIsEmpty(a) {
+  if (!a || typeof a !== "object") return true;
+  const temTexto = [a.diagnostico, a.fluxoCaixa && a.fluxoCaixa.comentario, a.metasComentario]
+    .some((t) => String(t || "").trim());
+  const temLista = (Array.isArray(a.riscos) && a.riscos.length > 0)
+    || (Array.isArray(a.recomendacoes) && a.recomendacoes.length > 0);
+  return !temTexto && !temLista;
+}
+
+// Espelho de `stripAdvicePatterns`: campo que atravessa a linha sai vazio, item
+// que atravessa some da lista. Nada é reescrito.
+function stripAiAdvice(analise) {
+  if (!analise || typeof analise !== "object") return analise;
+  const limpa = (t) => (aiViolatesBoundaries(t) ? "" : t);
+  const filtra = (lista, campos) => (Array.isArray(lista) ? lista : [])
+    .filter((item) => !campos.some((c) => aiViolatesBoundaries(item && item[c])));
+  return {
+    ...analise,
+    diagnostico: limpa(analise.diagnostico),
+    fluxoCaixa: { ...(analise.fluxoCaixa || {}), comentario: limpa(analise.fluxoCaixa && analise.fluxoCaixa.comentario) },
+    riscos: filtra(analise.riscos, ["titulo", "descricao"]),
+    recomendacoes: filtra(analise.recomendacoes, ["acao", "impacto"]),
+    metasComentario: limpa(analise.metasComentario),
+  };
+}
+
+// ------------------------------------------------------------------------------
 // PACOTE ENVIADO À IA
 // ------------------------------------------------------------------------------
 // Esta função se chamava `buildAnonymousPayload` e o comentário dizia "JSON
@@ -20925,10 +21010,16 @@ async function requestStructuredAnalysis(data, monthKey, options) {
     }
     if (!body) throw new InsightError("BAD_RESPONSE", "A resposta da IA veio em um formato inesperado.");
 
+    // [M37] O filtro roda de novo aqui, sobre o que chegou. O servidor já
+    // filtrou; esta passagem é o que garante o limite mesmo quando a resposta
+    // não veio do servidor de hoje. O texto corrido não tem campo a preservar:
+    // se violar, some inteiro.
+    const textoBruto = body.insight || "";
     return {
       estruturado: !!body.estruturado,
-      analise: body.analise || null,
-      texto: body.insight || "",
+      analise: body.analise ? stripAiAdvice(body.analise) : null,
+      texto: aiViolatesBoundaries(textoBruto) ? "" : textoBruto,
+      natureza: AI_NATURE,
       modelo: body.modelo || null,
     };
   } catch (err) {
@@ -28646,7 +28737,7 @@ function renderAiCard() {
     </div>
     ${ai.loading ? `<div class="ai-loading"><span class="spinner"></span> Analisando seus gastos…</div>` : ""}
     ${ai.error ? `<p class="ai-error">${svgIcon("alertTriangle", 14)} ${escapeHtml(ai.error)}</p>` : ""}
-    ${ai.analise ? renderAiStructured(ai.analise) : (ai.text ? `<div class="ai-text">${formatAiText(ai.text)}</div>` : "")}
+    ${ai.analise ? renderAiStructured(ai.analise) : (ai.text ? `<div class="ai-text">${formatAiText(ai.text)}${renderFinancialNotice("ia")}</div>` : "")}
     ${!ai.loading && !ai.analise ? `<p class="ai-privacy">${svgIcon("shieldCheck", 12)} Você vê o pacote inteiro antes de enviar, e pode tirar partes dele.</p>` : ""}
     ${!ai.loading ? `<button class="btn btn--secondary btn--block" data-ui-css="margin-top:10px" data-action="request-ai-insight">${ai.text ? "Analisar novamente" : "Analisar meus gastos"}</button>` : ""}
   </div>`;
@@ -28727,6 +28818,7 @@ function renderAiStructured(a) {
     </div>` : ""}
 
     <p class="ai-privacy">${svgIcon("shieldCheck", 12)} Só valores e nomes de categoria foram enviados. Descrições, datas e lançamentos individuais ficaram no seu aparelho.</p>
+    ${renderFinancialNotice("ia")}
   </div>`;
 }
 
@@ -40009,12 +40101,19 @@ async function confirmAiPreview() {
   setState({ aiInsight: { loading: true, text: null, error: null, analise: null } });
   try {
     const result = await requestStructuredAnalysis(state.data, mKey, opcoes);
+    const analise = result.estruturado ? result.analise : null;
+    // [M37] O filtro de limites pode ter esvaziado tudo. Cartão em branco faria
+    // parecer defeito; a pessoa merece saber que veio resposta e que ela foi
+    // descartada por sair do que este app se propõe a dizer.
+    const vazio = !result.texto && (!analise || aiAnalysisIsEmpty(analise));
     setState({
       aiInsight: {
         loading: false,
         text: result.texto || null,
-        analise: result.estruturado ? result.analise : null,
-        error: null,
+        analise: vazio ? null : analise,
+        error: vazio
+          ? "A resposta saiu do que este app pode dizer (recomendação de investimento) e foi descartada. Tente pedir a análise de novo."
+          : null,
       },
     });
   } catch (err) {

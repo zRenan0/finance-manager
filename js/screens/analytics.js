@@ -364,7 +364,7 @@ function renderAiCard() {
     </div>
     ${ai.loading ? `<div class="ai-loading"><span class="spinner"></span> Analisando seus gastos…</div>` : ""}
     ${ai.error ? `<p class="ai-error">${svgIcon("alertTriangle", 14)} ${escapeHtml(ai.error)}</p>` : ""}
-    ${ai.analise ? renderAiStructured(ai.analise) : (ai.text ? `<div class="ai-text">${formatAiText(ai.text)}</div>` : "")}
+    ${ai.analise ? renderAiStructured(ai.analise) : (ai.text ? `<div class="ai-text">${formatAiText(ai.text)}${renderFinancialNotice("ia")}</div>` : "")}
     ${!ai.loading && !ai.analise ? `<p class="ai-privacy">${svgIcon("shieldCheck", 12)} Você vê o pacote inteiro antes de enviar, e pode tirar partes dele.</p>` : ""}
     ${!ai.loading ? `<button class="btn btn--secondary btn--block" data-ui-css="margin-top:10px" data-action="request-ai-insight">${ai.text ? "Analisar novamente" : "Analisar meus gastos"}</button>` : ""}
   </div>`;
@@ -445,6 +445,7 @@ function renderAiStructured(a) {
     </div>` : ""}
 
     <p class="ai-privacy">${svgIcon("shieldCheck", 12)} Só valores e nomes de categoria foram enviados. Descrições, datas e lançamentos individuais ficaram no seu aparelho.</p>
+    ${renderFinancialNotice("ia")}
   </div>`;
 }
 

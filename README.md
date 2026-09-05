@@ -47,7 +47,7 @@ psql <URL_DE_STAGING> -v ON_ERROR_STOP=1 -f supabase/tests/verify_security_bound
 ```
 
 O processo de homologação, publicação e retorno está em `docs/RELEASE.md`. O schema
-de dados está na versão 23 e o cache offline na versão 73. O inventário técnico
+de dados está na versão 23 e o cache offline na versão 74. O inventário técnico
 do armazenamento está em `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`; o inventário de
 tratamento da LGPD está em `docs/INVENTARIO-DE-DADOS.md`; e o registro dos
 serviços externos está em `docs/TERCEIROS-E-OPERADORES.md`.
@@ -1752,6 +1752,35 @@ para a tela de conquistas, o esqueleto e os landmarks de acessibilidade.
 Isso usa a API paga da Anthropic (cobrança por uso, não é o Claude.ai). Sem a chave configurada,
 o app continua funcionando normalmente — só o botão de IA mostra uma mensagem explicando que
 precisa ser configurado.
+
+### O limite do que a IA pode dizer (M37)
+
+A IA aqui **explica, resume, organiza e aponta padrões** nos números que a pessoa
+já registrou. Ela **não recomenda investimento**: não indica ativo, ticker,
+produto, fundo, corretora, instituição nem percentual de carteira, e não promete
+rentabilidade. Recomendação individualizada de valores mobiliários é atividade
+regulada, e este aplicativo não a exerce.
+
+A fronteira é sustentada por três camadas, porque nenhuma delas basta sozinha:
+
+| Camada | Onde | O que garante |
+|---|---|---|
+| Prompt | `netlify/functions/analyze.js` | Persona de organizador de orçamento (não de consultor), proibições por escrito e o enquadramento aceitável: prazo, volatilidade e necessidade de usar o dinheiro |
+| Filtro de saída | `netlify/functions/_shared/ai-boundaries.js` | Campo que nomeia produto, ativo, instituição ou alocação sai vazio; item de lista some. Nada é reescrito |
+| Filtro no cliente | `js/insights.js` (cópia espelhada) | O mesmo corte aplicado ao que chega, porque resposta de backend antigo, proxy ou cache não pode furar o limite |
+
+O que **não** é bloqueado, de propósito, é a educação sobre risco. "Para um
+objetivo de curto prazo, ativos de alta volatilidade podem apresentar risco
+incompatível com a necessidade de usar o dinheiro em breve" passa inteira: filtro
+que derruba o texto bom para se proteger do ruim entrega tela vazia.
+
+Toda análise sai com a ressalva de natureza (educativo, gerado por IA, valor
+futuro é estimativa e não previsão), gerada pelo código e não pedida ao modelo,
+com link para a educação do investidor da CVM. Se o filtro esvaziar a resposta
+inteira, a tela diz isso em vez de mostrar um cartão em branco.
+
+`tests/test-ai-boundaries.js` cobre as três camadas, inclusive a igualdade entre
+as duas cópias do filtro (texto e comportamento).
 
 ## Rodar localmente antes de hospedar
 

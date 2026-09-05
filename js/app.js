@@ -2475,12 +2475,19 @@ async function confirmAiPreview() {
   setState({ aiInsight: { loading: true, text: null, error: null, analise: null } });
   try {
     const result = await requestStructuredAnalysis(state.data, mKey, opcoes);
+    const analise = result.estruturado ? result.analise : null;
+    // [M37] O filtro de limites pode ter esvaziado tudo. Cartão em branco faria
+    // parecer defeito; a pessoa merece saber que veio resposta e que ela foi
+    // descartada por sair do que este app se propõe a dizer.
+    const vazio = !result.texto && (!analise || aiAnalysisIsEmpty(analise));
     setState({
       aiInsight: {
         loading: false,
         text: result.texto || null,
-        analise: result.estruturado ? result.analise : null,
-        error: null,
+        analise: vazio ? null : analise,
+        error: vazio
+          ? "A resposta saiu do que este app pode dizer (recomendação de investimento) e foi descartada. Tente pedir a análise de novo."
+          : null,
       },
     });
   } catch (err) {

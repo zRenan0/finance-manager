@@ -117,6 +117,11 @@ function renderFinancialNotice(topic) {
     consorcio: { text: "Estimativa educativa. A contemplação, os reajustes, o fundo de reserva e os custos seguem o regulamento e o contrato do grupo.", links: [["Banco Central sobre consórcios", "https://www.bcb.gov.br/meubc/faqs/s/consorcios"]] },
     fgts: { text: "Estimativa educativa. Regras de saque, retorno de modalidade e remuneração podem mudar. Confirme as condições vigentes nos canais oficiais.", links: [["FGTS na Caixa", "https://www.caixa.gov.br/beneficios-trabalhador/fgts/Paginas/default.aspx"]] },
     juros: { text: "Projeção matemática, sem garantia de rendimento. Taxas, impostos, custos e inflação alteram o resultado real.", links: [["Educação do investidor na CVM", "https://www.gov.br/cvm/pt-br/assuntos/educacao/"]] },
+    // [M37] Natureza do texto gerado por IA. Ele fica ao lado das outras
+    // ressalvas de propósito: a análise da IA é do mesmo tipo de conteúdo que a
+    // simulação de juros (educativa, com premissa, sem garantia) e merece a
+    // mesma moldura em vez de um rodapé próprio, menor e mais fácil de ignorar.
+    ia: { text: "Conteúdo educativo gerado por IA a partir dos números que você enviou. Não é recomendação de investimento nem consultoria financeira: o app não indica ativo, produto, instituição nem percentual de carteira. Todo valor futuro citado é estimativa, não previsão.", links: [["Educação do investidor na CVM", "https://www.gov.br/cvm/pt-br/assuntos/educacao/"]] },
   };
   const notice = notices[topic] || notices.juros;
   return `<aside class="financial-notice" aria-label="Limites da simulação">${svgIcon("info", 16)}<div><p>${escapeHtml(notice.text)}</p><div class="source-links">${notice.links.map(([label, url]) => `<a href="${url}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`).join("")}</div><small>Referências revisadas em ${fmtDateFull(LEGAL_REVIEW_DATE)}.</small></div></aside>`;
