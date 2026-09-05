@@ -2,6 +2,37 @@
 
 ## Não publicado
 
+### O M38 tirou 70% do tempo de montar as telas
+
+- **Medido antes de mexer.** Com uma base de 20 mil lançamentos, montar os
+  modelos de um quadro custava 5,2 segundos. O perfil de CPU mostrou que a
+  escala já era linear: o problema não era algoritmo ruim, era trabalho
+  repetido. Depois das três correções, o mesmo trabalho custa 1,6 segundo.
+- **Busca de conta e cartão por id** deixou de percorrer a lista inteira a cada
+  chamada (eram até 8.800 buscas para montar uma única tela) e passou a usar um
+  índice.
+- **Faturas de cartão** deixaram de ser recalculadas dezenas de vezes por tela.
+- **A conversão de dinheiro para centavos**, a função mais chamada do
+  aplicativo, ganhou um atalho 23 vezes mais rápido para os valores comuns. A
+  releitura decimal, que existe para o arredondamento de meio centavo sair
+  certo, continua valendo perto dessa borda e nos valores muito grandes.
+- **Nenhum número exibido mudou, e isso foi conferido.** Os 18 modelos, a
+  normalização dos dados, as faturas de cada cartão e o saldo de cada conta
+  foram calculados com o código de antes e o de depois sobre a mesma base e
+  comparados byte a byte: zero diferenças. O atalho da conversão foi comparado
+  com a implementação anterior em ~9,7 milhões de casos, incluindo todo valor de
+  dois decimais até R$ 50.000, e a comparação virou teste permanente.
+- **Duas cores voltaram a aparecer.** O aviso de backup vencido e a bolha de
+  categoria na prévia do lançamento por frase usavam estilo embutido, que a
+  política de segurança do M5 bloqueia: os dois saíam sem cor. Passaram a usar o
+  mesmo mecanismo do resto do aplicativo.
+- **A instalação offline ficou mais resistente.** O leitor de PDF (1,78 MB, o
+  maior arquivo do pacote) era item obrigatório: se ele falhasse, a instalação
+  inteira era reprovada e a pessoa ficava sem aplicativo offline por causa de um
+  recurso que talvez nunca usasse. Ele continua sendo baixado junto com todo o
+  resto; o que mudou é que a falha dele não derruba mais o pacote.
+- O cache offline subiu para `v75`.
+
 ### O M37 desenhou o limite do que a IA pode dizer
 
 - **A IA deixou de se apresentar como consultor.** O pedido enviado ao modelo
@@ -34,7 +65,7 @@
   ANÔNIMOS". O app já tinha corrigido essa palavra em toda parte (o pacote leva
   nomes de categoria e de meta escolhidos por você) menos ali. Agora ele diz que
   são agregados e que não são anônimos.
-- O cache offline subiu para `v74`.
+- Vai junto no pacote do `v75`.
 
 ### O M36 deu prazo ao alvo da meta
 

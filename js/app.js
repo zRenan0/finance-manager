@@ -1647,7 +1647,12 @@ function renderLastBackupLine() {
   const dias = Math.max(0, Math.floor((Date.parse(`${todayIso()}T12:00:00`) - Date.parse(`${last}T12:00:00`)) / 86400000));
   const quando = dias === 0 ? "hoje" : dias === 1 ? "ontem" : `há ${dias} dias`;
   const velho = dias >= 45;
-  return `<p class="field-hint" ${velho ? 'style="color:var(--goal)"' : ""}>
+  // [M38] Era `style="..."` literal, e a CSP do M5 (`style-src-attr 'none'`)
+  // bloqueava o atributo: o aviso de backup velho perdia a cor exatamente
+  // quando ele importa. Passou a usar `data-ui-css`, que é o mecanismo que o
+  // aplicativo já tem para estilo calculado (o bloco logo acima usa o mesmo).
+  // Só aparecia com 45 dias sem backup, e é por isso que passou despercebido.
+  return `<p class="field-hint"${velho ? ' data-ui-css="color:var(--goal)"' : ""}>
     ${svgIcon(velho ? "alertTriangle" : "checkCircle", 12)} Último backup ${quando} (${fmtDateFull(last)}).
   </p>`;
 }

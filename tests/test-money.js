@@ -186,5 +186,77 @@ const idsReserva = vm.runInContext(`Array.from({ length: 5000 }, () => uid())`, 
 check("reserva sem Web Crypto ainda gera id válido", idsReserva.every((id) => SAFE_ID.test(id)), idsReserva[0]);
 check("reserva sem Web Crypto não colide em 5 mil", new Set(idsReserva).size === idsReserva.length);
 
+/* ==============================================================================
+ * [M38] O CAMINHO RÁPIDO DE `moneyToCents` DEVOLVE O MESMO INTEIRO
+ * ==============================================================================
+ * O M38 acrescentou um atalho: longe da borda de meio centavo, `Math.round` no
+ * lugar da releitura decimal. O atalho vale 23 vezes menos trabalho na função
+ * mais chamada do aplicativo, e um erro dele não apareceria como tela quebrada,
+ * apareceria como um centavo errado num saldo, em silêncio, meses depois.
+ *
+ * Por isso a equivalência não é argumentada, é medida: a implementação ANTERIOR
+ * é reproduzida aqui (`referenciaDecimal`) e as duas são comparadas em milhões
+ * de casos, incluindo o domínio inteiro do dinheiro de verdade. Qualquer
+ * divergência reprova.
+ *
+ * Se um dia o atalho precisar mudar, este bloco é o que diz se ele pode.
+ */
+console.log("\n17. Caminho rápido x releitura decimal (M38)");
+{
+  const referenciaDecimal = (value) => {
+    const n = typeof value === "number" ? value : Number(value);
+    if (!Number.isFinite(n)) return 0;
+    const sign = n < 0 ? -1 : 1;
+    const abs = Math.abs(n);
+    const asText = String(abs);
+    let scaled;
+    if (asText.includes("e") || asText.includes("E")) scaled = abs * 100;
+    else {
+      scaled = Number(`${asText}e2`);
+      if (!Number.isFinite(scaled)) scaled = abs * 100;
+    }
+    return sign * Math.round(scaled);
+  };
+
+  const divergentes = [];
+  const conferir = (v) => {
+    if (divergentes.length > 8) return;
+    const esperado = referenciaDecimal(v);
+    const obtido = ctx.moneyToCents(v);
+    if (obtido !== esperado) divergentes.push(`${JSON.stringify(v)}: ${obtido} != ${esperado}`);
+  };
+
+  // Todo valor de dois decimais de R$ 0,00 a R$ 50.000,00. É o domínio inteiro
+  // do dinheiro que passa por este aplicativo, conferido um a um.
+  for (let k = 0; k <= 5000000; k++) conferir(k / 100);
+  check("5 milhões de valores de 2 casas concordam", divergentes.length === 0, divergentes[0]);
+
+  // A família do 1,005: três decimais são exatamente onde o erro binário decide
+  // o arredondamento para o lado errado, e a razão de a releitura decimal existir.
+  for (let k = 0; k <= 2000000; k++) conferir(k / 1000);
+  check("2 milhões de valores de 3 casas concordam", divergentes.length === 0, divergentes[0]);
+
+  for (let k = 0; k <= 500000; k++) conferir(-k / 100);
+  check("meio milhão de negativos concordam", divergentes.length === 0, divergentes[0]);
+
+  [
+    1.005, 2.675, 8.165, 1.015, 1.025, 1.045, 0.615, 0.575, 10.235,
+    0, -0, 0.001, 0.005, 0.004999999, 1e-8, 1e-7, 0.5, -0.5,
+    1e7, 1e7 - 0.005, 1e7 + 0.005, 1e9, 1e12, 1e12 + 0.5, 9007199254740991,
+    1e21, 1e-21, 123456789.987, 0.1 + 0.2, 1 / 3, 2 / 3,
+    "1.005", "0,50", "", null, undefined, NaN, Infinity, -Infinity, "abc", true, false, [], {},
+  ].forEach(conferir);
+  check("adversários conhecidos, bordas e entradas inválidas concordam", divergentes.length === 0, divergentes[0]);
+
+  for (let i = 0; i < 300000; i++) conferir(Math.random() * 1e6);
+  for (let i = 0; i < 300000; i++) conferir(Math.round((Math.random() - 0.5) * 2e8) / 100);
+  // Acima do teto do atalho a releitura decimal continua sendo o caminho; este
+  // trecho prova que o teto está no lugar certo.
+  for (let i = 0; i < 100000; i++) conferir(Math.random() * 1e12);
+  check("700 mil aleatórios, dentro e fora do teto, concordam", divergentes.length === 0, divergentes[0]);
+
+  eq("o teto do atalho continua declarado", run("MONEY_FAST_MAX"), 1e7);
+}
+
 console.log(`\n${fail === 0 ? "TODOS OS TESTES PASSARAM" : "FALHAS ENCONTRADAS"}: ${ok} ok, ${fail} falha(s)\n`);
 process.exit(fail === 0 ? 0 : 1);

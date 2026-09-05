@@ -87,7 +87,7 @@ function workerHarness(options = {}) {
     clearTimeout,
   };
   vm.createContext(context);
-  vm.runInContext(`${SOURCE}\nself.__pwa = { VERSION, CACHE_NAME, PAGE_CACHE, FONT_CACHE, APP_SHELL, LANDING_ASSETS, LANDING_PAGES };`, context,
+  vm.runInContext(`${SOURCE}\nself.__pwa = { VERSION, CACHE_NAME, PAGE_CACHE, FONT_CACHE, APP_SHELL, OPTIONAL_ASSETS, LANDING_ASSETS, LANDING_PAGES };`, context,
     { filename: "service-worker.js" });
 
   async function dispatchWait(type, event = {}) {
@@ -139,6 +139,14 @@ async function main() {
   check("as navegações da landing ficam no cache de páginas",
     c.LANDING_PAGES.every((item) => pageKeys.has(absoluteKey(item))));
   check("a versão só pede ativação após o pacote completo", ok.skipWaitingCount() === 1, ok.skipWaitingCount());
+  // [M38] O PDF.js saiu da lista OBRIGATÓRIA, não do pacote: com rede boa ele
+  // continua entrando no mesmo cache, na mesma instalação.
+  check("os pesados opcionais continuam sendo guardados quando dá",
+    c.OPTIONAL_ASSETS.length > 0 && c.OPTIONAL_ASSETS.every((item) => shellKeys.has(absoluteKey(item))),
+    `${c.OPTIONAL_ASSETS.length} opcionais`);
+  check("o PDF.js está entre os opcionais, não no shell",
+    c.OPTIONAL_ASSETS.some((item) => /pdfjs/.test(item)) && !c.APP_SHELL.some((item) => /pdfjs/.test(item)),
+    c.APP_SHELL.filter((i) => /pdfjs/.test(i)).join(", "));
 
   console.log("\n2. Separação offline");
   ok.setOnline(false);
@@ -176,6 +184,23 @@ async function main() {
   check("caches parciais da nova versão são apagados",
     !broken.stores.has(broken.constants.CACHE_NAME) && !broken.stores.has(broken.constants.PAGE_CACHE),
     Array.from(broken.stores.keys()).join(", "));
+
+  // [M38] O outro lado da moeda: o item opcional que falha NÃO pode derrubar a
+  // instalação. Era o que acontecia com o PDF.js, 1,78 MB obrigatórios que
+  // deixavam a pessoa sem aplicativo offline por causa de um leitor de PDF.
+  console.log("\n4b. Falha de item opcional não reprova a instalação");
+  const semPdf = workerHarness({ failedPaths: ["/vendor/pdfjs/pdf.worker.min.mjs"] });
+  let erroOpcional = "";
+  try { await semPdf.dispatchWait("install"); } catch (error) { erroOpcional = error.message; }
+  check("instalação segue sem o opcional", erroOpcional === "", erroOpcional);
+  check("o pacote é promovido mesmo assim", semPdf.skipWaitingCount() === 1, semPdf.skipWaitingCount());
+  const shellSemPdf = semPdf.stores.get(semPdf.constants.CACHE_NAME);
+  check("o shell continua completo", shellSemPdf
+    && semPdf.constants.APP_SHELL.every((item) => shellSemPdf.entries.has(absoluteKey(item))));
+  check("o opcional que deu certo ainda entrou",
+    shellSemPdf.entries.has(absoluteKey("vendor/pdfjs/pdf.min.mjs")));
+  check("o opcional que falhou simplesmente não está lá",
+    !shellSemPdf.entries.has(absoluteKey("vendor/pdfjs/pdf.worker.min.mjs")));
 
   console.log("\n5. Navegação aguarda a gravação");
   let pendingPut = false;

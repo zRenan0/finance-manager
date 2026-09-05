@@ -516,7 +516,12 @@ function renderNaturalDraft(d, index) {
 
   return `<div class="nlp-draft ${d.amount > 0 ? "" : "nlp-draft--invalid"}">
     <div class="nlp-draft__head">
-      <span class="icon-bubble ${isIncome ? "icon-bubble--income" : ""}" ${isIncome ? "" : `style="background:color-mix(in srgb, ${cat.color} 14%, transparent); color:${cat.color}"`}>
+      ${/* [M38] `style="..."` literal era bloqueado pela CSP do M5
+            (`style-src-attr 'none'`) e a bolha da categoria saía sem cor na
+            prévia do lançamento em linguagem natural. `data-ui-css` é o
+            caminho do próprio aplicativo para estilo calculado, e a cor da
+            categoria já chega saneada como `#RRGGBB`. */""}
+      <span class="icon-bubble ${isIncome ? "icon-bubble--income" : ""}"${isIncome ? "" : ` data-ui-css="background:color-mix(in srgb, ${cat.color} 14%, transparent); color:${cat.color}"`}>
         ${svgIcon(isIncome ? "trendUp" : cat.icon, 17)}
       </span>
       <div class="nlp-draft__info">

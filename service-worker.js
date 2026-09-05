@@ -78,7 +78,10 @@
 // v74: a IA (M37) ganhou limite declarado. O prompt deixou de pedir um
 // "consultor financeiro" e passou a proibir recomendação de investimento; a
 // saída é filtrada nas duas pontas e a tela carrega a ressalva de natureza.
-const VERSION = "v74";
+// v75: o M38 acelerou os modelos (índice por id, cache de faturas e caminho
+// rápido do dinheiro), tirou dois estilos embutidos que a CSP bloqueava e
+// tirou o PDF.js do pacote OBRIGATÓRIO da instalação, sem deixar de baixá-lo.
+const VERSION = "v75";
 const BUILD_ID = VERSION;
 const CACHE_NAME = "financas-cache-" + VERSION;
 // A PÁGINA COMERCIAL TEM CACHE PRÓPRIO.
@@ -127,11 +130,32 @@ const APP_SHELL = [
   "js/modules/dynamic-styles.js",
   "js/modules/test-bridge.js",
   "js/modules/app.generated.js",
+  "icons/icon-192.png",
+  "icons/icon-512.png",
+];
+
+/* ==============================================================================
+ * [M38] O PDF.js SAIU DO PACOTE OBRIGATÓRIO (continua sendo baixado)
+ * ==============================================================================
+ * Ele é 1,78 MB dos 2,3 MB do pacote: mais que todo o resto do aplicativo
+ * somado. E era item OBRIGATÓRIO da instalação, o que produzia o pior resultado
+ * possível numa conexão ruim: a biblioteca de ler PDF falha, a instalação
+ * inteira é reprovada, os dois caches são apagados e a pessoa fica **sem
+ * aplicativo offline** por causa de um recurso que ela pode nunca usar.
+ *
+ * A troca é essa: continua sendo buscado junto com todo o resto, no mesmo cache
+ * e na mesma instalação, então quem tem rede boa não percebe diferença nenhuma.
+ * O que mudou é o que acontece quando ele falha: a instalação segue, o shell é
+ * promovido e a importação de PDF (que já carrega a biblioteca sob demanda, com
+ * `import()`) tenta de novo quando houver rede.
+ *
+ * O critério para entrar aqui é estreito: só entra o que é grande, carregado sob
+ * demanda e cuja ausência degrada UM recurso em vez de quebrar o aplicativo.
+ */
+const OPTIONAL_ASSETS = [
   "vendor/pdfjs/pdf.min.mjs",
   "vendor/pdfjs/pdf.worker.min.mjs",
   "vendor/pdfjs/LICENSE",
-  "icons/icon-192.png",
-  "icons/icon-512.png",
 ];
 
 // Os estáticos da página comercial entram no cache normal, cada um sob a
@@ -184,6 +208,7 @@ self.addEventListener("install", (event) => {
 
       await Promise.all([
         ...APP_SHELL.map((path) => guardar(cache, path)),
+        ...OPTIONAL_ASSETS.map((path) => guardar(cache, path)),
         ...LANDING_ASSETS.map((path) => guardar(cache, path)),
         ...LANDING_PAGES.map((path) => guardar(paginas, path)),
       ]);

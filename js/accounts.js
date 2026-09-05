@@ -9,12 +9,52 @@ const ACCOUNT_TYPE_LABELS = {
   outro: "Outra conta",
 };
 
+/* ==============================================================================
+ * [M38] ÍNDICE DE BUSCA POR ID
+ * ==============================================================================
+ * `accountById` era um `find` linear, e a medição do M38 mostrou de 4.600 a
+ * 8.800 chamadas em UM único build de modelo com 5.000 lançamentos (uma por
+ * lançamento varrido, em vários motores). Com oito contas, isso são dezenas de
+ * milhares de comparações por quadro para responder a mesma pergunta.
+ *
+ * A cache é indexada pela IDENTIDADE DO ARRAY, não pela do snapshot. É de
+ * propósito: `sanitize()` reatribui `data.accounts` dentro do MESMO objeto
+ * `data` (`data.accounts = normalizeAccounts(...)`), então uma cache presa ao
+ * snapshot poderia sobreviver à troca da lista e responder com a conta antiga.
+ * Presa ao array, qualquer substituição da lista já é um endereço novo e a
+ * cache erra por ausência, nunca por conteúdo velho. O WeakMap solta sozinho
+ * quando a lista antiga vira lixo.
+ *
+ * A única forma de errar seria alguém MUTAR a lista no lugar (`push`/`splice`).
+ * Nada no aplicativo faz isso: toda gravação passa por `setData`, que troca o
+ * array inteiro. Se um dia passar a fazer, este comentário é o aviso.
+ */
+const __indicePorLista = new WeakMap();
+
+function listaIndexadaPorId(lista) {
+  if (!Array.isArray(lista)) return null;
+  let indice = __indicePorLista.get(lista);
+  if (!indice) {
+    indice = new Map();
+    // `find` devolve a PRIMEIRA ocorrência; o índice preserva essa regra para o
+    // caso (já impossível depois do `sanitize`) de dois registros com o mesmo id.
+    for (let i = 0; i < lista.length; i++) {
+      const item = lista[i];
+      if (item && item.id != null && !indice.has(item.id)) indice.set(item.id, item);
+    }
+    __indicePorLista.set(lista, indice);
+  }
+  return indice;
+}
+
 function accountById(data, id) {
-  return (data.accounts || []).find((a) => a.id === id) || null;
+  const indice = listaIndexadaPorId(data && data.accounts);
+  return (indice && indice.get(id)) || null;
 }
 
 function creditCardById(data, id) {
-  return (data.creditCards || []).find((c) => c.id === id) || null;
+  const indice = listaIndexadaPorId(data && data.creditCards);
+  return (indice && indice.get(id)) || null;
 }
 
 function transactionAffectsCash(data, transaction, asOf) {
@@ -172,6 +212,12 @@ function cardStatementTransactionAmount(transaction) {
 function cardStatements(data, cardId) {
   const card = creditCardById(data, cardId);
   if (!card) return [];
+  // [M38] Mesma cache do passivo; ver o bloco "CACHE DAS FATURAS" abaixo. Aqui
+  // não há data-limite, então a chave é só o cartão.
+  return faturasEmCache(data, `todas|${cardId}`, () => cardStatementsCalc(data, card, cardId));
+}
+
+function cardStatementsCalc(data, card, cardId) {
   const map = new Map();
   const ensure = (key) => {
     if (!map.has(key)) map.set(key, { key, purchases: 0, paid: 0, outstanding: 0, count: 0, dueDate: cardStatementDueDate(card, key) });
@@ -194,6 +240,43 @@ function cardStatements(data, cardId) {
     .sort((a, b) => (a.key < b.key ? -1 : 1));
 }
 
+/* ==============================================================================
+ * [M38] CACHE DAS FATURAS
+ * ==============================================================================
+ * `cardLiabilityStatements` varre TODOS os lançamentos duas vezes, e a medição
+ * do M38 flagrou 69 chamadas em um único build do modelo de patrimônio com
+ * 5.000 lançamentos: 690 mil iterações para responder três perguntas
+ * diferentes (uma por cartão). O perfil de CPU confirmou `cardStatementKeyForDate`
+ * e este laço como o segundo maior custo do quadro, atrás só de `moneyToCents`.
+ *
+ * A função é PURA em relação a quatro entradas: a lista de lançamentos, a de
+ * pagamentos, o cartão e a data-limite. A cache é indexada pelas duas LISTAS
+ * (identidade de array, mesmo raciocínio do índice por id acima), e a chave de
+ * texto carrega cartão e limite JÁ RESOLVIDO. Resolver o limite antes de montar
+ * a chave é o que impede a virada do dia de servir resultado de ontem: `asOf`
+ * ausente vira `todayIso()` e entra na chave como data explícita.
+ *
+ * A entrega continua sendo objetos NOVOS a cada chamada. Guardar as linhas e
+ * devolver a mesma referência mudaria o contrato para quem hoje pode alterar o
+ * resultado sem afetar ninguém; a cópia custa dezenas de objetos, não milhares.
+ */
+const __faturasPorLancamentos = new WeakMap();
+
+function faturasEmCache(data, chave, calcular) {
+  const lancamentos = (data && data.transactions) || null;
+  const pagamentos = (data && data.cardPayments) || null;
+  if (!Array.isArray(lancamentos)) return calcular();
+  let porPagamentos = __faturasPorLancamentos.get(lancamentos);
+  if (!porPagamentos) { porPagamentos = new WeakMap(); __faturasPorLancamentos.set(lancamentos, porPagamentos); }
+  // Sem lista de pagamentos ainda não há segunda dimensão para indexar; a
+  // própria lista de lançamentos serve de chave e o resultado continua correto.
+  const dimensao = Array.isArray(pagamentos) ? pagamentos : lancamentos;
+  let porChave = porPagamentos.get(dimensao);
+  if (!porChave) { porChave = new Map(); porPagamentos.set(dimensao, porChave); }
+  if (!porChave.has(chave)) porChave.set(chave, calcular());
+  return porChave.get(chave).map((linha) => ({ ...linha }));
+}
+
 // Passivo reconhecido até uma data. Compras parceladas entram pelo valor total
 // quando a primeira parcela começa; compras avulsas futuras só entram na data.
 // Isso é diferente de `cardStatements`, que mostra todo o calendário cadastrado
@@ -202,6 +285,10 @@ function cardLiabilityStatements(data, cardId, asOf) {
   const card = creditCardById(data, cardId);
   if (!card) return [];
   const limit = asOf || todayIso();
+  return faturasEmCache(data, `liab|${cardId}|${limit}`, () => cardLiabilityStatementsCalc(data, card, cardId, limit));
+}
+
+function cardLiabilityStatementsCalc(data, card, cardId, limit) {
   const groupStarts = new Map();
 
   (data.transactions || []).forEach((t) => {

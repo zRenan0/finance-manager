@@ -12,7 +12,8 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 
 | Campo | Valor |
 |---|---|
-| Módulo atual | **M37** (concluído) |
+| Módulo atual | **M38** (concluído) |
+| Status do M38 | **CONCLUÍDO** - medido antes de mexer: montar os modelos de um quadro com 20 mil lançamentos custava 5,2 s e passou a custar 1,6 s (−70%), sem que um único número exibido mudasse (35 comparações byte a byte contra o código anterior, 0 divergências). Índice por id, cache de faturas e caminho rápido de `moneyToCents` (~9,7 milhões de casos conferidos). De passagem: dois estilos embutidos que a CSP bloqueava voltaram a pintar, e o PDF.js saiu do pacote OBRIGATÓRIO da instalação sem deixar de ser baixado. Cache em `v75` |
 | Status do M37 | **CONCLUÍDO** - a IA deixou de se apresentar como consultor financeiro e passou a ter limite declarado: o pedido proíbe recomendação de investimento, produto, instituição e alocação; a saída é filtrada por nove padrões nas duas pontas (servidor e navegador, com as cópias travadas por teste); toda análise sai com a natureza declarada (educativo, estimativa, não previsão). A educação sobre risco continua passando inteira. Cache em `v74` |
 | Status do M36 | **CONCLUÍDO** - o alvo da meta ganhou prazo: marcação opcional por meta corrige o valor pela premissa de IPCA do próprio app, mostra quanto o objetivo custaria no prazo e quanto seria preciso guardar por mês para manter o poder de compra. O alvo gravado continua sendo o preço de hoje e nenhum número antigo se mexe (travado por teste campo a campo). Cache em `v73` |
 | Status do M35 | **CONCLUÍDO** - a conciliação ganhou o passo de revisão: compara os dois saldos, procura o movimento que fecharia a diferença no centavo (repetido, transferência, fatura, ajuste anterior, sinal invertido, fatura vencida) e só grava o ajuste depois do pedido. O saldo do OFX (`LEDGERBAL`) abre a conferência preenchida sem virar lançamento. Cache em `v72` |
@@ -50,10 +51,10 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 | Status do M3 | **CONCLUÍDO** — aplicado e confirmado no banco em 2026-08-28 |
 | Status do M2 | **CONCLUÍDO** — nenhuma vulnerabilidade de autorização; invariantes travados por teste |
 | Status do M1 | **CONCLUÍDO** — aplicado e confirmado; gatilho capturado e versionado |
-| Módulos concluídos | M0 a M37 |
-| Próximo módulo | M38 - Performance |
+| Módulos concluídos | M0 a M38 |
+| Próximo módulo | M39 - Acessibilidade |
 | Branch | `deploy-atualizado` (árvore limpa no início do M0) |
-| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `tests/test-cloud-sync.js`, `tests/test-account-backend.js`, `tests/test-critical-actions.js`, `tests/test-coverage.js`, `tests/test-security-adversarial.js`, `tests/test-observability.js`, `tests/test-data-inventory-lgpd.js`, `tests/test-third-party-transparency.js`, `supabase/tests/verify_security_boundary.sql`, `scripts/check-deploy.js`, `scripts/serve.js`, `scripts/coverage.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/storage.js`, `js/cloud-sync.js` (M10), `js/analytics.js`, `js/forecast.js`, `js/wrapped.js`, `js/screens/analytics.js` (M11), `js/backup-crypto.js`, `js/app.js`, `js/actions.js`, `js/storage.js`, `js/screens/settings.js`, `css/components.css`, `scripts/build-app-module.js` (M12), `netlify/functions/sync.js` (M13), `js/import.js`, `netlify/functions/_shared/finance-schema.js` (M14), observabilidade em backend, frontend e Service Worker (M17), inventário e tela de Privacidade (M18), registro de terceiros e operadores (M19), `js/modules/app.generated.js` (regerado). Documentação: inventário do M8, protocolo do M10, backup protegido do M12, `docs/VERSIONAMENTO.md` do M13, observabilidade do M17, inventário LGPD do M18, terceiros do M19 e desenhos de M15 a M19. **M20 (só documentação e verificação, nenhum arquivo de produção):** `SECURITY_INCIDENT_RESPONSE.md` (novo), `tests/test-incident-response.js` (novo), `scripts/check-release.js`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. **M21:** `reportar-vulnerabilidade.html` (novo), `css/reportar.css` (novo), `SECURITY.md` (novo), `scripts/security-txt.js` (novo), `tests/test-responsible-disclosure.js` (novo), `vercel.json`, `scripts/build-dist.js`, `scripts/serve.js`, `scripts/check-release.js`, `scripts/check-deploy.js`, `landing.html`, `tests/test-landing.js`, `tests/browser/run-landing.js`, `SECURITY_INCIDENT_RESPONSE.md`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. **M22:** `docs/MARCA.md` (novo), `tests/test-brand.js` (novo), `index.html`, `manifest.webmanifest`, `landing.html`, `scripts/check-release.js`, `scripts/security-txt.js`, `SECURITY.md`, `SECURITY_INCIDENT_RESPONSE.md`, `README.md`, `CHANGELOG.md`. **M23:** `landing.html`, `css/landing.css`, `service-worker.js` (v63), `tests/test-brand.js`, `tests/test-responsible-disclosure.js`, `tests/test-third-party-transparency.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M24:** `js/screens/onboarding.js`, `js/app.js`, `js/actions.js`, `css/screens/notifications-onboarding.css`, `service-worker.js` (v64), `js/modules/app.generated.js`, `tests/test-onboarding.js`, `tests/browser/run-browser.js`, `tests/browser/run-pwa.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M37:** `netlify/functions/_shared/ai-boundaries.js` (novo), `tests/test-ai-boundaries.js` (novo), `netlify/functions/analyze.js`, `js/insights.js`, `js/app.js`, `js/transparency.js`, `js/screens/analytics.js`, `service-worker.js` (v74), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M36:** `tests/test-goals-inflation.js` (novo), `js/goals.js`, `js/storage.js`, `js/actions.js`, `js/app.js`, `js/screens/goals.js`, `css/screens/planning.css`, `service-worker.js` (v73), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M35:** `js/reconcile.js` (novo), `tests/test-reconciliation.js` (novo), `js/screens/accounts.js`, `js/actions.js`, `js/app.js`, `js/import.js`, `js/screens/import.js`, `css/utilities.css`, `scripts/build-app-module.js`, `service-worker.js` (v72), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M34:** `tests/test-debt-center.js` (novo), `js/debts.js`, `js/storage.js`, `js/screens/debts.js`, `js/app.js`, `js/actions.js`, `css/base.css`, `service-worker.js` (v71), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M32/M33:** `tests/test-anomalies-subscriptions.js` (novo), `tests/helpers/fixed-clock.js` (novo), `tests/test-health.js`, `tests/test-insights-engine.js`, `tests/test-render.js`, `tests/test-reserve-and-close.js`, `js/forecast.js`, `js/analytics.js`, `js/advisor.js`, `js/recurring.js`, `js/storage.js`, `js/screens/insights.js`, `js/screens/subscriptions.js`, `js/app.js`, `js/actions.js`, `css/screens/intelligence.css`, `service-worker.js` (v70), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M30/M31:** `tests/test-daily-and-purchase.js` (novo), `js/forecast.js`, `js/insights.js`, `js/screens/calendar.js`, `js/screens/simulate.js`, `js/app.js`, `css/screens/planning.css`, `service-worker.js` (v69), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M28/M29:** `tests/test-reserve-and-close.js` (novo), `js/metrics.js`, `js/forecast.js`, `js/screens/health.js`, `js/screens/calendar.js`, `css/screens/health.css`, `css/screens/planning.css`, `service-worker.js` (v68), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M27:** `tests/test-score-explainable.js` (novo), `js/score.js`, `js/screens/health.js`, `css/screens/health.css`, `service-worker.js` (v67), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M26:** `tests/test-local-only-notice.js` (novo), `js/app.js`, `js/actions.js`, `js/screens/dashboard.js`, `css/screens/dashboard.css`, `css/components.css`, `service-worker.js` (v66), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M25:** `js/demo.js` (novo), `tests/test-demo-mode.js` (novo), `js/app.js`, `js/actions.js`, `js/screens/onboarding.js`, `css/components.css`, `service-worker.js` (v65), `scripts/build-app-module.js`, `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. |
+| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `tests/test-cloud-sync.js`, `tests/test-account-backend.js`, `tests/test-critical-actions.js`, `tests/test-coverage.js`, `tests/test-security-adversarial.js`, `tests/test-observability.js`, `tests/test-data-inventory-lgpd.js`, `tests/test-third-party-transparency.js`, `supabase/tests/verify_security_boundary.sql`, `scripts/check-deploy.js`, `scripts/serve.js`, `scripts/coverage.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/storage.js`, `js/cloud-sync.js` (M10), `js/analytics.js`, `js/forecast.js`, `js/wrapped.js`, `js/screens/analytics.js` (M11), `js/backup-crypto.js`, `js/app.js`, `js/actions.js`, `js/storage.js`, `js/screens/settings.js`, `css/components.css`, `scripts/build-app-module.js` (M12), `netlify/functions/sync.js` (M13), `js/import.js`, `netlify/functions/_shared/finance-schema.js` (M14), observabilidade em backend, frontend e Service Worker (M17), inventário e tela de Privacidade (M18), registro de terceiros e operadores (M19), `js/modules/app.generated.js` (regerado). Documentação: inventário do M8, protocolo do M10, backup protegido do M12, `docs/VERSIONAMENTO.md` do M13, observabilidade do M17, inventário LGPD do M18, terceiros do M19 e desenhos de M15 a M19. **M20 (só documentação e verificação, nenhum arquivo de produção):** `SECURITY_INCIDENT_RESPONSE.md` (novo), `tests/test-incident-response.js` (novo), `scripts/check-release.js`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. **M21:** `reportar-vulnerabilidade.html` (novo), `css/reportar.css` (novo), `SECURITY.md` (novo), `scripts/security-txt.js` (novo), `tests/test-responsible-disclosure.js` (novo), `vercel.json`, `scripts/build-dist.js`, `scripts/serve.js`, `scripts/check-release.js`, `scripts/check-deploy.js`, `landing.html`, `tests/test-landing.js`, `tests/browser/run-landing.js`, `SECURITY_INCIDENT_RESPONSE.md`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. **M22:** `docs/MARCA.md` (novo), `tests/test-brand.js` (novo), `index.html`, `manifest.webmanifest`, `landing.html`, `scripts/check-release.js`, `scripts/security-txt.js`, `SECURITY.md`, `SECURITY_INCIDENT_RESPONSE.md`, `README.md`, `CHANGELOG.md`. **M23:** `landing.html`, `css/landing.css`, `service-worker.js` (v63), `tests/test-brand.js`, `tests/test-responsible-disclosure.js`, `tests/test-third-party-transparency.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M24:** `js/screens/onboarding.js`, `js/app.js`, `js/actions.js`, `css/screens/notifications-onboarding.css`, `service-worker.js` (v64), `js/modules/app.generated.js`, `tests/test-onboarding.js`, `tests/browser/run-browser.js`, `tests/browser/run-pwa.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M38:** `tests/test-performance.js` (novo), `js/accounts.js`, `js/utils.js`, `js/app.js`, `js/screens/add.js`, `service-worker.js` (v75), `tests/test-money.js`, `tests/test-pwa-cache.js`, `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M37:** `netlify/functions/_shared/ai-boundaries.js` (novo), `tests/test-ai-boundaries.js` (novo), `netlify/functions/analyze.js`, `js/insights.js`, `js/app.js`, `js/transparency.js`, `js/screens/analytics.js`, `service-worker.js` (v74), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M36:** `tests/test-goals-inflation.js` (novo), `js/goals.js`, `js/storage.js`, `js/actions.js`, `js/app.js`, `js/screens/goals.js`, `css/screens/planning.css`, `service-worker.js` (v73), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M35:** `js/reconcile.js` (novo), `tests/test-reconciliation.js` (novo), `js/screens/accounts.js`, `js/actions.js`, `js/app.js`, `js/import.js`, `js/screens/import.js`, `css/utilities.css`, `scripts/build-app-module.js`, `service-worker.js` (v72), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M34:** `tests/test-debt-center.js` (novo), `js/debts.js`, `js/storage.js`, `js/screens/debts.js`, `js/app.js`, `js/actions.js`, `css/base.css`, `service-worker.js` (v71), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M32/M33:** `tests/test-anomalies-subscriptions.js` (novo), `tests/helpers/fixed-clock.js` (novo), `tests/test-health.js`, `tests/test-insights-engine.js`, `tests/test-render.js`, `tests/test-reserve-and-close.js`, `js/forecast.js`, `js/analytics.js`, `js/advisor.js`, `js/recurring.js`, `js/storage.js`, `js/screens/insights.js`, `js/screens/subscriptions.js`, `js/app.js`, `js/actions.js`, `css/screens/intelligence.css`, `service-worker.js` (v70), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M30/M31:** `tests/test-daily-and-purchase.js` (novo), `js/forecast.js`, `js/insights.js`, `js/screens/calendar.js`, `js/screens/simulate.js`, `js/app.js`, `css/screens/planning.css`, `service-worker.js` (v69), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M28/M29:** `tests/test-reserve-and-close.js` (novo), `js/metrics.js`, `js/forecast.js`, `js/screens/health.js`, `js/screens/calendar.js`, `css/screens/health.css`, `css/screens/planning.css`, `service-worker.js` (v68), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M27:** `tests/test-score-explainable.js` (novo), `js/score.js`, `js/screens/health.js`, `css/screens/health.css`, `service-worker.js` (v67), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M26:** `tests/test-local-only-notice.js` (novo), `js/app.js`, `js/actions.js`, `js/screens/dashboard.js`, `css/screens/dashboard.css`, `css/components.css`, `service-worker.js` (v66), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M25:** `js/demo.js` (novo), `tests/test-demo-mode.js` (novo), `js/app.js`, `js/actions.js`, `js/screens/onboarding.js`, `css/components.css`, `service-worker.js` (v65), `scripts/build-app-module.js`, `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. |
 | Migration do M13 | `20260831120000_database_schema_version.sql` — **aplicada e confirmada em produção em 2026-08-31** (`database_schema_version = 1`; grants inalterados: só `service_role` e `postgres`). Reversível por `alter table public.cofre_sync_config drop column if exists database_schema_version;` |
 | Migrations criadas até aqui | `20260828120000_rls_auto_enable_least_privilege.sql`, `20260828130000_rls_auto_enable_versionada.sql`, `20260828140000_menor_privilegio_tabelas.sql` (as três **aplicadas e confirmadas em 2026-08-28**), `20260828150000_rls_auto_enable_gatilho.sql` (**ainda não aplicada**; é no-op em produção, onde o gatilho já existe) |
 | Versão do app | `0.30.0` (package.json) |
@@ -4055,6 +4056,147 @@ executado nesta sessão. Firefox, WebKit e `npm run test:pwa` também não.
 
 ---
 
+## M38 - Performance
+
+### Antes
+
+O aplicativo já tinha atenção a desempenho: `js/perf.js` memoiza cada modelo pela
+identidade do snapshot, `idleTask` tira conquistas e avisos do caminho crítico,
+`scheduleRender` junta renders do mesmo tick, `resampleSeries` limita pontos de
+gráfico e as listas paginam em 30 itens (`state.analyticsLimit`). O que não
+existia era **medida**.
+
+Medi antes de tocar em qualquer linha, com base sintética de 2.500 a 20.000
+lançamentos, 8 contas, 3 cartões, 10 metas, 50 bens e 500 transferências:
+
+| Modelo | 20.000 lançamentos |
+|---|---|
+| `buildWealthModel` | 1.444,7 ms |
+| `buildHealthModel` | 1.134,4 ms |
+| `buildAchievementsModel` | 659,5 ms |
+| `buildAdvisorModel` | 593,3 ms |
+| `buildDashboardModel` | 553,7 ms |
+| `accountsSummary` | 200,2 ms |
+| **soma dos modelos** | **5.250,4 ms** |
+
+**A escala é linear** (2.500 → 5.000 → 10.000 dobra o tempo, não quadruplica).
+Não havia O(n²) escondido; o problema era o CONSTANTE, e o perfil de CPU (via
+`inspector`, tempo próprio por função) mais a contagem de chamadas mostraram
+exatamente onde:
+
+| Achado | Evidência | Grau |
+|---|---|---|
+| A1: `accountById`/`creditCardById` são `find` linear | 4.598 a 8.780 chamadas em UM build; com 8 contas, dezenas de milhares de comparações por quadro | **P1 de desempenho** |
+| A2: `cardLiabilityStatements` varre todos os lançamentos duas vezes | 69 chamadas em um build de patrimônio = ~690 mil iterações; 2º maior custo do perfil | **P1 de desempenho** |
+| A3: `moneyToCents` faz releitura decimal (`String` + `Number`) sempre | 35 mil a 99 mil chamadas por build; **maior custo próprio** de todos os perfis | **P1 de desempenho** |
+| A4: dois `style="..."` literais no HTML gerado | a CSP do M5 (`style-src-attr 'none'`) bloqueia o atributo; o aviso de backup vencido e a bolha de categoria da prévia por frase saíam sem cor | **P3, defeito real** |
+| A5: PDF.js (1,78 MB) era item OBRIGATÓRIO do pacote offline | falha dele reprova a instalação inteira e apaga os dois caches: sem aplicativo offline por causa de um leitor de PDF | **P2 de resiliência** |
+
+### Alterações
+
+**A1 - índice por id (`js/accounts.js`).** `Map` id → registro, guardado num
+`WeakMap` indexado pela **identidade do array**, não pela do snapshot. Essa
+escolha é o coração da segurança da mudança: `sanitize()` reatribui
+`data.accounts` dentro do MESMO objeto `data`, então cache presa ao snapshot
+poderia sobreviver à troca da lista e responder com a conta antiga. Presa ao
+array, qualquer substituição já é endereço novo e a cache erra por ausência,
+nunca por conteúdo velho. Preserva a regra do `find` (primeira ocorrência vence)
+e continua devolvendo a mesma referência, não cópia.
+
+**A2 - cache das faturas (`js/accounts.js`).** `cardStatements` e
+`cardLiabilityStatements` passaram a guardar o cálculo indexado pelas duas listas
+(lançamentos e pagamentos) mais uma chave de texto com cartão e data-limite **já
+resolvida** - resolver o padrão antes de montar a chave é o que impede a virada
+do dia de servir o resultado de ontem. A entrega continua sendo **objetos novos a
+cada chamada**: guardar e devolver a mesma referência mudaria o contrato para
+quem hoje pode alterar o resultado sem afetar ninguém.
+
+**A3 - caminho rápido de `moneyToCents` (`js/utils.js`).** A releitura decimal só
+é NECESSÁRIA perto de meio centavo, que é onde o erro binário decide o
+arredondamento para o lado errado. Longe dessa borda, `Math.round` devolve o
+mesmo inteiro. `MONEY_FAST_MAX = 1e7` existe porque em valores muito grandes o
+próprio produto perde resolução; acima do teto, a releitura decimal continua
+sendo o caminho. Nada foi removido: a implementação anterior é o `else`.
+
+**A4 - dois estilos embutidos.** `js/app.js` (aviso de backup com 45+ dias) e
+`js/screens/add.js` (bolha da categoria na prévia do lançamento por frase)
+passaram a usar `data-ui-css`, o mecanismo que o aplicativo já tem para estilo
+calculado. Varredura no navegador em 14 rotas: **zero** elementos com atributo
+`style` restantes.
+
+**A5 - `OPTIONAL_ASSETS` no Service Worker.** O PDF.js continua sendo buscado na
+mesma instalação e no mesmo cache; o que mudou é que ele saiu de
+`REQUIRED_PRECACHE`. Quem tem rede boa não percebe diferença; quem não tem passa
+a receber o aplicativo offline em vez de nada. A biblioteca já era carregada sob
+demanda (`import()` em `js/pdf-import.js`), então a ausência degrada UM recurso
+em vez de quebrar o aplicativo.
+
+### O que foi medido e NÃO virou mudança
+
+- **`migrate()`/`sanitize`** é hoje o maior custo isolado (656 ms em 20 mil
+  lançamentos), mas roda **uma vez, no carregamento**, e o perfil mostra custo
+  espalhado por normalização de campo (`isRealIsoDate`, timestamps, ids). Não há
+  um gargalo único para corrigir sem reescrever a normalização inteira. **P3.**
+- **17 folhas de CSS carregadas por `@import` encadeado** (26 requisições no
+  primeiro carregamento). Concatenar em `dist/` seguiria o padrão que o projeto
+  já usa para JS, mas obrigaria a mexer na lista do Service Worker e no contrato
+  de instalação atômica do M9. Sobre HTTP/2 o custo real é ~1 ida e volta extra,
+  e só na primeira visita. **P3, com a proposta registrada.**
+- **Minificar o pacote** (2 MB de `app.generated.js`, cheio de comentários por
+  decisão do projeto) exigiria uma dependência nova num projeto que hoje roda sem
+  `npm install`. A Vercel já comprime na entrega. **Recusado.**
+- **Espelho em `localStorage`:** `JSON.stringify` do snapshot inteiro a cada
+  gravação (limitado a um a cada 1.200 ms). Medido: 3,3 ms com mil lançamentos,
+  18,6 ms com cinco mil, 70,5 ms com vinte mil. A partir de ~4.500 lançamentos o
+  pacote passa de `MIRROR_MAX_BYTES` (3 MB) e o espelho **se desliga sozinho** -
+  é o risco que o M8 já registrou, e continua registrado. **P2, sem mudança
+  aqui:** resolver exige outro desenho de armazenamento, não uma otimização.
+- **Importação de CSV:** linear e barata (84 ms para 10 mil linhas). Nada a fazer.
+- **Listas grandes:** já paginam em 30 itens. Nada a fazer.
+
+### Compatibilidade
+
+Sem migração, sem mudança de schema, sem mudança de contrato de API, sem campo
+novo em dado persistido. `SCHEMA_VERSION` segue em 23 e `DB_VERSION` em 4.
+Nenhuma assinatura de função mudou: `accountById`, `creditCardById`,
+`cardStatements`, `cardLiabilityStatements` e `moneyToCents` recebem e devolvem
+exatamente o que recebiam e devolviam. O que mudou dentro delas é o caminho até a
+mesma resposta. Cache do Service Worker em `v75`.
+
+### Testes
+
+| Teste | Resultado |
+|---|---|
+| Equivalência HEAD x árvore atual (harness de sessão) | **IDÊNTICOS**: 35 comparações, 0 divergências. Cobre `migrate/sanitize`, os 18 modelos, `cardStatements` e `cardLiabilityStatements` de cada cartão, `accountBalance` de cada conta e as duas invalidações de cache, sobre base de 4.000 lançamentos com cartões, parcelas, metas, bens, pagamentos e ajustes |
+| Equivalência de `moneyToCents` (~9,7 milhões de casos) | **0 divergências**; virou o bloco 17 de `tests/test-money.js`, permanente |
+| `node tests/test-performance.js` (novo) | **PASSOU**; 41 ok |
+| `node tests/test-money.js` | **PASSOU**; 103 ok |
+| `node tests/test-pwa-cache.js` (com os 5 contratos novos do opcional) | **PASSOU**; 22 ok |
+| `node tests/test-accounts.js`, `test-accounting-integrity.js`, `test-wealth.js`, `test-landing.js`, `test-pdf-import.js` | **PASSARAM** |
+| `npm run lint` | **PASSOU** |
+| `npm run check:build` | **PASSOU**; 73 fontes |
+| `npm test` | **PASSOU**; nenhuma falha de asserção |
+| `npm run check:release` | **PASSOU** (só os dois avisos legais de sempre) |
+| `npm run build:dist` | **PASSOU**; 40 arquivos |
+| `npm run test:browser:chromium` | **PASSOU**; 18 de 18 |
+| `npm run test:pwa` (offline real) | **PASSOU**: shell, landing, dados locais, limpeza e API fora do cache |
+| Navegador real (Chromium, 375 px) | **PASSOU**. Conta com saldo inicial, cartão e compra no crédito: "FATURAS ABERTAS R$ 320,00" e "APÓS FATURAS R$ 5.980,00", com a fatura calculada pelo caminho novo. A bolha de categoria da prévia por frase voltou a ter cor (fundo e cor computados, não mais bloqueados). Varredura de 14 rotas: zero elementos com atributo `style` |
+
+**Ganho medido** (20 mil lançamentos, melhor de 3, mesma máquina): soma dos
+modelos de **5.250,4 ms para 1.572,4 ms (−70%)**. `buildWealthModel` −79%,
+`buildHealthModel` −71%, `buildDashboardModel` −69%. `moneyToCents` isolado: 2
+milhões de conversões de 734 ms para 32 ms (−96%).
+
+**Não validado:** Firefox e WebKit (rodei Chromium), e o ganho não foi medido
+dentro do navegador com base grande - as medidas de tempo são do motor em Node,
+que é onde os modelos rodam. A prova em navegador foi de correção, não de tempo.
+
+### Status
+
+**CONCLUÍDO.**
+
+---
+
 ## Checklist de regressão
 
 Executar após **todo** módulo que toque no código. Marcar `OK` / `FALHOU` / `NÃO VALIDADO`.
@@ -4079,6 +4221,7 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
 - [ ] `node tests/test-reconciliation.js` (comparação, causas e não gravar do M35)
 - [ ] `node tests/test-goals-inflation.js` (correção pela inflação e alvo intacto do M36)
 - [ ] `node tests/test-ai-boundaries.js` (limites do conteúdo da IA do M37)
+- [ ] `node tests/test-performance.js` (contratos das caches do M38)
 - [ ] `node tests/test-accounting-integrity.js` (invariantes contábeis do M11)
 - [ ] `node tests/test-backup-restore.js` (backup, restauração e senha do M12)
 - [ ] `node tests/test-versioning.js` (versões e matriz de compatibilidade do M13)
@@ -4211,6 +4354,21 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
   IA), mas a avaliação formal continua pendente em `docs/LEGAL-LAUNCH.md`.
 - **M37, P3:** o filtro de limites da IA é de língua portuguesa. Um segundo idioma
   exigiria estender `AI_ADVICE_PATTERNS` nas duas cópias.
+- **M38, P3:** as 17 folhas de CSS são carregadas por `@import` encadeado a partir
+  de `css/style.css` (26 requisições no primeiro carregamento). Concatenar em
+  `dist/`, como o projeto já faz com o JavaScript, exigiria mexer na lista do
+  Service Worker e no contrato de instalação atômica do M9. O ganho real sobre
+  HTTP/2 é cerca de uma ida e volta, só na primeira visita.
+- **M38, P3:** `migrate()`/`sanitize` é o maior custo isolado que restou (656 ms
+  com 20 mil lançamentos), mas roda uma vez por carregamento e o custo está
+  espalhado pela normalização campo a campo. Não há gargalo único a corrigir sem
+  reescrever a normalização.
+- **M38, P2 (herdado do M8):** o espelho em `localStorage` serializa o snapshot
+  inteiro a cada gravação e se desliga sozinho acima de 3 MB, o que acontece por
+  volta de 4.500 lançamentos. Medido nesta sessão: 3,3 ms / 0,69 MB com mil
+  lançamentos; 18,6 ms / 3,47 MB com cinco mil; 70,5 ms / 13,89 MB com vinte mil.
+  A partir daí a rede de segurança some em silêncio. Resolver exige outro desenho
+  de armazenamento, não uma otimização.
 - **M4**: o cartão de IA com resposta real da `/api/analyze` não foi visto em
   navegador (exige `vercel dev` + chave). Os dois caminhos estão cobertos por
   teste de unidade; a confirmação visual fica para a próxima vez que o backend

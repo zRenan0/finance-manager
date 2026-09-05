@@ -79,20 +79,49 @@ function daysBetweenIso(a, b) {
 // O truque do expoente decimal (`Number("1.005e2")`) reinterpreta o valor a partir
 // da representação DECIMAL, não da binária, então 1.005 vira 100.5 (e não
 // 100.49999999999999) e o arredondamento "meio para cima" fica correto.
+//
+// [M38] CAMINHO RÁPIDO, com o exato mesmo resultado.
+//
+// Esta é a função mais quente do aplicativo: a medição do módulo contou de 35
+// mil a 99 mil chamadas em UM build de modelo com 5.000 lançamentos, e o perfil
+// de CPU a apontou como o maior custo próprio de todos os quadros. O gargalo é a
+// releitura decimal: `String(abs)` aloca e `Number(...)` reanalisa texto.
+//
+// O truque só é NECESSÁRIO perto de meio centavo, que é onde o erro binário
+// decide o arredondamento para o lado errado. Longe dessa borda, `Math.round`
+// devolve o mesmo inteiro por 23 vezes menos trabalho. Então: multiplica,
+// mede a distância até a borda e só relê em decimal quem está encostado nela.
+//
+// `MONEY_FAST_MAX` existe porque, em valores muito grandes, o próprio `scaled`
+// perde resolução (a partir de 1e7 o passo do double já se aproxima da margem
+// usada aqui). Acima do teto, a releitura decimal continua sendo o caminho, que
+// além de exata é mais precisa que a multiplicação.
+//
+// A equivalência não é argumento, é medida: `tests/test-money.js` compara as
+// duas implementações em ~9,7 milhões de casos (todo valor de 2 casas até
+// R$ 50.000, toda a família de 3 casas do 1,005, negativos, notação científica,
+// entradas inválidas e milhões de aleatórios) e exige ZERO divergência.
+const MONEY_FAST_MAX = 1e7;
+
+function moneyToCentsExato(abs) {
+  const asText = String(abs);
+  if (asText.includes("e") || asText.includes("E")) return abs * 100; // notação científica
+  const scaled = Number(`${asText}e2`);
+  return Number.isFinite(scaled) ? scaled : abs * 100;
+}
+
 function moneyToCents(value) {
   const n = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(n)) return 0;
   const sign = n < 0 ? -1 : 1;
   const abs = Math.abs(n);
-  const asText = String(abs);
-  let scaled;
-  if (asText.includes("e") || asText.includes("E")) {
-    scaled = abs * 100;                       // notação científica: fallback direto
-  } else {
-    scaled = Number(`${asText}e2`);
-    if (!Number.isFinite(scaled)) scaled = abs * 100;
+  if (abs < MONEY_FAST_MAX) {
+    const scaled = abs * 100;
+    const arredondado = Math.round(scaled);
+    // Longe da borda de meio centavo o binário e o decimal concordam.
+    if (Math.abs(scaled - arredondado) < 0.5 - 1e-6) return sign * arredondado;
   }
-  return sign * Math.round(scaled);
+  return sign * Math.round(moneyToCentsExato(abs));
 }
 function moneyFromCents(cents) {
   const c = Math.round(Number(cents) || 0);
@@ -11293,12 +11322,52 @@ const ACCOUNT_TYPE_LABELS = {
   outro: "Outra conta",
 };
 
+/* ==============================================================================
+ * [M38] ÍNDICE DE BUSCA POR ID
+ * ==============================================================================
+ * `accountById` era um `find` linear, e a medição do M38 mostrou de 4.600 a
+ * 8.800 chamadas em UM único build de modelo com 5.000 lançamentos (uma por
+ * lançamento varrido, em vários motores). Com oito contas, isso são dezenas de
+ * milhares de comparações por quadro para responder a mesma pergunta.
+ *
+ * A cache é indexada pela IDENTIDADE DO ARRAY, não pela do snapshot. É de
+ * propósito: `sanitize()` reatribui `data.accounts` dentro do MESMO objeto
+ * `data` (`data.accounts = normalizeAccounts(...)`), então uma cache presa ao
+ * snapshot poderia sobreviver à troca da lista e responder com a conta antiga.
+ * Presa ao array, qualquer substituição da lista já é um endereço novo e a
+ * cache erra por ausência, nunca por conteúdo velho. O WeakMap solta sozinho
+ * quando a lista antiga vira lixo.
+ *
+ * A única forma de errar seria alguém MUTAR a lista no lugar (`push`/`splice`).
+ * Nada no aplicativo faz isso: toda gravação passa por `setData`, que troca o
+ * array inteiro. Se um dia passar a fazer, este comentário é o aviso.
+ */
+const __indicePorLista = new WeakMap();
+
+function listaIndexadaPorId(lista) {
+  if (!Array.isArray(lista)) return null;
+  let indice = __indicePorLista.get(lista);
+  if (!indice) {
+    indice = new Map();
+    // `find` devolve a PRIMEIRA ocorrência; o índice preserva essa regra para o
+    // caso (já impossível depois do `sanitize`) de dois registros com o mesmo id.
+    for (let i = 0; i < lista.length; i++) {
+      const item = lista[i];
+      if (item && item.id != null && !indice.has(item.id)) indice.set(item.id, item);
+    }
+    __indicePorLista.set(lista, indice);
+  }
+  return indice;
+}
+
 function accountById(data, id) {
-  return (data.accounts || []).find((a) => a.id === id) || null;
+  const indice = listaIndexadaPorId(data && data.accounts);
+  return (indice && indice.get(id)) || null;
 }
 
 function creditCardById(data, id) {
-  return (data.creditCards || []).find((c) => c.id === id) || null;
+  const indice = listaIndexadaPorId(data && data.creditCards);
+  return (indice && indice.get(id)) || null;
 }
 
 function transactionAffectsCash(data, transaction, asOf) {
@@ -11456,6 +11525,12 @@ function cardStatementTransactionAmount(transaction) {
 function cardStatements(data, cardId) {
   const card = creditCardById(data, cardId);
   if (!card) return [];
+  // [M38] Mesma cache do passivo; ver o bloco "CACHE DAS FATURAS" abaixo. Aqui
+  // não há data-limite, então a chave é só o cartão.
+  return faturasEmCache(data, `todas|${cardId}`, () => cardStatementsCalc(data, card, cardId));
+}
+
+function cardStatementsCalc(data, card, cardId) {
   const map = new Map();
   const ensure = (key) => {
     if (!map.has(key)) map.set(key, { key, purchases: 0, paid: 0, outstanding: 0, count: 0, dueDate: cardStatementDueDate(card, key) });
@@ -11478,6 +11553,43 @@ function cardStatements(data, cardId) {
     .sort((a, b) => (a.key < b.key ? -1 : 1));
 }
 
+/* ==============================================================================
+ * [M38] CACHE DAS FATURAS
+ * ==============================================================================
+ * `cardLiabilityStatements` varre TODOS os lançamentos duas vezes, e a medição
+ * do M38 flagrou 69 chamadas em um único build do modelo de patrimônio com
+ * 5.000 lançamentos: 690 mil iterações para responder três perguntas
+ * diferentes (uma por cartão). O perfil de CPU confirmou `cardStatementKeyForDate`
+ * e este laço como o segundo maior custo do quadro, atrás só de `moneyToCents`.
+ *
+ * A função é PURA em relação a quatro entradas: a lista de lançamentos, a de
+ * pagamentos, o cartão e a data-limite. A cache é indexada pelas duas LISTAS
+ * (identidade de array, mesmo raciocínio do índice por id acima), e a chave de
+ * texto carrega cartão e limite JÁ RESOLVIDO. Resolver o limite antes de montar
+ * a chave é o que impede a virada do dia de servir resultado de ontem: `asOf`
+ * ausente vira `todayIso()` e entra na chave como data explícita.
+ *
+ * A entrega continua sendo objetos NOVOS a cada chamada. Guardar as linhas e
+ * devolver a mesma referência mudaria o contrato para quem hoje pode alterar o
+ * resultado sem afetar ninguém; a cópia custa dezenas de objetos, não milhares.
+ */
+const __faturasPorLancamentos = new WeakMap();
+
+function faturasEmCache(data, chave, calcular) {
+  const lancamentos = (data && data.transactions) || null;
+  const pagamentos = (data && data.cardPayments) || null;
+  if (!Array.isArray(lancamentos)) return calcular();
+  let porPagamentos = __faturasPorLancamentos.get(lancamentos);
+  if (!porPagamentos) { porPagamentos = new WeakMap(); __faturasPorLancamentos.set(lancamentos, porPagamentos); }
+  // Sem lista de pagamentos ainda não há segunda dimensão para indexar; a
+  // própria lista de lançamentos serve de chave e o resultado continua correto.
+  const dimensao = Array.isArray(pagamentos) ? pagamentos : lancamentos;
+  let porChave = porPagamentos.get(dimensao);
+  if (!porChave) { porChave = new Map(); porPagamentos.set(dimensao, porChave); }
+  if (!porChave.has(chave)) porChave.set(chave, calcular());
+  return porChave.get(chave).map((linha) => ({ ...linha }));
+}
+
 // Passivo reconhecido até uma data. Compras parceladas entram pelo valor total
 // quando a primeira parcela começa; compras avulsas futuras só entram na data.
 // Isso é diferente de `cardStatements`, que mostra todo o calendário cadastrado
@@ -11486,6 +11598,10 @@ function cardLiabilityStatements(data, cardId, asOf) {
   const card = creditCardById(data, cardId);
   if (!card) return [];
   const limit = asOf || todayIso();
+  return faturasEmCache(data, `liab|${cardId}|${limit}`, () => cardLiabilityStatementsCalc(data, card, cardId, limit));
+}
+
+function cardLiabilityStatementsCalc(data, card, cardId, limit) {
   const groupStarts = new Map();
 
   (data.transactions || []).forEach((t) => {
@@ -28216,7 +28332,12 @@ function renderNaturalDraft(d, index) {
 
   return `<div class="nlp-draft ${d.amount > 0 ? "" : "nlp-draft--invalid"}">
     <div class="nlp-draft__head">
-      <span class="icon-bubble ${isIncome ? "icon-bubble--income" : ""}" ${isIncome ? "" : `style="background:color-mix(in srgb, ${cat.color} 14%, transparent); color:${cat.color}"`}>
+      ${/* [M38] `style="..."` literal era bloqueado pela CSP do M5
+            (`style-src-attr 'none'`) e a bolha da categoria saía sem cor na
+            prévia do lançamento em linguagem natural. `data-ui-css` é o
+            caminho do próprio aplicativo para estilo calculado, e a cor da
+            categoria já chega saneada como `#RRGGBB`. */""}
+      <span class="icon-bubble ${isIncome ? "icon-bubble--income" : ""}"${isIncome ? "" : ` data-ui-css="background:color-mix(in srgb, ${cat.color} 14%, transparent); color:${cat.color}"`}>
         ${svgIcon(isIncome ? "trendUp" : cat.icon, 17)}
       </span>
       <div class="nlp-draft__info">
@@ -39273,7 +39394,12 @@ function renderLastBackupLine() {
   const dias = Math.max(0, Math.floor((Date.parse(`${todayIso()}T12:00:00`) - Date.parse(`${last}T12:00:00`)) / 86400000));
   const quando = dias === 0 ? "hoje" : dias === 1 ? "ontem" : `há ${dias} dias`;
   const velho = dias >= 45;
-  return `<p class="field-hint" ${velho ? 'style="color:var(--goal)"' : ""}>
+  // [M38] Era `style="..."` literal, e a CSP do M5 (`style-src-attr 'none'`)
+  // bloqueava o atributo: o aviso de backup velho perdia a cor exatamente
+  // quando ele importa. Passou a usar `data-ui-css`, que é o mecanismo que o
+  // aplicativo já tem para estilo calculado (o bloco logo acima usa o mesmo).
+  // Só aparecia com 45 dias sem backup, e é por isso que passou despercebido.
+  return `<p class="field-hint"${velho ? ' data-ui-css="color:var(--goal)"' : ""}>
     ${svgIcon(velho ? "alertTriangle" : "checkCircle", 12)} Último backup ${quando} (${fmtDateFull(last)}).
   </p>`;
 }

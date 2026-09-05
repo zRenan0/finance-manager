@@ -47,7 +47,7 @@ psql <URL_DE_STAGING> -v ON_ERROR_STOP=1 -f supabase/tests/verify_security_bound
 ```
 
 O processo de homologação, publicação e retorno está em `docs/RELEASE.md`. O schema
-de dados está na versão 23 e o cache offline na versão 74. O inventário técnico
+de dados está na versão 23 e o cache offline na versão 75. O inventário técnico
 do armazenamento está em `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`; o inventário de
 tratamento da LGPD está em `docs/INVENTARIO-DE-DADOS.md`; e o registro dos
 serviços externos está em `docs/TERCEIROS-E-OPERADORES.md`.
@@ -1699,6 +1699,45 @@ promovida a camada de modelo.
 A verificação de conquistas — que reavalia metas, reserva, orçamentos e
 patrimônio — roda em `idleTask` (`requestIdleCallback`, com queda para
 `setTimeout` no Safari), fora do caminho crítico do quadro.
+
+#### O que o M38 mediu e mudou
+
+A memoização acima resolve o **mesmo modelo pedido duas vezes**. Ela não resolve
+o trabalho repetido DENTRO de um build, e era ali que estava o custo. Com uma
+base de 20 mil lançamentos, montar os modelos de um quadro custava 5,2 segundos.
+
+O perfil de CPU apontou três culpados, e nenhum deles era algoritmo ruim — a
+escala já era linear. Era trabalho repetido:
+
+| Achado | Medida | O que foi feito |
+|---|---|---|
+| `accountById` era `find` linear e recebia de 4.600 a 8.800 chamadas por build | dezenas de milhares de comparações por quadro | Índice `Map` por id, guardado pela identidade do ARRAY (`js/accounts.js`) |
+| `cardLiabilityStatements` varre todos os lançamentos duas vezes e era chamada 69 vezes num build | ~690 mil iterações | Cache por lista de lançamentos + lista de pagamentos + cartão + data-limite resolvida |
+| `moneyToCents` recebia de 35 mil a 99 mil chamadas por build e era o maior custo próprio do perfil | a releitura decimal aloca string e reanalisa texto | Caminho rápido com `Math.round`, com releitura decimal só perto da borda de meio centavo |
+
+Resultado, mesma máquina, mesma base de 20 mil lançamentos, melhor de três:
+
+| Modelo | Antes | Depois |
+|---|---|---|
+| `buildWealthModel` | 1.445 ms | 300 ms |
+| `buildHealthModel` | 1.134 ms | 333 ms |
+| `buildAchievementsModel` | 660 ms | 201 ms |
+| `buildAdvisorModel` | 593 ms | 181 ms |
+| `buildDashboardModel` | 554 ms | 171 ms |
+| `accountsSummary` | 200 ms | 55 ms |
+| **soma dos modelos** | **5.250 ms** | **1.572 ms (−70%)** |
+
+Nenhum número exibido mudou, e isso foi medido, não suposto: os 18 modelos, a
+normalização, as faturas de cada cartão e o saldo de cada conta foram calculados
+com as fontes de antes e de depois sobre a mesma base e comparados byte a byte.
+Zero divergências. O caminho rápido do dinheiro tem a própria prova, permanente,
+em `tests/test-money.js`: ~9,7 milhões de casos contra a implementação anterior,
+incluindo todo valor de dois decimais até R$ 50.000.
+
+Os contratos que tornam as caches seguras estão travados em
+`tests/test-performance.js`: o índice devolve o que o `find` devolvia, trocar a
+lista troca a resposta, e a fatura sai em objetos novos a cada chamada (quem
+alterar o resultado não contamina a próxima leitura).
 
 ### Movimento e carregamento
 
