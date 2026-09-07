@@ -12,7 +12,8 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 
 | Campo | Valor |
 |---|---|
-| Módulo atual | **M38** (concluído) |
+| Módulo atual | **M39** (concluído) |
+| Status do M39 | **CONCLUÍDO** - auditoria medida em 20 rotas e nos dois temas, com seis correções: o foco volta para quem abriu o diálogo pelo teclado (era o achado P1), marcos de navegação com nomes distintos, contraste do contador de revisão de 3,22:1 para 4,74:1, animações respeitando `prefers-reduced-motion`, cinco campos com nome próprio e onze links deixando de ser ambíguos. Nenhuma mudança visual para quem enxerga. Cache em `v76` |
 | Status do M38 | **CONCLUÍDO** - medido antes de mexer: montar os modelos de um quadro com 20 mil lançamentos custava 5,2 s e passou a custar 1,6 s (−70%), sem que um único número exibido mudasse (35 comparações byte a byte contra o código anterior, 0 divergências). Índice por id, cache de faturas e caminho rápido de `moneyToCents` (~9,7 milhões de casos conferidos). De passagem: dois estilos embutidos que a CSP bloqueava voltaram a pintar, e o PDF.js saiu do pacote OBRIGATÓRIO da instalação sem deixar de ser baixado. Cache em `v75` |
 | Status do M37 | **CONCLUÍDO** - a IA deixou de se apresentar como consultor financeiro e passou a ter limite declarado: o pedido proíbe recomendação de investimento, produto, instituição e alocação; a saída é filtrada por nove padrões nas duas pontas (servidor e navegador, com as cópias travadas por teste); toda análise sai com a natureza declarada (educativo, estimativa, não previsão). A educação sobre risco continua passando inteira. Cache em `v74` |
 | Status do M36 | **CONCLUÍDO** - o alvo da meta ganhou prazo: marcação opcional por meta corrige o valor pela premissa de IPCA do próprio app, mostra quanto o objetivo custaria no prazo e quanto seria preciso guardar por mês para manter o poder de compra. O alvo gravado continua sendo o preço de hoje e nenhum número antigo se mexe (travado por teste campo a campo). Cache em `v73` |
@@ -51,10 +52,10 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 | Status do M3 | **CONCLUÍDO** — aplicado e confirmado no banco em 2026-08-28 |
 | Status do M2 | **CONCLUÍDO** — nenhuma vulnerabilidade de autorização; invariantes travados por teste |
 | Status do M1 | **CONCLUÍDO** — aplicado e confirmado; gatilho capturado e versionado |
-| Módulos concluídos | M0 a M38 |
-| Próximo módulo | M39 - Acessibilidade |
+| Módulos concluídos | M0 a M39 |
+| Próximo módulo | M40 - Responsividade |
 | Branch | `deploy-atualizado` (árvore limpa no início do M0) |
-| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `tests/test-cloud-sync.js`, `tests/test-account-backend.js`, `tests/test-critical-actions.js`, `tests/test-coverage.js`, `tests/test-security-adversarial.js`, `tests/test-observability.js`, `tests/test-data-inventory-lgpd.js`, `tests/test-third-party-transparency.js`, `supabase/tests/verify_security_boundary.sql`, `scripts/check-deploy.js`, `scripts/serve.js`, `scripts/coverage.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/storage.js`, `js/cloud-sync.js` (M10), `js/analytics.js`, `js/forecast.js`, `js/wrapped.js`, `js/screens/analytics.js` (M11), `js/backup-crypto.js`, `js/app.js`, `js/actions.js`, `js/storage.js`, `js/screens/settings.js`, `css/components.css`, `scripts/build-app-module.js` (M12), `netlify/functions/sync.js` (M13), `js/import.js`, `netlify/functions/_shared/finance-schema.js` (M14), observabilidade em backend, frontend e Service Worker (M17), inventário e tela de Privacidade (M18), registro de terceiros e operadores (M19), `js/modules/app.generated.js` (regerado). Documentação: inventário do M8, protocolo do M10, backup protegido do M12, `docs/VERSIONAMENTO.md` do M13, observabilidade do M17, inventário LGPD do M18, terceiros do M19 e desenhos de M15 a M19. **M20 (só documentação e verificação, nenhum arquivo de produção):** `SECURITY_INCIDENT_RESPONSE.md` (novo), `tests/test-incident-response.js` (novo), `scripts/check-release.js`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. **M21:** `reportar-vulnerabilidade.html` (novo), `css/reportar.css` (novo), `SECURITY.md` (novo), `scripts/security-txt.js` (novo), `tests/test-responsible-disclosure.js` (novo), `vercel.json`, `scripts/build-dist.js`, `scripts/serve.js`, `scripts/check-release.js`, `scripts/check-deploy.js`, `landing.html`, `tests/test-landing.js`, `tests/browser/run-landing.js`, `SECURITY_INCIDENT_RESPONSE.md`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. **M22:** `docs/MARCA.md` (novo), `tests/test-brand.js` (novo), `index.html`, `manifest.webmanifest`, `landing.html`, `scripts/check-release.js`, `scripts/security-txt.js`, `SECURITY.md`, `SECURITY_INCIDENT_RESPONSE.md`, `README.md`, `CHANGELOG.md`. **M23:** `landing.html`, `css/landing.css`, `service-worker.js` (v63), `tests/test-brand.js`, `tests/test-responsible-disclosure.js`, `tests/test-third-party-transparency.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M24:** `js/screens/onboarding.js`, `js/app.js`, `js/actions.js`, `css/screens/notifications-onboarding.css`, `service-worker.js` (v64), `js/modules/app.generated.js`, `tests/test-onboarding.js`, `tests/browser/run-browser.js`, `tests/browser/run-pwa.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M38:** `tests/test-performance.js` (novo), `js/accounts.js`, `js/utils.js`, `js/app.js`, `js/screens/add.js`, `service-worker.js` (v75), `tests/test-money.js`, `tests/test-pwa-cache.js`, `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M37:** `netlify/functions/_shared/ai-boundaries.js` (novo), `tests/test-ai-boundaries.js` (novo), `netlify/functions/analyze.js`, `js/insights.js`, `js/app.js`, `js/transparency.js`, `js/screens/analytics.js`, `service-worker.js` (v74), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M36:** `tests/test-goals-inflation.js` (novo), `js/goals.js`, `js/storage.js`, `js/actions.js`, `js/app.js`, `js/screens/goals.js`, `css/screens/planning.css`, `service-worker.js` (v73), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M35:** `js/reconcile.js` (novo), `tests/test-reconciliation.js` (novo), `js/screens/accounts.js`, `js/actions.js`, `js/app.js`, `js/import.js`, `js/screens/import.js`, `css/utilities.css`, `scripts/build-app-module.js`, `service-worker.js` (v72), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M34:** `tests/test-debt-center.js` (novo), `js/debts.js`, `js/storage.js`, `js/screens/debts.js`, `js/app.js`, `js/actions.js`, `css/base.css`, `service-worker.js` (v71), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M32/M33:** `tests/test-anomalies-subscriptions.js` (novo), `tests/helpers/fixed-clock.js` (novo), `tests/test-health.js`, `tests/test-insights-engine.js`, `tests/test-render.js`, `tests/test-reserve-and-close.js`, `js/forecast.js`, `js/analytics.js`, `js/advisor.js`, `js/recurring.js`, `js/storage.js`, `js/screens/insights.js`, `js/screens/subscriptions.js`, `js/app.js`, `js/actions.js`, `css/screens/intelligence.css`, `service-worker.js` (v70), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M30/M31:** `tests/test-daily-and-purchase.js` (novo), `js/forecast.js`, `js/insights.js`, `js/screens/calendar.js`, `js/screens/simulate.js`, `js/app.js`, `css/screens/planning.css`, `service-worker.js` (v69), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M28/M29:** `tests/test-reserve-and-close.js` (novo), `js/metrics.js`, `js/forecast.js`, `js/screens/health.js`, `js/screens/calendar.js`, `css/screens/health.css`, `css/screens/planning.css`, `service-worker.js` (v68), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M27:** `tests/test-score-explainable.js` (novo), `js/score.js`, `js/screens/health.js`, `css/screens/health.css`, `service-worker.js` (v67), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M26:** `tests/test-local-only-notice.js` (novo), `js/app.js`, `js/actions.js`, `js/screens/dashboard.js`, `css/screens/dashboard.css`, `css/components.css`, `service-worker.js` (v66), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M25:** `js/demo.js` (novo), `tests/test-demo-mode.js` (novo), `js/app.js`, `js/actions.js`, `js/screens/onboarding.js`, `css/components.css`, `service-worker.js` (v65), `scripts/build-app-module.js`, `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. |
+| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `tests/test-cloud-sync.js`, `tests/test-account-backend.js`, `tests/test-critical-actions.js`, `tests/test-coverage.js`, `tests/test-security-adversarial.js`, `tests/test-observability.js`, `tests/test-data-inventory-lgpd.js`, `tests/test-third-party-transparency.js`, `supabase/tests/verify_security_boundary.sql`, `scripts/check-deploy.js`, `scripts/serve.js`, `scripts/coverage.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/storage.js`, `js/cloud-sync.js` (M10), `js/analytics.js`, `js/forecast.js`, `js/wrapped.js`, `js/screens/analytics.js` (M11), `js/backup-crypto.js`, `js/app.js`, `js/actions.js`, `js/storage.js`, `js/screens/settings.js`, `css/components.css`, `scripts/build-app-module.js` (M12), `netlify/functions/sync.js` (M13), `js/import.js`, `netlify/functions/_shared/finance-schema.js` (M14), observabilidade em backend, frontend e Service Worker (M17), inventário e tela de Privacidade (M18), registro de terceiros e operadores (M19), `js/modules/app.generated.js` (regerado). Documentação: inventário do M8, protocolo do M10, backup protegido do M12, `docs/VERSIONAMENTO.md` do M13, observabilidade do M17, inventário LGPD do M18, terceiros do M19 e desenhos de M15 a M19. **M20 (só documentação e verificação, nenhum arquivo de produção):** `SECURITY_INCIDENT_RESPONSE.md` (novo), `tests/test-incident-response.js` (novo), `scripts/check-release.js`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. **M21:** `reportar-vulnerabilidade.html` (novo), `css/reportar.css` (novo), `SECURITY.md` (novo), `scripts/security-txt.js` (novo), `tests/test-responsible-disclosure.js` (novo), `vercel.json`, `scripts/build-dist.js`, `scripts/serve.js`, `scripts/check-release.js`, `scripts/check-deploy.js`, `landing.html`, `tests/test-landing.js`, `tests/browser/run-landing.js`, `SECURITY_INCIDENT_RESPONSE.md`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. **M22:** `docs/MARCA.md` (novo), `tests/test-brand.js` (novo), `index.html`, `manifest.webmanifest`, `landing.html`, `scripts/check-release.js`, `scripts/security-txt.js`, `SECURITY.md`, `SECURITY_INCIDENT_RESPONSE.md`, `README.md`, `CHANGELOG.md`. **M23:** `landing.html`, `css/landing.css`, `service-worker.js` (v63), `tests/test-brand.js`, `tests/test-responsible-disclosure.js`, `tests/test-third-party-transparency.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M24:** `js/screens/onboarding.js`, `js/app.js`, `js/actions.js`, `css/screens/notifications-onboarding.css`, `service-worker.js` (v64), `js/modules/app.generated.js`, `tests/test-onboarding.js`, `tests/browser/run-browser.js`, `tests/browser/run-pwa.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M39:** `tests/test-accessibility.js` (novo), `js/modules/dialog-controller.js`, `js/app.js`, `js/screens/invest.js`, `js/screens/categories.js`, `js/screens/privacy.js`, `css/components.css`, `css/screens/movements.css`, `service-worker.js` (v76), `tests/test-render.js`, `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M38:** `tests/test-performance.js` (novo), `js/accounts.js`, `js/utils.js`, `js/app.js`, `js/screens/add.js`, `service-worker.js` (v75), `tests/test-money.js`, `tests/test-pwa-cache.js`, `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M37:** `netlify/functions/_shared/ai-boundaries.js` (novo), `tests/test-ai-boundaries.js` (novo), `netlify/functions/analyze.js`, `js/insights.js`, `js/app.js`, `js/transparency.js`, `js/screens/analytics.js`, `service-worker.js` (v74), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M36:** `tests/test-goals-inflation.js` (novo), `js/goals.js`, `js/storage.js`, `js/actions.js`, `js/app.js`, `js/screens/goals.js`, `css/screens/planning.css`, `service-worker.js` (v73), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M35:** `js/reconcile.js` (novo), `tests/test-reconciliation.js` (novo), `js/screens/accounts.js`, `js/actions.js`, `js/app.js`, `js/import.js`, `js/screens/import.js`, `css/utilities.css`, `scripts/build-app-module.js`, `service-worker.js` (v72), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M34:** `tests/test-debt-center.js` (novo), `js/debts.js`, `js/storage.js`, `js/screens/debts.js`, `js/app.js`, `js/actions.js`, `css/base.css`, `service-worker.js` (v71), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M32/M33:** `tests/test-anomalies-subscriptions.js` (novo), `tests/helpers/fixed-clock.js` (novo), `tests/test-health.js`, `tests/test-insights-engine.js`, `tests/test-render.js`, `tests/test-reserve-and-close.js`, `js/forecast.js`, `js/analytics.js`, `js/advisor.js`, `js/recurring.js`, `js/storage.js`, `js/screens/insights.js`, `js/screens/subscriptions.js`, `js/app.js`, `js/actions.js`, `css/screens/intelligence.css`, `service-worker.js` (v70), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M30/M31:** `tests/test-daily-and-purchase.js` (novo), `js/forecast.js`, `js/insights.js`, `js/screens/calendar.js`, `js/screens/simulate.js`, `js/app.js`, `css/screens/planning.css`, `service-worker.js` (v69), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M28/M29:** `tests/test-reserve-and-close.js` (novo), `js/metrics.js`, `js/forecast.js`, `js/screens/health.js`, `js/screens/calendar.js`, `css/screens/health.css`, `css/screens/planning.css`, `service-worker.js` (v68), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M27:** `tests/test-score-explainable.js` (novo), `js/score.js`, `js/screens/health.js`, `css/screens/health.css`, `service-worker.js` (v67), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M26:** `tests/test-local-only-notice.js` (novo), `js/app.js`, `js/actions.js`, `js/screens/dashboard.js`, `css/screens/dashboard.css`, `css/components.css`, `service-worker.js` (v66), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M25:** `js/demo.js` (novo), `tests/test-demo-mode.js` (novo), `js/app.js`, `js/actions.js`, `js/screens/onboarding.js`, `css/components.css`, `service-worker.js` (v65), `scripts/build-app-module.js`, `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. |
 | Migration do M13 | `20260831120000_database_schema_version.sql` — **aplicada e confirmada em produção em 2026-08-31** (`database_schema_version = 1`; grants inalterados: só `service_role` e `postgres`). Reversível por `alter table public.cofre_sync_config drop column if exists database_schema_version;` |
 | Migrations criadas até aqui | `20260828120000_rls_auto_enable_least_privilege.sql`, `20260828130000_rls_auto_enable_versionada.sql`, `20260828140000_menor_privilegio_tabelas.sql` (as três **aplicadas e confirmadas em 2026-08-28**), `20260828150000_rls_auto_enable_gatilho.sql` (**ainda não aplicada**; é no-op em produção, onde o gatilho já existe) |
 | Versão do app | `0.30.0` (package.json) |
@@ -4197,6 +4198,144 @@ que é onde os modelos rodam. A prova em navegador foi de correção, não de te
 
 ---
 
+## M39 - Acessibilidade
+
+### Antes
+
+O aplicativo já tinha uma camada de acessibilidade construída de propósito, e
+nada dela foi desfeito: atalho de pular o menu, `<main>`/`<nav>` como marcos,
+`aria-current` na aba ativa, Esc fechando a camada de cima, armadilha de Tab e
+`inert` no fundo dos diálogos, `role="alert"` com `aria-invalid` e
+`aria-describedby` nos erros de formulário, região `aria-live` para os avisos,
+anel de foco próprio nas superfícies escuras, estado que não depende só de cor e
+alvo de toque de 44px.
+
+O que faltava era **medida**. A auditoria do M39 rodou no navegador, em 20 rotas
+e nos dois temas, com quatro varreduras automatizadas (nome acessível, foco,
+estrutura e contraste) mais teste de teclado de verdade.
+
+Seis achados, todos confirmados antes de virar correção:
+
+| # | Achado | Grau |
+|---|---|---|
+| A1 | Fechar diálogo aberto **pelo teclado** deixava o foco no `<body>`. `opener` só era gravado no `pointerdown`, que Enter e Espaço não disparam. Some com o gatilho que a própria abertura remove (o botão do assistente vira o painel) | **P1** (WCAG 2.4.3) |
+| A2 | Os dois marcos de navegação (lateral e inferior) usavam o mesmo `aria-label` | **P2** |
+| A3 | `.review-count` media **3,22:1** no tema claro; 16px em peso 800 exige 4,5:1 | **P2** (WCAG 1.4.3) |
+| A4 | As quatro animações do aplicativo ignoravam `prefers-reduced-motion`, embora `utilities.css` declare essa regra como do projeto | **P2** |
+| A5 | Cinco campos tinham como único nome o texto de exemplo, que some ao digitar | **P2** (WCAG 4.1.2) |
+| A6 | Onze links repetiam dois nomes entre cinco fornecedores diferentes | **P3** (WCAG 2.4.4) |
+
+### Alterações
+
+**A1 - o foco volta para quem abriu.** Duas camadas, porque nenhuma cobre tudo
+sozinha:
+
+- `noteTrigger(elemento)` no controlador de diálogos, chamado por `openOverlay`
+  (`js/app.js`) **antes do render**. É o único ponto em que o gatilho ainda
+  existe e ainda tem o foco, e é o que resolve o caso do assistente, cujo botão
+  desaparece na própria abertura;
+- leitura do foco dentro de `sync()` quando o diálogo aparece e não há gatilho
+  anotado. Cobre o caminho comum, em que o botão continua atrás do diálogo.
+
+O `pointerdown` continua onde estava. `noteTrigger` não sobrescreve gatilho já
+anotado nem grava com diálogo aberto.
+
+**A2 - "Navegação lateral" e "Navegação inferior".** Os dois marcos convivem no
+HTML (o CSS mostra um ou outro conforme a largura), então precisam de nomes
+próprios. `tests/test-render.js` passou a exigir os dois, distintos.
+
+**A3 - `--goal-ink` no contador da caixa de revisão.** A base já mantinha a
+variante escurecida exatamente para texto miúdo sobre superfície clara, e a
+folha explica a regra desde antes; este ponto tinha escapado dela. Medido:
+3,22:1 → **4,74:1** sobre a pastilha de 16%. No tema escuro `--goal-ink` aponta
+de volta para `--goal`, então lá nada muda.
+
+**A4 - bloco de movimento reduzido em `css/components.css`,** cobrindo entrada
+de tela, entrada da grade do painel, entrada do modal, folha do modal e aviso.
+Desligar é seguro porque as quatro animações terminam no estado natural do
+elemento e o `.toast` já se centraliza pela própria regra. O giro do carregando
+fica de propósito: é a única indicação de trabalho em andamento, e tirá-lo
+removeria informação em vez de movimento.
+
+**A5 - nomes permanentes.** `aria-labelledby` nos quatro campos do simulador de
+juros (o rótulo visível ganhou `id`; virar `<label>` mexeria no seletor da
+folha) e `aria-label` na busca de categorias. O texto de exemplo continua lá.
+
+**A6 - fornecedor no nome do link.** `aria-label="Privacidade do serviço:
+Vercel"` e equivalentes, com `escapeHtml` como todo o resto. O texto visível não
+mudou uma letra.
+
+### O que a auditoria conferiu e NÃO precisou corrigir
+
+Vale registrar, porque foi medido e não presumido:
+
+- **nenhum** controle sem nome acessível nas 20 rotas (a varredura final voltou
+  vazia nos dois temas);
+- **zero** falhas de contraste nas 20 rotas dos dois temas depois de A3;
+- nenhum `tabindex` positivo, nenhum interativo aninhado, nenhum elemento
+  focável dentro de `aria-hidden` sem `inert`;
+- 20 de 20 SVGs dentro de controles marcados como `aria-hidden`;
+- um `<main>` e um `<h1>` por tela, sem salto de nível de título;
+- diálogos com `role`, `aria-modal`, rótulo, foco inicial dentro, armadilha de
+  Tab e fundo inerte;
+- erros de formulário com `role="alert"`, `aria-invalid`, `aria-describedby`,
+  foco no primeiro campo inválido e resumo em região `aria-live` polida.
+
+**Correção de rota da própria auditoria:** a primeira varredura de contraste
+acusou 10 falhas na tela inicial do tema claro. Eram **falso positivo do
+medidor**, não do aplicativo: ele lia `backgroundColor` sem compor o alfa e sem
+reconhecer `color(srgb …)`, então media texto branco de um cartão com gradiente
+contra o fundo claro da página. Corrigido o medidor (composição de alfa, parada
+em gradiente, leitura das duas notações de cor), sobrou **um** achado real, que
+é o A3. Fica registrado porque a lição vale para a próxima auditoria: medida
+errada sobre acessibilidade produz correção errada.
+
+### Compatibilidade
+
+Sem migração, sem mudança de schema, sem campo novo em dado persistido e sem
+mudança de contrato de API. `SCHEMA_VERSION` segue em 23 e `DB_VERSION` em 4.
+Nenhuma mudança visual para quem enxerga: os textos visíveis são os mesmos, as
+cores mudaram em um único elemento (para a variante que a própria base define) e
+as animações só param para quem pediu isso no sistema. `noteTrigger` é adição ao
+objeto congelado do controlador; `openOverlay` a chama por `typeof`, então uma
+versão antiga do módulo não quebra nada. Cache do Service Worker em `v76`.
+
+### Testes
+
+| Teste | Resultado |
+|---|---|
+| `node tests/test-accessibility.js` (novo) | **PASSOU**; 43 ok |
+| `node tests/test-render.js` (com as duas asserções novas de marco) | **PASSOU**; 738 ok |
+| `node tests/test-ui-foundation.js` | **PASSOU**; 15 ok |
+| `npm run lint` | **PASSOU** |
+| `npm run check:build` | **PASSOU**; 73 fontes |
+| `npm test` | **PASSOU**; nenhuma falha de asserção |
+| `npm run check:release` | **PASSOU** (só os dois avisos legais de sempre) |
+| `npm run build:dist` | **PASSOU**; 40 arquivos |
+| `npm run test:browser:chromium` | **PASSOU**; 18 de 18 |
+| `npm run test:pwa` (offline real) | **PASSOU** |
+| Navegador real (Chromium) | **PASSOU**. Varredura de nome acessível em 20 rotas: vazia. Contraste em 20 rotas x 2 temas: vazio. Foco volta ao gatilho nos dois diálogos testados, abrindo por teclado E por ponteiro. Marcos com nomes distintos. Links da tela de privacidade sem ambiguidade. Erro de formulário conferido ao vivo: `role="alert"`, `aria-invalid`, `aria-describedby`, foco no campo e resumo em região polida. Primeira Tab revela o atalho de pular, com anel de foco visível (conferido em captura) |
+
+**Não validado:** leitor de tela de verdade (NVDA, VoiceOver, TalkBack). Tudo
+aqui é conferido pelo que a árvore de acessibilidade expõe, que é o que o leitor
+lê, mas não substitui ouvir. Firefox e WebKit também não; rodei Chromium.
+
+### Pendências registradas
+
+- **P3:** o `keydown` que trata o Esc está registrado em `#app`, não em
+  `document`. Com o foco fora da árvore do aplicativo (logo depois do
+  carregamento, antes da primeira Tab), o Esc não chega ao tratador. Na prática
+  o diálogo sempre põe o foco dentro de si, então o caminho real está coberto;
+  o caso de borda fica anotado.
+- **P3:** confirmar com leitor de tela real em pelo menos um sistema móvel e um
+  de mesa antes de tratar a acessibilidade como fechada.
+
+### Status
+
+**CONCLUÍDO.**
+
+---
+
 ## Checklist de regressão
 
 Executar após **todo** módulo que toque no código. Marcar `OK` / `FALHOU` / `NÃO VALIDADO`.
@@ -4222,6 +4361,7 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
 - [ ] `node tests/test-goals-inflation.js` (correção pela inflação e alvo intacto do M36)
 - [ ] `node tests/test-ai-boundaries.js` (limites do conteúdo da IA do M37)
 - [ ] `node tests/test-performance.js` (contratos das caches do M38)
+- [ ] `node tests/test-accessibility.js` (retorno de foco, marcos, tinta e movimento do M39)
 - [ ] `node tests/test-accounting-integrity.js` (invariantes contábeis do M11)
 - [ ] `node tests/test-backup-restore.js` (backup, restauração e senha do M12)
 - [ ] `node tests/test-versioning.js` (versões e matriz de compatibilidade do M13)
@@ -4363,6 +4503,13 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
   com 20 mil lançamentos), mas roda uma vez por carregamento e o custo está
   espalhado pela normalização campo a campo. Não há gargalo único a corrigir sem
   reescrever a normalização.
+- **M39, P3:** o tratador de Esc está registrado em `#app`, não em `document`.
+  Com o foco fora da árvore do aplicativo (logo depois do carregamento, antes da
+  primeira Tab), a tecla não chega ao tratador. O caminho real está coberto,
+  porque o diálogo sempre põe o foco dentro de si.
+- **M39, P3:** falta conferir com leitor de tela real (NVDA, VoiceOver ou
+  TalkBack). Tudo foi medido pela árvore de acessibilidade, que é o que o leitor
+  lê, mas isso não substitui ouvir.
 - **M38, P2 (herdado do M8):** o espelho em `localStorage` serializa o snapshot
   inteiro a cada gravação e se desliga sozinho acima de 3 MB, o que acontece por
   volta de 4.500 lançamentos. Medido nesta sessão: 3,3 ms / 0,69 MB com mil

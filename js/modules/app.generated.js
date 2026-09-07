@@ -30655,24 +30655,29 @@ function renderCompoundSimCards() {
         <p class="card-title">Sua simulação</p>
         <p class="card-subtitle" data-ui-css="margin-top:0">Arraste para ver como aportes recorrentes viram patrimônio ao longo do tempo. Nada aqui é lançado na sua conta; é só uma projeção.</p>
 
+        ${/* [M39] O nome de cada campo está no `<span>` ao lado do valor, e para
+              quem enxerga isso basta. O leitor de tela, porém, não deduz essa
+              vizinhança: sem associação, o campo só tinha o texto de exemplo,
+              que some ao digitar. `aria-labelledby` amarra os dois SEM mexer na
+              marcação nem no CSS (virar `<label>` mudaria o seletor da folha). */""}
         <div class="invest-field">
-          <div class="invest-field__head"><span>Valor inicial</span><b>${fmtBRL(inicial)}</b></div>
-          <input id="invest-inicial-input" class="input" data-field="invest-inicial" inputmode="decimal" value="${escapeHtml(inv.inicial)}" placeholder="0,00" autocomplete="off" />
+          <div class="invest-field__head"><span id="invest-inicial-rotulo">Valor inicial</span><b>${fmtBRL(inicial)}</b></div>
+          <input id="invest-inicial-input" class="input" data-field="invest-inicial" inputmode="decimal" value="${escapeHtml(inv.inicial)}" placeholder="0,00" aria-labelledby="invest-inicial-rotulo" autocomplete="off" />
         </div>
 
         <div class="invest-field">
-          <div class="invest-field__head"><span>Aporte mensal</span><b>${fmtBRL(aporte)}</b></div>
-          <input type="number" inputmode="decimal" id="invest-aporte-range-input" class="input input--stepper" min="0" max="5000" step="25" data-field="invest-aporte-range" value="${clamp(aporte, 0, 5000)}" placeholder="0" />
+          <div class="invest-field__head"><span id="invest-aporte-rotulo">Aporte mensal</span><b>${fmtBRL(aporte)}</b></div>
+          <input type="number" inputmode="decimal" id="invest-aporte-range-input" class="input input--stepper" min="0" max="5000" step="25" data-field="invest-aporte-range" value="${clamp(aporte, 0, 5000)}" placeholder="0" aria-labelledby="invest-aporte-rotulo" />
         </div>
 
         <div class="invest-field">
-          <div class="invest-field__head"><span>Prazo</span><b>${anos} ${anos === 1 ? "ano" : "anos"}</b></div>
-          <input type="number" inputmode="numeric" id="invest-anos-range-input" class="input input--stepper" min="1" max="40" step="1" data-field="invest-anos-range" value="${anos}" placeholder="1" />
+          <div class="invest-field__head"><span id="invest-anos-rotulo">Prazo</span><b>${anos} ${anos === 1 ? "ano" : "anos"}</b></div>
+          <input type="number" inputmode="numeric" id="invest-anos-range-input" class="input input--stepper" min="1" max="40" step="1" data-field="invest-anos-range" value="${anos}" placeholder="1" aria-labelledby="invest-anos-rotulo" />
         </div>
 
         <div class="invest-field">
-          <div class="invest-field__head"><span>Taxa de juros ao ano</span><b>${fmtNum(taxa)}%</b></div>
-          <input type="number" inputmode="decimal" id="invest-taxa-range-input" class="input input--stepper" min="0" max="25" step="0.1" data-field="invest-taxa-range" value="${taxa}" placeholder="0" />
+          <div class="invest-field__head"><span id="invest-taxa-rotulo">Taxa de juros ao ano</span><b>${fmtNum(taxa)}%</b></div>
+          <input type="number" inputmode="decimal" id="invest-taxa-range-input" class="input input--stepper" min="0" max="25" step="0.1" data-field="invest-taxa-range" value="${taxa}" placeholder="0" aria-labelledby="invest-taxa-rotulo" />
           <div class="invest-presets">
             ${ratePresets.map((p) => `<button class="payment-chip ${Math.abs(taxa - p.ratePct) < 0.05 ? "active" : ""}" data-action="set-invest-rate" data-value="${p.ratePct}">${p.label}</button>`).join("")}
           </div>
@@ -33656,8 +33661,13 @@ function renderCategoriesScreen() {
       <div class="cat-toolbar__top">
         <div class="cat-search">
           ${svgIcon("search", 16, "cat-search__icon")}
+          ${/* [M39] O campo não tem rótulo visível: quem enxerga se orienta pela
+                lupa e pelo texto de exemplo. Para o leitor de tela, o texto de
+                exemplo SOME assim que a pessoa digita, e aí o campo fica sem
+                nome nenhum. O `aria-label` dá o nome permanente sem acrescentar
+                nada à tela. */""}
           <input id="cat-search-input" class="input input--search" data-field="cat-search" value="${escapeHtml(ui.search || "")}"
-            placeholder="Buscar categoria ou subcategoria" autocomplete="off" />
+            placeholder="Buscar categoria ou subcategoria" aria-label="Buscar categoria ou subcategoria" autocomplete="off" />
           ${ui.search ? `<button class="icon-btn icon-btn--muted cat-search__clear" data-action="cat-search-clear" aria-label="Limpar busca">${svgIcon("x", 14)}</button>` : ""}
         </div>
         <button class="btn btn--primary cat-toolbar__new" data-action="cat-editor-open">${svgIcon("plus", 16)} Nova categoria</button>
@@ -34628,16 +34638,21 @@ function renderLegalThirdParty(item) {
     ["Como excluir", item.deletion],
     ["Transferência internacional", item.transfer],
   ];
+  // [M39] O TEXTO VISÍVEL É O MESMO EM TODOS OS FORNECEDORES, E ISSO BASTA PARA
+  // QUEM ENXERGA A FICHA EM VOLTA. Quem usa leitor de tela costuma navegar pela
+  // LISTA de links, onde o contexto some: apareciam cinco "Privacidade do
+  // serviço" e seis "Fonte técnica oficial", indistinguíveis. O `aria-label`
+  // carrega o nome do fornecedor sem mudar uma letra do que está na tela.
   const privacyLink = item.privacyUrl === LEGAL_PENDING
     ? ""
-    : `<a href="${escapeHtml(item.privacyUrl)}" target="_blank" rel="noopener noreferrer">Privacidade do serviço</a>`;
+    : `<a href="${escapeHtml(item.privacyUrl)}" target="_blank" rel="noopener noreferrer" aria-label="Privacidade do serviço: ${escapeHtml(item.name)}">Privacidade do serviço</a>`;
   return `<details class="legal-third-party ${pending ? "legal-third-party--pending" : ""}">
     <summary>
       <span class="legal-third-party__identity"><b>${escapeHtml(item.name)}</b><small>${escapeHtml(item.role)}</small></span>
       <span class="legal-third-party__status">${pending ? "Por definir" : "Em uso"}</span>
     </summary>
     <dl class="legal-list">${fields.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl>
-    <div class="source-links">${privacyLink}<a href="${escapeHtml(item.evidence)}" target="_blank" rel="noopener noreferrer">Fonte técnica oficial</a></div>
+    <div class="source-links">${privacyLink}<a href="${escapeHtml(item.evidence)}" target="_blank" rel="noopener noreferrer" aria-label="Fonte técnica oficial: ${escapeHtml(item.name)}">Fonte técnica oficial</a></div>
   </details>`;
 }
 
@@ -38172,6 +38187,13 @@ function pushRouteForCurrentTab() {
 
 function openOverlay(name) {
   if (state.overlayStack.indexOf(name) !== -1) return;
+  // [M39] Aqui, e só aqui, ainda dá para saber quem abriu: o render que vem a
+  // seguir reconstrói o HTML e alguns gatilhos somem na própria abertura (o
+  // botão do assistente vira o painel). Sem esta anotação, fechar o diálogo
+  // devolvia o foco ao `<body>` e a pessoa voltava para o topo da página.
+  if (window.CofreUI && window.CofreUI.dialogs && typeof window.CofreUI.dialogs.noteTrigger === "function") {
+    window.CofreUI.dialogs.noteTrigger(document.activeElement);
+  }
   state.overlayStack.push(name);
   NavHistory.push(state.tab, state.overlayStack);
 }
@@ -39212,8 +39234,12 @@ function renderBackHeader(title) {
   </div>`;
 }
 
+// [M39] As duas navegações existem ao mesmo tempo no HTML (o CSS mostra uma ou
+// outra conforme a largura), e as duas se chamavam "Navegação principal". Quem
+// usa leitor de tela navega pela LISTA de marcos: dois com o mesmo nome viram
+// uma escolha às cegas. O nome passou a dizer qual é qual.
 function renderSideNav() {
-  return `<nav class="side-nav" aria-label="Navegação principal">
+  return `<nav class="side-nav" aria-label="Navegação lateral">
     <div class="side-nav__brand">
       <div class="brand-mark">${svgIcon("wallet", 19)}</div>
       <span>Cofre</span>
@@ -39226,7 +39252,7 @@ function renderSideNav() {
 }
 
 function renderBottomNav() {
-  return `<nav class="bottom-nav" aria-label="Navegação principal">
+  return `<nav class="bottom-nav" aria-label="Navegação inferior">
     ${MOBILE_NAV.map((item) => {
       if (item.id === "add") {
         return `<div class="bottom-nav__fab-wrap">

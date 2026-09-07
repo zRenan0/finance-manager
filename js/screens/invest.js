@@ -39,24 +39,29 @@ function renderCompoundSimCards() {
         <p class="card-title">Sua simulação</p>
         <p class="card-subtitle" data-ui-css="margin-top:0">Arraste para ver como aportes recorrentes viram patrimônio ao longo do tempo. Nada aqui é lançado na sua conta; é só uma projeção.</p>
 
+        ${/* [M39] O nome de cada campo está no `<span>` ao lado do valor, e para
+              quem enxerga isso basta. O leitor de tela, porém, não deduz essa
+              vizinhança: sem associação, o campo só tinha o texto de exemplo,
+              que some ao digitar. `aria-labelledby` amarra os dois SEM mexer na
+              marcação nem no CSS (virar `<label>` mudaria o seletor da folha). */""}
         <div class="invest-field">
-          <div class="invest-field__head"><span>Valor inicial</span><b>${fmtBRL(inicial)}</b></div>
-          <input id="invest-inicial-input" class="input" data-field="invest-inicial" inputmode="decimal" value="${escapeHtml(inv.inicial)}" placeholder="0,00" autocomplete="off" />
+          <div class="invest-field__head"><span id="invest-inicial-rotulo">Valor inicial</span><b>${fmtBRL(inicial)}</b></div>
+          <input id="invest-inicial-input" class="input" data-field="invest-inicial" inputmode="decimal" value="${escapeHtml(inv.inicial)}" placeholder="0,00" aria-labelledby="invest-inicial-rotulo" autocomplete="off" />
         </div>
 
         <div class="invest-field">
-          <div class="invest-field__head"><span>Aporte mensal</span><b>${fmtBRL(aporte)}</b></div>
-          <input type="number" inputmode="decimal" id="invest-aporte-range-input" class="input input--stepper" min="0" max="5000" step="25" data-field="invest-aporte-range" value="${clamp(aporte, 0, 5000)}" placeholder="0" />
+          <div class="invest-field__head"><span id="invest-aporte-rotulo">Aporte mensal</span><b>${fmtBRL(aporte)}</b></div>
+          <input type="number" inputmode="decimal" id="invest-aporte-range-input" class="input input--stepper" min="0" max="5000" step="25" data-field="invest-aporte-range" value="${clamp(aporte, 0, 5000)}" placeholder="0" aria-labelledby="invest-aporte-rotulo" />
         </div>
 
         <div class="invest-field">
-          <div class="invest-field__head"><span>Prazo</span><b>${anos} ${anos === 1 ? "ano" : "anos"}</b></div>
-          <input type="number" inputmode="numeric" id="invest-anos-range-input" class="input input--stepper" min="1" max="40" step="1" data-field="invest-anos-range" value="${anos}" placeholder="1" />
+          <div class="invest-field__head"><span id="invest-anos-rotulo">Prazo</span><b>${anos} ${anos === 1 ? "ano" : "anos"}</b></div>
+          <input type="number" inputmode="numeric" id="invest-anos-range-input" class="input input--stepper" min="1" max="40" step="1" data-field="invest-anos-range" value="${anos}" placeholder="1" aria-labelledby="invest-anos-rotulo" />
         </div>
 
         <div class="invest-field">
-          <div class="invest-field__head"><span>Taxa de juros ao ano</span><b>${fmtNum(taxa)}%</b></div>
-          <input type="number" inputmode="decimal" id="invest-taxa-range-input" class="input input--stepper" min="0" max="25" step="0.1" data-field="invest-taxa-range" value="${taxa}" placeholder="0" />
+          <div class="invest-field__head"><span id="invest-taxa-rotulo">Taxa de juros ao ano</span><b>${fmtNum(taxa)}%</b></div>
+          <input type="number" inputmode="decimal" id="invest-taxa-range-input" class="input input--stepper" min="0" max="25" step="0.1" data-field="invest-taxa-range" value="${taxa}" placeholder="0" aria-labelledby="invest-taxa-rotulo" />
           <div class="invest-presets">
             ${ratePresets.map((p) => `<button class="payment-chip ${Math.abs(taxa - p.ratePct) < 0.05 ? "active" : ""}" data-action="set-invest-rate" data-value="${p.ratePct}">${p.label}</button>`).join("")}
           </div>

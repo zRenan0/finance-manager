@@ -1215,6 +1215,26 @@
   to   { opacity: 1; transform: none; }
 }
 .screen--enter > * { animation: riseIn 420ms var(--ease) both; }
+
+/* [M39] QUEM PEDIU MENOS MOVIMENTO AINDA RECEBIA A ENTRADA INTEIRA.
+   `utilities.css` já respeitava a preferência nos raios da celebração e no
+   esqueleto, e a folha declara isso como regra do projeto. As quatro animações
+   do próprio aplicativo (entrada de tela, entrada de modal, folha do modal e
+   aviso) ficaram de fora: todo toque de navegação subia o conteúdo 10px na
+   tela, e é justamente esse movimento repetido que incomoda quem marcou a
+   preferência no sistema.
+   Desligar é seguro porque as quatro terminam no estado natural do elemento
+   (opacidade 1, sem deslocamento) e o `.toast` já centraliza pela própria
+   regra, não pela animação. O giro do carregando fica: ele é pequeno, é a
+   única indicação de que o app está trabalhando, e removê-lo tiraria
+   informação em vez de tirar movimento. */
+@media (prefers-reduced-motion: reduce) {
+  .screen--enter > *,
+  .screen--enter .grid-dashboard > *,
+  .modal-overlay--enter,
+  .modal-overlay--enter .modal-sheet,
+  .toast { animation: none; }
+}
 .screen--enter > *:nth-child(1) { animation-delay: 0ms; }
 .screen--enter > *:nth-child(2) { animation-delay: 45ms; }
 .screen--enter > *:nth-child(3) { animation-delay: 90ms; }

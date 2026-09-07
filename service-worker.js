@@ -81,7 +81,11 @@
 // v75: o M38 acelerou os modelos (índice por id, cache de faturas e caminho
 // rápido do dinheiro), tirou dois estilos embutidos que a CSP bloqueava e
 // tirou o PDF.js do pacote OBRIGATÓRIO da instalação, sem deixar de baixá-lo.
-const VERSION = "v75";
+// v76: a acessibilidade do M39 mexeu no pacote e nas folhas. O foco volta para
+// quem abriu o diálogo, os dois marcos de navegação ganharam nomes distintos,
+// o contador da caixa de revisão passou a usar a tinta escurecida e as
+// animações do aplicativo respeitam `prefers-reduced-motion`.
+const VERSION = "v76";
 const BUILD_ID = VERSION;
 const CACHE_NAME = "financas-cache-" + VERSION;
 // A PÁGINA COMERCIAL TEM CACHE PRÓPRIO.

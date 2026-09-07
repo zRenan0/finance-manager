@@ -62,6 +62,21 @@ export function createDialogController() {
     const dialogs = Array.from(document.querySelectorAll(DIALOG_SELECTOR));
     const dialog = dialogs[dialogs.length - 1] || null;
     if (dialog) {
+      // [M39] QUEM ABRIU PELO TECLADO TAMBÉM PRECISA VOLTAR PARA ONDE ESTAVA.
+      //
+      // `opener` só era gravado em `pointerdown`. Abrir o diálogo com Enter ou
+      // Espaço não dispara `pointerdown` nenhum, então `opener` ficava nulo, o
+      // `findTrigger` abaixo não achava alvo e, ao fechar, o foco caía no
+      // `<body>`: a pessoa voltava para o topo da página e precisava tabular a
+      // tela inteira de novo. O defeito atingia exatamente quem depende do
+      // recurso (WCAG 2.4.3, ordem de foco).
+      //
+      // Aqui o foco ainda está no gatilho: `render()` reconstrói o HTML, chama
+      // `restoreFocus` (que devolve o foco ao botão, que continua existindo
+      // atrás do diálogo) e só então chama este `sync`. Ler o elemento focado
+      // neste ponto cobre teclado, ponteiro e abertura por código, sem depender
+      // de qual evento começou a história.
+      if (!wasOpen && !opener) opener = triggerDescriptor(document.activeElement);
       dialog.dataset.managedDialog = 'true';
       isolateBackground(dialog);
       focusFirst(dialog);
@@ -103,7 +118,22 @@ export function createDialogController() {
     }
   }
 
+  // [M39] Declaração explícita de quem abriu, para o caso em que o gatilho SOME.
+  //
+  // O `pointerdown` e a leitura do foco em `sync` cobrem o botão que continua na
+  // tela atrás do diálogo. Não cobrem o gatilho que a própria abertura remove -
+  // o assistente é assim: o botão flutuante vira o painel. Quando o `sync` roda,
+  // o botão não existe mais, o foco já caiu no `<body>` e não há o que guardar.
+  //
+  // `noteTrigger` é chamado por `openOverlay` (js/app.js), ANTES do render, com
+  // o elemento que ainda está focado. Só grava se ainda não houver um gatilho
+  // anotado, para não sobrescrever o do `pointerdown` da mesma abertura.
+  function noteTrigger(element) {
+    if (opener || document.querySelector(DIALOG_SELECTOR)) return;
+    opener = triggerDescriptor(element || document.activeElement);
+  }
+
   document.addEventListener('pointerdown', onPointerDown, true);
   document.addEventListener('keydown', onKeydown, true);
-  return Object.freeze({ sync });
+  return Object.freeze({ sync, noteTrigger });
 }

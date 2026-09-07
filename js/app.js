@@ -425,6 +425,13 @@ function pushRouteForCurrentTab() {
 
 function openOverlay(name) {
   if (state.overlayStack.indexOf(name) !== -1) return;
+  // [M39] Aqui, e só aqui, ainda dá para saber quem abriu: o render que vem a
+  // seguir reconstrói o HTML e alguns gatilhos somem na própria abertura (o
+  // botão do assistente vira o painel). Sem esta anotação, fechar o diálogo
+  // devolvia o foco ao `<body>` e a pessoa voltava para o topo da página.
+  if (window.CofreUI && window.CofreUI.dialogs && typeof window.CofreUI.dialogs.noteTrigger === "function") {
+    window.CofreUI.dialogs.noteTrigger(document.activeElement);
+  }
   state.overlayStack.push(name);
   NavHistory.push(state.tab, state.overlayStack);
 }
@@ -1465,8 +1472,12 @@ function renderBackHeader(title) {
   </div>`;
 }
 
+// [M39] As duas navegações existem ao mesmo tempo no HTML (o CSS mostra uma ou
+// outra conforme a largura), e as duas se chamavam "Navegação principal". Quem
+// usa leitor de tela navega pela LISTA de marcos: dois com o mesmo nome viram
+// uma escolha às cegas. O nome passou a dizer qual é qual.
 function renderSideNav() {
-  return `<nav class="side-nav" aria-label="Navegação principal">
+  return `<nav class="side-nav" aria-label="Navegação lateral">
     <div class="side-nav__brand">
       <div class="brand-mark">${svgIcon("wallet", 19)}</div>
       <span>Cofre</span>
@@ -1479,7 +1490,7 @@ function renderSideNav() {
 }
 
 function renderBottomNav() {
-  return `<nav class="bottom-nav" aria-label="Navegação principal">
+  return `<nav class="bottom-nav" aria-label="Navegação inferior">
     ${MOBILE_NAV.map((item) => {
       if (item.id === "add") {
         return `<div class="bottom-nav__fab-wrap">

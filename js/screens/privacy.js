@@ -51,16 +51,21 @@ function renderLegalThirdParty(item) {
     ["Como excluir", item.deletion],
     ["Transferência internacional", item.transfer],
   ];
+  // [M39] O TEXTO VISÍVEL É O MESMO EM TODOS OS FORNECEDORES, E ISSO BASTA PARA
+  // QUEM ENXERGA A FICHA EM VOLTA. Quem usa leitor de tela costuma navegar pela
+  // LISTA de links, onde o contexto some: apareciam cinco "Privacidade do
+  // serviço" e seis "Fonte técnica oficial", indistinguíveis. O `aria-label`
+  // carrega o nome do fornecedor sem mudar uma letra do que está na tela.
   const privacyLink = item.privacyUrl === LEGAL_PENDING
     ? ""
-    : `<a href="${escapeHtml(item.privacyUrl)}" target="_blank" rel="noopener noreferrer">Privacidade do serviço</a>`;
+    : `<a href="${escapeHtml(item.privacyUrl)}" target="_blank" rel="noopener noreferrer" aria-label="Privacidade do serviço: ${escapeHtml(item.name)}">Privacidade do serviço</a>`;
   return `<details class="legal-third-party ${pending ? "legal-third-party--pending" : ""}">
     <summary>
       <span class="legal-third-party__identity"><b>${escapeHtml(item.name)}</b><small>${escapeHtml(item.role)}</small></span>
       <span class="legal-third-party__status">${pending ? "Por definir" : "Em uso"}</span>
     </summary>
     <dl class="legal-list">${fields.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl>
-    <div class="source-links">${privacyLink}<a href="${escapeHtml(item.evidence)}" target="_blank" rel="noopener noreferrer">Fonte técnica oficial</a></div>
+    <div class="source-links">${privacyLink}<a href="${escapeHtml(item.evidence)}" target="_blank" rel="noopener noreferrer" aria-label="Fonte técnica oficial: ${escapeHtml(item.name)}">Fonte técnica oficial</a></div>
   </details>`;
 }
 

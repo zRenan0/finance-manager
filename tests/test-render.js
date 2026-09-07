@@ -849,7 +849,10 @@ console.log("\n7. Módulo 6 — gamificação, esqueleto e acessibilidade");
   const shell = run("renderShell()");
   check("shell tem link de pular para o conteúdo", shell.includes("skip-link"));
   check("shell tem região de anúncio para leitor de tela", shell.includes('aria-live="polite"'));
-  check("navegação inferior é rotulada", shell.includes('aria-label="Navegação principal"'));
+  // [M39] Os dois marcos de navegação convivem no HTML; cada um precisa de nome
+  // PRÓPRIO, senão a lista de marcos do leitor de tela mostra dois iguais.
+  check("navegação inferior é rotulada", shell.includes('aria-label="Navegação inferior"'));
+  check("navegação lateral tem nome diferente", shell.includes('aria-label="Navegação lateral"'));
   check("aba ativa marca aria-current", shell.includes('aria-current="page"'));
 
   const celebra = run("(state.gamification.celebrating = buildAchievementsModel(state.data, new Date()).items.slice(0,1), renderCelebrationOverlay())");

@@ -47,7 +47,7 @@ psql <URL_DE_STAGING> -v ON_ERROR_STOP=1 -f supabase/tests/verify_security_bound
 ```
 
 O processo de homologação, publicação e retorno está em `docs/RELEASE.md`. O schema
-de dados está na versão 23 e o cache offline na versão 75. O inventário técnico
+de dados está na versão 23 e o cache offline na versão 76. O inventário técnico
 do armazenamento está em `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`; o inventário de
 tratamento da LGPD está em `docs/INVENTARIO-DE-DADOS.md`; e o registro dos
 serviços externos está em `docs/TERCEIROS-E-OPERADORES.md`.
@@ -1765,6 +1765,33 @@ alterar o resultado não contamina a próxima leitura).
 - Estado de medalha não depende só de cor: trancada é dessaturada **e** tem o
   contorno tracejado; conquistada ganha selo de check.
 - Alvos de toque com mínimo de 44px em ponteiro grosso.
+
+#### O que o M39 auditou e corrigiu
+
+A auditoria rodou no navegador, em **20 rotas e nos dois temas**, medindo em vez
+de inspecionar de olho. Seis correções saíram dela:
+
+| Achado | Onde doía | Correção |
+|---|---|---|
+| Fechar um diálogo aberto **pelo teclado** jogava o foco no `<body>` | O gatilho só era gravado no `pointerdown`; quem abre com Enter voltava para o topo da página e tinha de tabular tudo de novo (WCAG 2.4.3) | `noteTrigger`, chamado por `openOverlay` antes do render, mais leitura do foco no `sync` |
+| Os dois marcos de navegação se chamavam "Navegação principal" | A lista de marcos do leitor de tela mostrava dois nomes iguais | "Navegação lateral" e "Navegação inferior" |
+| O contador da caixa de revisão media **3,22:1** no tema claro | 16px em peso 800 não é texto grande: o mínimo é 4,5:1 | `--goal-ink`, a variante que a base já mantinha para isso; passou a **4,74:1** |
+| As animações do aplicativo ignoravam `prefers-reduced-motion` | Entrada de tela, modal e aviso subiam o conteúdo a cada navegação | Bloco de movimento reduzido em `components.css`; o giro do carregando fica, porque é informação |
+| Cinco campos tinham como nome apenas o texto de exemplo | O texto de exemplo some ao digitar, e o campo fica sem nome | `aria-labelledby` nos quatro do simulador, `aria-label` na busca de categorias |
+| Onze links repetiam "Privacidade do serviço" e "Fonte técnica oficial" | Na lista de links do leitor de tela, indistinguíveis entre cinco fornecedores | `aria-label` com o nome do fornecedor; o texto visível não mudou |
+
+O que a auditoria **não** encontrou, e vale dizer porque foi medido: nenhum
+controle sem nome acessível, nenhum foco preso fora de diálogo, nenhum
+`tabindex` positivo, nenhum interativo aninhado, nenhum elemento focável dentro
+de `aria-hidden`, nenhum SVG decorativo exposto ao leitor (20 de 20 marcados) e
+**zero falhas de contraste** nas 20 rotas dos dois temas depois da correção
+acima. Os erros de formulário já eram exemplares: `role="alert"`,
+`aria-invalid`, `aria-describedby` e foco no primeiro campo inválido.
+
+`tests/test-accessibility.js` trava as seis decisões na fonte. O contraste em si
+não é medido lá de propósito: a conta depende do fundo composto (pastilha
+translúcida sobre cartão sobre página) e de gradiente, que só existem no
+navegador, e um número aproximado sobre acessibilidade é pior que nenhum.
 
 ### Testes
 

@@ -147,8 +147,13 @@ function renderCategoriesScreen() {
       <div class="cat-toolbar__top">
         <div class="cat-search">
           ${svgIcon("search", 16, "cat-search__icon")}
+          ${/* [M39] O campo não tem rótulo visível: quem enxerga se orienta pela
+                lupa e pelo texto de exemplo. Para o leitor de tela, o texto de
+                exemplo SOME assim que a pessoa digita, e aí o campo fica sem
+                nome nenhum. O `aria-label` dá o nome permanente sem acrescentar
+                nada à tela. */""}
           <input id="cat-search-input" class="input input--search" data-field="cat-search" value="${escapeHtml(ui.search || "")}"
-            placeholder="Buscar categoria ou subcategoria" autocomplete="off" />
+            placeholder="Buscar categoria ou subcategoria" aria-label="Buscar categoria ou subcategoria" autocomplete="off" />
           ${ui.search ? `<button class="icon-btn icon-btn--muted cat-search__clear" data-action="cat-search-clear" aria-label="Limpar busca">${svgIcon("x", 14)}</button>` : ""}
         </div>
         <button class="btn btn--primary cat-toolbar__new" data-action="cat-editor-open">${svgIcon("plus", 16)} Nova categoria</button>

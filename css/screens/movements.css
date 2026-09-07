@@ -7,7 +7,12 @@
 .movement-review__header { width:100%; min-height:68px; display:grid; grid-template-columns:42px 1fr 24px; align-items:center; gap:12px; padding:12px 16px; border:0; background:transparent; color:var(--ink); text-align:left; cursor:pointer; }
 .movement-review__header > span:nth-child(2) { display:flex; flex-direction:column; gap:2px; }
 .movement-review__header small { color:var(--ink-faint); font-weight:400; }
-.review-count { width:38px; height:38px; display:grid; place-items:center; border-radius:50%; background:color-mix(in srgb, var(--goal) 16%, transparent); color:var(--goal); font-weight:800; }
+/* [M39] O número é 16px em peso 800, o que NÃO conta como texto grande na WCAG
+   (grande é 24px, ou 18,66px em negrito), então o mínimo aqui é 4,5:1. Sobre a
+   própria pastilha de 16% da cor, `--goal` media 3,22:1. `--goal-ink` é a
+   variante que a base já mantém exatamente para este caso e mede 4,74:1; no
+   tema escuro ela aponta de volta para `--goal`, então lá nada muda. */
+.review-count { width:38px; height:38px; display:grid; place-items:center; border-radius:50%; background:color-mix(in srgb, var(--goal) 16%, transparent); color:var(--goal-ink); font-weight:800; }
 .movement-review__body { border-top:1px solid var(--border); padding:4px 16px 12px; }
 .review-issue { display:grid; grid-template-columns:38px minmax(0, 1fr) auto; align-items:center; gap:12px; padding:14px 0; border-bottom:1px solid var(--border); }
 .review-issue:last-child { border-bottom:0; }

@@ -2,6 +2,38 @@
 
 ## Não publicado
 
+### O M39 conferiu a acessibilidade tela por tela
+
+- **Fechar uma janela pelo teclado devolve o foco para onde você estava.** Quem
+  abria um diálogo com Enter e o fechava com Esc voltava para o começo da
+  página e tinha de percorrer tudo de novo com Tab. O defeito atingia
+  exatamente quem depende do teclado. Quem abre com o toque ou com o mouse
+  nunca percebeu, e continua sem perceber.
+- **As duas navegações agora têm nomes diferentes** ("Navegação lateral" e
+  "Navegação inferior"). Elas se chamavam a mesma coisa, e na lista de marcos
+  de um leitor de tela isso vira uma escolha às cegas.
+- **O contador da caixa de revisão ficou legível no tema claro.** O número
+  media 3,22:1 de contraste, abaixo do mínimo de 4,5:1 para o tamanho dele.
+  Agora mede 4,74:1, com a mesma cor de família que o resto da tela usa.
+- **Quem pede menos movimento no sistema recebe menos movimento.** A entrada de
+  cada tela, a abertura dos modais e o aviso deixaram de animar quando a
+  preferência está ligada. O girinho de "carregando" continua: ele é a única
+  indicação de que o app está trabalhando.
+- **Cinco campos ganharam nome próprio.** Os quatro do simulador de juros e a
+  busca de categorias tinham como nome apenas o texto de exemplo, que some
+  assim que você digita; para um leitor de tela o campo ficava sem nome. Nada
+  mudou na tela.
+- **Onze links passaram a dizer de qual serviço são.** Na tela de privacidade
+  havia cinco "Privacidade do serviço" e seis "Fonte técnica oficial", que na
+  lista de links de um leitor de tela eram indistinguíveis. O texto visível
+  continua o mesmo.
+- **O que a auditoria conferiu e estava certo:** nenhum botão ou campo sem
+  nome nas 20 telas, nenhuma armadilha de foco, nenhum ícone decorativo
+  atrapalhando a leitura, e zero falhas de contraste nos dois temas depois da
+  correção acima. As mensagens de erro dos formulários já eram anunciadas, já
+  marcavam o campo e já levavam o foco até ele.
+- O cache offline subiu para `v76`.
+
 ### O M38 tirou 70% do tempo de montar as telas
 
 - **Medido antes de mexer.** Com uma base de 20 mil lançamentos, montar os
@@ -31,7 +63,7 @@
   inteira era reprovada e a pessoa ficava sem aplicativo offline por causa de um
   recurso que talvez nunca usasse. Ele continua sendo baixado junto com todo o
   resto; o que mudou é que a falha dele não derruba mais o pacote.
-- O cache offline subiu para `v75`.
+- Vai junto no pacote do `v76`.
 
 ### O M37 desenhou o limite do que a IA pode dizer
 
