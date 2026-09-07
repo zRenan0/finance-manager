@@ -2,6 +2,28 @@
 
 ## Não publicado
 
+### O M40 mediu o app de 320 a 1440 pixels
+
+- **Sete larguras, 23 telas, com dado de verdade.** A verificação anterior
+  olhava quatro larguras numa tela só, e com a base vazia — e tela vazia não
+  estica layout nenhum. Agora a varredura roda com conta e cartão de nome longo,
+  categoria de 55 caracteres sem espaço nenhum, valores na casa do milhão e
+  descrições compridas. Resultado: **nenhuma rolagem horizontal e nenhum texto
+  cortado**, em nenhuma das combinações.
+- **Também no pior caso de acessibilidade:** 320px com o texto do corpo dobrado,
+  que é o que acontece quando alguém aumenta a fonte do navegador. Passa.
+- **Modais em tela baixa e em paisagem.** Num telefone deitado (740x360) ou num
+  aparelho pequeno (320x480), as janelas continuam cabendo, rolam por dentro e
+  não deixam botão fora do alcance.
+- **Nada fica escondido atrás da barra de baixo.** Cada botão das telas longas
+  foi testado pelo ponto central, rolando até o fim.
+- **Correção:** os botões de conselho da tela de Saúde ("Criar meta de reserva",
+  "Cadastrar carteira") ficavam com 38px de altura no celular, abaixo do mínimo
+  de 44px que o app usa para alvos de toque. Uma regra de estilo mais específica
+  vencia o piso sem querer. Corrigido só para o toque; no computador o desenho
+  segue igual.
+- O cache offline subiu para `v77`.
+
 ### O M39 conferiu a acessibilidade tela por tela
 
 - **Fechar uma janela pelo teclado devolve o foco para onde você estava.** Quem
@@ -32,7 +54,7 @@
   atrapalhando a leitura, e zero falhas de contraste nos dois temas depois da
   correção acima. As mensagens de erro dos formulários já eram anunciadas, já
   marcavam o campo e já levavam o foco até ele.
-- O cache offline subiu para `v76`.
+- Vai junto no pacote do `v77`.
 
 ### O M38 tirou 70% do tempo de montar as telas
 

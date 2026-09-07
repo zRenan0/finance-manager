@@ -85,7 +85,10 @@
 // quem abriu o diálogo, os dois marcos de navegação ganharam nomes distintos,
 // o contador da caixa de revisão passou a usar a tinta escurecida e as
 // animações do aplicativo respeitam `prefers-reduced-motion`.
-const VERSION = "v76";
+// v77: o M40 devolveu o alvo de toque de 44px aos botões de conselho da tela de
+// Saúde, que uma regra de especificidade maior estava encolhendo para 38px no
+// celular. Muda só a folha da Saúde.
+const VERSION = "v77";
 const BUILD_ID = VERSION;
 const CACHE_NAME = "financas-cache-" + VERSION;
 // A PÁGINA COMERCIAL TEM CACHE PRÓPRIO.

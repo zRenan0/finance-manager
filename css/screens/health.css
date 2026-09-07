@@ -107,6 +107,18 @@
   white-space: normal; text-align: center;
 }
 
+/* [M40] ESTA REGRA ESTAVA DERRUBANDO O MÍNIMO DE TOQUE, SEM QUERER.
+   O piso de 44px do projeto mora em `utilities.css` como `button:not(.switch)`,
+   que vale (0,1,1) de especificidade. `.indicator__advice .btn` vale (0,2,0) e
+   ganha, então "Criar meta de reserva" e "Cadastrar carteira" ficavam com 38px
+   de altura no celular, medidos com ponteiro grosso emulado. A altura mínima
+   fixa existe para o rótulo poder quebrar em duas linhas na coluna estreita;
+   o que ela não precisava era encolher o alvo. Aqui o piso volta a valer em
+   ponteiro grosso, sem tocar no desenho de mesa nem na quebra de linha. */
+@media (pointer: coarse) {
+  .indicator__advice .btn { min-height: 44px; }
+}
+
 .indicator__more {
   margin-top: auto; padding-top: 14px; background: none; border: none; cursor: pointer;
   display: flex; align-items: center; justify-content: center; gap: 6px;

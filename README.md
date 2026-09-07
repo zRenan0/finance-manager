@@ -47,7 +47,7 @@ psql <URL_DE_STAGING> -v ON_ERROR_STOP=1 -f supabase/tests/verify_security_bound
 ```
 
 O processo de homologação, publicação e retorno está em `docs/RELEASE.md`. O schema
-de dados está na versão 23 e o cache offline na versão 76. O inventário técnico
+de dados está na versão 23 e o cache offline na versão 77. O inventário técnico
 do armazenamento está em `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`; o inventário de
 tratamento da LGPD está em `docs/INVENTARIO-DE-DADOS.md`; e o registro dos
 serviços externos está em `docs/TERCEIROS-E-OPERADORES.md`.
@@ -1738,6 +1738,44 @@ Os contratos que tornam as caches seguras estão travados em
 `tests/test-performance.js`: o índice devolve o que o `find` devolvia, trocar a
 lista troca a resposta, e a fatura sai em objetos novos a cada chamada (quem
 alterar o resultado não contamina a próxima leitura).
+
+### Responsividade (M40)
+
+A varredura cobre **sete larguras** (320, 360, 390, 430, 768, 1024 e 1440) em
+**23 telas**, e roda com a base cheia do que costuma quebrar grade: conta e
+cartão de nome longo, categoria de 55 caracteres **sem espaço** (a causa
+clássica de rolagem horizontal, porque não há onde quebrar a linha), valores na
+casa do milhão e descrições compridas. Tela vazia não estica layout nenhum, e
+era essa a limitação da cobertura anterior.
+
+O critério é o que a pessoa sente: **rolagem horizontal na página**. Elemento com
+rolagem própria (tabela larga, faixa de gráfico) não conta, porque isso é
+desenho, não defeito. Junto vão duas medidas que a rolagem não vê: texto cortado
+dentro da própria caixa, e o pior caso combinado da WCAG 1.4.4 com a 1.4.10 —
+320px com o texto do corpo dobrado.
+
+Resultado: zero rolagem horizontal, zero texto cortado, nas sete larguras e nas
+23 telas. Modais em tela baixa (320x480) e em paisagem (740x360) cabem, rolam por
+dentro e não deixam botão fora da tela. Nenhum controle fica coberto pela doca
+inferior, testado pelo centro de cada alvo com `elementFromPoint`.
+
+**O achado do módulo foi de alvo de toque.** `.indicator__advice .btn` declarava
+`min-height: 38px` e, com especificidade (0,2,0), vencia o piso de 44px do
+projeto, que é uma regra de elemento em `utilities.css` — `button:not(.switch)`,
+(0,1,1). Os botões de conselho da tela de Saúde ficavam com 38px no celular. A
+altura mínima existe para o rótulo poder quebrar em duas linhas na coluna
+estreita; o bloco `@media (pointer: coarse)` devolve o piso sem tocar nisso.
+
+O teste de toque reprova abaixo de **43px**, e a tolerância de 1px é declarada:
+o dia do calendário é uma grade de sete colunas (7 × 44 = 308, mais vãos e
+recuos, não cabe em 390px sem rolagem lateral) e alguns botões medem 43,x por
+arredondamento de subpixel. Ambos passam com folga no mínimo de 24px da WCAG
+2.5.8. Ficam de fora, com o motivo escrito no teste, o atalho de pular (só
+existe para o teclado) e os links de referência dentro de texto corrido, que a
+própria WCAG isenta.
+
+Os dois casos vivem em `tests/browser/run-browser.js`, e o de toque foi
+verificado nos dois sentidos: passa com a correção e **reprova sem ela**.
 
 ### Movimento e carregamento
 

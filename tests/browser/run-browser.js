@@ -1053,6 +1053,233 @@ async function runOnboardingViewportM4(browser, scenario) {
     assert(shared.pageErrors.length === 0, `erros no navegador: ${shared.pageErrors.join("; ")}`);
   });
 
+  // [M40] AS SETE LARGURAS DO ROTEIRO, EM TODAS AS TELAS, COM DADO DE VERDADE.
+  //
+  // O teste acima cobria QUATRO larguras numa tela só (o painel), e tela vazia
+  // não estica layout nenhum. Aqui a base recebe o que costuma quebrar grade:
+  // nome de conta longo, nome de categoria SEM ESPAÇO (a causa clássica de
+  // rolagem horizontal, porque não há onde quebrar a linha), valor na casa do
+  // milhão e descrição comprida. Depois disso, as 23 telas são varridas nas sete
+  // larguras do roteiro.
+  //
+  // O critério é o que a pessoa sente: rolagem horizontal na página. Elemento
+  // com rolagem PRÓPRIA (tabela larga, faixa de gráfico) não conta, porque isso
+  // é desenho, não defeito.
+  await test("320 a 1440 px: 23 telas com dado extremo, sem rolagem horizontal", async () => {
+    const largo = await openFresh(browser, { width: 390, height: 844 }, {});
+    const page = largo.page;
+    try {
+      await completeOnboarding(page);
+
+      // ---- base que estica a grade ----
+      await page.evaluate(async () => {
+        const espera = (ms) => new Promise((r) => setTimeout(r, ms));
+        const set = (campo, valor) => {
+          const el = document.querySelector(`[data-field="${campo}"]`);
+          if (!el) return false;
+          el.value = valor;
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+          return true;
+        };
+        const clique = (sel) => { const el = document.querySelector(sel); if (el) el.click(); return !!el; };
+
+        CofreUI.test.navigate("accounts"); await espera(260);
+        clique('[data-action="account-new"]'); await espera(220);
+        set("account-name", "Conta corrente conjunta do Banco Cooperativo Internacional");
+        set("account-opening-balance", "1234567,89");
+        clique('[data-action="account-save"]'); await espera(320);
+
+        clique('[data-action="card-new"]'); await espera(220);
+        set("card-name", "Cartão de crédito platinum internacional sem anuidade");
+        set("card-limit", "98765,43"); set("card-closing", "5"); set("card-due", "12");
+        clique('[data-action="card-save"]'); await espera(320);
+
+        for (const [tipo, valor, texto] of [
+          ["income", "987654,32", "Salário mensal com participação nos lucros e resultados do exercício"],
+          ["expense", "123456,78", "Supermercado atacadista da avenida principal com estacionamento coberto"],
+        ]) {
+          CofreUI.test.navigate("add"); await espera(260);
+          clique(`[data-action="set-type"][data-value="${tipo}"]`); await espera(160);
+          set("tx-amount", valor); set("tx-description", texto);
+          clique("[data-action='select-category']"); await espera(160);
+          clique('[data-action="submit-tx"]'); await espera(340);
+        }
+
+        // Nome sem espaço: é ele que estoura grade quando falta `min-width: 0`
+        // ou quebra de palavra em algum ponto da corrente de flex/grid.
+        CofreUI.test.navigate("categories"); await espera(260);
+        clique('[data-action="cat-editor-open"]'); await espera(220);
+        set("cat-editor-name", "SupermercadoAtacadistaMunicipalIntermunicipalConsolidado");
+        set("cat-editor-budget", "12345,67");
+        clique('[data-action="cat-editor-save"]'); await espera(340);
+      });
+
+      const TELAS = [
+        "dashboard", "add", "analytics", "goals", "settings", "import", "simulate",
+        "subscriptions", "health", "wealth", "calendar", "invest", "simulators",
+        "achievements", "insights", "notifications", "accounts", "debts",
+        "all", "rules", "categories", "privacy", "account",
+      ];
+      const LARGURAS = [320, 360, 390, 430, 768, 1024, 1440];
+
+      const problemas = [];
+      for (const width of LARGURAS) {
+        await page.setViewportSize({ width, height: width >= 768 ? 900 : 780 });
+        for (const tela of TELAS) {
+          await page.evaluate((t) => CofreUI.test.navigate(t), tela);
+          await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+          const achado = await page.evaluate(() => {
+            const limite = document.documentElement.clientWidth;
+            const overflow = document.documentElement.scrollWidth - limite;
+            if (overflow <= 2) return null;
+            const culpados = [];
+            document.querySelectorAll("body *").forEach((node) => {
+              const box = node.getBoundingClientRect();
+              if (box.width === 0 || box.height === 0) return;
+              if (box.right > limite + 2) {
+                culpados.push({ cls: String(node.className || node.tagName).slice(0, 40), right: Math.round(box.right) });
+              }
+            });
+            culpados.sort((a, b) => b.right - a.right);
+            return { overflow, culpados: culpados.slice(0, 3) };
+          });
+          if (achado) problemas.push({ width, tela, ...achado });
+        }
+      }
+      assert(problemas.length === 0, `rolagem horizontal: ${JSON.stringify(problemas.slice(0, 4))}`);
+
+      // Texto cortado dentro da própria caixa, sem reticências e sem rolagem:
+      // é o defeito que a varredura de rolagem não vê, porque a página não
+      // cresce; quem some é o final da palavra.
+      await page.setViewportSize({ width: 320, height: 780 });
+      const cortados = [];
+      for (const tela of TELAS) {
+        await page.evaluate((t) => CofreUI.test.navigate(t), tela);
+        await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+        const achado = await page.evaluate(() => {
+          const escondido = (el) => {
+            const cs = getComputedStyle(el);
+            if (cs.position === "absolute" && (cs.clip !== "auto" || cs.clipPath !== "none")) return true;
+            const box = el.getBoundingClientRect();
+            return box.width <= 2 || box.height <= 2;
+          };
+          const fora = [];
+          document.querySelectorAll("#app *").forEach((node) => {
+            if (node.children.length) return;
+            if (!(node.textContent || "").trim()) return;
+            if (escondido(node)) return;
+            const cs = getComputedStyle(node);
+            if (cs.overflowX === "auto" || cs.overflowX === "scroll" || cs.textOverflow === "ellipsis") return;
+            if (node.scrollWidth > node.clientWidth + 2 && node.clientWidth > 0) {
+              fora.push({ txt: node.textContent.trim().slice(0, 24), cls: String(node.className || "").slice(0, 26) });
+            }
+          });
+          return fora.slice(0, 3);
+        });
+        if (achado.length) cortados.push({ tela, achado });
+      }
+      assert(cortados.length === 0, `texto cortado em 320px: ${JSON.stringify(cortados.slice(0, 4))}`);
+
+      // Texto dobrado em 320px cobre, junto, o redimensionamento da WCAG 1.4.4
+      // e o refluxo da 1.4.10 no pior caso que o roteiro pede.
+      await page.evaluate(() => { document.body.style.fontSize = "32px"; });
+      const comZoom = [];
+      for (const tela of TELAS) {
+        await page.evaluate((t) => CofreUI.test.navigate(t), tela);
+        await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+        const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+        if (overflow > 2) comZoom.push({ tela, overflow });
+      }
+      await page.evaluate(() => { document.body.style.fontSize = ""; });
+      assert(comZoom.length === 0, `rolagem horizontal em 320px com texto dobrado: ${JSON.stringify(comZoom.slice(0, 4))}`);
+      assert(largo.pageErrors.length === 0, `erros no navegador: ${largo.pageErrors.join("; ")}`);
+    } finally {
+      await largo.context.close();
+    }
+  });
+
+  // [M40] O piso de toque do projeto (44px, `utilities.css`) é uma regra de
+  // ELEMENTO (`button:not(.switch)`), então qualquer seletor de classe com dois
+  // níveis a derrota sem querer. Foi o que aconteceu em `.indicator__advice
+  // .btn`: os botões de conselho da tela de Saúde ficavam com 38px no celular.
+  // Este teste mede com ponteiro grosso de verdade, em todas as telas.
+  await test("ponteiro grosso: nenhum controle abaixo de 44px", async () => {
+    const toque = await openFresh(browser, { width: 390, height: 844 }, { hasTouch: true });
+    const page = toque.page;
+    try {
+      await completeOnboarding(page);
+      // SEM DADO, METADE DOS CONTROLES NÃO EXISTE, e um teste que não alcança o
+      // elemento não prova nada: com a base vazia a tela de Saúde não tem UM
+      // botão de conselho, que é justamente onde estava o defeito de 38px.
+      // Conta e lançamento bastam para os conselhos aparecerem.
+      await page.evaluate(async () => {
+        const espera = (ms) => new Promise((r) => setTimeout(r, ms));
+        const set = (campo, valor) => {
+          const el = document.querySelector(`[data-field="${campo}"]`);
+          if (!el) return false;
+          el.value = valor;
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+          return true;
+        };
+        const clique = (sel) => { const el = document.querySelector(sel); if (el) el.click(); return !!el; };
+        CofreUI.test.navigate("accounts"); await espera(300);
+        clique('[data-action="account-new"]'); await espera(240);
+        set("account-name", "Conta teste"); set("account-opening-balance", "3000,00");
+        clique('[data-action="account-save"]'); await espera(380);
+        CofreUI.test.navigate("add"); await espera(300);
+        clique('[data-action="set-type"][data-value="expense"]'); await espera(200);
+        set("tx-amount", "250,00"); set("tx-description", "Mercado");
+        clique("[data-action='select-category']"); await espera(200);
+        clique('[data-action="submit-tx"]'); await espera(460);
+      });
+      const TELAS = ["dashboard", "analytics", "goals", "settings", "health", "wealth",
+        "insights", "accounts", "categories", "debts", "calendar", "subscriptions"];
+      // Guarda de sanidade: se um dia o conselho da Saúde deixar de renderizar,
+      // este teste voltaria a passar por ausência, e não por acerto.
+      await page.evaluate(() => CofreUI.test.navigate("health"));
+      await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+      const conselhos = await page.evaluate(() => document.querySelectorAll(".indicator__advice .btn").length);
+      assert(conselhos > 0, "a tela de Saúde não renderizou nenhum botão de conselho: o teste perderia o alvo");
+      const pequenos = [];
+      for (const tela of TELAS) {
+        await page.evaluate((t) => CofreUI.test.navigate(t), tela);
+        await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+        const achado = await page.evaluate(() => {
+          if (!matchMedia("(pointer: coarse)").matches) return "SEM PONTEIRO GROSSO";
+          const fora = [];
+          document.querySelectorAll("#app button, #app a[href]").forEach((el) => {
+            // O atalho de pular só existe para o teclado; não é alvo de toque.
+            if (el.classList.contains("skip-link")) return;
+            // Link de referência dentro de texto corrido: a WCAG isenta o alvo
+            // que é uma palavra no meio de uma frase.
+            if (el.closest(".source-links, .legal-list, p")) return;
+            if (el.closest("details:not([open])")) return;
+            const box = el.getBoundingClientRect();
+            if (box.width === 0 || box.height === 0) return;
+            // TOLERÂNCIA DE 1px, E ELA TEM MOTIVO. Duas coisas medem 43,x sem
+            // serem defeito: o arredondamento de subpixel de um botão que a
+            // folha declara com 44px, e o dia do calendário, que é uma grade de
+            // SETE colunas (7 x 44 = 308, mais vãos e recuos, não cabe em
+            // 390px sem rolagem lateral). Os dois passam com folga no mínimo da
+            // WCAG 2.5.8 (24px). O piso de 43 continua pegando o defeito que
+            // este teste nasceu para pegar: os 38px de `.indicator__advice`.
+            if (box.height < 43 || box.width < 43) {
+              fora.push({ txt: (el.getAttribute("aria-label") || el.textContent || "").trim().slice(0, 24), cls: String(el.className || "").slice(0, 26), w: Math.round(box.width), h: Math.round(box.height) });
+            }
+          });
+          return fora.slice(0, 4);
+        });
+        if (achado === "SEM PONTEIRO GROSSO") throw new Error("o contexto não emulou toque");
+        if (achado.length) pequenos.push({ tela, achado });
+      }
+      assert(pequenos.length === 0, `alvos abaixo de 44px: ${JSON.stringify(pequenos.slice(0, 4))}`);
+    } finally {
+      await toque.context.close();
+    }
+  });
+
   await test("320 px mantém doca, assistente e controles sem corte nem sobreposição", async () => {
     const touch = await openFresh(browser, { width: 320, height: 844 }, { hasTouch: true });
     const page = touch.page;

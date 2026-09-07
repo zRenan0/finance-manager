@@ -12,7 +12,8 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 
 | Campo | Valor |
 |---|---|
-| Módulo atual | **M39** (concluído) |
+| Módulo atual | **M40** (concluído) - roteiro encerrado |
+| Status do M40 | **CONCLUÍDO** - sete larguras x 23 telas com dado extremo (nome sem espaço, valor na casa do milhão, descrição longa): zero rolagem horizontal e zero texto cortado, inclusive em 320px com texto dobrado. Modais em tela baixa e em paisagem cabem e rolam por dentro. Um achado: os botões de conselho da Saúde ficavam com 38px de alvo no celular porque uma regra mais específica vencia o piso de 44px; corrigido só em ponteiro grosso. O teste novo foi provado nos dois sentidos. Cache em `v77` |
 | Status do M39 | **CONCLUÍDO** - auditoria medida em 20 rotas e nos dois temas, com seis correções: o foco volta para quem abriu o diálogo pelo teclado (era o achado P1), marcos de navegação com nomes distintos, contraste do contador de revisão de 3,22:1 para 4,74:1, animações respeitando `prefers-reduced-motion`, cinco campos com nome próprio e onze links deixando de ser ambíguos. Nenhuma mudança visual para quem enxerga. Cache em `v76` |
 | Status do M38 | **CONCLUÍDO** - medido antes de mexer: montar os modelos de um quadro com 20 mil lançamentos custava 5,2 s e passou a custar 1,6 s (−70%), sem que um único número exibido mudasse (35 comparações byte a byte contra o código anterior, 0 divergências). Índice por id, cache de faturas e caminho rápido de `moneyToCents` (~9,7 milhões de casos conferidos). De passagem: dois estilos embutidos que a CSP bloqueava voltaram a pintar, e o PDF.js saiu do pacote OBRIGATÓRIO da instalação sem deixar de ser baixado. Cache em `v75` |
 | Status do M37 | **CONCLUÍDO** - a IA deixou de se apresentar como consultor financeiro e passou a ter limite declarado: o pedido proíbe recomendação de investimento, produto, instituição e alocação; a saída é filtrada por nove padrões nas duas pontas (servidor e navegador, com as cópias travadas por teste); toda análise sai com a natureza declarada (educativo, estimativa, não previsão). A educação sobre risco continua passando inteira. Cache em `v74` |
@@ -52,10 +53,10 @@ P0/P1). Não substituir nem apagar: o que está lá como CONCLUÍDO não deve se
 | Status do M3 | **CONCLUÍDO** — aplicado e confirmado no banco em 2026-08-28 |
 | Status do M2 | **CONCLUÍDO** — nenhuma vulnerabilidade de autorização; invariantes travados por teste |
 | Status do M1 | **CONCLUÍDO** — aplicado e confirmado; gatilho capturado e versionado |
-| Módulos concluídos | M0 a M39 |
-| Próximo módulo | M40 - Responsividade |
+| Módulos concluídos | **M0 a M40 - roteiro completo** |
+| Próximo módulo | nenhum: os 41 módulos do roteiro foram concluídos. O que segue são as pendências listadas no fim deste arquivo |
 | Branch | `deploy-atualizado` (árvore limpa no início do M0) |
-| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `tests/test-cloud-sync.js`, `tests/test-account-backend.js`, `tests/test-critical-actions.js`, `tests/test-coverage.js`, `tests/test-security-adversarial.js`, `tests/test-observability.js`, `tests/test-data-inventory-lgpd.js`, `tests/test-third-party-transparency.js`, `supabase/tests/verify_security_boundary.sql`, `scripts/check-deploy.js`, `scripts/serve.js`, `scripts/coverage.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/storage.js`, `js/cloud-sync.js` (M10), `js/analytics.js`, `js/forecast.js`, `js/wrapped.js`, `js/screens/analytics.js` (M11), `js/backup-crypto.js`, `js/app.js`, `js/actions.js`, `js/storage.js`, `js/screens/settings.js`, `css/components.css`, `scripts/build-app-module.js` (M12), `netlify/functions/sync.js` (M13), `js/import.js`, `netlify/functions/_shared/finance-schema.js` (M14), observabilidade em backend, frontend e Service Worker (M17), inventário e tela de Privacidade (M18), registro de terceiros e operadores (M19), `js/modules/app.generated.js` (regerado). Documentação: inventário do M8, protocolo do M10, backup protegido do M12, `docs/VERSIONAMENTO.md` do M13, observabilidade do M17, inventário LGPD do M18, terceiros do M19 e desenhos de M15 a M19. **M20 (só documentação e verificação, nenhum arquivo de produção):** `SECURITY_INCIDENT_RESPONSE.md` (novo), `tests/test-incident-response.js` (novo), `scripts/check-release.js`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. **M21:** `reportar-vulnerabilidade.html` (novo), `css/reportar.css` (novo), `SECURITY.md` (novo), `scripts/security-txt.js` (novo), `tests/test-responsible-disclosure.js` (novo), `vercel.json`, `scripts/build-dist.js`, `scripts/serve.js`, `scripts/check-release.js`, `scripts/check-deploy.js`, `landing.html`, `tests/test-landing.js`, `tests/browser/run-landing.js`, `SECURITY_INCIDENT_RESPONSE.md`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. **M22:** `docs/MARCA.md` (novo), `tests/test-brand.js` (novo), `index.html`, `manifest.webmanifest`, `landing.html`, `scripts/check-release.js`, `scripts/security-txt.js`, `SECURITY.md`, `SECURITY_INCIDENT_RESPONSE.md`, `README.md`, `CHANGELOG.md`. **M23:** `landing.html`, `css/landing.css`, `service-worker.js` (v63), `tests/test-brand.js`, `tests/test-responsible-disclosure.js`, `tests/test-third-party-transparency.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M24:** `js/screens/onboarding.js`, `js/app.js`, `js/actions.js`, `css/screens/notifications-onboarding.css`, `service-worker.js` (v64), `js/modules/app.generated.js`, `tests/test-onboarding.js`, `tests/browser/run-browser.js`, `tests/browser/run-pwa.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M39:** `tests/test-accessibility.js` (novo), `js/modules/dialog-controller.js`, `js/app.js`, `js/screens/invest.js`, `js/screens/categories.js`, `js/screens/privacy.js`, `css/components.css`, `css/screens/movements.css`, `service-worker.js` (v76), `tests/test-render.js`, `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M38:** `tests/test-performance.js` (novo), `js/accounts.js`, `js/utils.js`, `js/app.js`, `js/screens/add.js`, `service-worker.js` (v75), `tests/test-money.js`, `tests/test-pwa-cache.js`, `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M37:** `netlify/functions/_shared/ai-boundaries.js` (novo), `tests/test-ai-boundaries.js` (novo), `netlify/functions/analyze.js`, `js/insights.js`, `js/app.js`, `js/transparency.js`, `js/screens/analytics.js`, `service-worker.js` (v74), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M36:** `tests/test-goals-inflation.js` (novo), `js/goals.js`, `js/storage.js`, `js/actions.js`, `js/app.js`, `js/screens/goals.js`, `css/screens/planning.css`, `service-worker.js` (v73), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M35:** `js/reconcile.js` (novo), `tests/test-reconciliation.js` (novo), `js/screens/accounts.js`, `js/actions.js`, `js/app.js`, `js/import.js`, `js/screens/import.js`, `css/utilities.css`, `scripts/build-app-module.js`, `service-worker.js` (v72), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M34:** `tests/test-debt-center.js` (novo), `js/debts.js`, `js/storage.js`, `js/screens/debts.js`, `js/app.js`, `js/actions.js`, `css/base.css`, `service-worker.js` (v71), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M32/M33:** `tests/test-anomalies-subscriptions.js` (novo), `tests/helpers/fixed-clock.js` (novo), `tests/test-health.js`, `tests/test-insights-engine.js`, `tests/test-render.js`, `tests/test-reserve-and-close.js`, `js/forecast.js`, `js/analytics.js`, `js/advisor.js`, `js/recurring.js`, `js/storage.js`, `js/screens/insights.js`, `js/screens/subscriptions.js`, `js/app.js`, `js/actions.js`, `css/screens/intelligence.css`, `service-worker.js` (v70), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M30/M31:** `tests/test-daily-and-purchase.js` (novo), `js/forecast.js`, `js/insights.js`, `js/screens/calendar.js`, `js/screens/simulate.js`, `js/app.js`, `css/screens/planning.css`, `service-worker.js` (v69), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M28/M29:** `tests/test-reserve-and-close.js` (novo), `js/metrics.js`, `js/forecast.js`, `js/screens/health.js`, `js/screens/calendar.js`, `css/screens/health.css`, `css/screens/planning.css`, `service-worker.js` (v68), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M27:** `tests/test-score-explainable.js` (novo), `js/score.js`, `js/screens/health.js`, `css/screens/health.css`, `service-worker.js` (v67), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M26:** `tests/test-local-only-notice.js` (novo), `js/app.js`, `js/actions.js`, `js/screens/dashboard.js`, `css/screens/dashboard.css`, `css/components.css`, `service-worker.js` (v66), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M25:** `js/demo.js` (novo), `tests/test-demo-mode.js` (novo), `js/app.js`, `js/actions.js`, `js/screens/onboarding.js`, `css/components.css`, `service-worker.js` (v65), `scripts/build-app-module.js`, `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. |
+| Arquivos alterados até aqui | Testes/scripts: `tests/test-security.js`, `tests/test-service-role-scope.js`, `tests/test-xss-surface.js`, `tests/test-auth-password.js`, `tests/test-session-scope-backend.js`, `tests/test-device-revocation-backend.js`, `tests/test-storage-privacy-inventory.js`, `tests/test-render.js`, `tests/test-cloud-sync.js`, `tests/test-account-backend.js`, `tests/test-critical-actions.js`, `tests/test-coverage.js`, `tests/test-security-adversarial.js`, `tests/test-observability.js`, `tests/test-data-inventory-lgpd.js`, `tests/test-third-party-transparency.js`, `supabase/tests/verify_security_boundary.sql`, `scripts/check-deploy.js`, `scripts/serve.js`, `scripts/coverage.js`. Produção: `js/screens/analytics.js`, `js/icons.js` (M4), `vercel.json` (M5), `netlify/functions/account.js`, `netlify/functions/_shared/supabase-rest.js`, `js/utils.js`, `js/auth.js`, `js/actions.js`, `js/app.js`, `js/screens/account.js`, `css/screens/account.css` (M6/M7), `js/storage.js`, `js/cloud-sync.js` (M10), `js/analytics.js`, `js/forecast.js`, `js/wrapped.js`, `js/screens/analytics.js` (M11), `js/backup-crypto.js`, `js/app.js`, `js/actions.js`, `js/storage.js`, `js/screens/settings.js`, `css/components.css`, `scripts/build-app-module.js` (M12), `netlify/functions/sync.js` (M13), `js/import.js`, `netlify/functions/_shared/finance-schema.js` (M14), observabilidade em backend, frontend e Service Worker (M17), inventário e tela de Privacidade (M18), registro de terceiros e operadores (M19), `js/modules/app.generated.js` (regerado). Documentação: inventário do M8, protocolo do M10, backup protegido do M12, `docs/VERSIONAMENTO.md` do M13, observabilidade do M17, inventário LGPD do M18, terceiros do M19 e desenhos de M15 a M19. **M20 (só documentação e verificação, nenhum arquivo de produção):** `SECURITY_INCIDENT_RESPONSE.md` (novo), `tests/test-incident-response.js` (novo), `scripts/check-release.js`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. **M21:** `reportar-vulnerabilidade.html` (novo), `css/reportar.css` (novo), `SECURITY.md` (novo), `scripts/security-txt.js` (novo), `tests/test-responsible-disclosure.js` (novo), `vercel.json`, `scripts/build-dist.js`, `scripts/serve.js`, `scripts/check-release.js`, `scripts/check-deploy.js`, `landing.html`, `tests/test-landing.js`, `tests/browser/run-landing.js`, `SECURITY_INCIDENT_RESPONSE.md`, `docs/LEGAL-LAUNCH.md`, `README.md`, `CHANGELOG.md`. **M22:** `docs/MARCA.md` (novo), `tests/test-brand.js` (novo), `index.html`, `manifest.webmanifest`, `landing.html`, `scripts/check-release.js`, `scripts/security-txt.js`, `SECURITY.md`, `SECURITY_INCIDENT_RESPONSE.md`, `README.md`, `CHANGELOG.md`. **M23:** `landing.html`, `css/landing.css`, `service-worker.js` (v63), `tests/test-brand.js`, `tests/test-responsible-disclosure.js`, `tests/test-third-party-transparency.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M24:** `js/screens/onboarding.js`, `js/app.js`, `js/actions.js`, `css/screens/notifications-onboarding.css`, `service-worker.js` (v64), `js/modules/app.generated.js`, `tests/test-onboarding.js`, `tests/browser/run-browser.js`, `tests/browser/run-pwa.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M40:** `tests/browser/run-browser.js`, `css/screens/health.css`, `service-worker.js` (v77), `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M39:** `tests/test-accessibility.js` (novo), `js/modules/dialog-controller.js`, `js/app.js`, `js/screens/invest.js`, `js/screens/categories.js`, `js/screens/privacy.js`, `css/components.css`, `css/screens/movements.css`, `service-worker.js` (v76), `tests/test-render.js`, `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M38:** `tests/test-performance.js` (novo), `js/accounts.js`, `js/utils.js`, `js/app.js`, `js/screens/add.js`, `service-worker.js` (v75), `tests/test-money.js`, `tests/test-pwa-cache.js`, `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M37:** `netlify/functions/_shared/ai-boundaries.js` (novo), `tests/test-ai-boundaries.js` (novo), `netlify/functions/analyze.js`, `js/insights.js`, `js/app.js`, `js/transparency.js`, `js/screens/analytics.js`, `service-worker.js` (v74), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M36:** `tests/test-goals-inflation.js` (novo), `js/goals.js`, `js/storage.js`, `js/actions.js`, `js/app.js`, `js/screens/goals.js`, `css/screens/planning.css`, `service-worker.js` (v73), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M35:** `js/reconcile.js` (novo), `tests/test-reconciliation.js` (novo), `js/screens/accounts.js`, `js/actions.js`, `js/app.js`, `js/import.js`, `js/screens/import.js`, `css/utilities.css`, `scripts/build-app-module.js`, `service-worker.js` (v72), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M34:** `tests/test-debt-center.js` (novo), `js/debts.js`, `js/storage.js`, `js/screens/debts.js`, `js/app.js`, `js/actions.js`, `css/base.css`, `service-worker.js` (v71), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M32/M33:** `tests/test-anomalies-subscriptions.js` (novo), `tests/helpers/fixed-clock.js` (novo), `tests/test-health.js`, `tests/test-insights-engine.js`, `tests/test-render.js`, `tests/test-reserve-and-close.js`, `js/forecast.js`, `js/analytics.js`, `js/advisor.js`, `js/recurring.js`, `js/storage.js`, `js/screens/insights.js`, `js/screens/subscriptions.js`, `js/app.js`, `js/actions.js`, `css/screens/intelligence.css`, `service-worker.js` (v70), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M30/M31:** `tests/test-daily-and-purchase.js` (novo), `js/forecast.js`, `js/insights.js`, `js/screens/calendar.js`, `js/screens/simulate.js`, `js/app.js`, `css/screens/planning.css`, `service-worker.js` (v69), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M28/M29:** `tests/test-reserve-and-close.js` (novo), `js/metrics.js`, `js/forecast.js`, `js/screens/health.js`, `js/screens/calendar.js`, `css/screens/health.css`, `css/screens/planning.css`, `service-worker.js` (v68), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M27:** `tests/test-score-explainable.js` (novo), `js/score.js`, `js/screens/health.js`, `css/screens/health.css`, `service-worker.js` (v67), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M26:** `tests/test-local-only-notice.js` (novo), `js/app.js`, `js/actions.js`, `js/screens/dashboard.js`, `css/screens/dashboard.css`, `css/components.css`, `service-worker.js` (v66), `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. **M25:** `js/demo.js` (novo), `tests/test-demo-mode.js` (novo), `js/app.js`, `js/actions.js`, `js/screens/onboarding.js`, `css/components.css`, `service-worker.js` (v65), `scripts/build-app-module.js`, `js/modules/app.generated.js`, `README.md`, `docs/VERSIONAMENTO.md`, `docs/ARMAZENAMENTO-E-PRIVACIDADE.md`, `CHANGELOG.md`. |
 | Migration do M13 | `20260831120000_database_schema_version.sql` — **aplicada e confirmada em produção em 2026-08-31** (`database_schema_version = 1`; grants inalterados: só `service_role` e `postgres`). Reversível por `alter table public.cofre_sync_config drop column if exists database_schema_version;` |
 | Migrations criadas até aqui | `20260828120000_rls_auto_enable_least_privilege.sql`, `20260828130000_rls_auto_enable_versionada.sql`, `20260828140000_menor_privilegio_tabelas.sql` (as três **aplicadas e confirmadas em 2026-08-28**), `20260828150000_rls_auto_enable_gatilho.sql` (**ainda não aplicada**; é no-op em produção, onde o gatilho já existe) |
 | Versão do app | `0.30.0` (package.json) |
@@ -4336,6 +4337,109 @@ lê, mas não substitui ouvir. Firefox e WebKit também não; rodei Chromium.
 
 ---
 
+## M40 - Responsividade
+
+### Antes
+
+A suíte de navegador já cobria responsividade, mas em quatro larguras (320, 390,
+768, 1440), numa tela só (o painel), com a base VAZIA. Tela vazia não estica
+grade nenhuma: o que quebra layout é conteúdo.
+
+O M40 mediu o que faltava: **as sete larguras do roteiro em 23 telas, com dado
+extremo**, mais landing, modais, paisagem e ponteiro grosso.
+
+### O que foi medido
+
+| Eixo | Cobertura | Resultado |
+|---|---|---|
+| Rolagem horizontal | 7 larguras (320, 360, 390, 430, 768, 1024, 1440) x 23 telas | **zero** |
+| Rolagem horizontal com dado extremo | conta e cartão de nome longo, categoria de 55 caracteres SEM espaço, valores na casa do milhão, descrições compridas | **zero** |
+| Texto cortado dentro da própria caixa | 23 telas em 320px | **zero** |
+| WCAG 1.4.4 + 1.4.10 combinadas | 320px com o texto do corpo dobrado (32px) em 23 telas | **zero** |
+| Landing | 320, 360, 430, 768, 1440 | **zero** |
+| Modais | 320x480 (tela baixa) e 740x360 (paisagem) | teto de 92vh com rolagem interna; **nenhum botão fora da tela** |
+| Conteúdo coberto pela doca | 10 telas, roladas até o fim, testando o centro de cada controle com `elementFromPoint` | **nenhum** controle inalcançável |
+| Gráficos e tabelas | 7 telas de dado denso | nada estoura o pai sem ter rolagem própria |
+| Alvo de toque | 12 telas com ponteiro grosso emulado | **um achado** |
+
+### O único achado, e a correção
+
+`.indicator__advice .btn { min-height: 38px }` (`css/screens/health.css`) vale
+(0,2,0) de especificidade e vencia o piso de toque do projeto, que mora em
+`utilities.css` como `button:not(.switch) { min-height: 44px }` e vale (0,1,1).
+Resultado: no celular, os botões de conselho da tela de Saúde ("Criar meta de
+reserva", "Cadastrar carteira", "Ver regra 50/30/20") ficavam com **38px** de
+altura.
+
+A regra de 38px existe por um motivo legítimo, registrado na própria folha: o
+rótulo precisa quebrar em duas linhas na coluna estreita, então a altura tem de
+ser mínima em vez de fixa. O que ela não precisava era encolher o alvo. A
+correção é um bloco `@media (pointer: coarse)` que devolve o piso de 44px sem
+tocar no desenho de mesa nem na quebra de linha.
+
+### O teste que quase não valia nada
+
+O primeiro teste de toque que escrevi **passou com o defeito presente**. Não por
+acerto: com a base vazia, a tela de Saúde não renderiza NENHUM botão de
+conselho, então o teste nunca chegava ao elemento. Um teste que não pode falhar
+pelo defeito que motivou sua existência dá confiança falsa, que é pior do que
+não ter teste.
+
+Corrigido de duas formas: o caso passou a semear conta e lançamento (o mínimo
+para os conselhos aparecerem) e ganhou uma guarda que reprova se a tela de Saúde
+voltar a não renderizar conselho nenhum. Depois disso a prova foi feita nos dois
+sentidos: com a correção **passa**; removendo a correção do CSS, **reprova**
+apontando os três botões de 38px.
+
+### Tolerância de 1px, declarada
+
+O teste reprova abaixo de **43px**, não de 44. Duas coisas medem 43,x sem serem
+defeito: o arredondamento de subpixel de um botão que a folha declara com 44px,
+e o dia do calendário, que é uma grade de SETE colunas (7 x 44 = 308, mais vãos
+e recuos, não cabe em 390px sem rolagem lateral). Os dois passam com folga no
+mínimo de 24px da WCAG 2.5.8. O piso de 43 continua pegando o defeito real, que
+era de 38px, e isso foi verificado.
+
+### O que NÃO virou mudança
+
+- **`.skip-link` mede 41px** em ponteiro grosso. É o atalho de teclado,
+  invisível até receber foco: não é alvo de toque. Excluído do teste com o
+  motivo escrito.
+- **Links de referência dentro de texto** (a fonte da CVM nas ressalvas
+  financeiras) medem 26px. A WCAG 2.5.8 isenta explicitamente o alvo que é uma
+  palavra dentro de uma frase, e forçá-los a 44px estragaria o parágrafo.
+- **`.segmented__option` mede 39x44** em 320px. Passa no mínimo da WCAG e
+  encolher a fonte ou a caixa para ganhar 5px pioraria a leitura.
+
+### Compatibilidade
+
+Uma linha de CSS dentro de uma consulta de mídia nova. Nenhum dado, nenhum
+contrato, nenhuma assinatura, nenhuma migração. `SCHEMA_VERSION` segue em 23 e
+`DB_VERSION` em 4. Em ponteiro fino (mesa) nada muda: o bloco só existe sob
+`pointer: coarse`. Cache do Service Worker em `v77`.
+
+### Testes
+
+| Teste | Resultado |
+|---|---|
+| `320 a 1440 px: 23 telas com dado extremo, sem rolagem horizontal` (novo) | **PASSOU**; 161 combinações de largura e tela, mais 23 telas de texto cortado e 23 de texto dobrado |
+| `ponteiro grosso: nenhum controle abaixo de 44px` (novo) | **PASSOU**; e **REPROVA** quando a correção do CSS é removida, verificado |
+| `npm run test:browser:chromium` | **PASSOU**; 20 de 20 |
+| `npm run lint` | **PASSOU** |
+| `npm run check:build` | **PASSOU**; 73 fontes |
+| `npm test` | **PASSOU**; suíte completa, 81 arquivos |
+| Navegador real (Chromium) | **PASSOU**. Sete larguras x 20 rotas: zero rolagem horizontal, zero texto cortado. Landing em cinco larguras: zero. Modais em 320x480 e em paisagem 740x360: cabem, rolam por dentro, nenhum botão fora da tela. Categoria de 55 caracteres sem espaço em 320px: zero estouro. 320px com texto de 32px em 14 rotas: zero |
+
+**Não validado:** Firefox e WebKit (rodei Chromium), e aparelho físico. As
+medidas de toque usam emulação de ponteiro grosso, que é o que o CSS consulta,
+mas não substitui um dedo em um telefone real.
+
+### Status
+
+**CONCLUÍDO.** Com ele fecham os 41 módulos do roteiro (M0 a M40).
+
+---
+
 ## Checklist de regressão
 
 Executar após **todo** módulo que toque no código. Marcar `OK` / `FALHOU` / `NÃO VALIDADO`.
@@ -4362,6 +4466,7 @@ Os itens automatizados são a primeira linha; os manuais só onde não há teste
 - [ ] `node tests/test-ai-boundaries.js` (limites do conteúdo da IA do M37)
 - [ ] `node tests/test-performance.js` (contratos das caches do M38)
 - [ ] `node tests/test-accessibility.js` (retorno de foco, marcos, tinta e movimento do M39)
+- [ ] `npm run test:browser:chromium` cobre o M40: sete larguras x 23 telas e o alvo de toque em ponteiro grosso
 - [ ] `node tests/test-accounting-integrity.js` (invariantes contábeis do M11)
 - [ ] `node tests/test-backup-restore.js` (backup, restauração e senha do M12)
 - [ ] `node tests/test-versioning.js` (versões e matriz de compatibilidade do M13)
