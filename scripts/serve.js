@@ -23,7 +23,11 @@ const fs = require("fs");
 const path = require("path");
 
 const ROOT = path.join(__dirname, "..");
-const PORT = Number(process.env.PORT) || 4173;
+// `--port=N` existe para poder subir o pacote publicado ao lado do servidor de
+// desenvolvimento, sem que um derrube o outro: conferir `dist/` com o repositório
+// no ar é justamente o que pega uma diferença introduzida pelo build.
+const PORTA_ARG = (process.argv.find((a) => a.startsWith("--port=")) || "").split("=")[1];
+const PORT = Number(PORTA_ARG) || Number(process.env.PORT) || 4173;
 const HOST = process.env.HOST || "127.0.0.1";
 
 // [M5] OS CABEÇALHOS LOCAIS SÃO LIDOS DA PUBLICAÇÃO, NÃO COPIADOS DELA.

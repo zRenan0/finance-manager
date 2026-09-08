@@ -22,6 +22,7 @@
     "test:coverage": "node scripts/coverage.js"
   },
   "devDependencies": {
+    "esbuild": "^0.25.10",
     "pdfjs-dist": "^6.2.108",
     "playwright": "^1.55.0"
   },

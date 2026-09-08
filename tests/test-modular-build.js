@@ -104,6 +104,51 @@ if (distBuild.status === 0) {
     && fs.readFileSync(path.join(ROOT, file)).includes(13));
   check("arquivos de texto do dist usam somente LF", comCr.length === 0, comCr.join(", "));
   check("dist não publica index.html", !fs.existsSync(path.join(ROOT, "dist/index.html")));
+
+  // ------------------------------------------------------------------
+  // [M41] O QUE VAI PARA A REDE É MINIFICADO; O QUE FICA NO REPOSITÓRIO NÃO
+  // ------------------------------------------------------------------
+  // O pacote saía com 2.090.538 bytes de JavaScript sem minificação nenhuma,
+  // comentários inclusos. Os comentários deste projeto são longos de propósito
+  // e ficam onde sempre estiveram; o que muda é que eles param de viajar.
+  const appGerado = moduleFiles.find((file) => /app\.generated\./.test(file));
+  const bytesPublicados = appGerado ? fs.statSync(path.join(ROOT, appGerado)).size : 0;
+  const bytesFonte = fs.statSync(path.join(ROOT, "js/modules/app.generated.js")).size;
+  check("o módulo publicado é bem menor que a fonte",
+    bytesPublicados > 0 && bytesPublicados < bytesFonte * 0.7,
+    `${bytesPublicados} publicados contra ${bytesFonte} de fonte`);
+  const publicadoTexto = appGerado ? fs.readFileSync(path.join(ROOT, appGerado), "utf8") : "";
+  check("os comentários longos não viajam para o navegador",
+    !/\/\/ ---------/.test(publicadoTexto) && !publicadoTexto.includes("MOTOR DE MÉTRICAS"));
+  check("a fonte continua com os comentários intactos",
+    fs.readFileSync(path.join(ROOT, "js/modules/app.generated.js"), "utf8").includes("MOTOR DE MÉTRICAS"));
+  check("boot.js publicado também é minificado",
+    fs.statSync(path.join(ROOT, "dist/js/boot.js")).size < fs.statSync(path.join(ROOT, "js/boot.js")).size * 0.7);
+
+  // ------------------------------------------------------------------
+  // [M41] A CASCATA DE @import NÃO VAI PARA O AR
+  // ------------------------------------------------------------------
+  // `css/style.css` era uma lista de 18 @import: o navegador baixava e
+  // interpretava um arquivo inteiro só para descobrir que existiam outros 18.
+  // Dois níveis serializados de latência antes do primeiro pixel, em toda
+  // carga fria, e 20 recursos bloqueando a renderização.
+  const fonteCss = read("css/style.css");
+  const parciais = Array.from(fonteCss.matchAll(/@import\s+url\(\s*["']([^"')]+)["']\s*\)\s*;/g)).map((m) => m[1]);
+  check("a divisão do CSS continua existindo no repositório", parciais.length > 10, parciais.length);
+  const cssPublicado = read("dist/css/style.css");
+  check("a folha publicada não tem @import nenhum", !/@import/.test(cssPublicado));
+  check("os parciais não são publicados",
+    parciais.every((rel) => !fs.existsSync(path.join(ROOT, "dist/css", ...rel.split("/")))),
+    parciais.filter((rel) => fs.existsSync(path.join(ROOT, "dist/css", ...rel.split("/")))).join(", "));
+  check("a folha publicada contém a cascata inteira",
+    cssPublicado.length > read("css/base.css").length,
+    `${cssPublicado.length} bytes`);
+  // Um parcial que continuasse na lista do service worker reprovaria a
+  // instalação inteira por 404, e a pessoa ficaria sem aplicativo offline.
+  check("o service worker publicado não pede mais os parciais",
+    parciais.every((rel) => !workerPublicado.includes(`"css/${rel}"`)),
+    parciais.filter((rel) => workerPublicado.includes(`"css/${rel}"`)).join(", "));
+  check("e continua pedindo a folha única", workerPublicado.includes('"css/style.css"'));
 }
 
 console.log("\n3. Estilos fora do HTML");

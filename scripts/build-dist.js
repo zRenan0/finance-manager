@@ -22,6 +22,7 @@
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const esbuild = require("esbuild");
 const securityTxt = require("./security-txt");
 
 const ROOT = path.join(__dirname, "..");
@@ -112,6 +113,141 @@ function copiar(origem, destino) {
     fs.copyFileSync(origem, destino);
   }
   return 1;
+}
+
+/* ------------------------------------------------------------------ *
+ * [M41] MINIFICAÇÃO, SÓ NA SAÍDA
+ *
+ * O pacote publicado saía com 2.090.538 bytes de JavaScript sem nenhuma
+ * minificação, comentários inclusos. E os comentários deste repositório são
+ * longos de propósito: eles explicam POR QUE cada decisão financeira foi
+ * tomada, e são a melhor parte do código. Só que na rede eles são peso morto:
+ * ninguém lê o comentário do app.generated.js pelo navegador.
+ *
+ * A saída é minificar só o que vai para `dist/`. As fontes em `js/` e `css/`
+ * ficam intactas, com os comentários todos; quem edita continua lendo o mesmo
+ * arquivo de sempre. E o `esbuild` é devDependency: nada dele viaja para o
+ * navegador, então o princípio de zero dependência em produção continua de pé.
+ *
+ * O alvo é es2022 e não es2020 porque `bootstrap.js` usa await no topo do
+ * módulo, que o es2020 não conhece; e porque o app já usa `?.` e `??`. Não há
+ * transpilação aqui, só minificação: baixar de nível o que já funciona nos
+ * navegadores que o app declara suportar só acrescentaria bytes.
+ * ------------------------------------------------------------------ */
+const ALVO_JS = "es2022";
+
+function minificarArquivo(absoluto, relativo) {
+  const original = normalizarLf(fs.readFileSync(absoluto, "utf8"));
+  const ehCss = relativo.endsWith(".css");
+  // Módulo ES x script clássico. Em módulo, os nomes do topo são privados e
+  // podem ser encurtados; em script clássico eles são GLOBAIS, e renomeá-los
+  // quebraria quem os chama de fora. `format` só é declarado no primeiro caso,
+  // e é isso que ensina o minificador a diferença.
+  const ehModulo = relativo.startsWith("js/modules/");
+  const resultado = esbuild.transformSync(original, {
+    loader: ehCss ? "css" : "js",
+    ...(ehModulo ? { format: "esm" } : {}),
+    ...(ehCss ? {} : { target: ALVO_JS }),
+    minify: true,
+    legalComments: "none",
+  });
+  const saida = normalizarLf(resultado.code);
+  fs.writeFileSync(absoluto, saida, "utf8");
+  return { antes: Buffer.byteLength(original, "utf8"), depois: Buffer.byteLength(saida, "utf8") };
+}
+
+/* ------------------------------------------------------------------ *
+ * [M41] A CASCATA DE @import VIRA UM ARQUIVO SÓ
+ *
+ * `css/style.css` era uma lista de 18 `@import`. O navegador precisa baixar e
+ * interpretar style.css INTEIRO antes de descobrir que existem outros 18
+ * arquivos: são dois níveis serializados de latência antes do primeiro pixel,
+ * em toda carga fria. Em localhost isso custa 35 ms e some; em 4G com 70 ms de
+ * ida e volta são centenas de milissegundos no caminho crítico, e eram 20
+ * recursos bloqueando a renderização.
+ *
+ * A divisão continua no repositório, porque ela é boa para quem edita. O que
+ * muda é o que vai para o ar: um arquivo só, na mesma ordem da cascata,
+ * minificado. Os parciais somem de `dist/` e também da lista do service
+ * worker, senão a instalação offline tentaria buscar arquivos que não existem
+ * mais e reprovaria o pacote inteiro.
+ * ------------------------------------------------------------------ */
+function montarCss() {
+  const entrada = path.join(ROOT, "css", "style.css");
+  const fonte = normalizarLf(fs.readFileSync(entrada, "utf8"));
+  const partes = Array.from(fonte.matchAll(/@import\s+url\(\s*["']([^"')]+)["']\s*\)\s*;/g)).map((m) => m[1]);
+  if (!partes.length) return [];
+
+  const juntas = partes.map((relativa) => {
+    const absoluto = path.join(ROOT, "css", ...relativa.split("/"));
+    if (!fs.existsSync(absoluto)) throw new Error(`css/style.css importa arquivo ausente: ${relativa}`);
+    const conteudo = normalizarLf(fs.readFileSync(absoluto, "utf8"));
+    if (/@import/.test(conteudo)) throw new Error(`@import aninhado em css/${relativa}: a concatenação não resolveria a ordem`);
+    return `/* ${relativa} */\n${conteudo}`;
+  }).join("\n");
+
+  const destino = path.join(DIST, "css", "style.css");
+  const minificado = normalizarLf(esbuild.transformSync(juntas, {
+    loader: "css", minify: true, legalComments: "none",
+  }).code);
+  fs.writeFileSync(destino, minificado, "utf8");
+
+  partes.forEach((relativa) => {
+    fs.rmSync(path.join(DIST, "css", ...relativa.split("/")), { force: true });
+  });
+  // Pasta que ficou vazia depois de absorver os parciais não deve ir para o ar.
+  const screens = path.join(DIST, "css", "screens");
+  if (fs.existsSync(screens) && fs.readdirSync(screens).length === 0) fs.rmdirSync(screens);
+
+  const antes = partes.reduce((soma, relativa) => soma
+    + Buffer.byteLength(fs.readFileSync(path.join(ROOT, "css", ...relativa.split("/")), "utf8"), "utf8"), 0);
+  console.log(`css/style.css: ${partes.length} arquivos concatenados, ${(antes / 1024).toFixed(0)} kB para ${(Buffer.byteLength(minificado, "utf8") / 1024).toFixed(0)} kB.`);
+  return partes;
+}
+
+// A lista do service worker precisa deixar de pedir os parciais absorvidos:
+// eles são item OBRIGATÓRIO da instalação, e um 404 aí reprova o pacote
+// inteiro e deixa a pessoa sem aplicativo offline.
+//
+// A limpeza acontece dentro de `reescreverPacoteVersionado`, DEPOIS de a
+// identidade do pacote ser calculada: o worker publicado é o único arquivo que
+// fica fora do próprio hash (senão a referência seria circular), e por isso o
+// conteúdo dele naquele instante precisa ser o do repositório. Comparação por
+// linha inteira, e não por expressão regular montada com o nome do arquivo:
+// nome de arquivo com ponto vira metacaractere sem ninguém perceber.
+function semParciaisDeCss(worker, partes) {
+  const alvos = new Set(partes.map((relativa) => `"css/${relativa}",`));
+  const encontrados = new Set();
+  const linhas = worker.split("\n").filter((linha) => {
+    const limpa = linha.trim();
+    if (!alvos.has(limpa)) return true;
+    encontrados.add(limpa);
+    return false;
+  });
+  const ausentes = [...alvos].filter((alvo) => !encontrados.has(alvo));
+  if (ausentes.length) {
+    throw new Error(`service-worker.js não lista ${ausentes.join(", ")}; a limpeza do dist ficaria incompleta`);
+  }
+  return linhas.join("\n");
+}
+
+function minificarJs() {
+  const raiz = path.join(DIST, "js");
+  if (!fs.existsSync(raiz)) return;
+  let antes = 0, depois = 0;
+  listarArquivos(raiz).filter((arquivo) => arquivo.endsWith(".js")).forEach((arquivo) => {
+    const medida = minificarArquivo(path.join(raiz, ...arquivo.split("/")), `js/${arquivo}`);
+    antes += medida.antes;
+    depois += medida.depois;
+  });
+  console.log(`JavaScript publicado: ${(antes / 1024).toFixed(0)} kB para ${(depois / 1024).toFixed(0)} kB.`);
+}
+
+function minificarCssAvulso() {
+  ["landing.css", "reportar.css"].forEach((nome) => {
+    const alvo = path.join(DIST, "css", nome);
+    if (fs.existsSync(alvo)) minificarArquivo(alvo, `css/${nome}`);
+  });
 }
 
 function listarArquivos(dir, base = dir) {
@@ -208,7 +344,7 @@ function versionarModulos() {
   return prontos;
 }
 
-function reescreverPacoteVersionado(modulos) {
+function reescreverPacoteVersionado(modulos, parciaisCss) {
   const bootstrap = modulos.get("bootstrap.js");
   if (!bootstrap) throw new Error("Módulo obrigatório ausente: js/modules/bootstrap.js");
 
@@ -230,7 +366,7 @@ function reescreverPacoteVersionado(modulos) {
   fs.writeFileSync(htmlPath, normalizarLf(html), "utf8");
 
   const workerPath = path.join(DIST, "service-worker.js");
-  let worker = normalizarLf(fs.readFileSync(workerPath, "utf8"));
+  let worker = semParciaisDeCss(normalizarLf(fs.readFileSync(workerPath, "utf8")), parciaisCss || []);
   modulos.forEach((gerado, fonte) => {
     const anterior = `js/modules/${fonte}`;
     const proximo = `js/modules/${gerado.arquivo}`;
@@ -387,9 +523,15 @@ function main() {
   const gerado = path.join(DIST, "js/modules/app.generated.js");
   if (!fs.existsSync(gerado)) throw new Error("Rode `npm run build` antes: js/modules/app.generated.js não existe.");
 
+  // A minificação vem ANTES do versionamento: o nome por conteúdo tem de ser o
+  // hash dos bytes que o navegador realmente baixa.
+  const parciaisCss = montarCss();
+  minificarCssAvulso();
+  minificarJs();
+
   const modulos = versionarModulos();
   absolutizar("landing.html");
-  const pacote = reescreverPacoteVersionado(modulos);
+  const pacote = reescreverPacoteVersionado(modulos, parciaisCss);
 
   // O security.txt é gerado, não copiado: `Expires` precisa ser renovado a cada
   // publicação, senão o canal aparece expirado para quem o consultar. Ver
