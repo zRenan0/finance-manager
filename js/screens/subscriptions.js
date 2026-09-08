@@ -18,8 +18,12 @@
 // plano; "R$ 670,80 por ano" faz. A mensalidade continua visível,
 // como referência; só deixou de ser a manchete.
 // ==================================================================
+// [M41] "Essenciais" ganhou aba própria. Moradia, seguros e educação formal são
+// compromissos que se repetem, mas não se cancelam numa tarde: misturá-los com
+// streaming fazia o alerta de assinaturas cobrar uma decisão impossível.
 const SUBS_VIEWS = [
   { id: "assinaturas", label: "Assinaturas" },
+  { id: "essenciais", label: "Essenciais" },
   { id: "variaveis", label: "Recorrentes" },
   { id: "ignoradas", label: "Sem acompanhar" },
 ];
@@ -28,7 +32,10 @@ function renderSubscriptionsScreen() {
   const mKey = keyOfCurrentMonth();
   const m = recurringModel(mKey);
   const view = state.subs.view;
-  const list = view === "assinaturas" ? m.subscriptions : view === "variaveis" ? m.variable : m.ignored;
+  const list = view === "assinaturas" ? m.subscriptions
+    : view === "essenciais" ? m.essentials
+    : view === "variaveis" ? m.variable
+    : m.ignored;
 
   return `<div class="screen screen--narrow">
     ${renderBackHeader("Assinaturas e recorrências")}
@@ -49,7 +56,10 @@ function renderSubscriptionsScreen() {
 
     <div class="segmented">
       ${SUBS_VIEWS.map((v) => {
-        const count = v.id === "assinaturas" ? m.counts.subscriptions : v.id === "variaveis" ? m.counts.variable : m.counts.ignored;
+        const count = v.id === "assinaturas" ? m.counts.subscriptions
+          : v.id === "essenciais" ? m.counts.essentials
+          : v.id === "variaveis" ? m.counts.variable
+          : m.counts.ignored;
         return `<button class="segmented__option ${view === v.id ? "active" : ""}" data-action="subs-view" data-value="${v.id}">${v.label}${count > 0 ? ` (${count})` : ""}</button>`;
       }).join("")}
     </div>
@@ -77,12 +87,14 @@ function renderSubscriptionsScreen() {
 
 function subsEmptyTitle(view) {
   if (view === "ignoradas") return "Você não parou de acompanhar nada.";
+  if (view === "essenciais") return "Nenhum compromisso essencial identificado.";
   if (view === "variaveis") return "Nenhuma cobrança recorrente de valor variável.";
   return "Nenhuma assinatura identificada ainda.";
 }
 
 function subsEmptyHint(view) {
   if (view === "ignoradas") return "Itens que você mandar parar de acompanhar aparecem aqui e podem voltar a qualquer momento.";
+  if (view === "essenciais") return "Aluguel, condomínio, seguros, plano de saúde e mensalidade escolar entram aqui: são fixos, mas não se resolvem cancelando.";
   if (view === "variaveis") return "Contas de luz, água e mercado entram aqui quando repetem a cadência com valores diferentes.";
   return "Assim que o mesmo gasto aparecer duas vezes no mesmo intervalo, ele é reconhecido automaticamente.";
 }
@@ -94,9 +106,11 @@ function renderSubsHero(m) {
     <div class="sub-hero__main">
       <p class="eyebrow">Assinaturas · custo de 12 meses</p>
       <p class="sub-hero__annual">${fmtBRL(m.annualTotal)}</p>
-      <p class="sub-hero__monthly">${fmtBRL(m.monthlyTotal)} por mês em ${m.counts.subscriptions} ${m.counts.subscriptions === 1 ? "cobrança" : "cobranças"} de valor fixo</p>
+      <p class="sub-hero__monthly">${fmtBRL(m.monthlyTotal)} por mês em ${m.counts.subscriptions} ${m.counts.subscriptions === 1 ? "assinatura" : "assinaturas"} que dá para cancelar</p>
+      ${m.counts.essentials > 0 ? `<p class="card-subtitle" data-ui-css="margin:6px 0 0">${fmtBRL(m.essentialMonthly)} por mês em ${m.counts.essentials} ${m.counts.essentials === 1 ? "compromisso essencial" : "compromissos essenciais"} (moradia, seguros, educação) ficam fora desta conta: eles se repetem, mas não se resolvem cancelando. Estão na aba "Essenciais".</p>` : ""}
     </div>
     <div class="health-grid">
+      <div class="health-stat"><span>Essenciais</span><b>${fmtBRL(m.essentialMonthly)}</b></div>
       <div class="health-stat"><span>Recorrentes variáveis</span><b>${fmtBRL(m.variableMonthly)}</b></div>
       <div class="health-stat"><span>Comprometido por mês</span><b>${fmtBRL(m.committedMonthly)}</b></div>
       <div class="health-stat"><span>Recorrências no ano</span><b>${fmtBRL(m.committedAnnual)}</b></div>
@@ -297,6 +311,9 @@ function renderSubItem(s, ignored, income) {
       </div>
       ${s.sinceFirstPct > 3 ? `<p class="sub-item__note">Desde a primeira cobrança o valor subiu ${s.sinceFirstPct.toFixed(0)}%; de ${fmtBRL(s.firstAmount)} para ${fmtBRL(s.lastAmount)}.</p>` : ""}
       ${s.kind === "recorrente" ? `<p class="sub-item__note">O valor varia entre as cobranças, então este é um gasto recorrente e não uma assinatura de preço fixo. O total usa a última cobrança como referência.</p>` : ""}
+      ${s.kind === "assinatura" ? `<p class="sub-item__note">${s.essential
+        ? `Tratado como <b>compromisso essencial</b>${s.essentialSource === "voce" ? ", porque você classificou assim" : `, pelo tipo reconhecido (${escapeHtml(s.typeLabel)})`}. Fica fora do alerta de assinaturas e do custo anual delas; continua inteiro no comprometido do mês.`
+        : `Tratado como <b>assinatura</b>${s.essentialSource === "voce" ? ", porque você classificou assim" : ""}: entra no alerta de assinaturas e no custo de 12 meses.`}</p>` : ""}
       ${s.reviewedAt ? `<p class="sub-item__note">Você revisou este item em ${fmtDateFull(s.reviewedAt)}${s.daysSinceReview > 0 ? ` (há ${s.daysSinceReview} ${s.daysSinceReview === 1 ? "dia" : "dias"})` : ""}. A marcação guarda só a data; nenhum juízo sobre a assinatura.</p>` : ""}
       ${s.declaredOnly ? `<p class="sub-item__note">Este compromisso vem da marcação "gasto fixo mensal" no lançamento, não de um histórico de cobranças. A partir da segunda cobrança o app passa a usar as datas e os valores reais.</p>` : ""}
       <div class="sub-item__actions">
@@ -305,6 +322,7 @@ function renderSubItem(s, ignored, income) {
           : `${s.flaggedRecurring
               ? `<button class="btn btn--secondary btn--sm" data-action="sub-unflag" data-id="${escapeHtml(s.key)}">Desmarcar como recorrente</button>`
               : `<button class="btn btn--secondary btn--sm" data-action="rec-confirm" data-id="${escapeHtml(s.key)}">Marcar como recorrente</button>`}
+             ${s.kind === "assinatura" ? `<button class="btn btn--secondary btn--sm" data-action="sub-classify" data-id="${escapeHtml(s.key)}" data-value="${s.essential ? "assinatura" : "essencial"}">${s.essential ? "Tratar como assinatura" : "Tratar como essencial"}</button>` : ""}
              <button class="btn btn--secondary btn--sm" data-action="sub-review" data-id="${escapeHtml(s.key)}">${reviewing ? "Fechar revisão" : subsReviewLabel(s)}</button>
              <button class="btn btn--ghost btn--sm" data-action="sub-ignore" data-id="${escapeHtml(s.key)}">Parar de acompanhar</button>`}
       </div>
@@ -317,14 +335,14 @@ function renderSubItem(s, ignored, income) {
 // reajuste, que antes só existia na tela cheia.
 function renderSubscriptionsCard() {
   const m = recurringModel(keyOfCurrentMonth());
-  if (m.counts.subscriptions === 0 && m.counts.variable === 0) return "";
-  const top = m.subscriptions.concat(m.variable).slice(0, 3);
+  if (m.counts.tracked === 0) return "";
+  const top = m.subscriptions.concat(m.essentials).concat(m.variable).slice(0, 3);
   return `<div class="card card--subs span-3" data-action="nav" data-tab="subscriptions" data-ui-css="cursor:pointer">
     <div class="leak-header">
       ${svgIcon("refresh", 18, "leak-header__icon")}
       <div>
         <p class="card-title" data-ui-css="margin:0">Assinaturas e recorrências</p>
-        <p class="card-subtitle" data-ui-css="margin:2px 0 0">${m.counts.subscriptions + m.counts.variable} identificadas · ${fmtBRL(m.annualTotal)} por ano em assinaturas</p>
+        <p class="card-subtitle" data-ui-css="margin:2px 0 0">${m.counts.tracked} ${m.counts.tracked === 1 ? "recorrência identificada" : "recorrências identificadas"}, ${m.counts.subscriptions} ${m.counts.subscriptions === 1 ? "delas assinatura" : "delas assinaturas"} · ${fmtBRL(m.annualTotal)} por ano em assinaturas</p>
       </div>
       <span class="leak-total">${fmtBRL(m.committedMonthly)}/mês</span>
     </div>

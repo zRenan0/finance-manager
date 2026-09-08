@@ -56,10 +56,13 @@ console.log("\n1. Cadência sai do intervalo entre cobranças, não de \"aparece
 
   const m = buildRecurringModel(withTx(transactions));
   const netflix = find(m.subscriptions, "Netflix");
-  const seguro = find(m.subscriptions.concat(m.ended), "Seguro do carro");
+  // [M41] O seguro é compromisso essencial, não assinatura: ele sai da lista de
+  // assinaturas e vai para `essentials`. Ver REC_ESSENTIAL_TYPES em recurring.js.
+  const seguro = find(m.subscriptions.concat(m.essentials).concat(m.ended), "Seguro do carro");
 
   check("Netflix reconhecida como mensal", netflix && netflix.cadenceId === "mensal", netflix && netflix.cadenceId);
   check("Seguro reconhecido como anual", seguro && seguro.cadenceId === "anual", seguro && seguro.cadenceId);
+  check("Seguro não é tratado como assinatura cancelável", seguro && seguro.essential === true, seguro && seguro.essential);
   check("equivalente mensal do seguro é 1/12 da cobrança", seguro && near(seguro.monthlyEquivalent, 100), seguro && seguro.monthlyEquivalent);
   check("custo anual da Netflix é 12x a mensalidade", netflix && near(netflix.annualCost, 670.8), netflix && netflix.annualCost);
   check("total mensal NÃO soma o valor cheio do seguro", m.monthlyTotal < 200, m.monthlyTotal);

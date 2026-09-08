@@ -253,7 +253,7 @@ const ADVISOR_RULES = [
       if (rec.committedMonthly <= 0) return null;
       const share = rec.incomeShare;
       if (share < ADV.fixedShareWarn) return null;
-      const n = rec.counts.subscriptions + rec.counts.variable;
+      const n = rec.counts.tracked;
       return advCard({
         id: "despesas-fixas",
         tone: share >= ADV.fixedShareDanger ? "warn" : "info",
@@ -363,19 +363,25 @@ const ADVISOR_RULES = [
 
   // §8; o custo anual das assinaturas. É este número que muda decisão:
   // "R$ 55,90" não assusta ninguém; "R$ 670 por ano" faz revisar o plano.
+  //
+  // [M41] E só entra aqui o que se CANCELA. Este alerta existe para provocar uma
+  // decisão; aplicá-lo ao aluguel é conselho vazio, e conselho vazio derruba a
+  // confiança nos outros alertas. Moradia, seguros e educação formal contam
+  // inteiros em "despesas fixas", logo acima, que é a pergunta certa para eles.
   {
     id: "assinaturas",
-    run({ rec, income }) {
+    run({ rec }) {
       if (!rec || rec.counts.subscriptions === 0) return null;
       if (rec.monthlyTotal <= 0) return null;
-      const share = income > 0 ? safePct(rec.monthlyTotal, income) : 0;
+      const share = rec.subscriptionShare;
       const heavy = share >= ADV.subscriptionShare;
+      const n = rec.counts.subscriptions;
       return advCard({
         id: "assinaturas",
         tone: heavy ? "warn" : "info",
         icon: "refresh",
         title: `Suas assinaturas somam ${fmtBRL(rec.monthlyTotal)} por mês`,
-        message: `São ${rec.counts.subscriptions} cobranças recorrentes. ${fmtBRL(rec.annualTotal)} ao longo de um ano${share > 0 ? `, ${share.toFixed(0)}% da sua renda` : ""}.`,
+        message: `${n === 1 ? "É 1 serviço que dá para cancelar" : `São ${n} serviços que dão para cancelar`}: ${fmtBRL(rec.annualTotal)} ao longo de um ano${share > 0 ? `, ${share.toFixed(0)}% da sua renda` : ""}.${rec.counts.essentials > 0 ? ` Moradia, seguros e educação ficam fora desta conta (${fmtBRL(rec.essentialMonthly)}/mês); eles se repetem, mas não se resolvem cancelando.` : ""}`,
         value: rec.annualTotal,
         impact: rec.monthlyTotal,
         action: { label: "Revisar assinaturas", tab: "subscriptions" },
@@ -504,7 +510,9 @@ const ADVISOR_RULES = [
         tone: "info",
         icon: "shieldCheck",
         title: `Faltam ${fmtBRL(missing)} para sua reserva ficar completa`,
-        message: `Hoje ela cobre ${fmtDec(e.monthsCovered, 1)} dos ${e.targetMonths} meses que você definiu.`,
+        message: e.targetSource === "meta"
+          ? `Hoje ela cobre ${fmtDec(e.monthsCovered, 1)} dos ${fmtDec(e.targetMonthsEffective, 1)} meses de despesa que o seu alvo de ${fmtBRL(e.target)} compra.`
+          : `Hoje ela cobre ${fmtDec(e.monthsCovered, 1)} dos ${e.targetMonths} meses que você definiu.`,
         value: missing,
         impact: missing,
         action: { label: "Ver metas", tab: "goals" },

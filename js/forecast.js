@@ -304,6 +304,48 @@ function buildFutureEvents(data, fromIso, toIso) {
   return events;
 }
 
+// ------------------------------------------------------------------------------
+// FATURAS DE CARTÃO COMO EVENTOS DATADOS
+// ------------------------------------------------------------------------------
+// A fatura conhecida entra no caixa no VENCIMENTO. Se já venceu e continua em
+// aberto, entra no primeiro dia da projeção, porque segue como compromisso.
+//
+// Fica fora de `buildFutureEvents` de propósito: aquela função devolve eventos
+// em regime de COMPETÊNCIA (a compra no crédito é consumo na data da compra), e
+// a fatura é a liquidação em CAIXA do que já está lá. Quem soma dinheiro saindo
+// da conta pede as duas listas; quem soma consumo pede só a primeira. Antes
+// este bloco vivia dentro de `buildForecast`, e por isso "Próximas contas" não
+// enxergava fatura nenhuma.
+function cardStatementEvents(data, fromIso, toIso) {
+  if (typeof cardStatements !== "function") return [];
+  const amanha = isoOfDate(new Date(dateFromIso(fromIso).getTime() + 86400000));
+  const out = [];
+  (data.creditCards || []).forEach((card) => {
+    cardStatements(data, card.id).forEach((statement) => {
+      if (!(statement.outstanding > 0)) return;
+      const overdue = statement.dueDate <= fromIso;
+      const iso = overdue ? amanha : statement.dueDate;
+      if (iso > toIso) return;
+      out.push({
+        id: `card-statement-${card.id}-${statement.key}`,
+        iso,
+        type: "expense",
+        amount: statement.outstanding,
+        label: `Fatura ${card.name}`,
+        categoryName: "Cartões",
+        color: "var(--negative)",
+        icon: "creditCard",
+        kind: "card-statement",
+        installment: null,
+        certain: true,
+        cashEffect: true,
+        meta: { creditCardId: card.id, statementKey: statement.key, dueDate: statement.dueDate, overdue },
+      });
+    });
+  });
+  return out;
+}
+
 /* ==============================================================================
  * SALDO DIA A DIA
  * ============================================================================== */
@@ -314,33 +356,10 @@ function buildForecast(data, refIso) {
   const endIso = isoOfDate(new Date(dateFromIso(today).getTime() + FORECAST_MAX_DAYS * 86400000));
   const events = buildFutureEvents(data, today, endIso);
 
-  // Faturas conhecidas entram no caixa no vencimento. Se já venceram, entram
-  // no primeiro dia da projeção, pois seguem como compromisso em aberto.
-  if (typeof cardStatements === "function") {
-    const tomorrow = isoOfDate(new Date(dateFromIso(today).getTime() + 86400000));
-    (data.creditCards || []).forEach((card) => {
-      cardStatements(data, card.id).forEach((statement) => {
-        if (!(statement.outstanding > 0)) return;
-        const overdue = statement.dueDate <= today;
-        const iso = overdue ? tomorrow : statement.dueDate;
-        if (iso > endIso) return;
-        events.push({
-          id: `card-statement-${card.id}-${statement.key}`,
-          iso,
-          type: "expense",
-          amount: statement.outstanding,
-          label: `Fatura ${card.name}`,
-          categoryName: "Cartões",
-          color: "var(--negative)",
-          icon: "creditCard",
-          kind: "card-statement",
-          installment: null,
-          certain: true,
-          cashEffect: true,
-          meta: { creditCardId: card.id, statementKey: statement.key, dueDate: statement.dueDate, overdue },
-        });
-      });
-    });
+  // Faturas conhecidas entram no caixa no vencimento (ver `cardStatementEvents`).
+  const faturas = cardStatementEvents(data, today, endIso);
+  if (faturas.length) {
+    faturas.forEach((e) => events.push(e));
     events.sort((a, b) => (a.iso < b.iso ? -1 : a.iso > b.iso ? 1 : 0));
   }
 
@@ -720,7 +739,7 @@ function forecastAssumptions(data, baseline, events) {
 
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
-    buildForecast, buildFutureEvents, recurringTemplates, variableBaseline,
+    buildForecast, buildFutureEvents, cardStatementEvents, recurringTemplates, variableBaseline,
     monthCloseForecast, monthExpenseOutlook, dailyAllowance, FORECAST_HORIZONS,
   };
 }

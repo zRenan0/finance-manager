@@ -339,11 +339,13 @@ function renderScoreCard(m) {
 // ---- Patrimônio: total, composição e evolução ----
 function renderNetWorthCard(m) {
   const w = m.worth;
-  const series = netWorthSeries(state.data, 6);
-  const first = series[0].value;
-  const last = series[series.length - 1].value;
-  const delta = subMoney(last, first);
-  const deltaPct = first !== 0 ? (delta / Math.abs(first)) * 100 : null;
+  // [M41] A variação vem de `netWorthGrowth`, a MESMA função que o pilar de
+  // patrimônio do score consulta. Eram duas janelas (6 meses aqui, 4 lá) e a
+  // tela exibia "+443,2%" ao lado de "cresceu 251,1% nos últimos meses".
+  const g = netWorthGrowth(state.data);
+  const series = g.series;
+  const delta = g.delta;
+  const deltaPct = g.pct;
   const up = delta >= 0;
   const trendColor = up ? "var(--positive)" : "var(--negative)";
 
@@ -367,6 +369,7 @@ function renderNetWorthCard(m) {
 
     ${renderSparkline(series, up ? "var(--brand)" : "var(--negative)")}
     <div class="networth-axis">${series.map((p) => `<span>${p.label}</span>`).join("")}</div>
+    ${g.measurable && deltaPct != null ? `<p class="footnote" data-ui-css="margin-top:6px">${up ? "Crescimento" : "Queda"} de ${fmtDec(Math.abs(deltaPct), 1)}% desde ${g.sinceLabel}: de ${fmtBRL(g.first)} para ${fmtBRL(g.last)}.</p>` : ""}
 
     ${sum > 0 ? `<div class="segment-bar" data-ui-css="margin-top:14px">
       ${parts.filter((p) => p.value > 0).map((p) => `<div data-ui-css="flex:${p.value};background:${p.color}"></div>`).join("")}
@@ -408,13 +411,18 @@ function renderReserveCard(m) {
     <p class="mini-card__value">${fmtBRL(r.current)}</p>
     <div class="progress progress--sm"><div class="progress__fill" data-ui-css="width:${clamp(r.pct, 0, 100)}%; background:${meta.color}"></div></div>
     <p class="mini-card__note">
-      ${r.monthlyNeed > 0
-        ? `Cobre <b>${fmtDec(r.monthsCovered, 1)}</b> de ${r.targetMonths} meses de despesa (${fmtBRL(r.monthlyNeed)}/mês).`
+      ${/* [M41] Os dois números do cartão passam a falar da MESMA régua. Antes
+            ele dizia "cobre 2,1 de 6 meses de despesa (R$ 3.963,38/mês)" e, uma
+            linha abaixo, "Alvo: R$ 21.600,00"; mas 6 × 3.963,38 = 23.780,28.
+            O alvo vinha da meta cadastrada e a contagem de meses vinha do
+            ajuste; nenhuma das duas frases explicava a outra. */
+      r.monthlyNeed > 0
+        ? `Cobre <b>${fmtDec(r.monthsCovered, 1)}</b> de ${fmtDec(r.targetMonthsEffective, 1)} meses de despesa (${fmtBRL(r.monthlyNeed)}/mês).`
         : "Registre alguns gastos para calcular quantos meses sua reserva cobre."}
     </p>
     ${!r.configured
       ? `<button class="btn btn--secondary btn--block btn--sm" data-action="nav" data-tab="goals">Criar meta de reserva</button>`
-      : `<p class="footnote" data-ui-css="margin-top:8px">Alvo: ${fmtBRL(r.target)}</p>`}
+      : `<p class="footnote" data-ui-css="margin-top:8px">Alvo: ${fmtBRL(r.target)}${r.targetSource === "meta" ? ", definido por você" : `, ${r.targetMonths} meses de despesa`}</p>`}
   </div>`;
 }
 
@@ -474,13 +482,21 @@ function renderUpcomingBillsCard(m) {
       <button class="btn btn--ghost btn--block btn--sm" data-action="nav" data-tab="calendar">${svgIcon("calendar", 14)} Ver no calendário</button>
     </div>`;
   }
-  const KIND_LABEL = { late: "Atrasada", recurring: "Prevista", scheduled: "Agendada" };
-  const KIND_COLOR = { late: "var(--negative)", recurring: "var(--goal)", scheduled: "var(--ink-faint)" };
+  // Os rótulos cobrem todos os tipos que o motor de previsão devolve. Um tipo
+  // sem rótulo aparecia como "undefined · 12/09" na linha da conta.
+  const KIND_LABEL = {
+    late: "Atrasada", recurring: "Prevista", scheduled: "Agendada",
+    installment: "Parcela", "card-statement": "Fatura", liability: "Dívida",
+  };
+  const KIND_COLOR = {
+    late: "var(--negative)", recurring: "var(--goal)", scheduled: "var(--ink-faint)",
+    installment: "var(--ink-faint)", "card-statement": "var(--negative)", liability: "var(--negative)",
+  };
   return `<div class="card card--upcoming span-1">
     <div class="mini-card__head">
       <div>
         <p class="card-title" data-ui-css="margin:0">Próximas contas</p>
-        <p class="mini-card__sub">${b.items.length} nos próximos 30 dias</p>
+        <p class="mini-card__sub">${b.overdueCount > 0 ? `${plural(b.overdueCount, "vencida", "vencidas")} · ` : ""}${b.items.length - b.overdueCount} nos próximos 30 dias</p>
       </div>
       <span class="leak-total">${fmtBRL(b.total)}</span>
     </div>
@@ -489,11 +505,12 @@ function renderUpcomingBillsCard(m) {
         <span class="icon-bubble icon-bubble--sm" data-ui-css="background:color-mix(in srgb, ${it.color} 14%, transparent); color:${it.color}">${svgIcon(it.icon, 14)}</span>
         <div class="bill-row__info">
           <p class="bill-row__label">${escapeHtml(it.label)}${it.installment ? ` <span class="bill-row__inst">${it.installment}</span>` : ""}</p>
-          <p class="bill-row__meta" data-ui-css="color:${KIND_COLOR[it.kind]}">${KIND_LABEL[it.kind]} · ${fmtDateShort(it.date)}${it.kind !== "late" && it.daysLeft >= 0 ? ` · em ${it.daysLeft}d` : ""}</p>
+          <p class="bill-row__meta" data-ui-css="color:${it.overdue ? "var(--negative)" : (KIND_COLOR[it.kind] || "var(--ink-faint)")}">${it.overdue && it.kind === "card-statement" ? "Fatura vencida" : (KIND_LABEL[it.kind] || "Prevista")} · ${fmtDateShort(it.date)}${!it.overdue && it.daysLeft >= 0 ? ` · em ${it.daysLeft}d` : ""}</p>
         </div>
         <span class="bill-row__amount">${fmtBRL(it.amount)}</span>
       </div>`).join("")}
     </div>
+    ${b.items.length > 5 ? `<p class="footnote">+${b.items.length - 5} ${b.items.length - 5 === 1 ? "outra conta" : "outras contas"} nesta janela; veja tudo no calendário.</p>` : ""}
     ${b.lateCount > 0 ? `<button class="btn btn--secondary btn--block btn--sm" data-action="carry-post-all">Lançar gastos fixos pendentes</button>` : ""}
     <button class="btn btn--ghost btn--block btn--sm" data-action="nav" data-tab="calendar">${svgIcon("calendar", 14)} Ver no calendário</button>
   </div>`;

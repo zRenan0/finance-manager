@@ -1205,6 +1205,17 @@ function onClick(e) {
       state.subs.reviewKey = null;
       notify("Revisão registrada; guardamos só a data", "success");
       break;
+    // [M41] Reclassificar entre assinatura e compromisso essencial. Guarda a
+    // ESCOLHA da pessoa, que vence a inferência pelo nome; nenhum lançamento é
+    // tocado e nenhum juízo sobre o gasto é registrado.
+    case "sub-classify": {
+      const alvo = value === "essencial" ? "essencial" : "assinatura";
+      setData((d) => ({ ...d, recurringPrefs: recPrefsWith(d, "classe", id, alvo) }));
+      notify(alvo === "essencial"
+        ? "Passa a contar como compromisso essencial, fora do alerta de assinaturas"
+        : "Passa a contar como assinatura, dentro do alerta e do custo anual", "info");
+      break;
+    }
     case "sub-ignore":
       // "Parar de acompanhar" NÃO apaga lançamento nenhum: só registra a
       // preferência. O histórico continua alimentando gráficos e comparações.

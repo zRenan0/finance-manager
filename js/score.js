@@ -141,16 +141,21 @@ const SCORE_PILLARS = [
     evaluate(data, mKey, ctx) {
       const r = ctx.reserve;
       if (r.monthlyNeed <= 0 && r.current <= 0) return { applicable: false };
-      const ratio = scoreRamp(r.monthsCovered, 0, r.targetMonths);
+      // [M41] A régua é o ALVO EXIBIDO convertido em meses, não os meses do
+      // ajuste: quando a pessoa cadastrou uma meta de R$ 21.600 e a despesa
+      // média é R$ 3.963,38, o alvo compra 5,4 meses e não 6. Medir contra 6
+      // fazia o pilar cobrar um dinheiro que o alvo da tela não pedia.
+      const alvoMeses = r.targetMonthsEffective;
+      const ratio = scoreRamp(r.monthsCovered, 0, alvoMeses);
       const months = r.monthsCovered;
       return {
         applicable: true,
         ratio,
-        good: months >= r.targetMonths,
+        good: months >= alvoMeses,
         detail: r.current > 0
-          ? `Sua reserva cobre ${fmtDec(months, 1)} ${months < 2 ? "mês" : "meses"} de despesas (alvo: ${r.targetMonths}).`
+          ? `Sua reserva cobre ${fmtDec(months, 1)} ${months < 2 ? "mês" : "meses"} de despesas (alvo: ${fmtDec(alvoMeses, 1)}${r.targetSource === "meta" ? ", definido por você" : ""}).`
           : "Você ainda não tem reserva de emergência formada.",
-        advice: months >= r.targetMonths ? null : `Faltam ${fmtBRL(Math.max(0, subMoney(r.target, r.current)))} para chegar aos ${r.targetMonths} meses de segurança.`,
+        advice: months >= alvoMeses ? null : `Faltam ${fmtBRL(Math.max(0, subMoney(r.target, r.current)))} para chegar ao alvo de ${fmtBRL(r.target)}.`,
       };
     },
   },
@@ -182,20 +187,24 @@ const SCORE_PILLARS = [
     weight: 10,
     icon: "layout",
     evaluate(data, mKey, ctx) {
-      const series = netWorthSeries(data, 4);
-      const first = series[0].value;
-      const last = series[series.length - 1].value;
-      if (Math.abs(first) < 1 && Math.abs(last) < 1) return { applicable: false };
-      const growth = first !== 0 ? ((last - first) / Math.abs(first)) * 100 : (last > 0 ? 100 : 0);
-      const ratio = scoreRamp(growth, -10, 10);      // −10% = zero, +10% no trimestre = cheio
+      // [M41] A JANELA É A MESMA DO CARTÃO DE PATRIMÔNIO, e o período é escrito.
+      // Aqui a série tinha 4 meses e no cartão tinha 6: a mesma tela dizia
+      // "+443,2%" num canto e "cresceu 251,1% nos últimos meses" no outro.
+      // A régua (−10% a +10%) continua a mesma; sobre seis meses ela é um pouco
+      // mais folgada que sobre um trimestre, e isso é deliberado: patrimônio se
+      // move devagar e um mês ruim não deveria derrubar o pilar.
+      const g = netWorthGrowth(data);
+      if (!g.measurable) return { applicable: false };
+      const growth = g.pct;
+      const ratio = scoreRamp(growth, -10, 10);
       return {
         applicable: true,
         ratio,
         good: growth >= 0,
         growth,
         detail: growth >= 0
-          ? `Seu patrimônio cresceu ${fmtDec(growth, 1)}% nos últimos meses, até ${fmtBRL(last)}.`
-          : `Seu patrimônio recuou ${fmtDec(Math.abs(growth), 1)}% nos últimos meses.`,
+          ? `Seu patrimônio cresceu ${fmtDec(growth, 1)}% desde ${g.sinceLabel}, até ${fmtBRL(g.last)}.`
+          : `Seu patrimônio recuou ${fmtDec(Math.abs(growth), 1)}% desde ${g.sinceLabel}, até ${fmtBRL(g.last)}.`,
         advice: growth >= 0 ? null : "Patrimônio caindo com renda estável costuma significar consumo do que já foi guardado.",
       };
     },

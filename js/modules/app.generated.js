@@ -16175,16 +16175,21 @@ const SCORE_PILLARS = [
     evaluate(data, mKey, ctx) {
       const r = ctx.reserve;
       if (r.monthlyNeed <= 0 && r.current <= 0) return { applicable: false };
-      const ratio = scoreRamp(r.monthsCovered, 0, r.targetMonths);
+      // [M41] A régua é o ALVO EXIBIDO convertido em meses, não os meses do
+      // ajuste: quando a pessoa cadastrou uma meta de R$ 21.600 e a despesa
+      // média é R$ 3.963,38, o alvo compra 5,4 meses e não 6. Medir contra 6
+      // fazia o pilar cobrar um dinheiro que o alvo da tela não pedia.
+      const alvoMeses = r.targetMonthsEffective;
+      const ratio = scoreRamp(r.monthsCovered, 0, alvoMeses);
       const months = r.monthsCovered;
       return {
         applicable: true,
         ratio,
-        good: months >= r.targetMonths,
+        good: months >= alvoMeses,
         detail: r.current > 0
-          ? `Sua reserva cobre ${fmtDec(months, 1)} ${months < 2 ? "mês" : "meses"} de despesas (alvo: ${r.targetMonths}).`
+          ? `Sua reserva cobre ${fmtDec(months, 1)} ${months < 2 ? "mês" : "meses"} de despesas (alvo: ${fmtDec(alvoMeses, 1)}${r.targetSource === "meta" ? ", definido por você" : ""}).`
           : "Você ainda não tem reserva de emergência formada.",
-        advice: months >= r.targetMonths ? null : `Faltam ${fmtBRL(Math.max(0, subMoney(r.target, r.current)))} para chegar aos ${r.targetMonths} meses de segurança.`,
+        advice: months >= alvoMeses ? null : `Faltam ${fmtBRL(Math.max(0, subMoney(r.target, r.current)))} para chegar ao alvo de ${fmtBRL(r.target)}.`,
       };
     },
   },
@@ -16216,20 +16221,24 @@ const SCORE_PILLARS = [
     weight: 10,
     icon: "layout",
     evaluate(data, mKey, ctx) {
-      const series = netWorthSeries(data, 4);
-      const first = series[0].value;
-      const last = series[series.length - 1].value;
-      if (Math.abs(first) < 1 && Math.abs(last) < 1) return { applicable: false };
-      const growth = first !== 0 ? ((last - first) / Math.abs(first)) * 100 : (last > 0 ? 100 : 0);
-      const ratio = scoreRamp(growth, -10, 10);      // −10% = zero, +10% no trimestre = cheio
+      // [M41] A JANELA É A MESMA DO CARTÃO DE PATRIMÔNIO, e o período é escrito.
+      // Aqui a série tinha 4 meses e no cartão tinha 6: a mesma tela dizia
+      // "+443,2%" num canto e "cresceu 251,1% nos últimos meses" no outro.
+      // A régua (−10% a +10%) continua a mesma; sobre seis meses ela é um pouco
+      // mais folgada que sobre um trimestre, e isso é deliberado: patrimônio se
+      // move devagar e um mês ruim não deveria derrubar o pilar.
+      const g = netWorthGrowth(data);
+      if (!g.measurable) return { applicable: false };
+      const growth = g.pct;
+      const ratio = scoreRamp(growth, -10, 10);
       return {
         applicable: true,
         ratio,
         good: growth >= 0,
         growth,
         detail: growth >= 0
-          ? `Seu patrimônio cresceu ${fmtDec(growth, 1)}% nos últimos meses, até ${fmtBRL(last)}.`
-          : `Seu patrimônio recuou ${fmtDec(Math.abs(growth), 1)}% nos últimos meses.`,
+          ? `Seu patrimônio cresceu ${fmtDec(growth, 1)}% desde ${g.sinceLabel}, até ${fmtBRL(g.last)}.`
+          : `Seu patrimônio recuou ${fmtDec(Math.abs(growth), 1)}% desde ${g.sinceLabel}, até ${fmtBRL(g.last)}.`,
         advice: growth >= 0 ? null : "Patrimônio caindo com renda estável costuma significar consumo do que já foi guardado.",
       };
     },
@@ -16604,6 +16613,45 @@ function netWorthSeries(data, months = 6) {
   return out;
 }
 
+// ------------------------------------------------------------------------------
+// [M41] UMA JANELA SÓ PARA "QUANTO O PATRIMÔNIO CRESCEU"
+// ------------------------------------------------------------------------------
+// O cartão de Patrimônio comparava o primeiro e o último ponto de uma série de
+// 6 meses; o pilar do score fazia a mesma conta sobre uma série de 4. Na mesma
+// tela apareciam "+443,2%" e "seu patrimônio cresceu 251,1% nos últimos meses".
+// Os dois números estavam certos, e é justamente isso que os torna
+// indefensáveis: a mesma grandeza com dois valores e nenhum período escrito.
+//
+// Agora existe uma função só, com uma janela só, e ela devolve o PERÍODO junto
+// com o percentual. "Cresceu 443,2% desde abril" é verificável; "cresceu 443,2%
+// nos últimos meses" é só uma afirmação grande.
+const NET_WORTH_GROWTH_MONTHS = 6;
+
+function netWorthGrowth(data, months) {
+  const janela = Math.max(2, Number(months) || NET_WORTH_GROWTH_MONTHS);
+  const series = netWorthSeries(data, janela);
+  const first = series[0].value;
+  const last = series[series.length - 1].value;
+  const delta = subMoney(last, first);
+  // Sem base nenhuma dos dois lados não há crescimento a medir; devolver 0%
+  // seria inventar um fato sobre quem ainda não tem histórico.
+  const measurable = Math.abs(first) >= 1 || Math.abs(last) >= 1;
+  const pct = !measurable ? null
+    : (first !== 0 ? (delta / Math.abs(first)) * 100 : (last > 0 ? 100 : last < 0 ? -100 : 0));
+  const [ano, mes] = String(series[0].key).split("-").map(Number);
+  const mesmoAno = ano === series[series.length - 1].year;
+  return {
+    series, months: janela,
+    first, last, delta, pct, measurable,
+    fromKey: series[0].key,
+    toKey: series[series.length - 1].key,
+    // "abril" quando o período cabe no mesmo ano, "abril de 2025" quando não.
+    sinceLabel: mesmoAno
+      ? MONTH_NAMES[mes - 1].toLowerCase()
+      : `${MONTH_NAMES[mes - 1].toLowerCase()} de ${ano}`,
+  };
+}
+
 /* ==============================================================================
  * RESERVA DE EMERGÊNCIA
  * ============================================================================== */
@@ -16727,22 +16775,42 @@ function emergencyLadder(data, months = 3) {
   };
 }
 
+// [M41] O ALVO E A RÉGUA PRECISAM SER O MESMO NÚMERO.
+//
+// O cartão dizia "cobre 2,1 de 6 meses de despesa (R$ 3.963,38/mês)" e, logo
+// abaixo, "Alvo: R$ 21.600,00". Só que 6 × 3.963,38 = 23.780,28. O alvo vinha
+// da meta que a pessoa cadastrou; a contagem de meses continuava vindo dos 6
+// meses do ajuste. Alcançar o alvo exibido dá 5,45 meses, não 6, e o cartão
+// perdia a coerência interna: nenhuma das duas frases explicava a outra.
+//
+// Agora `targetMonthsEffective` converte o alvo REAL pela mesma régua do
+// `monthsCovered` (alvo ÷ despesa média), e `targetSource` diz de onde ele veio
+// para a tela poder escrever "definido por você" em vez de fingir que 21.600
+// são seis meses.
 function emergencyFund(data) {
   const goal = emergencyGoalOf(data);
   const targetMonths = Math.max(1, Number(data.emergencyMonths) || 6);
   const monthlyNeed = avgMonthlyExpense(data);
   const current = goal ? roundMoney(goal.current) : 0;
   // Alvo: o que o usuário definiu na meta; sem meta, N meses de despesa média.
-  const target = goal && goal.target > 0 ? roundMoney(goal.target) : mulMoney(monthlyNeed, targetMonths);
+  const fromGoal = !!(goal && goal.target > 0);
+  const target = fromGoal ? roundMoney(goal.target) : mulMoney(monthlyNeed, targetMonths);
   const pct = target > 0 ? clamp(safePct(current, target), 0, 100) : 0;
   const monthsCovered = monthlyNeed > 0 ? current / monthlyNeed : 0;
+  // Quantos meses o ALVO EXIBIDO compra, na mesma régua de `monthsCovered`.
+  const targetMonthsEffective = monthlyNeed > 0 && target > 0 ? target / monthlyNeed : targetMonths;
 
   let status = "empty";
-  if (current > 0 && monthsCovered >= targetMonths) status = "ok";
-  else if (monthsCovered >= targetMonths / 2) status = "partial";
+  if (current > 0 && monthsCovered >= targetMonthsEffective) status = "ok";
+  else if (current > 0 && monthsCovered >= targetMonthsEffective / 2) status = "partial";
   else if (current > 0) status = "low";
 
-  return { goal, goalId: goal ? goal.id : null, current, target, pct, monthlyNeed, targetMonths, monthsCovered, status, configured: !!goal };
+  return {
+    goal, goalId: goal ? goal.id : null, current, target, pct, monthlyNeed,
+    targetMonths, targetMonthsEffective,
+    targetSource: fromGoal ? "meta" : "regra",
+    monthsCovered, status, configured: !!goal,
+  };
 }
 
 /* ==============================================================================
@@ -16856,33 +16924,69 @@ function categoryRanking(data, monthKey) {
  * PRÓXIMAS CONTAS
  * ============================================================================== */
 
-// Junta duas fontes reais, sem inventar dado:
-//   1. Lançamentos já cadastrados com data futura (parcelas, contas agendadas).
-//   2. Gastos fixos do mês anterior que ainda não foram lançados neste mês :
-//      projetados para o mesmo dia do mês (é exatamente o que o banner de
-//      "gastos fixos" já detecta, aqui reaproveitado com data estimada).
+// ------------------------------------------------------------------------------
+// [M41] UMA FONTE SÓ PARA "O QUE VEM AÍ"
+// ------------------------------------------------------------------------------
+// Esta função varria `data.transactions` procurando lançamentos com data
+// futura. O motor de previsão (forecast.js) monta a MESMA janela a partir de
+// recorrências, parcelas e faturas; e encontrava R$ 8.229,56 onde este cartão
+// dizia "nada previsto para os próximos 30 dias", logo acima da promessa de que
+// "parcelas e gastos fixos aparecem aqui automaticamente". Duas varreduras para
+// a mesma pergunta, e a que a tela mostrava era a cega.
+//
+// Agora a lista vem dos eventos de `buildFutureEvents`, os mesmos que o
+// calendário desenha e que o saldo projetado consome. Um compromisso que
+// aparece num lugar aparece nos três.
+//
+// A única coisa que NÃO sai de lá é a conta ATRASADA: `buildFutureEvents`
+// começa em hoje, e por definição não enxerga o que já venceu. O gasto fixo do
+// mês passado ainda não lançado continua vindo de `getPendingRecurring`, que é
+// a mesma fonte do banner de gastos fixos; sem ele o pilar "contas em dia" do
+// score ficaria cego. Como um entra só com data passada e o outro só com data
+// futura, não há como contar o mesmo compromisso duas vezes.
+// Parcela de dívida cadastrada (`liability`) entra na lista: ela é o compromisso
+// datado mais próximo de muita gente, e `hasEquivalentCommitment` já a impede de
+// aparecer em cima de um gasto fixo de valor equivalente. Deixá-la de fora
+// recriaria a contradição que este cartão existe para resolver: o calendário
+// mostrando a parcela do carro no dia 15 e o Início dizendo "nada previsto".
+const UPCOMING_KINDS = ["recurring", "scheduled", "installment", "card-statement", "liability"];
+
 function upcomingBills(data, days = 30) {
   const today = todayIso();
   const limitIso = isoOfDate(new Date(dateFromIso(today).getTime() + days * 86400000));
   const out = [];
 
-  (data.transactions || []).forEach((t) => {
-    if (t.type !== "expense") return;
-    if (t.date <= today || t.date > limitIso) return;
-    const cat = categoryById(data, t.categoryId);
+  const eventos = typeof buildFutureEvents === "function"
+    ? buildFutureEvents(data, today, limitIso).concat(cardStatementEvents(data, today, limitIso))
+    : [];
+  eventos.forEach((e) => {
+    if (e.type !== "expense") return;
+    if (UPCOMING_KINDS.indexOf(e.kind) < 0) return;
+    // A fatura vencida e ainda em aberto entra na PREVISÃO DE CAIXA no primeiro
+    // dia útil seguinte, porque é quando o dinheiro pode sair. Numa LISTA de
+    // contas, porém, essa data é ficção: o que a pessoa precisa ver é o
+    // vencimento real, senão cinco faturas atrasadas aparecem empilhadas no
+    // mesmo dia com o mesmo nome e viram uma linha só aos olhos.
+    const vencida = e.kind === "card-statement" && e.meta && e.meta.overdue;
+    const iso = vencida ? e.meta.dueDate : e.iso;
     out.push({
-      id: t.id,
-      kind: "scheduled",
-      date: t.date,
-      daysLeft: daysBetweenIso(today, t.date),
-      amount: roundMoney(t.amount),
-      label: t.description || cat.name,
-      categoryName: cat.name,
-      color: cat.color,
-      icon: cat.icon,
-      installment: t.installmentTotal ? `${t.installmentIndex}/${t.installmentTotal}` : null,
+      id: e.id,
+      kind: e.kind,
+      overdue: !!vencida,
+      date: iso,
+      daysLeft: daysBetweenIso(today, iso),
+      amount: roundMoney(e.amount),
+      label: e.label,
+      categoryName: e.categoryName,
+      color: e.color,
+      icon: e.icon,
+      installment: e.installment || null,
+      // Compromisso com data conhecida x fixo projetado pela repetição. A tela
+      // precisa poder dizer qual é qual em vez de apresentar os dois como fato.
+      certain: e.certain !== false,
     });
   });
+
 
   const currentKey = keyOfDate(new Date());
   getPendingRecurring(data, currentKey).forEach((t) => {
@@ -16890,11 +16994,11 @@ function upcomingBills(data, days = 30) {
     const [y, m] = currentKey.split("-").map(Number);
     const dim = daysInMonthOf(y, m - 1);
     const estimated = isoOfDate(new Date(y, m - 1, Math.min(day, dim)));
-    if (estimated > limitIso) return;
+    if (estimated >= today) return;              // daqui para a frente é do motor de previsão
     const cat = categoryById(data, t.categoryId);
     out.push({
       id: `recur-${t.id}`,
-      kind: estimated < today ? "late" : "recurring",
+      kind: "late",
       date: estimated,
       daysLeft: daysBetweenIso(today, estimated),
       amount: roundMoney(t.amount),
@@ -16903,11 +17007,20 @@ function upcomingBills(data, days = 30) {
       color: cat.color,
       icon: cat.icon,
       installment: null,
+      certain: false,
+      overdue: true,
     });
   });
 
   out.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-  return { items: out, total: sumMoney(out, (b) => b.amount), lateCount: out.filter((b) => b.kind === "late").length };
+  return {
+    items: out,
+    total: sumMoney(out, (b) => b.amount),
+    lateCount: out.filter((b) => b.kind === "late").length,
+    // Vencido e "próximo" não são a mesma coisa, e o cartão não pode chamar os
+    // dois de "nos próximos 30 dias".
+    overdueCount: out.filter((b) => b.overdue).length,
+  };
 }
 
 /* ==============================================================================
@@ -17316,20 +17429,26 @@ const HEALTH_INDICATORS = [
     evaluate(data, mKey, ctx) {
       const r = ctx.reserve;
       if (r.current <= 0 && r.monthlyNeed <= 0) return { applicable: false };
-      const ratio = healthRamp(r.monthsCovered, 0, r.targetMonths);
+      // [M41] A régua é o alvo EXIBIDO convertido em meses (ver `emergencyFund`).
+      // Com meta cadastrada, "de 6 meses" descrevia um alvo que a tela não
+      // mostrava em lugar nenhum.
+      const alvoMeses = r.targetMonthsEffective;
+      const ratio = healthRamp(r.monthsCovered, 0, alvoMeses);
       const missing = Math.max(0, subMoney(r.target, r.current));
       return {
         applicable: true,
         ratio,
         display: `${fmtDec(r.monthsCovered, 1)}`,
-        caption: `de ${r.targetMonths} meses de despesa`,
+        caption: `de ${fmtDec(alvoMeses, 1)} meses de despesa`,
         description: r.current > 0
           ? `Você tem ${fmtBRL(r.current)} reservados, o que sustenta ${fmtDec(r.monthsCovered, 1)} ${r.monthsCovered < 2 ? "mês" : "meses"} no seu padrão atual de ${fmtBRL(r.monthlyNeed)}/mês.`
           : "Você ainda não tem reserva de emergência formada; hoje um imprevisto vira dívida.",
         recommendation: ratio >= 1
           ? null
           : `Faltam ${fmtBRL(missing)}. Guardar essa quantia vem antes de investir em renda variável: reserva é seguro, não rendimento.`,
-        benchmark: `Referência: ${r.targetMonths} meses de despesa (ajustável em Ajustes).`,
+        benchmark: r.targetSource === "meta"
+          ? `Alvo definido por você: ${fmtBRL(r.target)}, o equivalente a ${fmtDec(alvoMeses, 1)} meses da sua despesa média.`
+          : `Referência: ${r.targetMonths} meses de despesa (ajustável em Ajustes).`,
         cta: r.configured ? { label: "Ver metas", tab: "goals" } : { label: "Criar meta de reserva", tab: "goals" },
         marks: [{ at: 1, label: "alvo" }],
       };
@@ -18740,6 +18859,48 @@ function buildFutureEvents(data, fromIso, toIso) {
   return events;
 }
 
+// ------------------------------------------------------------------------------
+// FATURAS DE CARTÃO COMO EVENTOS DATADOS
+// ------------------------------------------------------------------------------
+// A fatura conhecida entra no caixa no VENCIMENTO. Se já venceu e continua em
+// aberto, entra no primeiro dia da projeção, porque segue como compromisso.
+//
+// Fica fora de `buildFutureEvents` de propósito: aquela função devolve eventos
+// em regime de COMPETÊNCIA (a compra no crédito é consumo na data da compra), e
+// a fatura é a liquidação em CAIXA do que já está lá. Quem soma dinheiro saindo
+// da conta pede as duas listas; quem soma consumo pede só a primeira. Antes
+// este bloco vivia dentro de `buildForecast`, e por isso "Próximas contas" não
+// enxergava fatura nenhuma.
+function cardStatementEvents(data, fromIso, toIso) {
+  if (typeof cardStatements !== "function") return [];
+  const amanha = isoOfDate(new Date(dateFromIso(fromIso).getTime() + 86400000));
+  const out = [];
+  (data.creditCards || []).forEach((card) => {
+    cardStatements(data, card.id).forEach((statement) => {
+      if (!(statement.outstanding > 0)) return;
+      const overdue = statement.dueDate <= fromIso;
+      const iso = overdue ? amanha : statement.dueDate;
+      if (iso > toIso) return;
+      out.push({
+        id: `card-statement-${card.id}-${statement.key}`,
+        iso,
+        type: "expense",
+        amount: statement.outstanding,
+        label: `Fatura ${card.name}`,
+        categoryName: "Cartões",
+        color: "var(--negative)",
+        icon: "creditCard",
+        kind: "card-statement",
+        installment: null,
+        certain: true,
+        cashEffect: true,
+        meta: { creditCardId: card.id, statementKey: statement.key, dueDate: statement.dueDate, overdue },
+      });
+    });
+  });
+  return out;
+}
+
 /* ==============================================================================
  * SALDO DIA A DIA
  * ============================================================================== */
@@ -18750,33 +18911,10 @@ function buildForecast(data, refIso) {
   const endIso = isoOfDate(new Date(dateFromIso(today).getTime() + FORECAST_MAX_DAYS * 86400000));
   const events = buildFutureEvents(data, today, endIso);
 
-  // Faturas conhecidas entram no caixa no vencimento. Se já venceram, entram
-  // no primeiro dia da projeção, pois seguem como compromisso em aberto.
-  if (typeof cardStatements === "function") {
-    const tomorrow = isoOfDate(new Date(dateFromIso(today).getTime() + 86400000));
-    (data.creditCards || []).forEach((card) => {
-      cardStatements(data, card.id).forEach((statement) => {
-        if (!(statement.outstanding > 0)) return;
-        const overdue = statement.dueDate <= today;
-        const iso = overdue ? tomorrow : statement.dueDate;
-        if (iso > endIso) return;
-        events.push({
-          id: `card-statement-${card.id}-${statement.key}`,
-          iso,
-          type: "expense",
-          amount: statement.outstanding,
-          label: `Fatura ${card.name}`,
-          categoryName: "Cartões",
-          color: "var(--negative)",
-          icon: "creditCard",
-          kind: "card-statement",
-          installment: null,
-          certain: true,
-          cashEffect: true,
-          meta: { creditCardId: card.id, statementKey: statement.key, dueDate: statement.dueDate, overdue },
-        });
-      });
-    });
+  // Faturas conhecidas entram no caixa no vencimento (ver `cardStatementEvents`).
+  const faturas = cardStatementEvents(data, today, endIso);
+  if (faturas.length) {
+    faturas.forEach((e) => events.push(e));
     events.sort((a, b) => (a.iso < b.iso ? -1 : a.iso > b.iso ? 1 : 0));
   }
 
@@ -19156,7 +19294,7 @@ function forecastAssumptions(data, baseline, events) {
 
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
-    buildForecast, buildFutureEvents, recurringTemplates, variableBaseline,
+    buildForecast, buildFutureEvents, cardStatementEvents, recurringTemplates, variableBaseline,
     monthCloseForecast, monthExpenseOutlook, dailyAllowance, FORECAST_HORIZONS,
   };
 }
@@ -19678,6 +19816,35 @@ const REC_TYPES = [
 ];
 const REC_TYPE_OTHER = Object.freeze({ id: "outros", label: "Outros", icon: "tag" });
 
+// ------------------------------------------------------------------------------
+// [M41] ASSINATURA E COMPROMISSO RECORRENTE NÃO SÃO A MESMA COISA
+// ------------------------------------------------------------------------------
+// O motor classificava pela FORMA DO VALOR: preço que anda em degraus vira
+// "assinatura", preço que anda em rampa vira "recorrente variável". Pela forma
+// do valor, o aluguel é uma assinatura perfeita: R$ 1.850,00 todo mês, sem
+// variação nenhuma. E foi assim que o app passou a dizer "suas assinaturas
+// somam R$ 2.176,70 por mês, R$ 26.120,40 ao longo de um ano, 30% da sua renda"
+// com o aluguel encabeçando a lista.
+//
+// O alerta de assinaturas existe para provocar UMA decisão: cancelar. Aplicá-lo
+// a moradia é conselho vazio, e conselho vazio não fica contido: ele derruba a
+// confiança nos outros alertas do app. Sem o aluguel o número real era
+// R$ 326,70 por mês; esse sim é acionável.
+//
+// A régua nova é o TIPO, que o M33 já reconhece pelo nome. Moradia, seguros e
+// saúde, e educação formal ficam fora do alerta por padrão. Não porque não
+// custem: porque não se cancelam numa tarde. Continuam contando inteiros no
+// "comprometido por mês", que é a pergunta certa para eles.
+//
+// É PADRÃO, NÃO VEREDITO. Um curso de inglês que a pessoa quer cancelar, ou uma
+// assinatura de streaming que o app leu como "serviços", são reclassificáveis
+// pela própria pessoa, e a escolha dela vence a inferência (bucket `classe`).
+const REC_ESSENTIAL_TYPES = ["moradia", "seguros", "educacao"];
+
+function recIsEssentialType(typeId) {
+  return REC_ESSENTIAL_TYPES.indexOf(typeId) >= 0;
+}
+
 function recTypeOf(name) {
   const nome = typeof normalizeText === "function"
     ? normalizeText(name)
@@ -19714,11 +19881,21 @@ function recTotalsByType(items) {
 function recDecorate(item, prefs) {
   const tipo = recTypeOf(item.name);
   const revisadoEm = (prefs.review && prefs.review[item.key]) || "";
+  // A escolha da pessoa vence a inferência pelo nome, sempre.
+  const escolha = (prefs.classe && prefs.classe[item.key]) || "";
+  const essencial = escolha === "essencial" ? true
+    : escolha === "assinatura" ? false
+    : recIsEssentialType(tipo.id);
   return {
     ...item,
     typeId: tipo.id,
     typeLabel: tipo.label,
     typeIcon: tipo.icon,
+    // `essential` = compromisso que não se resolve cancelando numa tarde
+    // (moradia, seguro, escola). Fica fora do alerta de assinaturas e do
+    // "custo por ano", e continua inteiro no comprometido do mês.
+    essential: essencial,
+    essentialSource: escolha ? "voce" : "tipo",
     reviewedAt: revisadoEm,
     daysSinceReview: revisadoEm ? daysBetweenIso(revisadoEm, todayIso()) : null,
   };
@@ -19772,6 +19949,9 @@ function recPrefsOf(data) {
     // [M33] "Revisar assinatura": guarda QUANDO foi revisada, nunca um juízo
     // sobre a assinatura. O app não decide se ela vale a pena.
     review: p.review && typeof p.review === "object" ? p.review : {},
+    // [M41] `classe`: "assinatura" ou "essencial", quando a pessoa discorda da
+    //  leitura por tipo. Guarda a escolha, nunca um juízo sobre o gasto.
+    classe: p.classe && typeof p.classe === "object" ? p.classe : {},
   };
 }
 
@@ -20009,21 +20189,27 @@ function buildRecurringModel(data, opts) {
   const active = tracked.filter((s) => s.status !== "encerrada");
   const ended = tracked.filter((s) => s.status === "encerrada");
 
-  const subscriptions = active.filter((s) => s.kind === "assinatura")
-    .sort((a, b) => moneyCompare(b.monthlyEquivalent, a.monthlyEquivalent));
-  const variable = active.filter((s) => s.kind === "recorrente")
-    .sort((a, b) => moneyCompare(b.monthlyEquivalent, a.monthlyEquivalent));
+  const porValor = (a, b) => moneyCompare(b.monthlyEquivalent, a.monthlyEquivalent);
+  const fixos = active.filter((s) => s.kind === "assinatura");
+  // [M41] Só o que se cancela entra em "assinaturas". Ver REC_ESSENTIAL_TYPES.
+  const subscriptions = fixos.filter((s) => !s.essential).sort(porValor);
+  const essentials = fixos.filter((s) => s.essential).sort(porValor);
+  const variable = active.filter((s) => s.kind === "recorrente").sort(porValor);
 
   const monthlyTotal = sumMoney(subscriptions, (s) => s.monthlyEquivalent);
   const annualTotal = sumMoney(subscriptions, (s) => s.annualCost);
+  const essentialMonthly = sumMoney(essentials, (s) => s.monthlyEquivalent);
+  const essentialAnnual = sumMoney(essentials, (s) => s.annualCost);
   const variableMonthly = sumMoney(variable, (s) => s.monthlyEquivalent);
-  const committedMonthly = addMoney(monthlyTotal, variableMonthly);
+  // O COMPROMETIDO DO MÊS NÃO MUDA: moradia, seguro e escola saíram do alerta
+  // de assinaturas, não da conta de quanto da renda já tem dono.
+  const committedMonthly = addMoney(addMoney(monthlyTotal, essentialMonthly), variableMonthly);
 
   // [M33] O ANO DE TUDO QUE SE REPETE, não só das assinaturas de preço fixo.
   // A parte fixa é exata (`annualCost` já usa a cadência real); a variável é
   // estimativa a partir do equivalente mensal, e a tela precisa dizer isso.
-  const committedAnnual = addMoney(annualTotal, mulMoney(variableMonthly, 12));
-  const byType = recTotalsByType(subscriptions.concat(variable));
+  const committedAnnual = addMoney(addMoney(annualTotal, essentialAnnual), mulMoney(variableMonthly, 12));
+  const byType = recTotalsByType(subscriptions.concat(essentials).concat(variable));
 
   const increases = active
     .filter((s) => s.increasePct > REC_INCREASE_PCT)
@@ -20042,6 +20228,7 @@ function buildRecurringModel(data, opts) {
   return {
     monthKey: todayKey,
     subscriptions,
+    essentials,
     variable,
     ended,
     ignored,
@@ -20050,16 +20237,26 @@ function buildRecurringModel(data, opts) {
     upcomingTotal,
     monthlyTotal,
     annualTotal,
+    essentialMonthly,
+    essentialAnnual,
     variableMonthly,
     committedMonthly,
     committedAnnual,
     byType,
     income,
     incomeShare,
+    // A fatia da renda que as ASSINATURAS ocupam. É esta que alimenta o alerta;
+    // `incomeShare` continua sendo a de tudo que se repete.
+    subscriptionShare: income > 0 ? safePct(monthlyTotal, income) : 0,
     proposals: buildRecurringProposals(data, all, prefs),
     counts: {
       subscriptions: subscriptions.length,
+      essentials: essentials.length,
       variable: variable.length,
+      // Tudo que se repete e está sendo acompanhado. É o número que a tela
+      // mostra como "identificadas"; sem ele, o painel dizia "5 cobranças
+      // recorrentes" num cartão e "11 identificadas" no outro.
+      tracked: subscriptions.length + essentials.length + variable.length,
       ended: ended.length,
       ignored: ignored.length,
       reviewed: tracked.filter((s) => s.reviewedAt).length,
@@ -21840,7 +22037,7 @@ const ADVISOR_RULES = [
       if (rec.committedMonthly <= 0) return null;
       const share = rec.incomeShare;
       if (share < ADV.fixedShareWarn) return null;
-      const n = rec.counts.subscriptions + rec.counts.variable;
+      const n = rec.counts.tracked;
       return advCard({
         id: "despesas-fixas",
         tone: share >= ADV.fixedShareDanger ? "warn" : "info",
@@ -21950,19 +22147,25 @@ const ADVISOR_RULES = [
 
   // §8; o custo anual das assinaturas. É este número que muda decisão:
   // "R$ 55,90" não assusta ninguém; "R$ 670 por ano" faz revisar o plano.
+  //
+  // [M41] E só entra aqui o que se CANCELA. Este alerta existe para provocar uma
+  // decisão; aplicá-lo ao aluguel é conselho vazio, e conselho vazio derruba a
+  // confiança nos outros alertas. Moradia, seguros e educação formal contam
+  // inteiros em "despesas fixas", logo acima, que é a pergunta certa para eles.
   {
     id: "assinaturas",
-    run({ rec, income }) {
+    run({ rec }) {
       if (!rec || rec.counts.subscriptions === 0) return null;
       if (rec.monthlyTotal <= 0) return null;
-      const share = income > 0 ? safePct(rec.monthlyTotal, income) : 0;
+      const share = rec.subscriptionShare;
       const heavy = share >= ADV.subscriptionShare;
+      const n = rec.counts.subscriptions;
       return advCard({
         id: "assinaturas",
         tone: heavy ? "warn" : "info",
         icon: "refresh",
         title: `Suas assinaturas somam ${fmtBRL(rec.monthlyTotal)} por mês`,
-        message: `São ${rec.counts.subscriptions} cobranças recorrentes. ${fmtBRL(rec.annualTotal)} ao longo de um ano${share > 0 ? `, ${share.toFixed(0)}% da sua renda` : ""}.`,
+        message: `${n === 1 ? "É 1 serviço que dá para cancelar" : `São ${n} serviços que dão para cancelar`}: ${fmtBRL(rec.annualTotal)} ao longo de um ano${share > 0 ? `, ${share.toFixed(0)}% da sua renda` : ""}.${rec.counts.essentials > 0 ? ` Moradia, seguros e educação ficam fora desta conta (${fmtBRL(rec.essentialMonthly)}/mês); eles se repetem, mas não se resolvem cancelando.` : ""}`,
         value: rec.annualTotal,
         impact: rec.monthlyTotal,
         action: { label: "Revisar assinaturas", tab: "subscriptions" },
@@ -22091,7 +22294,9 @@ const ADVISOR_RULES = [
         tone: "info",
         icon: "shieldCheck",
         title: `Faltam ${fmtBRL(missing)} para sua reserva ficar completa`,
-        message: `Hoje ela cobre ${fmtDec(e.monthsCovered, 1)} dos ${e.targetMonths} meses que você definiu.`,
+        message: e.targetSource === "meta"
+          ? `Hoje ela cobre ${fmtDec(e.monthsCovered, 1)} dos ${fmtDec(e.targetMonthsEffective, 1)} meses de despesa que o seu alvo de ${fmtBRL(e.target)} compra.`
+          : `Hoje ela cobre ${fmtDec(e.monthsCovered, 1)} dos ${e.targetMonths} meses que você definiu.`,
         value: missing,
         impact: missing,
         action: { label: "Ver metas", tab: "goals" },
@@ -27130,11 +27335,13 @@ function renderScoreCard(m) {
 // ---- Patrimônio: total, composição e evolução ----
 function renderNetWorthCard(m) {
   const w = m.worth;
-  const series = netWorthSeries(state.data, 6);
-  const first = series[0].value;
-  const last = series[series.length - 1].value;
-  const delta = subMoney(last, first);
-  const deltaPct = first !== 0 ? (delta / Math.abs(first)) * 100 : null;
+  // [M41] A variação vem de `netWorthGrowth`, a MESMA função que o pilar de
+  // patrimônio do score consulta. Eram duas janelas (6 meses aqui, 4 lá) e a
+  // tela exibia "+443,2%" ao lado de "cresceu 251,1% nos últimos meses".
+  const g = netWorthGrowth(state.data);
+  const series = g.series;
+  const delta = g.delta;
+  const deltaPct = g.pct;
   const up = delta >= 0;
   const trendColor = up ? "var(--positive)" : "var(--negative)";
 
@@ -27158,6 +27365,7 @@ function renderNetWorthCard(m) {
 
     ${renderSparkline(series, up ? "var(--brand)" : "var(--negative)")}
     <div class="networth-axis">${series.map((p) => `<span>${p.label}</span>`).join("")}</div>
+    ${g.measurable && deltaPct != null ? `<p class="footnote" data-ui-css="margin-top:6px">${up ? "Crescimento" : "Queda"} de ${fmtDec(Math.abs(deltaPct), 1)}% desde ${g.sinceLabel}: de ${fmtBRL(g.first)} para ${fmtBRL(g.last)}.</p>` : ""}
 
     ${sum > 0 ? `<div class="segment-bar" data-ui-css="margin-top:14px">
       ${parts.filter((p) => p.value > 0).map((p) => `<div data-ui-css="flex:${p.value};background:${p.color}"></div>`).join("")}
@@ -27199,13 +27407,18 @@ function renderReserveCard(m) {
     <p class="mini-card__value">${fmtBRL(r.current)}</p>
     <div class="progress progress--sm"><div class="progress__fill" data-ui-css="width:${clamp(r.pct, 0, 100)}%; background:${meta.color}"></div></div>
     <p class="mini-card__note">
-      ${r.monthlyNeed > 0
-        ? `Cobre <b>${fmtDec(r.monthsCovered, 1)}</b> de ${r.targetMonths} meses de despesa (${fmtBRL(r.monthlyNeed)}/mês).`
+      ${/* [M41] Os dois números do cartão passam a falar da MESMA régua. Antes
+            ele dizia "cobre 2,1 de 6 meses de despesa (R$ 3.963,38/mês)" e, uma
+            linha abaixo, "Alvo: R$ 21.600,00"; mas 6 × 3.963,38 = 23.780,28.
+            O alvo vinha da meta cadastrada e a contagem de meses vinha do
+            ajuste; nenhuma das duas frases explicava a outra. */
+      r.monthlyNeed > 0
+        ? `Cobre <b>${fmtDec(r.monthsCovered, 1)}</b> de ${fmtDec(r.targetMonthsEffective, 1)} meses de despesa (${fmtBRL(r.monthlyNeed)}/mês).`
         : "Registre alguns gastos para calcular quantos meses sua reserva cobre."}
     </p>
     ${!r.configured
       ? `<button class="btn btn--secondary btn--block btn--sm" data-action="nav" data-tab="goals">Criar meta de reserva</button>`
-      : `<p class="footnote" data-ui-css="margin-top:8px">Alvo: ${fmtBRL(r.target)}</p>`}
+      : `<p class="footnote" data-ui-css="margin-top:8px">Alvo: ${fmtBRL(r.target)}${r.targetSource === "meta" ? ", definido por você" : `, ${r.targetMonths} meses de despesa`}</p>`}
   </div>`;
 }
 
@@ -27265,13 +27478,21 @@ function renderUpcomingBillsCard(m) {
       <button class="btn btn--ghost btn--block btn--sm" data-action="nav" data-tab="calendar">${svgIcon("calendar", 14)} Ver no calendário</button>
     </div>`;
   }
-  const KIND_LABEL = { late: "Atrasada", recurring: "Prevista", scheduled: "Agendada" };
-  const KIND_COLOR = { late: "var(--negative)", recurring: "var(--goal)", scheduled: "var(--ink-faint)" };
+  // Os rótulos cobrem todos os tipos que o motor de previsão devolve. Um tipo
+  // sem rótulo aparecia como "undefined · 12/09" na linha da conta.
+  const KIND_LABEL = {
+    late: "Atrasada", recurring: "Prevista", scheduled: "Agendada",
+    installment: "Parcela", "card-statement": "Fatura", liability: "Dívida",
+  };
+  const KIND_COLOR = {
+    late: "var(--negative)", recurring: "var(--goal)", scheduled: "var(--ink-faint)",
+    installment: "var(--ink-faint)", "card-statement": "var(--negative)", liability: "var(--negative)",
+  };
   return `<div class="card card--upcoming span-1">
     <div class="mini-card__head">
       <div>
         <p class="card-title" data-ui-css="margin:0">Próximas contas</p>
-        <p class="mini-card__sub">${b.items.length} nos próximos 30 dias</p>
+        <p class="mini-card__sub">${b.overdueCount > 0 ? `${plural(b.overdueCount, "vencida", "vencidas")} · ` : ""}${b.items.length - b.overdueCount} nos próximos 30 dias</p>
       </div>
       <span class="leak-total">${fmtBRL(b.total)}</span>
     </div>
@@ -27280,11 +27501,12 @@ function renderUpcomingBillsCard(m) {
         <span class="icon-bubble icon-bubble--sm" data-ui-css="background:color-mix(in srgb, ${it.color} 14%, transparent); color:${it.color}">${svgIcon(it.icon, 14)}</span>
         <div class="bill-row__info">
           <p class="bill-row__label">${escapeHtml(it.label)}${it.installment ? ` <span class="bill-row__inst">${it.installment}</span>` : ""}</p>
-          <p class="bill-row__meta" data-ui-css="color:${KIND_COLOR[it.kind]}">${KIND_LABEL[it.kind]} · ${fmtDateShort(it.date)}${it.kind !== "late" && it.daysLeft >= 0 ? ` · em ${it.daysLeft}d` : ""}</p>
+          <p class="bill-row__meta" data-ui-css="color:${it.overdue ? "var(--negative)" : (KIND_COLOR[it.kind] || "var(--ink-faint)")}">${it.overdue && it.kind === "card-statement" ? "Fatura vencida" : (KIND_LABEL[it.kind] || "Prevista")} · ${fmtDateShort(it.date)}${!it.overdue && it.daysLeft >= 0 ? ` · em ${it.daysLeft}d` : ""}</p>
         </div>
         <span class="bill-row__amount">${fmtBRL(it.amount)}</span>
       </div>`).join("")}
     </div>
+    ${b.items.length > 5 ? `<p class="footnote">+${b.items.length - 5} ${b.items.length - 5 === 1 ? "outra conta" : "outras contas"} nesta janela; veja tudo no calendário.</p>` : ""}
     ${b.lateCount > 0 ? `<button class="btn btn--secondary btn--block btn--sm" data-action="carry-post-all">Lançar gastos fixos pendentes</button>` : ""}
     <button class="btn btn--ghost btn--block btn--sm" data-action="nav" data-tab="calendar">${svgIcon("calendar", 14)} Ver no calendário</button>
   </div>`;
@@ -32408,8 +32630,12 @@ function renderAiPreviewModal() {
 // plano; "R$ 670,80 por ano" faz. A mensalidade continua visível,
 // como referência; só deixou de ser a manchete.
 // ==================================================================
+// [M41] "Essenciais" ganhou aba própria. Moradia, seguros e educação formal são
+// compromissos que se repetem, mas não se cancelam numa tarde: misturá-los com
+// streaming fazia o alerta de assinaturas cobrar uma decisão impossível.
 const SUBS_VIEWS = [
   { id: "assinaturas", label: "Assinaturas" },
+  { id: "essenciais", label: "Essenciais" },
   { id: "variaveis", label: "Recorrentes" },
   { id: "ignoradas", label: "Sem acompanhar" },
 ];
@@ -32418,7 +32644,10 @@ function renderSubscriptionsScreen() {
   const mKey = keyOfCurrentMonth();
   const m = recurringModel(mKey);
   const view = state.subs.view;
-  const list = view === "assinaturas" ? m.subscriptions : view === "variaveis" ? m.variable : m.ignored;
+  const list = view === "assinaturas" ? m.subscriptions
+    : view === "essenciais" ? m.essentials
+    : view === "variaveis" ? m.variable
+    : m.ignored;
 
   return `<div class="screen screen--narrow">
     ${renderBackHeader("Assinaturas e recorrências")}
@@ -32439,7 +32668,10 @@ function renderSubscriptionsScreen() {
 
     <div class="segmented">
       ${SUBS_VIEWS.map((v) => {
-        const count = v.id === "assinaturas" ? m.counts.subscriptions : v.id === "variaveis" ? m.counts.variable : m.counts.ignored;
+        const count = v.id === "assinaturas" ? m.counts.subscriptions
+          : v.id === "essenciais" ? m.counts.essentials
+          : v.id === "variaveis" ? m.counts.variable
+          : m.counts.ignored;
         return `<button class="segmented__option ${view === v.id ? "active" : ""}" data-action="subs-view" data-value="${v.id}">${v.label}${count > 0 ? ` (${count})` : ""}</button>`;
       }).join("")}
     </div>
@@ -32467,12 +32699,14 @@ function renderSubscriptionsScreen() {
 
 function subsEmptyTitle(view) {
   if (view === "ignoradas") return "Você não parou de acompanhar nada.";
+  if (view === "essenciais") return "Nenhum compromisso essencial identificado.";
   if (view === "variaveis") return "Nenhuma cobrança recorrente de valor variável.";
   return "Nenhuma assinatura identificada ainda.";
 }
 
 function subsEmptyHint(view) {
   if (view === "ignoradas") return "Itens que você mandar parar de acompanhar aparecem aqui e podem voltar a qualquer momento.";
+  if (view === "essenciais") return "Aluguel, condomínio, seguros, plano de saúde e mensalidade escolar entram aqui: são fixos, mas não se resolvem cancelando.";
   if (view === "variaveis") return "Contas de luz, água e mercado entram aqui quando repetem a cadência com valores diferentes.";
   return "Assim que o mesmo gasto aparecer duas vezes no mesmo intervalo, ele é reconhecido automaticamente.";
 }
@@ -32484,9 +32718,11 @@ function renderSubsHero(m) {
     <div class="sub-hero__main">
       <p class="eyebrow">Assinaturas · custo de 12 meses</p>
       <p class="sub-hero__annual">${fmtBRL(m.annualTotal)}</p>
-      <p class="sub-hero__monthly">${fmtBRL(m.monthlyTotal)} por mês em ${m.counts.subscriptions} ${m.counts.subscriptions === 1 ? "cobrança" : "cobranças"} de valor fixo</p>
+      <p class="sub-hero__monthly">${fmtBRL(m.monthlyTotal)} por mês em ${m.counts.subscriptions} ${m.counts.subscriptions === 1 ? "assinatura" : "assinaturas"} que dá para cancelar</p>
+      ${m.counts.essentials > 0 ? `<p class="card-subtitle" data-ui-css="margin:6px 0 0">${fmtBRL(m.essentialMonthly)} por mês em ${m.counts.essentials} ${m.counts.essentials === 1 ? "compromisso essencial" : "compromissos essenciais"} (moradia, seguros, educação) ficam fora desta conta: eles se repetem, mas não se resolvem cancelando. Estão na aba "Essenciais".</p>` : ""}
     </div>
     <div class="health-grid">
+      <div class="health-stat"><span>Essenciais</span><b>${fmtBRL(m.essentialMonthly)}</b></div>
       <div class="health-stat"><span>Recorrentes variáveis</span><b>${fmtBRL(m.variableMonthly)}</b></div>
       <div class="health-stat"><span>Comprometido por mês</span><b>${fmtBRL(m.committedMonthly)}</b></div>
       <div class="health-stat"><span>Recorrências no ano</span><b>${fmtBRL(m.committedAnnual)}</b></div>
@@ -32687,6 +32923,9 @@ function renderSubItem(s, ignored, income) {
       </div>
       ${s.sinceFirstPct > 3 ? `<p class="sub-item__note">Desde a primeira cobrança o valor subiu ${s.sinceFirstPct.toFixed(0)}%; de ${fmtBRL(s.firstAmount)} para ${fmtBRL(s.lastAmount)}.</p>` : ""}
       ${s.kind === "recorrente" ? `<p class="sub-item__note">O valor varia entre as cobranças, então este é um gasto recorrente e não uma assinatura de preço fixo. O total usa a última cobrança como referência.</p>` : ""}
+      ${s.kind === "assinatura" ? `<p class="sub-item__note">${s.essential
+        ? `Tratado como <b>compromisso essencial</b>${s.essentialSource === "voce" ? ", porque você classificou assim" : `, pelo tipo reconhecido (${escapeHtml(s.typeLabel)})`}. Fica fora do alerta de assinaturas e do custo anual delas; continua inteiro no comprometido do mês.`
+        : `Tratado como <b>assinatura</b>${s.essentialSource === "voce" ? ", porque você classificou assim" : ""}: entra no alerta de assinaturas e no custo de 12 meses.`}</p>` : ""}
       ${s.reviewedAt ? `<p class="sub-item__note">Você revisou este item em ${fmtDateFull(s.reviewedAt)}${s.daysSinceReview > 0 ? ` (há ${s.daysSinceReview} ${s.daysSinceReview === 1 ? "dia" : "dias"})` : ""}. A marcação guarda só a data; nenhum juízo sobre a assinatura.</p>` : ""}
       ${s.declaredOnly ? `<p class="sub-item__note">Este compromisso vem da marcação "gasto fixo mensal" no lançamento, não de um histórico de cobranças. A partir da segunda cobrança o app passa a usar as datas e os valores reais.</p>` : ""}
       <div class="sub-item__actions">
@@ -32695,6 +32934,7 @@ function renderSubItem(s, ignored, income) {
           : `${s.flaggedRecurring
               ? `<button class="btn btn--secondary btn--sm" data-action="sub-unflag" data-id="${escapeHtml(s.key)}">Desmarcar como recorrente</button>`
               : `<button class="btn btn--secondary btn--sm" data-action="rec-confirm" data-id="${escapeHtml(s.key)}">Marcar como recorrente</button>`}
+             ${s.kind === "assinatura" ? `<button class="btn btn--secondary btn--sm" data-action="sub-classify" data-id="${escapeHtml(s.key)}" data-value="${s.essential ? "assinatura" : "essencial"}">${s.essential ? "Tratar como assinatura" : "Tratar como essencial"}</button>` : ""}
              <button class="btn btn--secondary btn--sm" data-action="sub-review" data-id="${escapeHtml(s.key)}">${reviewing ? "Fechar revisão" : subsReviewLabel(s)}</button>
              <button class="btn btn--ghost btn--sm" data-action="sub-ignore" data-id="${escapeHtml(s.key)}">Parar de acompanhar</button>`}
       </div>
@@ -32707,14 +32947,14 @@ function renderSubItem(s, ignored, income) {
 // reajuste, que antes só existia na tela cheia.
 function renderSubscriptionsCard() {
   const m = recurringModel(keyOfCurrentMonth());
-  if (m.counts.subscriptions === 0 && m.counts.variable === 0) return "";
-  const top = m.subscriptions.concat(m.variable).slice(0, 3);
+  if (m.counts.tracked === 0) return "";
+  const top = m.subscriptions.concat(m.essentials).concat(m.variable).slice(0, 3);
   return `<div class="card card--subs span-3" data-action="nav" data-tab="subscriptions" data-ui-css="cursor:pointer">
     <div class="leak-header">
       ${svgIcon("refresh", 18, "leak-header__icon")}
       <div>
         <p class="card-title" data-ui-css="margin:0">Assinaturas e recorrências</p>
-        <p class="card-subtitle" data-ui-css="margin:2px 0 0">${m.counts.subscriptions + m.counts.variable} identificadas · ${fmtBRL(m.annualTotal)} por ano em assinaturas</p>
+        <p class="card-subtitle" data-ui-css="margin:2px 0 0">${m.counts.tracked} ${m.counts.tracked === 1 ? "recorrência identificada" : "recorrências identificadas"}, ${m.counts.subscriptions} ${m.counts.subscriptions === 1 ? "delas assinatura" : "delas assinaturas"} · ${fmtBRL(m.annualTotal)} por ano em assinaturas</p>
       </div>
       <span class="leak-total">${fmtBRL(m.committedMonthly)}/mês</span>
     </div>
@@ -36916,6 +37156,17 @@ function onClick(e) {
       state.subs.reviewKey = null;
       notify("Revisão registrada; guardamos só a data", "success");
       break;
+    // [M41] Reclassificar entre assinatura e compromisso essencial. Guarda a
+    // ESCOLHA da pessoa, que vence a inferência pelo nome; nenhum lançamento é
+    // tocado e nenhum juízo sobre o gasto é registrado.
+    case "sub-classify": {
+      const alvo = value === "essencial" ? "essencial" : "assinatura";
+      setData((d) => ({ ...d, recurringPrefs: recPrefsWith(d, "classe", id, alvo) }));
+      notify(alvo === "essencial"
+        ? "Passa a contar como compromisso essencial, fora do alerta de assinaturas"
+        : "Passa a contar como assinatura, dentro do alerta e do custo anual", "info");
+      break;
+    }
     case "sub-ignore":
       // "Parar de acompanhar" NÃO apaga lançamento nenhum: só registra a
       // preferência. O histórico continua alimentando gráficos e comparações.

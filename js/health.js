@@ -269,20 +269,26 @@ const HEALTH_INDICATORS = [
     evaluate(data, mKey, ctx) {
       const r = ctx.reserve;
       if (r.current <= 0 && r.monthlyNeed <= 0) return { applicable: false };
-      const ratio = healthRamp(r.monthsCovered, 0, r.targetMonths);
+      // [M41] A régua é o alvo EXIBIDO convertido em meses (ver `emergencyFund`).
+      // Com meta cadastrada, "de 6 meses" descrevia um alvo que a tela não
+      // mostrava em lugar nenhum.
+      const alvoMeses = r.targetMonthsEffective;
+      const ratio = healthRamp(r.monthsCovered, 0, alvoMeses);
       const missing = Math.max(0, subMoney(r.target, r.current));
       return {
         applicable: true,
         ratio,
         display: `${fmtDec(r.monthsCovered, 1)}`,
-        caption: `de ${r.targetMonths} meses de despesa`,
+        caption: `de ${fmtDec(alvoMeses, 1)} meses de despesa`,
         description: r.current > 0
           ? `Você tem ${fmtBRL(r.current)} reservados, o que sustenta ${fmtDec(r.monthsCovered, 1)} ${r.monthsCovered < 2 ? "mês" : "meses"} no seu padrão atual de ${fmtBRL(r.monthlyNeed)}/mês.`
           : "Você ainda não tem reserva de emergência formada; hoje um imprevisto vira dívida.",
         recommendation: ratio >= 1
           ? null
           : `Faltam ${fmtBRL(missing)}. Guardar essa quantia vem antes de investir em renda variável: reserva é seguro, não rendimento.`,
-        benchmark: `Referência: ${r.targetMonths} meses de despesa (ajustável em Ajustes).`,
+        benchmark: r.targetSource === "meta"
+          ? `Alvo definido por você: ${fmtBRL(r.target)}, o equivalente a ${fmtDec(alvoMeses, 1)} meses da sua despesa média.`
+          : `Referência: ${r.targetMonths} meses de despesa (ajustável em Ajustes).`,
         cta: r.configured ? { label: "Ver metas", tab: "goals" } : { label: "Criar meta de reserva", tab: "goals" },
         marks: [{ at: 1, label: "alvo" }],
       };

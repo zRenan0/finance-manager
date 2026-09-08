@@ -390,5 +390,77 @@ console.log("\n8. [M41] Projeção do mês: o aluguel não é cobrado todo dia")
     Math.abs(comida.projected - (60 * diaHoje) / progresso.ratio) < 1, comida.projected);
 }
 
+/* ------------------------------- 9. [M41] A reserva mede e mira na mesma régua */
+// O cartão dizia "cobre 2,1 de 6 meses de despesa (R$ 3.963,38/mês)" e, logo
+// abaixo, "Alvo: R$ 21.600,00". Mas 6 × 3.963,38 = 23.780,28: o alvo vinha da
+// meta cadastrada e a contagem de meses vinha do ajuste. Alcançar o alvo
+// exibido dá 5,45 meses, não 6, e nenhuma das duas frases explicava a outra.
+console.log("\n9. [M41] Reserva: o alvo exibido e a régua de meses são o mesmo número");
+{
+  const transactions = [];
+  for (let m = 3; m >= 1; m--) {
+    transactions.push(tx({ type: "income", amount: 7000, categoryId: "salario", date: monthsAgo(m, 5) }));
+    transactions.push(tx({ type: "expense", amount: 4000, categoryId: "moradia", date: monthsAgo(m, 8), recurring: true }));
+  }
+  const comMeta = base({
+    monthlyIncome: 7000, transactions, emergencyMonths: 6,
+    goals: [{ id: "g-res", name: "Reserva de emergência", target: 20000, current: 8400, savedUpfront: 0, icon: "piggy", deadline: null }],
+  });
+  const r = ctx.emergencyFund(comMeta);
+
+  check("a despesa média é a base declarada", Math.abs(r.monthlyNeed - 4000) < 0.02, r.monthlyNeed);
+  check("o alvo vem da meta que a pessoa cadastrou", r.targetSource === "meta" && r.target === 20000, r.target);
+  // A IDENTIDADE QUE FALTAVA: o alvo exibido, na régua exibida, dá os meses exibidos.
+  check("alvo ÷ despesa média = meses do alvo",
+    Math.abs(r.targetMonthsEffective * r.monthlyNeed - r.target) < 0.02,
+    { efetivo: r.targetMonthsEffective, produto: r.targetMonthsEffective * r.monthlyNeed, alvo: r.target });
+  check("e não são os 6 meses do ajuste", Math.abs(r.targetMonthsEffective - 5) < 0.01 && r.targetMonths === 6,
+    r.targetMonthsEffective);
+
+  const pilar = ctx.computeFinanceScore(comMeta, ctx.keyOfDate(new Date())).pillars.find((p) => p.id === "reserva");
+  check("o score mede contra o alvo exibido, não contra os 6 meses",
+    Math.abs(pilar.ratio - r.monthsCovered / r.targetMonthsEffective) < 0.001, pilar.ratio);
+  check("e a frase declara que o alvo é da pessoa", /definido por você/.test(pilar.detail), pilar.detail);
+
+  // Sem meta cadastrada, o alvo volta a ser N meses de despesa e as duas
+  // réguas coincidem por construção.
+  const semMeta = base({ monthlyIncome: 7000, transactions, emergencyMonths: 6, goals: [] });
+  const s = ctx.emergencyFund(semMeta);
+  check("sem meta o alvo é a regra de N meses", s.targetSource === "regra" && Math.abs(s.target - 24000) < 0.02, s.target);
+  check("e as duas réguas coincidem", Math.abs(s.targetMonthsEffective - s.targetMonths) < 0.001, s.targetMonthsEffective);
+}
+
+/* ----------------------- 10. [M41] Uma janela só para o crescimento do patrimônio */
+// A mesma tela mostrava "+443,2%" no cartão de patrimônio (série de 6 meses) e
+// "seu patrimônio cresceu 251,1% nos últimos meses" no cartão de score (série de
+// 4). Dois números certos para a mesma grandeza, sem período escrito em nenhum.
+console.log("\n10. [M41] Crescimento do patrimônio: uma janela, com o período escrito");
+{
+  const transactions = [];
+  for (let m = 6; m >= 0; m--) {
+    transactions.push(tx({ type: "income", amount: 6000, categoryId: "salario", date: monthsAgo(m, 5) }));
+    transactions.push(tx({ type: "expense", amount: 3000, categoryId: "moradia", date: monthsAgo(m, 8), recurring: true }));
+  }
+  const data = base({ monthlyIncome: 6000, transactions });
+
+  const g = ctx.netWorthGrowth(data);
+  const pilar = ctx.computeFinanceScore(data, ctx.keyOfDate(new Date())).pillars.find((p) => p.id === "patrimonio");
+
+  check("o crescimento é medido", g.measurable && Number.isFinite(g.pct), g.pct);
+  check("o pilar do score usa exatamente o mesmo percentual",
+    Math.abs(ctx.computeFinanceScore(data, ctx.keyOfDate(new Date())).pillars.find((p) => p.id === "patrimonio").ratio
+      - ctx.clamp((g.pct + 10) / 20, 0, 1)) < 0.001);
+  check("a frase diz desde quando", new RegExp(`desde ${g.sinceLabel}`).test(pilar.detail), pilar.detail);
+  check("o período é o primeiro ponto da série", g.fromKey === g.series[0].key);
+
+  // As duas janelas somem do código: quem quiser este número chama a função.
+  const scoreSrc = readSrc("js/score.js");
+  const painel = readSrc("js/screens/dashboard.js");
+  check("o score não monta mais a própria série de 4 meses", !/netWorthSeries\(data, 4\)/.test(scoreSrc));
+  check("o cartão de patrimônio não monta mais a própria série de 6",
+    !/netWorthSeries\(state\.data, 6\)/.test(painel) && /netWorthGrowth\(state\.data\)/.test(painel));
+  check("e o cartão escreve o período na tela", /desde \$\{g\.sinceLabel\}/.test(painel));
+}
+
 console.log(`\n${fail === 0 ? "TODOS OS TESTES PASSARAM" : "FALHAS ENCONTRADAS"} — ${pass} ok, ${fail} falha(s)\n`);
 process.exit(fail === 0 ? 0 : 1);

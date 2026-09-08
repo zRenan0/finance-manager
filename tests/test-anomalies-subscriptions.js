@@ -297,20 +297,61 @@ section("7. [M33] Painel consolidado");
   const soma = (lista, campo) => lista.reduce((s, t) => ctx.addMoney(s, t[campo]), 0);
   const anualVariavel = m.variable.reduce((s, x) => ctx.addMoney(s, x.annualCost), 0);
 
-  check("o total mensal de recorrências é mês fixo + mês variável",
-    m.committedMonthly === ctx.addMoney(m.monthlyTotal, m.variableMonthly), m.committedMonthly);
+  const anualEssencial = m.essentials.reduce((s, x) => ctx.addMoney(s, x.annualCost), 0);
+  check("o total mensal de recorrências é assinatura + essencial + variável",
+    m.committedMonthly === ctx.addMoney(ctx.addMoney(m.monthlyTotal, m.essentialMonthly), m.variableMonthly),
+    m.committedMonthly);
   check("o total anual soma a parte exata com a estimada",
-    m.committedAnnual === ctx.addMoney(m.annualTotal, ctx.mulMoney(m.variableMonthly, 12)), m.committedAnnual);
+    m.committedAnnual === ctx.addMoney(ctx.addMoney(m.annualTotal, m.essentialAnnual), ctx.mulMoney(m.variableMonthly, 12)),
+    m.committedAnnual);
   check("os subtotais por tipo fecham com o total mensal",
     soma(m.byType, "monthly") === m.committedMonthly, { tipos: soma(m.byType, "monthly"), total: m.committedMonthly });
   check("os subtotais por tipo fecham com o custo anual dos itens",
-    soma(m.byType, "annual") === ctx.addMoney(m.annualTotal, anualVariavel), soma(m.byType, "annual"));
+    soma(m.byType, "annual") === ctx.addMoney(ctx.addMoney(m.annualTotal, anualEssencial), anualVariavel),
+    soma(m.byType, "annual"));
   check("cada tipo sabe quantos itens tem",
-    m.byType.reduce((s, t) => s + t.count, 0) === m.counts.subscriptions + m.counts.variable);
+    m.byType.reduce((s, t) => s + t.count, 0) === m.counts.tracked);
   check("a lista de tipos vem ordenada pelo peso mensal",
     m.byType.every((t, i) => i === 0 || m.byType[i - 1].monthly >= t.monthly));
   check("todo item acompanhado carrega o tipo reconhecido",
-    m.subscriptions.concat(m.variable).every((s) => !!s.typeId && !!s.typeLabel));
+    m.subscriptions.concat(m.essentials).concat(m.variable).every((s) => !!s.typeId && !!s.typeLabel));
+
+  // ----------------------------------------------------------------------
+  // [M41] ALUGUEL NÃO É ASSINATURA
+  // ----------------------------------------------------------------------
+  // O painel dizia "suas assinaturas somam R$ 2.176,70 por mês, R$ 26.120,40 ao
+  // longo de um ano, 30% da sua renda" com o Aluguel de R$ 1.850 encabeçando a
+  // lista, e "5 cobranças" ao lado de "11 identificadas" na mesma tela. O
+  // alerta de assinaturas existe para provocar cancelamento; aplicá-lo a
+  // moradia é conselho vazio, e mina a confiança nos outros alertas.
+  const aluguel = m.subscriptions.concat(m.essentials).find((s) => /aluguel/i.test(s.name));
+  check("o aluguel é reconhecido no painel", !!aluguel, m.essentials.map((s) => s.name).join(","));
+  check("o aluguel NÃO está entre as assinaturas",
+    !m.subscriptions.some((s) => /aluguel/i.test(s.name)),
+    m.subscriptions.map((s) => s.name).join(","));
+  check("ele está entre os compromissos essenciais", !!aluguel && aluguel.essential === true);
+  check("o total de assinaturas cai para a ordem do que dá para cancelar",
+    m.monthlyTotal < 500, m.monthlyTotal);
+  check("e o comprometido do mês continua contando o aluguel inteiro",
+    m.committedMonthly > m.monthlyTotal + 1000, { comprometido: m.committedMonthly, assinaturas: m.monthlyTotal });
+
+  // O "5 vs 11" na mesma tela: agora há um número para cada pergunta, e a soma
+  // das partes é exatamente o total identificado.
+  check("o total identificado é a soma das três listas",
+    m.counts.tracked === m.counts.subscriptions + m.counts.essentials + m.counts.variable,
+    m.counts);
+  const painel = readSrc("js/screens/subscriptions.js");
+  check("o cartão do Início nomeia os dois números em vez de mostrar só um",
+    /counts\.tracked/.test(painel) && /delas assinatura/.test(painel));
+
+  // A pessoa pode discordar da leitura por tipo, e a escolha dela vence.
+  const reclassificado = run(`buildRecurringModel({ ...__demo, recurringPrefs: { classe: { ${JSON.stringify(aluguel ? aluguel.key : "x")}: "assinatura" } } })`);
+  check("reclassificar traz o item de volta para as assinaturas",
+    reclassificado.subscriptions.some((s) => /aluguel/i.test(s.name)),
+    reclassificado.subscriptions.map((s) => s.name).join(","));
+  check("e a origem da classificação fica registrada",
+    reclassificado.subscriptions.concat(reclassificado.essentials)
+      .filter((s) => /aluguel/i.test(s.name)).every((s) => s.essentialSource === "voce"));
   check("o equivalente mensal nunca passa do custo anual do mesmo tipo",
     m.byType.every((t) => t.monthly <= t.annual));
 }

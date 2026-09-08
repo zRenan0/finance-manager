@@ -349,5 +349,59 @@ console.log("\n13. Resiliência: base vazia e limites");
   check("horizontes expostos para a UI", FORECAST_HORIZONS.length === 4 && FORECAST_HORIZONS.every((h) => h.label));
 }
 
+/* ================================================================= M41 */
+// ------------------------------------------------------------------------------
+// "PRÓXIMAS CONTAS" E O CALENDÁRIO PRECISAM LER A MESMA FONTE
+// ------------------------------------------------------------------------------
+// `upcomingBills` varria `data.transactions` procurando data futura. O motor de
+// previsão montava a MESMA janela a partir de recorrências, parcelas e faturas e
+// encontrava R$ 8.229,56 onde o cartão do Início dizia "nada previsto para os
+// próximos 30 dias" — logo abaixo da promessa de que "parcelas e gastos fixos
+// aparecem aqui automaticamente".
+console.log("\nM41. Próximas contas saem do motor de previsão, não de uma varredura própria");
+{
+  const data = migrate({
+    monthlyIncome: 6000,
+    transactions: baseHistory().concat([
+      tx({ type: "expense", amount: 420, categoryId: "educacao", date: inDays(12),
+        description: "Curso de inglês", installmentTotal: 10, installmentIndex: 3 }),
+    ]),
+  });
+
+  const limite = inDays(30);
+  const aceitos = ["recurring", "scheduled", "installment", "liability", "card-statement"];
+  const previstos = buildFutureEvents(data, today, limite)
+    .concat(ctx.cardStatementEvents(data, today, limite))
+    .filter((e) => e.type === "expense" && aceitos.indexOf(e.kind) >= 0);
+  const bills = ctx.upcomingBills(data);
+
+  check("a previsão tem compromissos nesta janela", previstos.length > 0, previstos.length);
+  check("e o cartão não fica vazio", bills.items.length > 0, bills.items.length);
+  check("todo compromisso previsto aparece na lista do cartão",
+    previstos.every((e) => bills.items.some((b) => b.id === e.id)),
+    previstos.filter((e) => !bills.items.some((b) => b.id === e.id)).map((e) => e.id).join(","));
+  check("o total do cartão é o total dos eventos previstos (mais o que está atrasado)",
+    bills.total >= ctx.sumMoney(previstos, (e) => e.amount) - 0.02,
+    { cartao: bills.total, previsto: ctx.sumMoney(previstos, (e) => e.amount) });
+  check("a parcela chega rotulada como parcela",
+    bills.items.some((b) => b.kind === "installment" && b.installment === "3/10"),
+    bills.items.map((b) => `${b.kind}:${b.installment}`).join(" "));
+  check("o gasto fixo projetado aparece, e ele não é lançamento nenhum",
+    bills.items.some((b) => b.kind === "recurring" && b.label === "Aluguel"));
+
+  // A REGRESSÃO, DITA COM NÚMERO: a varredura antiga só via lançamentos com
+  // data futura, e por isso o aluguel projetado nunca chegava ao cartão.
+  const antiga = (data.transactions || []).filter((t) => t.type === "expense" && t.date > today && t.date <= limite);
+  check("a fonte antiga enxergava menos compromissos que a nova",
+    antiga.length < bills.items.length, { antiga: antiga.length, nova: bills.items.length });
+
+  // A promessa impressa no estado vazio precisa continuar verdadeira.
+  const painel = readSrc("js/screens/dashboard.js");
+  check("o estado vazio ainda promete o que o motor agora entrega",
+    /Parcelas e gastos fixos aparecem aqui automaticamente/.test(painel));
+  check("a lista sabe nomear todo tipo que o motor devolve",
+    aceitos.concat(["late"]).every((k) => new RegExp(`(^|[ {,"])"?${k.replace("-", "\\-")}"?:`, "m").test(painel)));
+}
+
 console.log(`\n${fail === 0 ? "TODOS OS TESTES PASSARAM" : "FALHAS ENCONTRADAS"} — ${pass} ok, ${fail} falha(s)\n`);
 process.exit(fail === 0 ? 0 : 1);

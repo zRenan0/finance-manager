@@ -104,6 +104,35 @@ const REC_TYPES = [
 ];
 const REC_TYPE_OTHER = Object.freeze({ id: "outros", label: "Outros", icon: "tag" });
 
+// ------------------------------------------------------------------------------
+// [M41] ASSINATURA E COMPROMISSO RECORRENTE NÃO SÃO A MESMA COISA
+// ------------------------------------------------------------------------------
+// O motor classificava pela FORMA DO VALOR: preço que anda em degraus vira
+// "assinatura", preço que anda em rampa vira "recorrente variável". Pela forma
+// do valor, o aluguel é uma assinatura perfeita: R$ 1.850,00 todo mês, sem
+// variação nenhuma. E foi assim que o app passou a dizer "suas assinaturas
+// somam R$ 2.176,70 por mês, R$ 26.120,40 ao longo de um ano, 30% da sua renda"
+// com o aluguel encabeçando a lista.
+//
+// O alerta de assinaturas existe para provocar UMA decisão: cancelar. Aplicá-lo
+// a moradia é conselho vazio, e conselho vazio não fica contido: ele derruba a
+// confiança nos outros alertas do app. Sem o aluguel o número real era
+// R$ 326,70 por mês; esse sim é acionável.
+//
+// A régua nova é o TIPO, que o M33 já reconhece pelo nome. Moradia, seguros e
+// saúde, e educação formal ficam fora do alerta por padrão. Não porque não
+// custem: porque não se cancelam numa tarde. Continuam contando inteiros no
+// "comprometido por mês", que é a pergunta certa para eles.
+//
+// É PADRÃO, NÃO VEREDITO. Um curso de inglês que a pessoa quer cancelar, ou uma
+// assinatura de streaming que o app leu como "serviços", são reclassificáveis
+// pela própria pessoa, e a escolha dela vence a inferência (bucket `classe`).
+const REC_ESSENTIAL_TYPES = ["moradia", "seguros", "educacao"];
+
+function recIsEssentialType(typeId) {
+  return REC_ESSENTIAL_TYPES.indexOf(typeId) >= 0;
+}
+
 function recTypeOf(name) {
   const nome = typeof normalizeText === "function"
     ? normalizeText(name)
@@ -140,11 +169,21 @@ function recTotalsByType(items) {
 function recDecorate(item, prefs) {
   const tipo = recTypeOf(item.name);
   const revisadoEm = (prefs.review && prefs.review[item.key]) || "";
+  // A escolha da pessoa vence a inferência pelo nome, sempre.
+  const escolha = (prefs.classe && prefs.classe[item.key]) || "";
+  const essencial = escolha === "essencial" ? true
+    : escolha === "assinatura" ? false
+    : recIsEssentialType(tipo.id);
   return {
     ...item,
     typeId: tipo.id,
     typeLabel: tipo.label,
     typeIcon: tipo.icon,
+    // `essential` = compromisso que não se resolve cancelando numa tarde
+    // (moradia, seguro, escola). Fica fora do alerta de assinaturas e do
+    // "custo por ano", e continua inteiro no comprometido do mês.
+    essential: essencial,
+    essentialSource: escolha ? "voce" : "tipo",
     reviewedAt: revisadoEm,
     daysSinceReview: revisadoEm ? daysBetweenIso(revisadoEm, todayIso()) : null,
   };
@@ -198,6 +237,9 @@ function recPrefsOf(data) {
     // [M33] "Revisar assinatura": guarda QUANDO foi revisada, nunca um juízo
     // sobre a assinatura. O app não decide se ela vale a pena.
     review: p.review && typeof p.review === "object" ? p.review : {},
+    // [M41] `classe`: "assinatura" ou "essencial", quando a pessoa discorda da
+    //  leitura por tipo. Guarda a escolha, nunca um juízo sobre o gasto.
+    classe: p.classe && typeof p.classe === "object" ? p.classe : {},
   };
 }
 
@@ -435,21 +477,27 @@ function buildRecurringModel(data, opts) {
   const active = tracked.filter((s) => s.status !== "encerrada");
   const ended = tracked.filter((s) => s.status === "encerrada");
 
-  const subscriptions = active.filter((s) => s.kind === "assinatura")
-    .sort((a, b) => moneyCompare(b.monthlyEquivalent, a.monthlyEquivalent));
-  const variable = active.filter((s) => s.kind === "recorrente")
-    .sort((a, b) => moneyCompare(b.monthlyEquivalent, a.monthlyEquivalent));
+  const porValor = (a, b) => moneyCompare(b.monthlyEquivalent, a.monthlyEquivalent);
+  const fixos = active.filter((s) => s.kind === "assinatura");
+  // [M41] Só o que se cancela entra em "assinaturas". Ver REC_ESSENTIAL_TYPES.
+  const subscriptions = fixos.filter((s) => !s.essential).sort(porValor);
+  const essentials = fixos.filter((s) => s.essential).sort(porValor);
+  const variable = active.filter((s) => s.kind === "recorrente").sort(porValor);
 
   const monthlyTotal = sumMoney(subscriptions, (s) => s.monthlyEquivalent);
   const annualTotal = sumMoney(subscriptions, (s) => s.annualCost);
+  const essentialMonthly = sumMoney(essentials, (s) => s.monthlyEquivalent);
+  const essentialAnnual = sumMoney(essentials, (s) => s.annualCost);
   const variableMonthly = sumMoney(variable, (s) => s.monthlyEquivalent);
-  const committedMonthly = addMoney(monthlyTotal, variableMonthly);
+  // O COMPROMETIDO DO MÊS NÃO MUDA: moradia, seguro e escola saíram do alerta
+  // de assinaturas, não da conta de quanto da renda já tem dono.
+  const committedMonthly = addMoney(addMoney(monthlyTotal, essentialMonthly), variableMonthly);
 
   // [M33] O ANO DE TUDO QUE SE REPETE, não só das assinaturas de preço fixo.
   // A parte fixa é exata (`annualCost` já usa a cadência real); a variável é
   // estimativa a partir do equivalente mensal, e a tela precisa dizer isso.
-  const committedAnnual = addMoney(annualTotal, mulMoney(variableMonthly, 12));
-  const byType = recTotalsByType(subscriptions.concat(variable));
+  const committedAnnual = addMoney(addMoney(annualTotal, essentialAnnual), mulMoney(variableMonthly, 12));
+  const byType = recTotalsByType(subscriptions.concat(essentials).concat(variable));
 
   const increases = active
     .filter((s) => s.increasePct > REC_INCREASE_PCT)
@@ -468,6 +516,7 @@ function buildRecurringModel(data, opts) {
   return {
     monthKey: todayKey,
     subscriptions,
+    essentials,
     variable,
     ended,
     ignored,
@@ -476,16 +525,26 @@ function buildRecurringModel(data, opts) {
     upcomingTotal,
     monthlyTotal,
     annualTotal,
+    essentialMonthly,
+    essentialAnnual,
     variableMonthly,
     committedMonthly,
     committedAnnual,
     byType,
     income,
     incomeShare,
+    // A fatia da renda que as ASSINATURAS ocupam. É esta que alimenta o alerta;
+    // `incomeShare` continua sendo a de tudo que se repete.
+    subscriptionShare: income > 0 ? safePct(monthlyTotal, income) : 0,
     proposals: buildRecurringProposals(data, all, prefs),
     counts: {
       subscriptions: subscriptions.length,
+      essentials: essentials.length,
       variable: variable.length,
+      // Tudo que se repete e está sendo acompanhado. É o número que a tela
+      // mostra como "identificadas"; sem ele, o painel dizia "5 cobranças
+      // recorrentes" num cartão e "11 identificadas" no outro.
+      tracked: subscriptions.length + essentials.length + variable.length,
       ended: ended.length,
       ignored: ignored.length,
       reviewed: tracked.filter((s) => s.reviewedAt).length,

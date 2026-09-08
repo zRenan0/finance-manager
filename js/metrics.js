@@ -227,6 +227,45 @@ function netWorthSeries(data, months = 6) {
   return out;
 }
 
+// ------------------------------------------------------------------------------
+// [M41] UMA JANELA SÓ PARA "QUANTO O PATRIMÔNIO CRESCEU"
+// ------------------------------------------------------------------------------
+// O cartão de Patrimônio comparava o primeiro e o último ponto de uma série de
+// 6 meses; o pilar do score fazia a mesma conta sobre uma série de 4. Na mesma
+// tela apareciam "+443,2%" e "seu patrimônio cresceu 251,1% nos últimos meses".
+// Os dois números estavam certos, e é justamente isso que os torna
+// indefensáveis: a mesma grandeza com dois valores e nenhum período escrito.
+//
+// Agora existe uma função só, com uma janela só, e ela devolve o PERÍODO junto
+// com o percentual. "Cresceu 443,2% desde abril" é verificável; "cresceu 443,2%
+// nos últimos meses" é só uma afirmação grande.
+const NET_WORTH_GROWTH_MONTHS = 6;
+
+function netWorthGrowth(data, months) {
+  const janela = Math.max(2, Number(months) || NET_WORTH_GROWTH_MONTHS);
+  const series = netWorthSeries(data, janela);
+  const first = series[0].value;
+  const last = series[series.length - 1].value;
+  const delta = subMoney(last, first);
+  // Sem base nenhuma dos dois lados não há crescimento a medir; devolver 0%
+  // seria inventar um fato sobre quem ainda não tem histórico.
+  const measurable = Math.abs(first) >= 1 || Math.abs(last) >= 1;
+  const pct = !measurable ? null
+    : (first !== 0 ? (delta / Math.abs(first)) * 100 : (last > 0 ? 100 : last < 0 ? -100 : 0));
+  const [ano, mes] = String(series[0].key).split("-").map(Number);
+  const mesmoAno = ano === series[series.length - 1].year;
+  return {
+    series, months: janela,
+    first, last, delta, pct, measurable,
+    fromKey: series[0].key,
+    toKey: series[series.length - 1].key,
+    // "abril" quando o período cabe no mesmo ano, "abril de 2025" quando não.
+    sinceLabel: mesmoAno
+      ? MONTH_NAMES[mes - 1].toLowerCase()
+      : `${MONTH_NAMES[mes - 1].toLowerCase()} de ${ano}`,
+  };
+}
+
 /* ==============================================================================
  * RESERVA DE EMERGÊNCIA
  * ============================================================================== */
@@ -350,22 +389,42 @@ function emergencyLadder(data, months = 3) {
   };
 }
 
+// [M41] O ALVO E A RÉGUA PRECISAM SER O MESMO NÚMERO.
+//
+// O cartão dizia "cobre 2,1 de 6 meses de despesa (R$ 3.963,38/mês)" e, logo
+// abaixo, "Alvo: R$ 21.600,00". Só que 6 × 3.963,38 = 23.780,28. O alvo vinha
+// da meta que a pessoa cadastrou; a contagem de meses continuava vindo dos 6
+// meses do ajuste. Alcançar o alvo exibido dá 5,45 meses, não 6, e o cartão
+// perdia a coerência interna: nenhuma das duas frases explicava a outra.
+//
+// Agora `targetMonthsEffective` converte o alvo REAL pela mesma régua do
+// `monthsCovered` (alvo ÷ despesa média), e `targetSource` diz de onde ele veio
+// para a tela poder escrever "definido por você" em vez de fingir que 21.600
+// são seis meses.
 function emergencyFund(data) {
   const goal = emergencyGoalOf(data);
   const targetMonths = Math.max(1, Number(data.emergencyMonths) || 6);
   const monthlyNeed = avgMonthlyExpense(data);
   const current = goal ? roundMoney(goal.current) : 0;
   // Alvo: o que o usuário definiu na meta; sem meta, N meses de despesa média.
-  const target = goal && goal.target > 0 ? roundMoney(goal.target) : mulMoney(monthlyNeed, targetMonths);
+  const fromGoal = !!(goal && goal.target > 0);
+  const target = fromGoal ? roundMoney(goal.target) : mulMoney(monthlyNeed, targetMonths);
   const pct = target > 0 ? clamp(safePct(current, target), 0, 100) : 0;
   const monthsCovered = monthlyNeed > 0 ? current / monthlyNeed : 0;
+  // Quantos meses o ALVO EXIBIDO compra, na mesma régua de `monthsCovered`.
+  const targetMonthsEffective = monthlyNeed > 0 && target > 0 ? target / monthlyNeed : targetMonths;
 
   let status = "empty";
-  if (current > 0 && monthsCovered >= targetMonths) status = "ok";
-  else if (monthsCovered >= targetMonths / 2) status = "partial";
+  if (current > 0 && monthsCovered >= targetMonthsEffective) status = "ok";
+  else if (current > 0 && monthsCovered >= targetMonthsEffective / 2) status = "partial";
   else if (current > 0) status = "low";
 
-  return { goal, goalId: goal ? goal.id : null, current, target, pct, monthlyNeed, targetMonths, monthsCovered, status, configured: !!goal };
+  return {
+    goal, goalId: goal ? goal.id : null, current, target, pct, monthlyNeed,
+    targetMonths, targetMonthsEffective,
+    targetSource: fromGoal ? "meta" : "regra",
+    monthsCovered, status, configured: !!goal,
+  };
 }
 
 /* ==============================================================================
@@ -479,33 +538,69 @@ function categoryRanking(data, monthKey) {
  * PRÓXIMAS CONTAS
  * ============================================================================== */
 
-// Junta duas fontes reais, sem inventar dado:
-//   1. Lançamentos já cadastrados com data futura (parcelas, contas agendadas).
-//   2. Gastos fixos do mês anterior que ainda não foram lançados neste mês :
-//      projetados para o mesmo dia do mês (é exatamente o que o banner de
-//      "gastos fixos" já detecta, aqui reaproveitado com data estimada).
+// ------------------------------------------------------------------------------
+// [M41] UMA FONTE SÓ PARA "O QUE VEM AÍ"
+// ------------------------------------------------------------------------------
+// Esta função varria `data.transactions` procurando lançamentos com data
+// futura. O motor de previsão (forecast.js) monta a MESMA janela a partir de
+// recorrências, parcelas e faturas; e encontrava R$ 8.229,56 onde este cartão
+// dizia "nada previsto para os próximos 30 dias", logo acima da promessa de que
+// "parcelas e gastos fixos aparecem aqui automaticamente". Duas varreduras para
+// a mesma pergunta, e a que a tela mostrava era a cega.
+//
+// Agora a lista vem dos eventos de `buildFutureEvents`, os mesmos que o
+// calendário desenha e que o saldo projetado consome. Um compromisso que
+// aparece num lugar aparece nos três.
+//
+// A única coisa que NÃO sai de lá é a conta ATRASADA: `buildFutureEvents`
+// começa em hoje, e por definição não enxerga o que já venceu. O gasto fixo do
+// mês passado ainda não lançado continua vindo de `getPendingRecurring`, que é
+// a mesma fonte do banner de gastos fixos; sem ele o pilar "contas em dia" do
+// score ficaria cego. Como um entra só com data passada e o outro só com data
+// futura, não há como contar o mesmo compromisso duas vezes.
+// Parcela de dívida cadastrada (`liability`) entra na lista: ela é o compromisso
+// datado mais próximo de muita gente, e `hasEquivalentCommitment` já a impede de
+// aparecer em cima de um gasto fixo de valor equivalente. Deixá-la de fora
+// recriaria a contradição que este cartão existe para resolver: o calendário
+// mostrando a parcela do carro no dia 15 e o Início dizendo "nada previsto".
+const UPCOMING_KINDS = ["recurring", "scheduled", "installment", "card-statement", "liability"];
+
 function upcomingBills(data, days = 30) {
   const today = todayIso();
   const limitIso = isoOfDate(new Date(dateFromIso(today).getTime() + days * 86400000));
   const out = [];
 
-  (data.transactions || []).forEach((t) => {
-    if (t.type !== "expense") return;
-    if (t.date <= today || t.date > limitIso) return;
-    const cat = categoryById(data, t.categoryId);
+  const eventos = typeof buildFutureEvents === "function"
+    ? buildFutureEvents(data, today, limitIso).concat(cardStatementEvents(data, today, limitIso))
+    : [];
+  eventos.forEach((e) => {
+    if (e.type !== "expense") return;
+    if (UPCOMING_KINDS.indexOf(e.kind) < 0) return;
+    // A fatura vencida e ainda em aberto entra na PREVISÃO DE CAIXA no primeiro
+    // dia útil seguinte, porque é quando o dinheiro pode sair. Numa LISTA de
+    // contas, porém, essa data é ficção: o que a pessoa precisa ver é o
+    // vencimento real, senão cinco faturas atrasadas aparecem empilhadas no
+    // mesmo dia com o mesmo nome e viram uma linha só aos olhos.
+    const vencida = e.kind === "card-statement" && e.meta && e.meta.overdue;
+    const iso = vencida ? e.meta.dueDate : e.iso;
     out.push({
-      id: t.id,
-      kind: "scheduled",
-      date: t.date,
-      daysLeft: daysBetweenIso(today, t.date),
-      amount: roundMoney(t.amount),
-      label: t.description || cat.name,
-      categoryName: cat.name,
-      color: cat.color,
-      icon: cat.icon,
-      installment: t.installmentTotal ? `${t.installmentIndex}/${t.installmentTotal}` : null,
+      id: e.id,
+      kind: e.kind,
+      overdue: !!vencida,
+      date: iso,
+      daysLeft: daysBetweenIso(today, iso),
+      amount: roundMoney(e.amount),
+      label: e.label,
+      categoryName: e.categoryName,
+      color: e.color,
+      icon: e.icon,
+      installment: e.installment || null,
+      // Compromisso com data conhecida x fixo projetado pela repetição. A tela
+      // precisa poder dizer qual é qual em vez de apresentar os dois como fato.
+      certain: e.certain !== false,
     });
   });
+
 
   const currentKey = keyOfDate(new Date());
   getPendingRecurring(data, currentKey).forEach((t) => {
@@ -513,11 +608,11 @@ function upcomingBills(data, days = 30) {
     const [y, m] = currentKey.split("-").map(Number);
     const dim = daysInMonthOf(y, m - 1);
     const estimated = isoOfDate(new Date(y, m - 1, Math.min(day, dim)));
-    if (estimated > limitIso) return;
+    if (estimated >= today) return;              // daqui para a frente é do motor de previsão
     const cat = categoryById(data, t.categoryId);
     out.push({
       id: `recur-${t.id}`,
-      kind: estimated < today ? "late" : "recurring",
+      kind: "late",
       date: estimated,
       daysLeft: daysBetweenIso(today, estimated),
       amount: roundMoney(t.amount),
@@ -526,11 +621,20 @@ function upcomingBills(data, days = 30) {
       color: cat.color,
       icon: cat.icon,
       installment: null,
+      certain: false,
+      overdue: true,
     });
   });
 
   out.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-  return { items: out, total: sumMoney(out, (b) => b.amount), lateCount: out.filter((b) => b.kind === "late").length };
+  return {
+    items: out,
+    total: sumMoney(out, (b) => b.amount),
+    lateCount: out.filter((b) => b.kind === "late").length,
+    // Vencido e "próximo" não são a mesma coisa, e o cartão não pode chamar os
+    // dois de "nos próximos 30 dias".
+    overdueCount: out.filter((b) => b.overdue).length,
+  };
 }
 
 /* ==============================================================================
