@@ -32,8 +32,21 @@ const TMP = path.join(OUT, "tmp");
 // agora combinam cobertura entre processos, e arquivos críticos podem ter um
 // piso próprio quando a média global esconder uma regressão localizada.
 const MINIMO_GLOBAL = Number(process.env.COVERAGE_MIN) || 75;
+// [M41] PISO PRÓPRIO ONDE O DINHEIRO É MANIPULADO.
+//
+// A média global escondia duas telas medidas em 43,6% e 57,4%, e são
+// justamente as duas piores para isso: `debts.js` desenha Price/SAC, a
+// comparação entre avalanche e bola de neve e o custo do atraso; `add.js` é por
+// onde TODO lançamento entra. Um formulário que quebra num estado pouco comum
+// não perde um pixel: perde o lançamento.
+//
+// Os pisos abaixo são catracas, como o global: ficam abaixo do medido depois do
+// M41 (88,3% e 76,4%) para não ficarem vermelhos por variação de uma linha, e
+// acima do ponto em que a tela volta a ser um vão.
 const MINIMOS_POR_ARQUIVO = Object.freeze({
   "js/actions.js": Number(process.env.COVERAGE_ACTIONS_MIN) || 35,
+  "js/screens/debts.js": Number(process.env.COVERAGE_DEBTS_MIN) || 75,
+  "js/screens/add.js": Number(process.env.COVERAGE_ADD_MIN) || 75,
 });
 
 function limpar() {

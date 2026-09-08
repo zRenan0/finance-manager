@@ -1239,5 +1239,152 @@ console.log("\n[Conta] Extrato de acessos e área destrutiva");
   check("o extrato tem linha de atividade própria", /account-device__rail/.test(accountCss));
 }
 
+/* ------------------------------------------------------------------ */
+// [M41] AS DUAS TELAS PIORES PARA SE TER COBERTURA BAIXA
+// ------------------------------------------------------------------
+// A auditoria mediu `js/screens/debts.js` em 43,6% e `js/screens/add.js` em
+// 57,4%. São as duas piores telas para esse número:
+//
+//   * `debts.js` desenha a matemática de Price/SAC, a comparação entre
+//     avalanche e bola de neve e o custo do atraso. É onde o app mais se
+//     aproxima de dar um veredito, e onde uma frase errada custa dinheiro.
+//   * `add.js` é por onde TODO lançamento entra. Um formulário que quebra num
+//     estado pouco comum (transferência, natureza, rascunho de linguagem
+//     natural) não perde um pixel: perde o lançamento.
+//
+// O que faltava não era teste de conta: era EXERCITAR os estados. As duas
+// telas eram renderizadas uma vez cada, com base vazia, e mais da metade do
+// arquivo nunca chegava a rodar.
+console.log("\n15. [M41] Central de dívidas em todos os seus estados");
+{
+  const hoje = run("todayIso()");
+  const dias = (n) => run(`isoOfDate(new Date(dateFromIso("${hoje}").getTime() + ${n} * 86400000))`);
+  run(`state.data = migrate({ ...state.data,
+    monthlyIncome: 6000,
+    accounts: [makeAccount({ id: "acc-d", name: "Conta principal", openingBalance: 3000, openingDate: "${dias(-200)}" })],
+    assets: [
+      makeAsset({ id: "dv-carro", class: "divida", name: "Financiamento do carro", value: 28000,
+        monthlyPayment: 890, ratePct: 1.4, ratePeriod: "month", debtType: "financiamento",
+        creditor: "Banco X", nextDueDate: "${dias(12)}", originalPrincipal: 40000,
+        remainingInstallments: 36, amortizationSystem: "price", balanceCheckedAt: "${dias(-5)}" }),
+      makeAsset({ id: "dv-cartao", class: "divida", name: "Rotativo do cartão", value: 4200,
+        monthlyPayment: 300, cetAnnualPct: 380, debtType: "cartao", creditor: "Banco Y",
+        nextDueDate: "${dias(-40)}", lateFeePct: 2, lateInterestMonthlyPct: 1,
+        balanceCheckedAt: "${dias(-120)}" }),
+      makeAsset({ id: "dv-amigo", class: "divida", name: "Empréstimo com amigo", value: 900,
+        monthlyPayment: 100, debtType: "outro", nextDueDate: "${dias(20)}" }),
+    ],
+    debtPlan: { strategy: "avalanche", extraMonthly: 400 },
+  });`);
+
+  const comDividas = run("renderDebtsScreen()");
+  auditHtml("dívidas com carteira cheia", comDividas);
+  check("a ordem de pagamento aparece", /Ordem de pagamento/.test(comDividas));
+  check("o plano de quitação aparece", /Plano de quitação/.test(comDividas));
+  check("a comparação de estratégias aparece", /Qual estratégia usar/.test(comDividas));
+  check("a dívida vencida é sinalizada no topo", /hero-chip--warn/.test(comDividas));
+
+  // Linha expandida: fatos, atraso com custo estimado, saldo velho, histórico.
+  run(`state.debtsUi.expandedId = "dv-cartao";`);
+  const expandida = run("renderDebtsScreen()");
+  auditHtml("dívidas com linha aberta", expandida);
+  check("a linha aberta mostra o custo do atraso", /multa de/.test(expandida));
+  check("e avisa que o saldo está sem conferência", /sem conferência há mais de 60 dias/.test(expandida));
+  check("a linha aberta oferece registrar pagamento", /data-action="debt-payment-open"/.test(expandida));
+
+  // A dívida sem taxa informada: a comparação não pode fingir que compara.
+  run(`state.debtsUi.expandedId = "dv-amigo";`);
+  const semTaxa = run("renderDebtsScreen()");
+  auditHtml("dívidas com item sem taxa", semTaxa);
+  check("custo não informado é declarado", /custo não informado/.test(semTaxa));
+
+  // Formulários abertos: cadastro novo, edição e pagamento.
+  run(`state.debtsUi = { ...state.debtsUi, expandedId: null, form: freshDebtForm() };`);
+  const formNovo = run("renderDebtsScreen()");
+  auditHtml("dívidas com formulário novo", formNovo);
+  check("o formulário novo diz que é novo", /Nova dívida/.test(formNovo) && /Cadastrar dívida/.test(formNovo));
+
+  run(`state.debtsUi.form = { ...freshDebtForm(), id: "dv-carro", name: "Financiamento do carro", value: "28.000,00", cetAnnualPct: "22,5", ratePct: "1,4", ratePeriod: "month", lateFeePct: "2", lateInterestMonthlyPct: "1", note: "Contrato 123" };`);
+  const formEdicao = run("renderDebtsScreen()");
+  auditHtml("dívidas com formulário de edição", formEdicao);
+  check("o formulário de edição diz que é edição", /Editar dívida/.test(formEdicao) && /Salvar alterações/.test(formEdicao));
+
+  run(`state.debtsUi.form = null; state.debtsUi.payment = freshDebtPayment("dv-carro");`);
+  const formPagamento = run("renderDebtsScreen()");
+  auditHtml("dívidas com formulário de pagamento", formPagamento);
+  check("o pagamento não recalcula o saldo sozinho",
+    /Não é calculado pelo valor pago/.test(formPagamento));
+  run(`state.debtsUi = { form: null, payment: null, expandedId: null, confirmDeleteId: null, extraDraft: null };`);
+
+  // Sem dívida cadastrada, mas com cartão em aberto: o convite que explica a
+  // diferença entre fatura e dívida com juros.
+  run(`state.data = migrate({ ...state.data, assets: [] });`);
+  const semDividas = run("renderDebtsScreen()");
+  auditHtml("dívidas vazias", semDividas);
+  check("o vazio convida a cadastrar", /data-action="debt-new"/.test(semDividas));
+}
+
+console.log("\n16. [M41] Formulário de lançamento em todos os seus estados");
+{
+  const hoje = run("todayIso()");
+  run(`state.data = migrate({ ...state.data,
+    monthlyIncome: 6000,
+    accounts: [
+      makeAccount({ id: "acc-a", name: "Conta A", openingBalance: 2000, openingDate: "${hoje}" }),
+      makeAccount({ id: "acc-b", name: "Conta B", openingBalance: 500, openingDate: "${hoje}" }),
+    ],
+    creditCards: [makeCreditCard({ id: "card-a", name: "Cartão", accountId: "acc-a", limit: 5000, closingDay: 20, dueDay: 28 })],
+    transactions: [
+      makeTransaction({ id: "add-t1", type: "expense", amount: 120, categoryId: "mercado", date: "${hoje}", description: "Mercado" }),
+      makeTransaction({ id: "add-t2", type: "income", amount: 6000, categoryId: "outros", date: "${hoje}", description: "Salário" }),
+    ],
+  }); state.form = freshTxForm();`);
+
+  const despesa = run("renderAddScreen()");
+  auditHtml("lançamento de despesa", despesa);
+
+  run(`state.form = { ...freshTxForm(), type: "income", amount: "1.500,00", description: "Freela" };`);
+  const receita = run("renderAddScreen()");
+  auditHtml("lançamento de receita", receita);
+  check("receita e despesa oferecem naturezas diferentes", receita !== despesa);
+
+  // Crédito parcelado: o bloco de parcelas e o cartão como destino.
+  run(`state.form = { ...freshTxForm(), payment: "Crédito", creditCardId: "card-a", amount: "1.200,00", installments: "10", description: "Notebook" };`);
+  const parcelado = run("renderAddScreen()");
+  auditHtml("lançamento parcelado no crédito", parcelado);
+
+  // Valor que estoura o grupo do orçamento: o aviso que só aparece com número.
+  run(`state.form = { ...freshTxForm(), amount: "4.500,00", categoryId: "moradia", description: "Reforma" };`);
+  const estouro = run("renderAddScreen()");
+  auditHtml("lançamento que estoura o grupo", estouro);
+
+  // Edição de um lançamento já gravado.
+  run(`state.editingTxId = "add-t1"; state.form = { ...freshTxForm(), amount: "120,00", categoryId: "mercado", description: "Mercado" };`);
+  const edicao = run("renderAddScreen()");
+  auditHtml("edição de lançamento", edicao);
+  run(`state.editingTxId = null;`);
+
+  // Entrada por linguagem natural, com rascunhos na tela: é o caminho em que o
+  // app INTERPRETA o que a pessoa escreveu, e o que ele entendeu tem de estar
+  // visível antes de virar lançamento.
+  // Duas frases numa linha: o separador reconhecido e ";", nao o "e".
+  const frase = "mercado 87,90 ontem; uber 23 hoje";
+  run(`state.nlp = { text: ${JSON.stringify(frase)}, drafts: parseNaturalEntries(${JSON.stringify(frase)}, state.data), error: null, loading: false, touched: true };`);
+  check("a frase produz mais de um rascunho", run("state.nlp.drafts.length") >= 2, run("state.nlp.drafts.length"));
+  const comRascunhos = run("renderQuickEntryCard()");
+  auditHtml("entrada rápida com rascunhos", comRascunhos);
+  check("o que o app entendeu aparece antes de virar lançamento", /nlp-draft/.test(comRascunhos));
+  check("e a confirmação é um passo separado", /data-action="nlp-confirm"/.test(comRascunhos));
+
+  // O caminho do erro: frase que o app não entende não pode sumir em silêncio.
+  run(`state.nlp = { text: "asdf", drafts: [], error: "Não entendi o valor", loading: false, touched: true };`);
+  const comErro = run("renderQuickEntryCard()");
+  auditHtml("entrada rápida com erro", comErro);
+  check("o erro da entrada rápida é dito na tela", /inline-error/.test(comErro));
+  run(`state.nlp = { text: "", drafts: [], error: null, loading: false, touched: false };`);
+
+  run(`state.form = freshTxForm();`);
+}
+
 console.log(`\n${fail === 0 ? "TODOS OS TESTES PASSARAM" : "FALHAS ENCONTRADAS"} — ${pass} ok, ${fail} falha(s)\n`);
 process.exit(fail === 0 ? 0 : 1);

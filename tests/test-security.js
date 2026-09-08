@@ -48,6 +48,50 @@ async function main() {
   check("saída de dados não é qualquer HTTPS", !/\bhttps:(\s|$)/.test(connectSrc), connectSrc);
   check("a única saída externa é a consulta fiscal", /https:\/\/\*\.gov\.br/.test(connectSrc), connectSrc);
 
+  // ----------------------------------------------------------------------
+  // [M41] O CURINGA `*.gov.br` É LARGO, E ESTA É A CONTA QUE O SUSTENTA
+  // ----------------------------------------------------------------------
+  // A auditoria apontou, com razão, que `https://*.gov.br` libera qualquer
+  // subdomínio do governo para conexão, enquanto o leitor de nota fiscal já
+  // restringe em código a SEFAZ e à Fazenda. O ideal seria repetir a mesma
+  // lista aqui: curinga na CSP é a rede de proteção que sobra quando a
+  // validação em código falha, e larga demais ela não protege.
+  //
+  // A lista explícita NÃO foi adotada, e a razão é honesta: são 27 portais
+  // estaduais com nomes heterogêneos (`nfce.fazenda.sp.gov.br`,
+  // `www.sefaz.rs.gov.br`, `www.fazenda.pr.gov.br`...), que mudam sem aviso.
+  // Uma lista escrita de memória erra algum host, e o erro não aparece aqui:
+  // aparece como leitor de nota que parou de funcionar num estado só, meses
+  // depois, sem mensagem. Trocar um risco residual de exfiltração por uma
+  // quebra funcional silenciosa é um mau negócio.
+  //
+  // O que compensa a decisão, e é o que estes testes travam:
+  //   1. o curinga é o ÚNICO da política inteira;
+  //   2. a validação em código continua estritamente mais estreita que ele;
+  //   3. a decisão está escrita no README, junto dos outros compromissos.
+  const curingas = (csp.match(/\*/g) || []).length;
+  check("o curinga da consulta fiscal é o único da política", curingas === 1, `${curingas} curingas em: ${csp}`);
+
+  const qr = {};
+  vm.runInNewContext(`${read("js/qrcode.js")}\nthis.isTrustedFiscalHost = isTrustedFiscalHost;`, qr);
+  const confiavel = qr.isTrustedFiscalHost;
+  check("a validação em código aceita o portal real", confiavel("nfce.fazenda.sp.gov.br") === true);
+  // Tudo abaixo passa pelo curinga da CSP e é recusado pelo código. É esta
+  // diferença que faz da CSP uma segunda camada, e não a única.
+  [
+    ["subdomínio de governo sem relação com nota fiscal", "dados.saude.gov.br"],
+    ["portal genérico do governo", "www.gov.br"],
+    ["nome que só imita a SEFAZ", "sefazfalsa.gov.br"],
+    ["domínio de fora disfarçado", "nfce.sefaz.sp.gov.br.invasor.com"],
+    ["host vazio", ""],
+  ].forEach(([rotulo, host]) => {
+    check(`o código recusa ${rotulo}`, confiavel(host) === false, host);
+  });
+
+  const readme = read("README.md");
+  check("o compromisso do curinga está documentado",
+    /https:\/\/\*\.gov\.br/.test(readme) && /27 portais estaduais/.test(readme));
+
   // [M5] O QUE SOBROU DEPOIS DE `default-src 'self'`.
   //
   // `default-src 'self'` já cobre a maior parte, mas ele PERMITE moldura de

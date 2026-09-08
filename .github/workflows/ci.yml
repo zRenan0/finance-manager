@@ -72,5 +72,14 @@ jobs:
       - name: Executar fluxos no navegador
         run: npm run test:browser
 
+      # Roda `build:dist` por dentro e exercita o pacote MINIFICADO: instalação,
+      # modo offline e uma passada por todas as telas do roteador. É a única
+      # verificação do projeto que executa o artefato publicado; a suíte de Node
+      # lê as fontes achatadas e continuaria verde se o build quebrasse um nome.
       - name: Executar instalação e modo offline
         run: npm run test:pwa
+
+      # A landing é a porta do domínio e a única página indexada. Ela tem folha
+      # e scripts próprios, e nada mais na suíte a renderiza.
+      - name: Executar a página comercial
+        run: npm run test:landing

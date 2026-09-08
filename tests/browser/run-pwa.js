@@ -146,8 +146,48 @@ async function completeOnboarding(page) {
     await page.waitForSelector("body.lp");
     assert(await page.locator('a[href="index.html"]').count() >= 1, "landing offline perdeu o acesso ao aplicativo");
 
+    // ------------------------------------------------------------------
+    // [M41] TODAS AS TELAS, CONTRA O PACOTE PUBLICADO
+    // ------------------------------------------------------------------
+    // Desde que `dist/` passou a ser minificado, o que o navegador executa não
+    // é mais byte a byte o que a suíte de Node carrega. A suíte de Node lê as
+    // fontes achatadas; se a minificação quebrasse um nome, um `typeof` ou um
+    // módulo, tudo continuaria verde e o defeito só apareceria em produção,
+    // como tela em branco.
+    //
+    // Este bloco é a única coisa no projeto que executa o ARTEFATO PUBLICADO em
+    // todas as telas do roteador. É barato (um render por aba, sem interação) e
+    // cobre justamente a classe de falha que o build pode introduzir.
+    await context.setOffline(false);
+    await page.goto(`${baseUrl}/index.html?__test=1`, { waitUntil: "domcontentloaded" });
+    await page.waitForFunction(() => document.documentElement.getAttribute("data-module-boot") === "ready");
+    const varredura = await page.evaluate(async () => {
+      const abas = [
+        "dashboard", "add", "analytics", "goals", "settings", "import", "simulate",
+        "subscriptions", "health", "wealth", "calendar", "invest", "simulators",
+        "achievements", "insights", "notifications", "accounts", "debts",
+        "all", "rules", "categories", "privacy", "account",
+      ];
+      const problemas = [];
+      for (const aba of abas) {
+        try {
+          CofreUI.test.navigate(aba);
+          await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+          const alvo = document.querySelector(".main-content");
+          const texto = alvo ? alvo.innerText : "";
+          if (texto.trim().length < 40) problemas.push(`${aba}: tela vazia`);
+          const lixo = texto.match(/undefined|NaN|\[object Object\]|\$\{/);
+          if (lixo) problemas.push(`${aba}: lixo de template (${lixo[0]})`);
+        } catch (error) {
+          problemas.push(`${aba}: ${error.message}`);
+        }
+      }
+      return { total: abas.length, problemas };
+    });
+    assert(varredura.problemas.length === 0, `telas com defeito no pacote publicado: ${varredura.problemas.join("; ")}`);
+
     assert(pageErrors.length === 0, `erros de página: ${pageErrors.join("; ")}`);
-    console.log("\nPWA real aprovado: shell, landing, dados locais, limpeza e API fora do cache.");
+    console.log(`\nPWA real aprovado: shell, landing, dados locais, limpeza, API fora do cache e ${varredura.total} telas do pacote minificado.`);
   } finally {
     await context.setOffline(false).catch(() => {});
     await context.close();

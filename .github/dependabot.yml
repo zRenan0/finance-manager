@@ -1,0 +1,53 @@
+# Atualização automática de dependências.
+#
+# POR QUE ISTO EXISTE NUM PROJETO COM ZERO DEPENDÊNCIA EM PRODUÇÃO
+#
+# O aplicativo não carrega biblioteca de terceiro nenhuma — exceto UMA, e ela é
+# justamente a de maior risco: o PDF.js. Ele é código de terceiro que roda no
+# NAVEGADOR e processa um arquivo que o usuário recebeu de outra pessoa (o
+# extrato que o banco mandou por e-mail). É o único ponto do projeto onde código
+# alheio encontra dado que veio de fora, e leitores de PDF são alvo histórico de
+# CVE. Uma versão parada aqui não é dívida técnica: é superfície de ataque.
+#
+# `playwright` e `esbuild` só rodam na máquina de quem desenvolve e na CI, mas
+# entram na mesma revisão semanal: eles decidem se o teste aprova e o que vai
+# para o ar, e uma versão comprometida aí contamina o pacote publicado sem tocar
+# no navegador de ninguém.
+#
+# As ações do GitHub entram porque elas rodam com o token do repositório. Uma
+# ação apontada por tag flutuante é a porta clássica de comprometimento de
+# cadeia de suprimentos, e `npm ci` verde não diz nada sobre isso.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: America/Sao_Paulo
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - dependencias
+    # O PDF.js sozinho, para que uma atualização dele nunca fique esperando o
+    # merge de outra: é o único terceiro que roda no navegador do usuário.
+    groups:
+      ferramentas-de-desenvolvimento:
+        patterns:
+          - "playwright"
+          - "esbuild"
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: America/Sao_Paulo
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore(ci)"
+    labels:
+      - dependencias

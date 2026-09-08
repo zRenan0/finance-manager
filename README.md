@@ -524,6 +524,39 @@ e uma `Permissions-Policy` mais fechada. A CSP é aplicada pelo cabeçalho
 arquivos do aplicativo precisam vir da própria origem e somente as origens
 necessárias para fontes e conexões são permitidas.
 
+#### O compromisso do `connect-src https://*.gov.br`
+
+A única saída de rede para fora do próprio site é a consulta da NFC-e
+(`js/qrcode.js`), e a CSP a libera por um curinga: `https://*.gov.br`. Isso é
+mais largo do que o aplicativo precisa, e a observação é correta — curinga na
+CSP é a rede de proteção que sobra quando a validação em código falha, e larga
+demais ela não protege.
+
+A lista explícita de hosts **não** foi adotada, e a razão está escrita aqui
+para não parecer descuido. São **27 portais estaduais** com nomes
+heterogêneos (`nfce.fazenda.sp.gov.br`, `www.sefaz.rs.gov.br`,
+`www.fazenda.pr.gov.br`, …) que mudam sem aviso. Uma lista incompleta ou
+desatualizada não falha no deploy: ela aparece meses depois como leitor de nota
+que parou de funcionar **num estado só**, sem mensagem de erro para o usuário —
+o `fetch` é best-effort e o app cai calado no preenchimento manual. Trocar um
+risco residual de exfiltração por uma quebra funcional silenciosa e regional é
+um mau negócio.
+
+O que sustenta a decisão, e o que `tests/test-security.js` trava:
+
+1. **É o único curinga da política inteira.** Qualquer outro reprova o teste.
+2. **A validação em código é estritamente mais estreita.**
+   `isTrustedFiscalHost` exige `.gov.br`, mais um rótulo `sefaz` ou `fazenda`,
+   mais um rótulo `nfce`/`nfe`/`portalsped`; e `parseNfceUrl` ainda exige
+   `https:`, porta padrão, sem credenciais na URL e chave de 44 dígitos.
+   `dados.saude.gov.br` passa pela CSP e é recusado pelo código.
+3. **A CSP é a segunda camada, não a única.** O teste verifica os dois lados
+   junto, para que afrouxar o código sem afrouxar a CSP (ou o contrário) seja
+   impossível de passar despercebido.
+
+Se algum dia a lista dos 27 hosts for levantada e verificada contra os portais
+reais, ela substitui o curinga e o item 1 do teste passa a exigir zero.
+
 ### Testes
 
 ```
