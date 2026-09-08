@@ -19,7 +19,7 @@ vm.createContext(ctx);
 const relogio = require("./helpers/fixed-clock").congelar(ctx);
 const Date = relogio.DataFixa;
 
-["js/utils.js", "js/rules.js", "js/layout.js", "js/storage.js", "js/accounts.js", "js/budgets.js", "js/score.js", "js/metrics.js", "js/health.js"]
+["js/utils.js", "js/rules.js", "js/layout.js", "js/storage.js", "js/accounts.js", "js/budgets.js", "js/score.js", "js/metrics.js", "js/forecast.js", "js/health.js"]
   .forEach((f) => vm.runInContext(readSrc(f), ctx, { filename: f }));
 
 const { buildHealthModel, debtProfile, cashFlowHistory, savingsCapacity } = ctx;
@@ -51,6 +51,26 @@ function congelarHoje(isoDate) {
   const original = ctx.todayIso;
   ctx.todayIso = () => isoDate;
   return () => { ctx.todayIso = original; };
+}
+
+// Igual à anterior, mas move TAMBÉM o `new Date()` do contexto. `monthProgress`
+// (budgets.js) lê o dia do mês por ali e não por `todayIso()`; sem isto, um
+// cenário que precisa acontecer no dia 8 fica com metade do app no dia 8 e a
+// outra metade no dia 15, e o teste deixa de provar o que se propõe.
+function congelarRelogio(isoDate) {
+  const [y, m, d] = isoDate.split("-").map(Number);
+  const Anterior = ctx.Date;
+  const instante = new Anterior(y, m - 1, d, 12, 0, 0, 0).getTime();
+  class DataFixa extends Anterior {
+    constructor(...args) {
+      if (args.length === 0) super(instante);
+      else super(...args);
+    }
+    static now() { return instante; }
+  }
+  const restaurarHoje = congelarHoje(isoDate);
+  ctx.Date = DataFixa;
+  return () => { ctx.Date = Anterior; restaurarHoje(); };
 }
 
 let seq = 0;
@@ -239,6 +259,135 @@ console.log("\n7. Fluxo de caixa ignora meses sem movimento");
   check("apenas 1 mês considerado", f.considered === 1, f.considered);
   check("mês positivo", f.positives === 1, f.positives);
   check("resultado médio = 2000", Math.abs(f.avgResult - 2000) < 0.01, f.avgResult);
+}
+
+/* ------------------------------------ 8. [M41] A projeção linear e o veredito */
+// ------------------------------------------------------------------------------
+// O CENÁRIO CONGELADO DO DEFEITO MAIS CARO QUE ESTE APP JÁ TEVE
+// ------------------------------------------------------------------------------
+// Renda de R$ 7.200, aluguel de R$ 1.850 pago no dia 3, R$ 60 por dia de gasto
+// variável, e hoje é dia 8. A pessoa recebeu tudo, gastou R$ 2.330 e guardou
+// dois terços da renda.
+//
+// A extrapolação linear (`gasto ÷ fração do mês decorrida`) dividia R$ 2.330
+// por 8/30 e projetava R$ 8.737 de gastos: o aluguel multiplicado por 3,75,
+// como se ele fosse cobrado quase quatro vezes no mesmo mês. Esse número
+// alimentava `scoreMonthBasis`, e o efeito não era um dígito errado num canto:
+//
+//   poupança (peso 25)  taxa projetada negativa  → 0 de 25
+//   gastos   (peso 15)  121% da renda            → 0 de 15
+//
+// 40 pontos de peso zerados por um artefato de divisão. Quem guardou dois
+// terços da renda recebia "Crítico" e a frase "prioridade agora é estancar o
+// desequilíbrio". O app não errava um número; errava o veredito.
+//
+// Este cenário fica congelado para que a regressão não volte por outra porta.
+console.log("\n8. [M41] Projeção do mês: o aluguel não é cobrado todo dia");
+{
+  const hoje = new Date();
+  const ano = hoje.getFullYear();
+  const mes = hoje.getMonth();
+  const diaHoje = 8;
+  const dim = ctx.daysInMonthOf(ano, mes);
+  const mKey = ctx.keyOfDate(hoje);
+  const noDia = (offsetMes, dia) => {
+    const d = new Date(ano, mes - offsetMes, 1);
+    const max = ctx.daysInMonthOf(d.getFullYear(), d.getMonth());
+    return iso(new Date(d.getFullYear(), d.getMonth(), Math.min(dia, max)));
+  };
+
+  const transactions = [];
+  // Três meses fechados idênticos, para a média de gasto variável ter base.
+  for (let m = 3; m >= 0; m--) {
+    const d = new Date(ano, mes - m, 1);
+    const dias = m === 0 ? diaHoje : ctx.daysInMonthOf(d.getFullYear(), d.getMonth());
+    transactions.push(tx({ type: "income", amount: 7200, categoryId: "salario", date: noDia(m, 1), description: "Salário" }));
+    transactions.push(tx({ type: "expense", amount: 1850, categoryId: "moradia", date: noDia(m, 3), description: "Aluguel", recurring: true }));
+    for (let dia = 1; dia <= dias; dia++) {
+      transactions.push(tx({ type: "expense", amount: 60, categoryId: "alimentacao", date: noDia(m, dia), description: `Mercado ${dia}` }));
+    }
+  }
+  // Tetos de categoria já na base, para provar o mesmo defeito na tela de
+  // orçamentos: `budgetForCategory` lê o teto do cadastro da categoria.
+  const categories = ctx.defaultData().categories.map((c) => (
+    c.id === "moradia" ? { ...c, budget: 2200 }
+      : c.id === "alimentacao" ? { ...c, budget: 2400 }
+      : c));
+  const data = ctx.migrate(base({ monthlyIncome: 7200, transactions, goals: [], categories }));
+
+  const restaurar = congelarRelogio(noDia(0, diaHoje));
+  const snap = ctx.monthSnapshot(data, mKey);
+  const score = ctx.computeFinanceScore(data, mKey);
+  const outlook = ctx.monthExpenseOutlook(data, noDia(0, diaHoje));
+  const tetos = ctx.computeBudgetStatus(data, mKey);
+  const progresso = ctx.monthProgress(mKey);
+  // O veredito que a extrapolação linear produzia, reconstruído com a fórmula
+  // antiga sobre os MESMOS dados. Ele fica no teste para que a diferença entre
+  // "Crítico" e "Regular" continue visível a quem ler isto daqui a um ano.
+  const snapAntigo = { ...snap, projectedExpense: ctx.divMoney(snap.expense, snap.progress.ratio) };
+  snapAntigo.projectedSavings = ctx.subMoney(snap.incomeProjected, snapAntigo.projectedExpense);
+  snapAntigo.projectedSavingsRate = ctx.safePct(snapAntigo.projectedSavings, snap.incomeProjected);
+  const scoreAntigo = ctx.computeFinanceScore(data, mKey, { month: snapAntigo });
+  restaurar();
+
+  const realizado = 1850 + 60 * diaHoje;                 // R$ 2.330
+  const linearAntigo = realizado / (diaHoje / dim);      // o que a conta velha dava
+
+  check("o realizado até o dia 8 é o esperado", Math.abs(snap.expense - realizado) < 0.02, snap.expense);
+  check("a projeção fica na casa do mês inteiro de verdade (~R$ 3.650)",
+    snap.projectedExpense > 3300 && snap.projectedExpense < 3900, snap.projectedExpense);
+  check("a projeção não passa de ~R$ 3.650", snap.projectedExpense <= 3700, snap.projectedExpense);
+  check("e é MUITO menor que a extrapolação linear que existia antes",
+    snap.projectedExpense < linearAntigo * 0.6,
+    `projetado ${snap.projectedExpense.toFixed(2)} contra linear ${linearAntigo.toFixed(2)}`);
+
+  // As três parcelas da conta, para a explicação da tela poder ser reconstruída.
+  check("a projeção é realizado + compromissos + variável restante",
+    Math.abs(outlook.realizado + outlook.compromissos + outlook.variaveis - outlook.projetado) < 0.02,
+    JSON.stringify(outlook));
+  check("o aluguel já lançado não é projetado de novo neste mês",
+    outlook.compromissos === 0, outlook.compromissos);
+
+  // O VEREDITO. É por isto que a correção é P0 e não um ajuste de exibição.
+  check("a economia projetada é positiva", snap.projectedSavings > 0, snap.projectedSavings);
+  check("o score não desaba para Crítico", score.score >= 50, `${score.score} (${score.level.id})`);
+  check("o nível é ao menos Regular",
+    ["regular", "bom", "excelente"].indexOf(score.level.id) >= 0, score.level.id);
+
+  const poupanca = score.pillars.find((p) => p.id === "poupanca");
+  const gastos = score.pillars.find((p) => p.id === "gastos");
+  check("o pilar de poupança recebe a pontuação cheia", poupanca.points === poupanca.weight,
+    `${poupanca.points}/${poupanca.weight}`);
+  check("o pilar de gastos recebe a pontuação cheia", gastos.points === gastos.weight,
+    `${gastos.points}/${gastos.weight}`);
+  check("o pilar de poupança não fala em \"vermelho\"", !/vermelho/.test(poupanca.detail), poupanca.detail);
+
+  // A prova de que o defeito era de VEREDITO e não de exibição: com a fórmula
+  // antiga, os mesmos dados davam Crítico e zeravam 40 pontos de peso.
+  check("a fórmula antiga, nestes dados, projetava ~R$ 8.737",
+    Math.abs(snapAntigo.projectedExpense - linearAntigo) < 1, snapAntigo.projectedExpense);
+  check("a fórmula antiga rebaixava o veredito para Crítico",
+    scoreAntigo.level.id === "critico", `${scoreAntigo.score} (${scoreAntigo.level.id})`);
+  check("a fórmula antiga zerava poupança e gastos",
+    scoreAntigo.pillars.find((p) => p.id === "poupanca").points === 0
+    && scoreAntigo.pillars.find((p) => p.id === "gastos").points === 0);
+  check("a correção devolve os 40 pontos de peso",
+    score.score - scoreAntigo.score >= 30, `${scoreAntigo.score} → ${score.score}`);
+  console.log(`     projeção: ${snap.projectedExpense.toFixed(2)} (antes ${snapAntigo.projectedExpense.toFixed(2)}) | score: ${score.score} ${score.level.label} (antes ${scoreAntigo.score} ${scoreAntigo.level.label})`);
+
+  // A MESMA MENTIRA VIVIA NO TETO POR CATEGORIA. Moradia com o aluguel pago no
+  // dia 3 projetava R$ 6.937 contra um teto de R$ 2.200 e disparava "você vai
+  // estourar" para quem já tinha pago a conta do mês inteiro. Alarme falso é
+  // pior que alarme nenhum: ele ensina a ignorar o cartão.
+  const moradia = tetos.items.find((i) => i.id === "moradia");
+  const comida = tetos.items.find((i) => i.id === "alimentacao");
+  check("o teto de Moradia projeta o aluguel uma vez só",
+    Math.abs(moradia.projected - 1850) < 0.02, moradia.projected);
+  check("e não avisa estouro para uma conta já paga", moradia.willExceed === false);
+  check("a extrapolação antiga passaria de R$ 6.900",
+    moradia.spent / progresso.ratio > 6900, (moradia.spent / progresso.ratio).toFixed(2));
+  check("o gasto variável continua sendo extrapolado pelo ritmo",
+    Math.abs(comida.projected - (60 * diaHoje) / progresso.ratio) < 1, comida.projected);
 }
 
 console.log(`\n${fail === 0 ? "TODOS OS TESTES PASSARAM" : "FALHAS ENCONTRADAS"} — ${pass} ok, ${fail} falha(s)\n`);

@@ -44,20 +44,33 @@ const BUDGET_LEVEL_META = {
 
 // Quanto foi gasto no mês numa categoria, somando as subcategorias quando a
 // categoria em questão for uma categoria-mãe. Soma em centavos (sem drift).
-function spentForCategory(data, categoryId, monthKey) {
+//
+// [M41] O total vem SEPARADO entre fixo e variável, porque a projeção do teto
+// precisa da distinção: só o gasto variável se repete pelo ritmo do mês. Ver a
+// nota em `computeBudgetStatus`.
+function spentForCategoryParts(data, categoryId, monthKey) {
   const ids = new Set(typeof categoryIdsForBudgetMonth === "function"
     ? categoryIdsForBudgetMonth(data, categoryId, monthKey)
     : categoryWithDescendants(data, categoryId));
-  let cents = 0;
+  let fixo = 0, variavel = 0;
   realizedTxForMonth(data, monthKey).forEach((t) => {
     if (!ids.has(t.categoryId)) return;
     // Consumo, com estorno abatido. Um aporte na categoria Investimentos não
     // "estoura o orçamento": ele é o orçamento sendo cumprido. E uma compra
     // estornada precisa devolver o espaço no orçamento, senão o usuário fica
     // com o limite consumido por uma compra que não existiu.
-    cents += consumptionCentsOf(t);
+    const cents = consumptionCentsOf(t);
+    if (t.recurring) fixo += cents; else variavel += cents;
   });
-  return moneyFromCents(Math.max(0, cents));
+  return {
+    total: moneyFromCents(Math.max(0, fixo + variavel)),
+    fixo: moneyFromCents(Math.max(0, fixo)),
+    variavel: moneyFromCents(Math.max(0, variavel)),
+  };
+}
+
+function spentForCategory(data, categoryId, monthKey) {
+  return spentForCategoryParts(data, categoryId, monthKey).total;
 }
 
 function budgetForCategory(data, categoryId, monthKey) {
@@ -95,21 +108,55 @@ function monthProgress(monthKey) {
 // Retorna { items, thresholds, counts, totals }. `items` já vem ordenado com os
 // casos mais críticos primeiro, que é a ordem em que a UI deve exibir.
 // ------------------------------------------------------------------------------
+// [M41] A EXTRAPOLAÇÃO LINEAR TAMBÉM MENTIA AQUI, POR CATEGORIA.
+//
+// `divMoney(spent, progress.ratio)` dividia o gasto da categoria pela fração do
+// mês decorrida. Em Moradia, com o aluguel pago no dia 3, no dia 8 isso
+// projetava quase quatro alugueis e disparava "você vai estourar o teto" para
+// quem já tinha pagado a conta do mês inteiro. O alarme falso é pior que a
+// ausência de alarme: ele ensina a ignorar o cartão.
+//
+// A régua é a mesma da projeção do mês (forecast.js): só o que é VARIÁVEL se
+// repete pelo ritmo. O fixo já pago entra pelo valor pago, e o que ainda vai
+// vencer entra pela data que já tem.
+function budgetFutureCommitments(data, monthKey, progress) {
+  const mapa = new Map();
+  if (!progress.isCurrent || typeof buildFutureEvents !== "function") return mapa;
+  const hoje = todayIso();
+  const fim = `${monthKey}-${String(progress.daysInMonth).padStart(2, "0")}`;
+  if (fim <= hoje) return mapa;
+  buildFutureEvents(data, hoje, fim).forEach((e) => {
+    if (e.type !== "expense" || !e.categoryId) return;
+    if (e.kind === "goal" || e.kind === "card-statement") return;
+    mapa.set(e.categoryId, addMoney(mapa.get(e.categoryId) || 0, e.amount));
+  });
+  return mapa;
+}
+
 function computeBudgetStatus(data, monthKey) {
   const mKey = monthKey || keyOfDate(new Date());
   const thresholds = budgetThresholds(data, mKey);
   const progress = monthProgress(mKey);
+  const commitments = budgetFutureCommitments(data, mKey, progress);
 
   const items = (data.categories || [])
     .filter((c) => budgetForCategory(data, c.id, mKey) > 0)
     .map((c) => {
-      const spent = spentForCategory(data, c.id, mKey);
+      const parts = spentForCategoryParts(data, c.id, mKey);
+      const spent = parts.total;
       const budget = budgetForCategory(data, c.id, mKey);
       const pct = safePct(spent, budget);
       const level = budgetLevelOf(pct, thresholds);
       const remaining = subMoney(budget, spent);
-      // Projeção linear: se manter este ritmo, quanto fecha o mês?
-      const projected = progress.ratio > 0 ? divMoney(spent, progress.ratio) : spent;
+      // Se manter este ritmo, quanto fecha o mês? Fixo já pago + compromisso
+      // já datado + só o variável extrapolado pelo ritmo.
+      const aVencer = (typeof categoryIdsForBudgetMonth === "function"
+        ? categoryIdsForBudgetMonth(data, c.id, mKey)
+        : categoryWithDescendants(data, c.id))
+        .reduce((soma, id) => addMoney(soma, commitments.get(id) || 0), 0);
+      const projected = progress.ratio > 0
+        ? roundMoney(addMoney(addMoney(parts.fixo, aVencer), divMoney(parts.variavel, progress.ratio)))
+        : spent;
       const projectedPct = safePct(projected, budget);
       const willExceed = level === BUDGET_LEVELS.OK && progress.isCurrent && projectedPct >= thresholds.over;
       const children = childCategories(data, c.id);

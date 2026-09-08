@@ -641,14 +641,25 @@ function renderBudgetHealth(refDate, isCurrentMonth, monthExpense, fixedSpent, v
     </div>`;
   }
 
-  let dayOfMonth = refDate.getDate(), dim = 30, daysLeft = 0, dailyBudget = 0, projected = monthExpense;
+  // [M41] OS DOIS NÚMEROS DESTE CARTÃO SÃO OS DO RESTO DO APP.
+  //
+  // Aqui viviam duas cópias locais: a projeção multiplicava o gasto realizado
+  // por `dim / dia` (repetindo o aluguel uma vez por dia) e o teto diário
+  // dividia a sobra da renda por outro caminho que o do calendário; o mesmo
+  // usuário lia "R$ 774,58 por dia" num cartão e "R$ 150,06 por dia" no outro,
+  // na mesma rolagem. Agora os dois saem de forecast.js.
+  const limite = isCurrentMonth && typeof dailyAllowance === "function" && typeof forecastModel === "function"
+    ? dailyAllowance(state.data, forecastModel())
+    : null;
+  let daysLeft = 0, dailyBudget = 0, projected = monthExpense;
   if (isCurrentMonth) {
     const now = new Date();
-    dayOfMonth = now.getDate();
-    dim = daysInMonthOf(now.getFullYear(), now.getMonth());
-    daysLeft = Math.max(1, dim - dayOfMonth + 1);
-    dailyBudget = remaining > 0 ? divMoney(remaining, daysLeft) : 0;
-    projected = dayOfMonth > 0 ? mulMoney(monthExpense, dim / dayOfMonth) : monthExpense;
+    const dim = daysInMonthOf(now.getFullYear(), now.getMonth());
+    daysLeft = limite ? limite.diasRestantes : Math.max(1, dim - now.getDate() + 1);
+    dailyBudget = limite ? limite.tetoPorDia : (remaining > 0 ? divMoney(remaining, daysLeft) : 0);
+    projected = typeof monthExpenseOutlook === "function"
+      ? monthExpenseOutlook(state.data).projetado
+      : monthExpense;
   }
   const ratio = safeRatio(projected, income);
   let status;
@@ -670,7 +681,7 @@ function renderBudgetHealth(refDate, isCurrentMonth, monthExpense, fixedSpent, v
       // contradizia sozinha - "você fecha em R$ 246" ao lado de "pode gastar
       // R$ 957 por dia durante 5 dias" - e a leitura natural era que um dos
       // dois números estava errado.
-      ? `No ritmo atual, o mês fecha em <b>${fmtBRL(projected)}</b> de gastos. O teto que ainda cabe na renda é de <b data-ui-css="color:${status.color}">${fmtBRL(dailyBudget)} por dia</b> nos próximos ${plural(daysLeft, "dia", "dias")}; é limite, não meta.`
+      ? `No ritmo atual, o mês fecha em <b>${fmtBRL(projected)}</b> de gastos. Descontadas as contas que ainda vencem, o teto que ainda cabe na renda é de <b data-ui-css="color:${status.color}">${fmtBRL(dailyBudget)} por dia</b> nos próximos ${plural(daysLeft, "dia", "dias")}; é limite, não meta.${limite && limite.limitadoPorCaixa ? " O teto está preso ao saldo em conta, não à renda: o que ainda vai entrar não chegou." : ""}`
       : `Você já ultrapassou sua renda em <b data-ui-css="color:var(--negative)">${fmtBRL(Math.abs(remaining))}</b> este mês. Vale segurar os gastos esporádicos até o próximo salário.`)
     : (remaining >= 0
       ? `Sobraram <b data-ui-css="color:var(--positive)">${fmtBRL(remaining)}</b> depois de todos os gastos do mês.`

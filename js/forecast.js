@@ -117,9 +117,9 @@ function variableBaseline(data, refIso) {
 
 // Quanto já foi gasto neste mês dentro do conceito "variável" acima.
 
-function variableSpentInMonth(data, monthKey) {
+function variableSpentInMonth(data, monthKey, asOf) {
   let cents = 0;
-  realizedTxForMonth(data, monthKey).forEach((t) => {
+  realizedTxForMonth(data, monthKey, asOf).forEach((t) => {
     if (t.type !== "expense") return;
     if (t.recurring || t.installmentGroupId || t.goalId) return;
     if (isTransferTx(t)) return;
@@ -179,6 +179,7 @@ function buildFutureEvents(data, fromIso, toIso) {
       categoryName: cat.name,
       color: cat.color,
       icon: cat.icon,
+      categoryId: t.categoryId,
       kind: t.installmentTotal ? "installment" : (t.goalId ? "goal" : "scheduled"),
       installment: t.installmentTotal ? `${t.installmentIndex}/${t.installmentTotal}` : null,
       certain: true,
@@ -218,6 +219,7 @@ function buildFutureEvents(data, fromIso, toIso) {
         categoryName: cat.name,
         color: cat.color,
         icon: cat.icon,
+        categoryId: tpl.categoryId,
         kind: "recurring",
         installment: null,
         certain: false,
@@ -355,7 +357,7 @@ function buildForecast(data, refIso) {
 
   const baseline = variableBaseline(data, today);
   const currentKey = monthKeyOf(today);
-  const spentSoFar = variableSpentInMonth(data, currentKey);
+  const spentSoFar = variableSpentInMonth(data, currentKey, today);
   const remainingCurrent = Math.max(0, moneyToCents(baseline.monthly) - moneyToCents(spentSoFar));
   const [cy, cm] = currentKey.split("-").map(Number);
   const daysLeftInMonth = Math.max(1, daysInMonthOf(cy, cm - 1) - Number(today.slice(8, 10)));
@@ -517,6 +519,82 @@ function monthCloseForecast(forecast) {
 }
 
 // ------------------------------------------------------------------------------
+// [M41] QUANTO O MÊS DEVE FECHAR EM GASTO; UMA CONTA SÓ, PARA O APP INTEIRO
+// ------------------------------------------------------------------------------
+// O app tinha três cópias da mesma extrapolação linear (metrics.js, analytics.js
+// e o cartão de saúde do Início): dividir o gasto realizado pela fração do mês
+// já decorrida. A conta é aritmeticamente válida e financeiramente falsa, porque
+// trata TODA despesa como se ela se repetisse todo dia. No dia 8, um aluguel de
+// R$ 1.850 pago no dia 3 era multiplicado por 30/8 e o app projetava quase
+// quatro aluguéis no mesmo mês. Daí saíam "economia projetada negativa" e dois
+// pilares do score zerados; 40 pontos de peso perdidos por um artefato de
+// divisão, para quem tinha guardado quase metade da renda.
+//
+// A conta certa já existia neste arquivo, espalhada nas peças que
+// `monthCloseForecast` usa. Aqui ela vira uma função só:
+//
+//   projeção = gasto realizado até hoje
+//             + compromissos já datados que ainda caem neste mês
+//             + estimativa do que sobra do gasto VARIÁVEL do mês
+//
+// A terceira parcela é exatamente a mesma que o cartão "Como o mês fecha"
+// mostra (`baseline.monthly - já gasto em variável`), e ela já exclui
+// recorrente, parcelado e aporte justamente para não contar duas vezes o que
+// entra pela segunda parcela.
+//
+// A RÉGUA É A DO REGIME DE COMPETÊNCIA, igual à de `realizedMonthTotals`:
+//   . compra no cartão é consumo na data da compra, então lançamento futuro no
+//     crédito ENTRA (mesmo sem efeito de caixa neste mês);
+//   . a fatura é a liquidação desse consumo, então `card-statement` FICA DE FORA,
+//     sob pena de cobrar a mesma compra duas vezes;
+//   . aporte em meta não é gasto (tem campo próprio no snapshot do mês), então
+//     `goal` também fica de fora.
+function monthExpenseOutlook(data, refIso) {
+  const hoje = refIso || todayIso();
+  const calcular = () => computeMonthExpenseOutlook(data, hoje);
+  return typeof memoByData === "function"
+    ? memoByData("expense-outlook", data, hoje, calcular)
+    : calcular();
+}
+
+function computeMonthExpenseOutlook(data, hoje) {
+  const mKey = monthKeyOf(hoje);
+  const [ano, mes] = mKey.split("-").map(Number);
+  const dim = daysInMonthOf(ano, mes - 1);
+  const fimIso = `${mKey}-${String(dim).padStart(2, "0")}`;
+  const dia = Number(String(hoje).slice(8, 10)) || 1;
+
+  const realizado = realizedMonthTotals(data, mKey, hoje).expense;
+
+  // Compromissos já datados: lançamentos futuros, fixos projetados e parcelas
+  // de dívida cadastrada. Vem do MESMO `buildFutureEvents` que alimenta o
+  // calendário e a previsão de saldo; nenhuma varredura própria.
+  const eventos = buildFutureEvents(data, hoje, fimIso).filter((e) => e.type === "expense"
+    && e.kind !== "goal"
+    && e.kind !== "card-statement");
+  const compromissos = sumMoney(eventos, (e) => e.amount);
+
+  const baseline = variableBaseline(data, hoje);
+  const gastoVariavel = variableSpentInMonth(data, mKey, hoje);
+  const variaveis = moneyFromCents(Math.max(0, moneyToCents(baseline.monthly) - moneyToCents(gastoVariavel)));
+
+  return {
+    monthKey: mKey,
+    hoje,
+    endIso: fimIso,
+    diasRestantes: Math.max(0, dim - dia),
+    realizado,
+    compromissos,
+    variaveis,
+    projetado: roundMoney(addMoney(addMoney(realizado, compromissos), variaveis)),
+    // Quantos meses de histórico sustentam a terceira parcela. Zero significa
+    // que a estimativa de variável não tem base e a projeção é só o que já
+    // aconteceu mais o que já está datado.
+    baselineMonths: baseline.months,
+  };
+}
+
+// ------------------------------------------------------------------------------
 // [M30] LIMITE DIÁRIO, A PARTIR DE UMA META E NÃO DA RENDA
 // ------------------------------------------------------------------------------
 // O app já tinha um teto diário: renda menos gasto, dividido pelos dias que
@@ -546,6 +624,30 @@ function savingTargetOf(data) {
   return { value: 0, source: "nenhuma" };
 }
 
+// [M41] O SALDO EM CONTA NÃO É MESADA.
+//
+// A versão anterior dividia `saldoAtual + receitas − contas − alvo` pelos dias
+// que faltavam. O primeiro termo é o saldo INTEIRO da conta, reserva de
+// emergência inclusa, poupada ao longo de meses: dividi-lo pelos dias restantes
+// transforma patrimônio em orçamento do mês. Para quem ganha R$ 7.200 (R$ 240
+// por dia), o app oferecia R$ 774,58 por dia; 3,2 vezes a renda diária, e cinco
+// vezes o teto que ele mesmo mostrava no cartão de saúde, uma rolagem abaixo.
+//
+// A conta agora parte da RENDA DO MÊS que ainda não está comprometida:
+//
+//   livre = renda do mês (realizada + prevista)
+//         − gasto já realizado
+//         − compromissos ainda datados deste mês
+//
+// e o saldo em conta volta ao papel que lhe cabe: PISO DE SEGURANÇA. Ele entra
+// só como limite superior (não dá para gastar dinheiro que ainda não entrou, e
+// a conta não pode fechar negativa), nunca como fonte. Por isso `menor(...)`:
+// vale o mais apertado dos dois, e o resultado nunca passa da renda disponível.
+//
+// `teto` e `disponivel` diferem por uma coisa só, a meta de guardar. O cartão
+// de saúde do Início mostra o primeiro ("o que ainda cabe na renda") e o
+// calendário mostra o segundo ("o que cabe guardando o que você planejou"), e
+// os dois saem daqui: eram duas contas independentes que discordavam por 5×.
 function dailyAllowance(data, forecast) {
   const close = monthCloseForecast(forecast);
   if (!close) return null;
@@ -553,14 +655,23 @@ function dailyAllowance(data, forecast) {
   const hoje = dateFromIso(forecast.today);
   const fim = dateFromIso(close.endIso);
   const diasRestantes = Math.max(1, Math.round((fim - hoje) / 86400000) + 1);
+  const menor = (a, b) => (moneyCompare(a, b) <= 0 ? a : b);
 
+  const outlook = monthExpenseOutlook(data, forecast.today);
+  const renda = incomeBasis(data, close.monthKey, forecast.today).projected;
   const alvo = savingTargetOf(data);
-  // O que sobra para gasto variável depois de honrar compromissos e a meta.
-  // `contas` já traz fixas, parcelas e faturas com data; nada é contado duas
-  // vezes porque a ESTIMATIVA de variável não entra aqui: ela é justamente o
-  // que este número substitui por uma decisão.
-  const disponivel = subMoney(subMoney(addMoney(close.saldoAtual, close.receitas), close.contas), alvo.value);
+
+  // Renda do mês que ainda não tem dono. A ESTIMATIVA de gasto variável não
+  // entra aqui de propósito: ela é justamente o que este número substitui por
+  // uma decisão.
+  const livreDaRenda = subMoney(subMoney(renda, outlook.realizado), outlook.compromissos);
+  // Piso de segurança: o que a conta aguenta pagar sem virar o mês negativa.
+  const folgaDeCaixa = subMoney(addMoney(close.saldoAtual, close.receitas), close.contas);
+
+  const teto = menor(livreDaRenda, folgaDeCaixa);
+  const disponivel = subMoney(teto, alvo.value);
   const porDia = disponivel > 0 ? divMoney(disponivel, diasRestantes) : 0;
+  const tetoPorDia = teto > 0 ? divMoney(teto, diasRestantes) : 0;
 
   return {
     endIso: close.endIso,
@@ -569,6 +680,16 @@ function dailyAllowance(data, forecast) {
     alvoFonte: alvo.source,
     disponivel: roundMoney(disponivel),
     porDia: roundMoney(porDia),
+    // O mesmo número sem descontar a meta: é o "teto que ainda cabe na renda"
+    // do cartão de saúde. Fica aqui para as duas telas não recalcularem.
+    teto: roundMoney(teto),
+    tetoPorDia: roundMoney(tetoPorDia),
+    renda: roundMoney(renda),
+    realizado: outlook.realizado,
+    compromissos: outlook.compromissos,
+    // Qual dos dois limites travou o número. Sem isso a tela não consegue
+    // explicar por que o teto ficou abaixo do que a renda permitiria.
+    limitadoPorCaixa: moneyCompare(folgaDeCaixa, livreDaRenda) < 0,
     // Sem folga o número vira zero, e dizer "R$ 0,00 por dia" sem explicar por
     // que seria pior que não dizer nada.
     apertado: disponivel <= 0,
@@ -598,5 +719,8 @@ function forecastAssumptions(data, baseline, events) {
 }
 
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { buildForecast, buildFutureEvents, recurringTemplates, variableBaseline, FORECAST_HORIZONS };
+  module.exports = {
+    buildForecast, buildFutureEvents, recurringTemplates, variableBaseline,
+    monthCloseForecast, monthExpenseOutlook, dailyAllowance, FORECAST_HORIZONS,
+  };
 }

@@ -492,14 +492,25 @@ function anAverages(data, monthKey) {
   const elapsed = Math.max(1, anElapsedDays(monthKey));
   const totalDays = anDaysInMonthKey(monthKey);
   const daily = divMoney(totals.expense, elapsed);
+  const isCurrent = monthKey === keyOfDate(new Date());
+  // A MÉDIA DIÁRIA CONTINUA SENDO MÉDIA DIÁRIA; A PROJEÇÃO NÃO É MAIS ELA
+  // VEZES O MÊS (M41). `daily` responde "quanto tenho torrado por dia até
+  // agora", que é leitura de ritmo e está certa. Multiplicá-la pelos dias do
+  // mês para projetar o fechamento era a mesma extrapolação linear que vivia em
+  // metrics.js: ela repete aluguel, IPTU e seguro uma vez por dia. A projeção
+  // agora sai do motor de previsão, o mesmo que o Score e o Início consultam.
+  const outlook = isCurrent && typeof monthExpenseOutlook === "function"
+    ? monthExpenseOutlook(data)
+    : null;
   return {
     daily,
     weekly: mulMoney(daily, 7),
     elapsedDays: elapsed,
     totalDays,
-    isCurrentMonth: monthKey === keyOfDate(new Date()),
-    // Projeção do fechamento pelo ritmo atual. Só faz sentido no mês corrente.
-    projected: monthKey === keyOfDate(new Date()) ? mulMoney(daily, totalDays) : totals.expense,
+    isCurrentMonth: isCurrent,
+    // Projeção do fechamento. Só faz sentido no mês corrente.
+    projected: outlook ? outlook.projetado : totals.expense,
+    projectedParts: outlook,
     expense: totals.expense,
     income: totals.income,
   };

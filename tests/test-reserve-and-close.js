@@ -149,7 +149,17 @@ section("4. [M29] Margem e risco dizem a verdade");
 
   const tela = readSrc("js/screens/calendar.js");
   check("a tela nomeia a margem de segurança", /Margem de segurança/.test(tela));
-  check("a tela nomeia o risco de fechar negativo", /Risco de fechar negativo/.test(tela));
+  // [M41] FLUXO E SALDO NÃO DIVIDEM VOCABULÁRIO. Este cartão fala de SALDO em
+  // conta; o pilar de poupança do score, na mesma rolagem, fala de FLUXO
+  // (entrou menos saiu). O painel dizia "você deve fechar o mês no vermelho em
+  // R$ 6.857" logo acima de "sem risco de saldo negativo no mês", e as duas
+  // frases eram verdadeiras ao mesmo tempo.
+  check("a tela nomeia o risco de a conta ficar negativa", /Risco de a conta ficar negativa/.test(tela));
+  check("a tela separa saldo de fluxo em palavras", /Isto é saldo, não fluxo/.test(tela));
+  const scoreSemComentario = readSrc("js/score.js").split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
+  check("o score fala de gasto acima da renda, não de \"vermelho\"",
+    /o gasto \$\{base\.partial \? "deve superar" : "superou"\} a renda/.test(scoreSemComentario)
+    && !/no vermelho/.test(scoreSemComentario));
   check("a margem é apresentada como o pior dia", /no pior dia do mês/.test(tela));
   check("o gasto variável é rotulado como estimativa",
     /média dos últimos meses, é estimativa/.test(tela));

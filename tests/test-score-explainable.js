@@ -25,7 +25,7 @@ ctx.window = ctx; ctx.self = ctx; ctx.globalThis = ctx;
 vm.createContext(ctx);
 [
   "js/utils.js", "js/rules.js", "js/layout.js", "js/storage.js", "js/accounts.js", "js/budgets.js",
-  "js/debts.js", "js/metrics.js", "js/wealth.js", "js/goals.js", "js/score.js", "js/demo.js",
+  "js/debts.js", "js/metrics.js", "js/forecast.js", "js/wealth.js", "js/goals.js", "js/score.js", "js/demo.js",
 ].forEach((f) => vm.runInContext(readSrc(f), ctx, { filename: f }));
 const run = (code) => vm.runInContext(code, ctx);
 

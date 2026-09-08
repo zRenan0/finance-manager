@@ -51,10 +51,20 @@ section("1. [M30] O limite parte da meta, não da renda");
   check("a meta é a soma dos planos mensais",
     limite.alvo === run(`__d.goals.reduce((s, g) => addMoney(s, g.monthlyPlan), 0)`), limite.alvo);
 
-  // A conta do roteiro, inteira.
-  const esperado = fechamento.saldoAtual + fechamento.receitas - fechamento.contas - limite.alvo;
-  check("disponível = caixa + receitas − contas − meta",
-    Math.abs(limite.disponivel - esperado) < 0.02, { disponivel: limite.disponivel, esperado: +esperado.toFixed(2) });
+  // [M41] A CONTA, INTEIRA. O primeiro termo deixou de ser o saldo em conta.
+  //
+  //   livre da renda = renda do mês − gasto realizado − compromissos datados
+  //   folga de caixa = saldo hoje + receitas previstas − contas previstas
+  //   disponível     = menor(livre, folga) − meta
+  const outlook = run(`monthExpenseOutlook(__d, __fc.today)`);
+  const livreDaRenda = limite.renda - outlook.realizado - outlook.compromissos;
+  const folgaDeCaixa = fechamento.saldoAtual + fechamento.receitas - fechamento.contas;
+  const teto = Math.min(livreDaRenda, folgaDeCaixa);
+  check("teto = menor(renda ainda livre, folga de caixa)",
+    Math.abs(limite.teto - teto) < 0.02, { teto: limite.teto, esperado: +teto.toFixed(2) });
+  check("disponível = teto − meta",
+    Math.abs(limite.disponivel - (teto - limite.alvo)) < 0.02,
+    { disponivel: limite.disponivel, esperado: +(teto - limite.alvo).toFixed(2) });
   check("por dia = disponível dividido pelos dias que faltam",
     Math.abs(limite.porDia - limite.disponivel / limite.diasRestantes) < 0.02,
     { porDia: limite.porDia, diasRestantes: limite.diasRestantes });
@@ -63,7 +73,7 @@ section("1. [M30] O limite parte da meta, não da renda");
   // A ESTIMATIVA DE VARIÁVEL NÃO ENTRA NA CONTA. Ela é o que este número
   // substitui por uma decisão; descontá-la seria contar duas vezes.
   check("a estimativa de variável fica fora do desconto",
-    Math.abs(limite.disponivel - esperado) < 0.02 && limite.estimativaVariavel > 0,
+    Math.abs(limite.disponivel - (teto - limite.alvo)) < 0.02 && limite.estimativaVariavel > 0,
     { estimativaVariavel: limite.estimativaVariavel });
 
   // Sem meta declarada, não há a que se referir.
@@ -76,6 +86,62 @@ section("1. [M30] O limite parte da meta, não da renda");
   const soRegra = run(`dailyAllowance(__soRegra, buildForecast(__soRegra))`);
   check("sem metas o alvo vem da regra de orçamento",
     soRegra.alvoFonte === "regra" && soRegra.alvo > 0, { alvo: soRegra.alvo });
+}
+
+// ------------------------------------------------------------------------------
+// [M41] O SALDO ACUMULADO NÃO É MESADA
+// ------------------------------------------------------------------------------
+// O defeito: `disponivel` começava em `saldoAtual`, o saldo INTEIRO da conta,
+// reserva de emergência inclusa. Dividido pelos dias que faltavam, o app
+// oferecia R$ 774,58 por dia a quem ganha R$ 240 por dia; e mostrava R$ 150,06
+// por dia no cartão de saúde, uma rolagem abaixo. Esta seção trava as duas
+// coisas: o teto vem da renda, e as duas telas leem o mesmo número.
+section("1b. [M41] O limite sai da renda; o saldo é só piso de segurança");
+{
+  const rendaDoMes = limite.renda;
+  check("a renda do mês é a base declarada", rendaDoMes > 0, rendaDoMes);
+  check("o teto nunca passa da renda do mês",
+    limite.teto <= rendaDoMes + 0.01, { teto: limite.teto, renda: rendaDoMes });
+  const diasDoMes = run(`daysInMonthOf(Number(__fc.today.slice(0, 4)), Number(__fc.today.slice(5, 7)) - 1)`);
+  check("o limite diário não passa da renda diária",
+    limite.porDia <= rendaDoMes / diasDoMes + 0.01,
+    { porDia: limite.porDia, rendaDiaria: +(rendaDoMes / diasDoMes).toFixed(2) });
+
+  // Encher a conta de dinheiro NÃO aumenta o quanto dá para gastar no mês.
+  ctx.__rico = run(`(() => {
+    const d = JSON.parse(JSON.stringify(__d));
+    d.accounts = (d.accounts || []).map((a, i) => (i === 0 ? { ...a, openingBalance: roundMoney(a.openingBalance + 500000) } : a));
+    return d;
+  })()`);
+  const rico = run(`dailyAllowance(__rico, buildForecast(__rico))`);
+  check("meio milhão a mais em conta não muda o limite diário",
+    Math.abs(rico.porDia - limite.porDia) < 0.02, { antes: limite.porDia, depois: rico.porDia });
+  check("e o saldo maior também não muda o teto",
+    Math.abs(rico.teto - limite.teto) < 0.02, { antes: limite.teto, depois: rico.teto });
+
+  // Mas conta vazia APERTA o limite: o saldo continua sendo piso de segurança.
+  ctx.__seco = run(`(() => {
+    const d = JSON.parse(JSON.stringify(__d));
+    d.accounts = (d.accounts || []).map((a) => ({ ...a, openingBalance: 0 }));
+    d.accountAdjustments = [];
+    return d;
+  })()`);
+  const seco = run(`dailyAllowance(__seco, buildForecast(__seco))`);
+  check("sem saldo em conta o limite aperta", seco.teto <= limite.teto + 0.01,
+    { comSaldo: limite.teto, semSaldo: seco.teto });
+
+  // As duas telas leem a MESMA função. Era aqui que nasciam os 5× de diferença.
+  const painel = readSrc("js/screens/dashboard.js");
+  check("o cartão de saúde do Início lê o teto de dailyAllowance",
+    /dailyAllowance\(state\.data, forecastModel\(\)\)/.test(painel) && /limite\.tetoPorDia/.test(painel));
+  check("o Início não extrapola mais o gasto pela fração do mês",
+    !/mulMoney\(monthExpense, dim \/ dayOfMonth\)/.test(painel));
+
+  // [P4.1] "O alvo vem de do aporte mensal" saiu em toda renderização: as duas
+  // variantes de fonte já começam com preposição e o texto acrescentava outra.
+  const telaCal = readSrc("js/screens/calendar.js");
+  check("a preposição do alvo não sai duplicada",
+    /O alvo vem \$\{fonte\}/.test(telaCal) && !/vem de \$\{fonte\}/.test(telaCal));
 }
 
 section("2. [M30] Quando não cabe, o app diz que não cabe");

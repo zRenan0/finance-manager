@@ -22,7 +22,7 @@ const relogio = require("./helpers/fixed-clock").congelar(ctx);
 const Date = relogio.DataFixa;
 
 ["js/utils.js", "js/rules.js", "js/layout.js", "js/storage.js", "js/budgets.js", "js/import.js", "js/score.js",
- "js/metrics.js", "js/recurring.js", "js/analytics.js", "js/insights.js",
+ "js/metrics.js", "js/forecast.js", "js/recurring.js", "js/analytics.js", "js/insights.js",
  "js/assistant.js", "js/advisor.js"]
   .forEach((f) => vm.runInContext(readSrc(f), ctx, { filename: f }));
 
@@ -177,12 +177,24 @@ console.log("\n7. Decisão 2 — média diária usa os dias já decorridos");
   check("mês corrente reconhecido", an.averages.isCurrentMonth === true);
   check("divide pelos dias vividos", near(an.averages.daily, 900 / now.getDate(), 0.02), an.averages.daily);
   check("média semanal é 7x a diária", near(an.averages.weekly, an.averages.daily * 7, 0.05));
+  // [M41] A PROJEÇÃO DEIXOU DE SER A MÉDIA DIÁRIA VEZES O MÊS.
+  //
+  // Um único gasto de R$ 900 no dia 1 não se repete todo dia. A extrapolação
+  // linear projetava R$ 900 × 30 / dia de hoje; no dia 8 isso vira R$ 3.375
+  // de um mercado que aconteceu uma vez. A projeção agora vem do motor de
+  // previsão: realizado + compromissos já datados + o que a média de gasto
+  // variável ainda espera. Sem histórico anterior, a média é zero e não há
+  // compromisso datado, então a projeção é o próprio realizado.
   const daysInCurrentMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  check("a projeção não repete o gasto único todo dia", near(an.averages.projected, 900), an.averages.projected);
   check(
-    "projeção do mês usa o total de dias",
-    near(an.averages.projected, an.averages.daily * daysInCurrentMonth, 0.02),
-    an.averages.projected
+    "e fica abaixo da extrapolação linear que existia antes",
+    now.getDate() >= daysInCurrentMonth || an.averages.projected < an.averages.daily * daysInCurrentMonth,
+    { projetado: an.averages.projected, linear: an.averages.daily * daysInCurrentMonth }
   );
+  check("a projeção mostra de que partes é feita",
+    !!an.averages.projectedParts && near(an.averages.projectedParts.realizado, 900),
+    an.averages.projectedParts);
 
   const past = buildAnalyticsModel(data, lastKey);
   check("mês passado divide pelo mês inteiro", past.averages.isCurrentMonth === false);

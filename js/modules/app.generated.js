@@ -13237,20 +13237,33 @@ const BUDGET_LEVEL_META = {
 
 // Quanto foi gasto no mês numa categoria, somando as subcategorias quando a
 // categoria em questão for uma categoria-mãe. Soma em centavos (sem drift).
-function spentForCategory(data, categoryId, monthKey) {
+//
+// [M41] O total vem SEPARADO entre fixo e variável, porque a projeção do teto
+// precisa da distinção: só o gasto variável se repete pelo ritmo do mês. Ver a
+// nota em `computeBudgetStatus`.
+function spentForCategoryParts(data, categoryId, monthKey) {
   const ids = new Set(typeof categoryIdsForBudgetMonth === "function"
     ? categoryIdsForBudgetMonth(data, categoryId, monthKey)
     : categoryWithDescendants(data, categoryId));
-  let cents = 0;
+  let fixo = 0, variavel = 0;
   realizedTxForMonth(data, monthKey).forEach((t) => {
     if (!ids.has(t.categoryId)) return;
     // Consumo, com estorno abatido. Um aporte na categoria Investimentos não
     // "estoura o orçamento": ele é o orçamento sendo cumprido. E uma compra
     // estornada precisa devolver o espaço no orçamento, senão o usuário fica
     // com o limite consumido por uma compra que não existiu.
-    cents += consumptionCentsOf(t);
+    const cents = consumptionCentsOf(t);
+    if (t.recurring) fixo += cents; else variavel += cents;
   });
-  return moneyFromCents(Math.max(0, cents));
+  return {
+    total: moneyFromCents(Math.max(0, fixo + variavel)),
+    fixo: moneyFromCents(Math.max(0, fixo)),
+    variavel: moneyFromCents(Math.max(0, variavel)),
+  };
+}
+
+function spentForCategory(data, categoryId, monthKey) {
+  return spentForCategoryParts(data, categoryId, monthKey).total;
 }
 
 function budgetForCategory(data, categoryId, monthKey) {
@@ -13288,21 +13301,55 @@ function monthProgress(monthKey) {
 // Retorna { items, thresholds, counts, totals }. `items` já vem ordenado com os
 // casos mais críticos primeiro, que é a ordem em que a UI deve exibir.
 // ------------------------------------------------------------------------------
+// [M41] A EXTRAPOLAÇÃO LINEAR TAMBÉM MENTIA AQUI, POR CATEGORIA.
+//
+// `divMoney(spent, progress.ratio)` dividia o gasto da categoria pela fração do
+// mês decorrida. Em Moradia, com o aluguel pago no dia 3, no dia 8 isso
+// projetava quase quatro alugueis e disparava "você vai estourar o teto" para
+// quem já tinha pagado a conta do mês inteiro. O alarme falso é pior que a
+// ausência de alarme: ele ensina a ignorar o cartão.
+//
+// A régua é a mesma da projeção do mês (forecast.js): só o que é VARIÁVEL se
+// repete pelo ritmo. O fixo já pago entra pelo valor pago, e o que ainda vai
+// vencer entra pela data que já tem.
+function budgetFutureCommitments(data, monthKey, progress) {
+  const mapa = new Map();
+  if (!progress.isCurrent || typeof buildFutureEvents !== "function") return mapa;
+  const hoje = todayIso();
+  const fim = `${monthKey}-${String(progress.daysInMonth).padStart(2, "0")}`;
+  if (fim <= hoje) return mapa;
+  buildFutureEvents(data, hoje, fim).forEach((e) => {
+    if (e.type !== "expense" || !e.categoryId) return;
+    if (e.kind === "goal" || e.kind === "card-statement") return;
+    mapa.set(e.categoryId, addMoney(mapa.get(e.categoryId) || 0, e.amount));
+  });
+  return mapa;
+}
+
 function computeBudgetStatus(data, monthKey) {
   const mKey = monthKey || keyOfDate(new Date());
   const thresholds = budgetThresholds(data, mKey);
   const progress = monthProgress(mKey);
+  const commitments = budgetFutureCommitments(data, mKey, progress);
 
   const items = (data.categories || [])
     .filter((c) => budgetForCategory(data, c.id, mKey) > 0)
     .map((c) => {
-      const spent = spentForCategory(data, c.id, mKey);
+      const parts = spentForCategoryParts(data, c.id, mKey);
+      const spent = parts.total;
       const budget = budgetForCategory(data, c.id, mKey);
       const pct = safePct(spent, budget);
       const level = budgetLevelOf(pct, thresholds);
       const remaining = subMoney(budget, spent);
-      // Projeção linear: se manter este ritmo, quanto fecha o mês?
-      const projected = progress.ratio > 0 ? divMoney(spent, progress.ratio) : spent;
+      // Se manter este ritmo, quanto fecha o mês? Fixo já pago + compromisso
+      // já datado + só o variável extrapolado pelo ritmo.
+      const aVencer = (typeof categoryIdsForBudgetMonth === "function"
+        ? categoryIdsForBudgetMonth(data, c.id, mKey)
+        : categoryWithDescendants(data, c.id))
+        .reduce((soma, id) => addMoney(soma, commitments.get(id) || 0), 0);
+      const projected = progress.ratio > 0
+        ? roundMoney(addMoney(addMoney(parts.fixo, aVencer), divMoney(parts.variavel, progress.ratio)))
+        : spent;
       const projectedPct = safePct(projected, budget);
       const willExceed = level === BUDGET_LEVELS.OK && progress.isCurrent && projectedPct >= thresholds.over;
       const children = childCategories(data, c.id);
@@ -16076,7 +16123,18 @@ const SCORE_PILLARS = [
       // Sem renda com que comparar, o pilar sai da conta em vez de dar zero.
       if (base.income <= 0 || base.rate == null) return { applicable: false };
       const ratio = scoreRamp(base.rate, 0, 20);   // 20% da renda = pontuação cheia
-      const fechado = base.partial ? "deve fechar o mês" : "fechou o mês";
+      // [M41] FLUXO E SALDO NÃO PODEM DIVIDIR A PALAVRA "VERMELHO".
+      //
+      // Este pilar mede FLUXO: o que entrou menos o que saiu no mês. O cartão
+      // de fechamento, na mesma rolagem, mede SALDO em conta. O painel dizia
+      // "você deve fechar o mês no vermelho em R$ 6.857" logo acima de "sem
+      // risco de saldo negativo no mês", e as duas frases são verdadeiras ao
+      // mesmo tempo. A leitura natural é que uma delas está errada; quem paga
+      // essa confusão é a confiança nas outras.
+      //
+      // Aqui a frase passa a falar de gastar mais do que entra. "A conta fica
+      // negativa" fica reservado para o saldo, em forecast.js e no calendário.
+      const excesso = fmtBRL(Math.abs(base.savings));
       return {
         applicable: true,
         ratio,
@@ -16084,7 +16142,7 @@ const SCORE_PILLARS = [
         good: base.rate >= 15,
         detail: base.savings > 0
           ? `Você economizou ${fmtBRL(base.savings)} (${base.rate.toFixed(0)}% da renda ${base.basis}).${scoreBasisNote(base)}`
-          : `Você ${fechado} no vermelho em ${fmtBRL(Math.abs(base.savings))}.${scoreBasisNote(base)}`,
+          : `Neste mês o gasto ${base.partial ? "deve superar" : "superou"} a renda em ${excesso}.${scoreBasisNote(base)}`,
         advice: base.rate >= 15 ? null : "Se 15% couber no seu mês sem criar dívida, use essa faixa como primeiro objetivo e ajuste depois.",
       };
     },
@@ -16707,10 +16765,20 @@ function monthSnapshot(data, monthKey) {
 
   // Projeção do fechamento, para quem quiser olhar o mês inteiro: os dois lados
   // projetados, nunca um projetado contra o outro realizado.
+  //
+  // A EXTRAPOLAÇÃO LINEAR SAIU DAQUI (M41). Dividir o gasto realizado pela
+  // fração do mês decorrida trata toda despesa como se ela se repetisse todo
+  // dia: no dia 8, o aluguel pago no dia 3 era multiplicado por 30/8 e o app
+  // projetava quase quatro aluguéis no mesmo mês. O número errado não ficava
+  // num canto; ele alimenta `scoreMonthBasis`, que zerava os pilares de
+  // poupança e de gastos e rebaixava o veredito de quem tinha guardado metade
+  // da renda. Agora a projeção vem do motor de previsão (forecast.js), que
+  // separa compromisso datado de gasto que se repete de fato.
   const progress = monthProgress(monthKey);
-  const projectedExpense = progress.isCurrent && progress.ratio > 0.15
-    ? divMoney(totals.expense, progress.ratio)
-    : totals.expense;
+  const outlook = progress.isCurrent && typeof monthExpenseOutlook === "function"
+    ? monthExpenseOutlook(data)
+    : null;
+  const projectedExpense = outlook ? outlook.projetado : totals.expense;
   const projectedSavings = subMoney(renda.projected, projectedExpense);
   const projectedSavingsRate = renda.projected > 0 ? safePct(projectedSavings, renda.projected) : null;
 
@@ -16758,6 +16826,9 @@ function monthSnapshot(data, monthKey) {
     prevExpense: prev.expense, prevIncome, prevIncomeRealized: prevRenda.realized,
     expenseDeltaPct, incomeDeltaPct,
     projectedExpense, progress,
+    // As parcelas da projeção, para a tela poder mostrar de onde ela sai em vez
+    // de exibir um total que ninguém consegue reconstruir.
+    projectedParts: outlook,
     txCount: totals.tx.length,
   };
 }
@@ -18482,9 +18553,9 @@ function variableBaseline(data, refIso) {
 
 // Quanto já foi gasto neste mês dentro do conceito "variável" acima.
 
-function variableSpentInMonth(data, monthKey) {
+function variableSpentInMonth(data, monthKey, asOf) {
   let cents = 0;
-  realizedTxForMonth(data, monthKey).forEach((t) => {
+  realizedTxForMonth(data, monthKey, asOf).forEach((t) => {
     if (t.type !== "expense") return;
     if (t.recurring || t.installmentGroupId || t.goalId) return;
     if (isTransferTx(t)) return;
@@ -18544,6 +18615,7 @@ function buildFutureEvents(data, fromIso, toIso) {
       categoryName: cat.name,
       color: cat.color,
       icon: cat.icon,
+      categoryId: t.categoryId,
       kind: t.installmentTotal ? "installment" : (t.goalId ? "goal" : "scheduled"),
       installment: t.installmentTotal ? `${t.installmentIndex}/${t.installmentTotal}` : null,
       certain: true,
@@ -18583,6 +18655,7 @@ function buildFutureEvents(data, fromIso, toIso) {
         categoryName: cat.name,
         color: cat.color,
         icon: cat.icon,
+        categoryId: tpl.categoryId,
         kind: "recurring",
         installment: null,
         certain: false,
@@ -18720,7 +18793,7 @@ function buildForecast(data, refIso) {
 
   const baseline = variableBaseline(data, today);
   const currentKey = monthKeyOf(today);
-  const spentSoFar = variableSpentInMonth(data, currentKey);
+  const spentSoFar = variableSpentInMonth(data, currentKey, today);
   const remainingCurrent = Math.max(0, moneyToCents(baseline.monthly) - moneyToCents(spentSoFar));
   const [cy, cm] = currentKey.split("-").map(Number);
   const daysLeftInMonth = Math.max(1, daysInMonthOf(cy, cm - 1) - Number(today.slice(8, 10)));
@@ -18882,6 +18955,82 @@ function monthCloseForecast(forecast) {
 }
 
 // ------------------------------------------------------------------------------
+// [M41] QUANTO O MÊS DEVE FECHAR EM GASTO; UMA CONTA SÓ, PARA O APP INTEIRO
+// ------------------------------------------------------------------------------
+// O app tinha três cópias da mesma extrapolação linear (metrics.js, analytics.js
+// e o cartão de saúde do Início): dividir o gasto realizado pela fração do mês
+// já decorrida. A conta é aritmeticamente válida e financeiramente falsa, porque
+// trata TODA despesa como se ela se repetisse todo dia. No dia 8, um aluguel de
+// R$ 1.850 pago no dia 3 era multiplicado por 30/8 e o app projetava quase
+// quatro aluguéis no mesmo mês. Daí saíam "economia projetada negativa" e dois
+// pilares do score zerados; 40 pontos de peso perdidos por um artefato de
+// divisão, para quem tinha guardado quase metade da renda.
+//
+// A conta certa já existia neste arquivo, espalhada nas peças que
+// `monthCloseForecast` usa. Aqui ela vira uma função só:
+//
+//   projeção = gasto realizado até hoje
+//             + compromissos já datados que ainda caem neste mês
+//             + estimativa do que sobra do gasto VARIÁVEL do mês
+//
+// A terceira parcela é exatamente a mesma que o cartão "Como o mês fecha"
+// mostra (`baseline.monthly - já gasto em variável`), e ela já exclui
+// recorrente, parcelado e aporte justamente para não contar duas vezes o que
+// entra pela segunda parcela.
+//
+// A RÉGUA É A DO REGIME DE COMPETÊNCIA, igual à de `realizedMonthTotals`:
+//   . compra no cartão é consumo na data da compra, então lançamento futuro no
+//     crédito ENTRA (mesmo sem efeito de caixa neste mês);
+//   . a fatura é a liquidação desse consumo, então `card-statement` FICA DE FORA,
+//     sob pena de cobrar a mesma compra duas vezes;
+//   . aporte em meta não é gasto (tem campo próprio no snapshot do mês), então
+//     `goal` também fica de fora.
+function monthExpenseOutlook(data, refIso) {
+  const hoje = refIso || todayIso();
+  const calcular = () => computeMonthExpenseOutlook(data, hoje);
+  return typeof memoByData === "function"
+    ? memoByData("expense-outlook", data, hoje, calcular)
+    : calcular();
+}
+
+function computeMonthExpenseOutlook(data, hoje) {
+  const mKey = monthKeyOf(hoje);
+  const [ano, mes] = mKey.split("-").map(Number);
+  const dim = daysInMonthOf(ano, mes - 1);
+  const fimIso = `${mKey}-${String(dim).padStart(2, "0")}`;
+  const dia = Number(String(hoje).slice(8, 10)) || 1;
+
+  const realizado = realizedMonthTotals(data, mKey, hoje).expense;
+
+  // Compromissos já datados: lançamentos futuros, fixos projetados e parcelas
+  // de dívida cadastrada. Vem do MESMO `buildFutureEvents` que alimenta o
+  // calendário e a previsão de saldo; nenhuma varredura própria.
+  const eventos = buildFutureEvents(data, hoje, fimIso).filter((e) => e.type === "expense"
+    && e.kind !== "goal"
+    && e.kind !== "card-statement");
+  const compromissos = sumMoney(eventos, (e) => e.amount);
+
+  const baseline = variableBaseline(data, hoje);
+  const gastoVariavel = variableSpentInMonth(data, mKey, hoje);
+  const variaveis = moneyFromCents(Math.max(0, moneyToCents(baseline.monthly) - moneyToCents(gastoVariavel)));
+
+  return {
+    monthKey: mKey,
+    hoje,
+    endIso: fimIso,
+    diasRestantes: Math.max(0, dim - dia),
+    realizado,
+    compromissos,
+    variaveis,
+    projetado: roundMoney(addMoney(addMoney(realizado, compromissos), variaveis)),
+    // Quantos meses de histórico sustentam a terceira parcela. Zero significa
+    // que a estimativa de variável não tem base e a projeção é só o que já
+    // aconteceu mais o que já está datado.
+    baselineMonths: baseline.months,
+  };
+}
+
+// ------------------------------------------------------------------------------
 // [M30] LIMITE DIÁRIO, A PARTIR DE UMA META E NÃO DA RENDA
 // ------------------------------------------------------------------------------
 // O app já tinha um teto diário: renda menos gasto, dividido pelos dias que
@@ -18911,6 +19060,30 @@ function savingTargetOf(data) {
   return { value: 0, source: "nenhuma" };
 }
 
+// [M41] O SALDO EM CONTA NÃO É MESADA.
+//
+// A versão anterior dividia `saldoAtual + receitas − contas − alvo` pelos dias
+// que faltavam. O primeiro termo é o saldo INTEIRO da conta, reserva de
+// emergência inclusa, poupada ao longo de meses: dividi-lo pelos dias restantes
+// transforma patrimônio em orçamento do mês. Para quem ganha R$ 7.200 (R$ 240
+// por dia), o app oferecia R$ 774,58 por dia; 3,2 vezes a renda diária, e cinco
+// vezes o teto que ele mesmo mostrava no cartão de saúde, uma rolagem abaixo.
+//
+// A conta agora parte da RENDA DO MÊS que ainda não está comprometida:
+//
+//   livre = renda do mês (realizada + prevista)
+//         − gasto já realizado
+//         − compromissos ainda datados deste mês
+//
+// e o saldo em conta volta ao papel que lhe cabe: PISO DE SEGURANÇA. Ele entra
+// só como limite superior (não dá para gastar dinheiro que ainda não entrou, e
+// a conta não pode fechar negativa), nunca como fonte. Por isso `menor(...)`:
+// vale o mais apertado dos dois, e o resultado nunca passa da renda disponível.
+//
+// `teto` e `disponivel` diferem por uma coisa só, a meta de guardar. O cartão
+// de saúde do Início mostra o primeiro ("o que ainda cabe na renda") e o
+// calendário mostra o segundo ("o que cabe guardando o que você planejou"), e
+// os dois saem daqui: eram duas contas independentes que discordavam por 5×.
 function dailyAllowance(data, forecast) {
   const close = monthCloseForecast(forecast);
   if (!close) return null;
@@ -18918,14 +19091,23 @@ function dailyAllowance(data, forecast) {
   const hoje = dateFromIso(forecast.today);
   const fim = dateFromIso(close.endIso);
   const diasRestantes = Math.max(1, Math.round((fim - hoje) / 86400000) + 1);
+  const menor = (a, b) => (moneyCompare(a, b) <= 0 ? a : b);
 
+  const outlook = monthExpenseOutlook(data, forecast.today);
+  const renda = incomeBasis(data, close.monthKey, forecast.today).projected;
   const alvo = savingTargetOf(data);
-  // O que sobra para gasto variável depois de honrar compromissos e a meta.
-  // `contas` já traz fixas, parcelas e faturas com data; nada é contado duas
-  // vezes porque a ESTIMATIVA de variável não entra aqui: ela é justamente o
-  // que este número substitui por uma decisão.
-  const disponivel = subMoney(subMoney(addMoney(close.saldoAtual, close.receitas), close.contas), alvo.value);
+
+  // Renda do mês que ainda não tem dono. A ESTIMATIVA de gasto variável não
+  // entra aqui de propósito: ela é justamente o que este número substitui por
+  // uma decisão.
+  const livreDaRenda = subMoney(subMoney(renda, outlook.realizado), outlook.compromissos);
+  // Piso de segurança: o que a conta aguenta pagar sem virar o mês negativa.
+  const folgaDeCaixa = subMoney(addMoney(close.saldoAtual, close.receitas), close.contas);
+
+  const teto = menor(livreDaRenda, folgaDeCaixa);
+  const disponivel = subMoney(teto, alvo.value);
   const porDia = disponivel > 0 ? divMoney(disponivel, diasRestantes) : 0;
+  const tetoPorDia = teto > 0 ? divMoney(teto, diasRestantes) : 0;
 
   return {
     endIso: close.endIso,
@@ -18934,6 +19116,16 @@ function dailyAllowance(data, forecast) {
     alvoFonte: alvo.source,
     disponivel: roundMoney(disponivel),
     porDia: roundMoney(porDia),
+    // O mesmo número sem descontar a meta: é o "teto que ainda cabe na renda"
+    // do cartão de saúde. Fica aqui para as duas telas não recalcularem.
+    teto: roundMoney(teto),
+    tetoPorDia: roundMoney(tetoPorDia),
+    renda: roundMoney(renda),
+    realizado: outlook.realizado,
+    compromissos: outlook.compromissos,
+    // Qual dos dois limites travou o número. Sem isso a tela não consegue
+    // explicar por que o teto ficou abaixo do que a renda permitiria.
+    limitadoPorCaixa: moneyCompare(folgaDeCaixa, livreDaRenda) < 0,
     // Sem folga o número vira zero, e dizer "R$ 0,00 por dia" sem explicar por
     // que seria pior que não dizer nada.
     apertado: disponivel <= 0,
@@ -18963,7 +19155,10 @@ function forecastAssumptions(data, baseline, events) {
 }
 
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { buildForecast, buildFutureEvents, recurringTemplates, variableBaseline, FORECAST_HORIZONS };
+  module.exports = {
+    buildForecast, buildFutureEvents, recurringTemplates, variableBaseline,
+    monthCloseForecast, monthExpenseOutlook, dailyAllowance, FORECAST_HORIZONS,
+  };
 }
 
 // source: js/transparency.js
@@ -20438,14 +20633,25 @@ function anAverages(data, monthKey) {
   const elapsed = Math.max(1, anElapsedDays(monthKey));
   const totalDays = anDaysInMonthKey(monthKey);
   const daily = divMoney(totals.expense, elapsed);
+  const isCurrent = monthKey === keyOfDate(new Date());
+  // A MÉDIA DIÁRIA CONTINUA SENDO MÉDIA DIÁRIA; A PROJEÇÃO NÃO É MAIS ELA
+  // VEZES O MÊS (M41). `daily` responde "quanto tenho torrado por dia até
+  // agora", que é leitura de ritmo e está certa. Multiplicá-la pelos dias do
+  // mês para projetar o fechamento era a mesma extrapolação linear que vivia em
+  // metrics.js: ela repete aluguel, IPTU e seguro uma vez por dia. A projeção
+  // agora sai do motor de previsão, o mesmo que o Score e o Início consultam.
+  const outlook = isCurrent && typeof monthExpenseOutlook === "function"
+    ? monthExpenseOutlook(data)
+    : null;
   return {
     daily,
     weekly: mulMoney(daily, 7),
     elapsedDays: elapsed,
     totalDays,
-    isCurrentMonth: monthKey === keyOfDate(new Date()),
-    // Projeção do fechamento pelo ritmo atual. Só faz sentido no mês corrente.
-    projected: monthKey === keyOfDate(new Date()) ? mulMoney(daily, totalDays) : totals.expense,
+    isCurrentMonth: isCurrent,
+    // Projeção do fechamento. Só faz sentido no mês corrente.
+    projected: outlook ? outlook.projetado : totals.expense,
+    projectedParts: outlook,
     expense: totals.expense,
     income: totals.income,
   };
@@ -21800,7 +22006,7 @@ const ADVISOR_RULES = [
         id: "ritmo",
         tone: "danger",
         icon: "bolt",
-        title: `No ritmo atual, o mês fecha ${fmtBRL(over)} no vermelho`,
+        title: `No ritmo atual, o mês gasta ${fmtBRL(over)} a mais do que entra`,
         message: `Você gasta ${fmtBRL(avg.daily)} por dia; em ${avg.totalDays} dias isso projeta ${fmtBRL(avg.projected)} contra uma renda de ${fmtBRL(income)}.`,
         value: over,
         impact: over,
@@ -27226,14 +27432,25 @@ function renderBudgetHealth(refDate, isCurrentMonth, monthExpense, fixedSpent, v
     </div>`;
   }
 
-  let dayOfMonth = refDate.getDate(), dim = 30, daysLeft = 0, dailyBudget = 0, projected = monthExpense;
+  // [M41] OS DOIS NÚMEROS DESTE CARTÃO SÃO OS DO RESTO DO APP.
+  //
+  // Aqui viviam duas cópias locais: a projeção multiplicava o gasto realizado
+  // por `dim / dia` (repetindo o aluguel uma vez por dia) e o teto diário
+  // dividia a sobra da renda por outro caminho que o do calendário; o mesmo
+  // usuário lia "R$ 774,58 por dia" num cartão e "R$ 150,06 por dia" no outro,
+  // na mesma rolagem. Agora os dois saem de forecast.js.
+  const limite = isCurrentMonth && typeof dailyAllowance === "function" && typeof forecastModel === "function"
+    ? dailyAllowance(state.data, forecastModel())
+    : null;
+  let daysLeft = 0, dailyBudget = 0, projected = monthExpense;
   if (isCurrentMonth) {
     const now = new Date();
-    dayOfMonth = now.getDate();
-    dim = daysInMonthOf(now.getFullYear(), now.getMonth());
-    daysLeft = Math.max(1, dim - dayOfMonth + 1);
-    dailyBudget = remaining > 0 ? divMoney(remaining, daysLeft) : 0;
-    projected = dayOfMonth > 0 ? mulMoney(monthExpense, dim / dayOfMonth) : monthExpense;
+    const dim = daysInMonthOf(now.getFullYear(), now.getMonth());
+    daysLeft = limite ? limite.diasRestantes : Math.max(1, dim - now.getDate() + 1);
+    dailyBudget = limite ? limite.tetoPorDia : (remaining > 0 ? divMoney(remaining, daysLeft) : 0);
+    projected = typeof monthExpenseOutlook === "function"
+      ? monthExpenseOutlook(state.data).projetado
+      : monthExpense;
   }
   const ratio = safeRatio(projected, income);
   let status;
@@ -27255,7 +27472,7 @@ function renderBudgetHealth(refDate, isCurrentMonth, monthExpense, fixedSpent, v
       // contradizia sozinha - "você fecha em R$ 246" ao lado de "pode gastar
       // R$ 957 por dia durante 5 dias" - e a leitura natural era que um dos
       // dois números estava errado.
-      ? `No ritmo atual, o mês fecha em <b>${fmtBRL(projected)}</b> de gastos. O teto que ainda cabe na renda é de <b data-ui-css="color:${status.color}">${fmtBRL(dailyBudget)} por dia</b> nos próximos ${plural(daysLeft, "dia", "dias")}; é limite, não meta.`
+      ? `No ritmo atual, o mês fecha em <b>${fmtBRL(projected)}</b> de gastos. Descontadas as contas que ainda vencem, o teto que ainda cabe na renda é de <b data-ui-css="color:${status.color}">${fmtBRL(dailyBudget)} por dia</b> nos próximos ${plural(daysLeft, "dia", "dias")}; é limite, não meta.${limite && limite.limitadoPorCaixa ? " O teto está preso ao saldo em conta, não à renda: o que ainda vai entrar não chegou." : ""}`
       : `Você já ultrapassou sua renda em <b data-ui-css="color:var(--negative)">${fmtBRL(Math.abs(remaining))}</b> este mês. Vale segurar os gastos esporádicos até o próximo salário.`)
     : (remaining >= 0
       ? `Sobraram <b data-ui-css="color:var(--positive)">${fmtBRL(remaining)}</b> depois de todos os gastos do mês.`
@@ -29511,8 +29728,8 @@ function renderMonthClose(f) {
         <span><b>Margem de segurança</b>: no pior dia do mês, ${fmtDateShort(m.fundoIso)}, o saldo chega a <b>${fmtBRL(m.margem)}</b>.</span>
       </p>
       ${m.risco
-        ? `<p class="month-close__flag month-close__flag--risk">${svgIcon("alertTriangle", 14)}<span><b>Risco de fechar negativo</b>: pelo ritmo atual o saldo fica abaixo de zero em <b>${fmtDateFull(m.riscoIso)}</b>.</span></p>`
-        : `<p class="month-close__flag">${svgIcon("checkCircle", 14)}<span>Sem risco de saldo negativo no mês, com as informações de hoje.</span></p>`}
+        ? `<p class="month-close__flag month-close__flag--risk">${svgIcon("alertTriangle", 14)}<span><b>Risco de a conta ficar negativa</b>: pelo ritmo atual o saldo fica abaixo de zero em <b>${fmtDateFull(m.riscoIso)}</b>.</span></p>`
+        : `<p class="month-close__flag">${svgIcon("checkCircle", 14)}<span>Sem risco de a conta ficar negativa neste mês, com as informações de hoje. Isto é saldo, não fluxo: o mês ainda pode gastar mais do que entra e a conta continuar positiva, porque há dinheiro de meses anteriores parado nela.</span></p>`}
     </div>
   </div>`;
 }
@@ -29542,7 +29759,8 @@ function renderDailyAllowance(f) {
     ${svgIcon("target", 14)}
     <span>Para terminar o mês com <b>${fmtBRL(d.alvo)}</b> guardados, sobram <b>${fmtBRL(d.disponivel)}</b> para gasto variável,
     o equivalente a cerca de <b>${fmtBRL(d.porDia)} por dia</b> nos ${d.diasRestantes} dias que faltam.
-    O alvo vem de ${fonte}. É referência, não obrigação.</span>
+    A conta parte da renda deste mês que ainda não está comprometida${d.limitadoPorCaixa ? ", limitada pelo saldo que você tem em conta hoje" : ""}; o que já está guardado não entra.
+    O alvo vem ${fonte}. É referência, não obrigação.</span>
   </p>`;
 }
 

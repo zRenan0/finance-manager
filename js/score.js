@@ -89,7 +89,18 @@ const SCORE_PILLARS = [
       // Sem renda com que comparar, o pilar sai da conta em vez de dar zero.
       if (base.income <= 0 || base.rate == null) return { applicable: false };
       const ratio = scoreRamp(base.rate, 0, 20);   // 20% da renda = pontuação cheia
-      const fechado = base.partial ? "deve fechar o mês" : "fechou o mês";
+      // [M41] FLUXO E SALDO NÃO PODEM DIVIDIR A PALAVRA "VERMELHO".
+      //
+      // Este pilar mede FLUXO: o que entrou menos o que saiu no mês. O cartão
+      // de fechamento, na mesma rolagem, mede SALDO em conta. O painel dizia
+      // "você deve fechar o mês no vermelho em R$ 6.857" logo acima de "sem
+      // risco de saldo negativo no mês", e as duas frases são verdadeiras ao
+      // mesmo tempo. A leitura natural é que uma delas está errada; quem paga
+      // essa confusão é a confiança nas outras.
+      //
+      // Aqui a frase passa a falar de gastar mais do que entra. "A conta fica
+      // negativa" fica reservado para o saldo, em forecast.js e no calendário.
+      const excesso = fmtBRL(Math.abs(base.savings));
       return {
         applicable: true,
         ratio,
@@ -97,7 +108,7 @@ const SCORE_PILLARS = [
         good: base.rate >= 15,
         detail: base.savings > 0
           ? `Você economizou ${fmtBRL(base.savings)} (${base.rate.toFixed(0)}% da renda ${base.basis}).${scoreBasisNote(base)}`
-          : `Você ${fechado} no vermelho em ${fmtBRL(Math.abs(base.savings))}.${scoreBasisNote(base)}`,
+          : `Neste mês o gasto ${base.partial ? "deve superar" : "superou"} a renda em ${excesso}.${scoreBasisNote(base)}`,
         advice: base.rate >= 15 ? null : "Se 15% couber no seu mês sem criar dívida, use essa faixa como primeiro objetivo e ajuste depois.",
       };
     },

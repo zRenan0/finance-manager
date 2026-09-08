@@ -419,7 +419,7 @@ const ADVISOR_RULES = [
         id: "ritmo",
         tone: "danger",
         icon: "bolt",
-        title: `No ritmo atual, o mês fecha ${fmtBRL(over)} no vermelho`,
+        title: `No ritmo atual, o mês gasta ${fmtBRL(over)} a mais do que entra`,
         message: `Você gasta ${fmtBRL(avg.daily)} por dia; em ${avg.totalDays} dias isso projeta ${fmtBRL(avg.projected)} contra uma renda de ${fmtBRL(income)}.`,
         value: over,
         impact: over,

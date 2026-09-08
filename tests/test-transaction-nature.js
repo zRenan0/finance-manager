@@ -30,7 +30,7 @@ function check(label, condition, detail) {
 
 const FONTES = ["js/utils.js", "js/perf.js", "js/router.js", "js/icons.js", "js/rules.js",
   "js/layout.js", "js/safe-errors.js", "js/storage.js", "js/budgets.js", "js/metrics.js",
-  "js/score.js", "js/achievements.js"];
+  "js/forecast.js", "js/score.js", "js/achievements.js"];
 
 function carregar() {
   const ctx = { console, setTimeout, clearTimeout, setInterval, clearInterval, crypto, URL,

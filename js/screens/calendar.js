@@ -251,8 +251,8 @@ function renderMonthClose(f) {
         <span><b>Margem de segurança</b>: no pior dia do mês, ${fmtDateShort(m.fundoIso)}, o saldo chega a <b>${fmtBRL(m.margem)}</b>.</span>
       </p>
       ${m.risco
-        ? `<p class="month-close__flag month-close__flag--risk">${svgIcon("alertTriangle", 14)}<span><b>Risco de fechar negativo</b>: pelo ritmo atual o saldo fica abaixo de zero em <b>${fmtDateFull(m.riscoIso)}</b>.</span></p>`
-        : `<p class="month-close__flag">${svgIcon("checkCircle", 14)}<span>Sem risco de saldo negativo no mês, com as informações de hoje.</span></p>`}
+        ? `<p class="month-close__flag month-close__flag--risk">${svgIcon("alertTriangle", 14)}<span><b>Risco de a conta ficar negativa</b>: pelo ritmo atual o saldo fica abaixo de zero em <b>${fmtDateFull(m.riscoIso)}</b>.</span></p>`
+        : `<p class="month-close__flag">${svgIcon("checkCircle", 14)}<span>Sem risco de a conta ficar negativa neste mês, com as informações de hoje. Isto é saldo, não fluxo: o mês ainda pode gastar mais do que entra e a conta continuar positiva, porque há dinheiro de meses anteriores parado nela.</span></p>`}
     </div>
   </div>`;
 }
@@ -282,7 +282,8 @@ function renderDailyAllowance(f) {
     ${svgIcon("target", 14)}
     <span>Para terminar o mês com <b>${fmtBRL(d.alvo)}</b> guardados, sobram <b>${fmtBRL(d.disponivel)}</b> para gasto variável,
     o equivalente a cerca de <b>${fmtBRL(d.porDia)} por dia</b> nos ${d.diasRestantes} dias que faltam.
-    O alvo vem de ${fonte}. É referência, não obrigação.</span>
+    A conta parte da renda deste mês que ainda não está comprometida${d.limitadoPorCaixa ? ", limitada pelo saldo que você tem em conta hoje" : ""}; o que já está guardado não entra.
+    O alvo vem ${fonte}. É referência, não obrigação.</span>
   </p>`;
 }
 

@@ -388,10 +388,20 @@ function monthSnapshot(data, monthKey) {
 
   // Projeção do fechamento, para quem quiser olhar o mês inteiro: os dois lados
   // projetados, nunca um projetado contra o outro realizado.
+  //
+  // A EXTRAPOLAÇÃO LINEAR SAIU DAQUI (M41). Dividir o gasto realizado pela
+  // fração do mês decorrida trata toda despesa como se ela se repetisse todo
+  // dia: no dia 8, o aluguel pago no dia 3 era multiplicado por 30/8 e o app
+  // projetava quase quatro aluguéis no mesmo mês. O número errado não ficava
+  // num canto; ele alimenta `scoreMonthBasis`, que zerava os pilares de
+  // poupança e de gastos e rebaixava o veredito de quem tinha guardado metade
+  // da renda. Agora a projeção vem do motor de previsão (forecast.js), que
+  // separa compromisso datado de gasto que se repete de fato.
   const progress = monthProgress(monthKey);
-  const projectedExpense = progress.isCurrent && progress.ratio > 0.15
-    ? divMoney(totals.expense, progress.ratio)
-    : totals.expense;
+  const outlook = progress.isCurrent && typeof monthExpenseOutlook === "function"
+    ? monthExpenseOutlook(data)
+    : null;
+  const projectedExpense = outlook ? outlook.projetado : totals.expense;
   const projectedSavings = subMoney(renda.projected, projectedExpense);
   const projectedSavingsRate = renda.projected > 0 ? safePct(projectedSavings, renda.projected) : null;
 
@@ -439,6 +449,9 @@ function monthSnapshot(data, monthKey) {
     prevExpense: prev.expense, prevIncome, prevIncomeRealized: prevRenda.realized,
     expenseDeltaPct, incomeDeltaPct,
     projectedExpense, progress,
+    // As parcelas da projeção, para a tela poder mostrar de onde ela sai em vez
+    // de exibir um total que ninguém consegue reconstruir.
+    projectedParts: outlook,
     txCount: totals.tx.length,
   };
 }
