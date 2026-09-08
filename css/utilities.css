@@ -133,6 +133,37 @@
   .switch__knob { top: 12px; }
 }
 
+/* ------------------------------------------------------------------
+   [M41] O PISO DE 24px VALE EM QUALQUER PONTEIRO
+   ------------------------------------------------------------------
+   O bloco acima só existe em ponteiro grosso, e isso é deliberado: no
+   desktop um botão de ícone de 36px é confortável, e 44px deixaria a
+   barra de ferramentas gorda sem ninguém pedir.
+
+   Só que 44px não é o requisito; é a folga que o projeto escolheu para
+   o dedo. O requisito é a WCAG 2.5.8 (AA), que pede 24x24 CSS px e NÃO
+   condiciona isso ao toque: vale para mouse, caneta e trackpad também.
+   O trabalho do M40 mediu e corrigiu o celular e deixou o desktop de
+   fora, porque a medição rodava com ponteiro grosso.
+
+   Medido de novo em 800px com ponteiro fino, nas 23 telas: 415
+   controles, 157 abaixo dos 44px do projeto (o que está certo, é o
+   desenho de desktop) e DOIS abaixo dos 24px da norma. Os dois são
+   botões desenhados como link, e por isso herdavam a altura da própria
+   linha de texto: 17px.
+
+   As caixas de marcar de 19px e 20px que a primeira medição acusou não
+   são defeito: as duas moram dentro de um <label> clicável (32x44 na
+   lista de movimentações, a linha inteira em Privacidade), e o alvo de
+   um controle dentro de rótulo é o rótulo. Medir a <input> ali é medir
+   o desenho, não o alvo. */
+.link-btn,
+.field__link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+}
+
 /* ---------- Esqueleto de carregamento ---------- */
 /* Silhueta com a MESMA geometria do dashboard: o conteúdo preenche o
    contorno em vez de empurrá-lo (nenhum salto de layout no boot). */

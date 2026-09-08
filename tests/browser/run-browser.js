@@ -1280,6 +1280,93 @@ async function runOnboardingViewportM4(browser, scenario) {
     }
   });
 
+  // [M41] O MESMO PISO, NO DESKTOP, COM O NÚMERO DA NORMA.
+  //
+  // O teste acima roda com ponteiro GROSSO, e a regra de 44px do projeto vive
+  // dentro de `@media (pointer: coarse)`. Ou seja: o desktop nunca foi medido,
+  // e o M40 corrigiu o celular deixando o mouse de fora.
+  //
+  // Aqui a régua muda de propósito. 44px é a folga que o projeto escolheu para
+  // o dedo, e no desktop um botão de ícone de 36px é confortável; cobrar 44
+  // aqui engordaria a barra de ferramentas sem ninguém pedir. O que a WCAG 2.5.8
+  // (AA) exige são 24x24 CSS px, e ela NÃO condiciona isso ao toque.
+  //
+  // Medido em 800px nas 23 telas: 415 controles, 157 abaixo de 44 (é o desenho
+  // de desktop, e está certo) e dois abaixo de 24. Os dois eram botões
+  // desenhados como link, com a altura da própria linha de texto: 17px.
+  await test("ponteiro fino: nenhum controle abaixo de 24px (WCAG 2.5.8 AA)", async () => {
+    const desktop = await openFresh(browser, { width: 800, height: 900 });
+    const page = desktop.page;
+    try {
+      await completeOnboarding(page);
+      await page.evaluate(async () => {
+        const espera = (ms) => new Promise((r) => setTimeout(r, ms));
+        const set = (campo, valor) => {
+          const el = document.querySelector(`[data-field="${campo}"]`);
+          if (!el) return;
+          el.value = valor;
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+        };
+        const clique = (sel) => { const el = document.querySelector(sel); if (el) el.click(); };
+        CofreUI.test.navigate("add"); await espera(300);
+        clique('[data-action="set-type"][data-value="expense"]'); await espera(200);
+        set("tx-amount", "250,00"); set("tx-description", "Mercado");
+        clique("[data-action='select-category']"); await espera(200);
+        clique('[data-action="submit-tx"]'); await espera(460);
+      });
+
+      const TELAS = ["dashboard", "analytics", "goals", "settings", "health", "wealth",
+        "insights", "accounts", "categories", "debts", "calendar", "subscriptions",
+        "add", "import", "simulate", "simulators", "achievements", "notifications",
+        "all", "rules", "privacy", "account", "invest"];
+      const pequenos = [];
+      let medidos = 0;
+      for (const tela of TELAS) {
+        await page.evaluate((t) => CofreUI.test.navigate(t), tela);
+        await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+        const achado = await page.evaluate(() => {
+          if (!matchMedia("(pointer: fine)").matches) return "SEM PONTEIRO FINO";
+          const fora = [];
+          let n = 0;
+          document.querySelectorAll("#app button, #app a[href], #app select, #app input:not([type=hidden]), #app textarea").forEach((el) => {
+            if (el.classList.contains("skip-link")) return;
+            if (el.closest("details:not([open])")) return;
+            // O ALVO DE UM CONTROLE DENTRO DE <label> É O RÓTULO INTEIRO.
+            // Clicar no rótulo aciona o controle, e é isso que a norma mede.
+            // A caixa de marcar de 19px da lista de movimentações mora num
+            // <label> de 32x44; medir a <input> ali seria medir o desenho.
+            const rotulo = el.closest("label");
+            const alvo = rotulo && (el.tagName === "INPUT" || el.tagName === "SELECT") ? rotulo : el;
+            const box = alvo.getBoundingClientRect();
+            if (box.width === 0 || box.height === 0) return;
+            n++;
+            // Exceção "inline" da 2.5.8: alvo que é uma palavra no meio de uma
+            // frase tem o tamanho preso à entrelinha do texto em volta.
+            if (el.closest(".source-links, .legal-list, p")) return;
+            if (box.height < 24 || box.width < 24) {
+              fora.push({
+                txt: (el.getAttribute("aria-label") || el.textContent || "").trim().slice(0, 24),
+                cls: String(el.className || "").slice(0, 26),
+                w: Math.round(box.width), h: Math.round(box.height),
+              });
+            }
+          });
+          return { n, fora: fora.slice(0, 4) };
+        });
+        if (achado === "SEM PONTEIRO FINO") throw new Error("o contexto não emulou mouse");
+        medidos += achado.n;
+        if (achado.fora.length) pequenos.push({ tela, achado: achado.fora });
+      }
+      // Guarda de sanidade: um seletor que deixasse de casar faria este teste
+      // passar por ausência de alvo, e não por acerto.
+      assert(medidos > 300, `só ${medidos} controles medidos: o teste perdeu o alvo`);
+      assert(pequenos.length === 0, `alvos abaixo de 24px no desktop: ${JSON.stringify(pequenos.slice(0, 4))}`);
+    } finally {
+      await desktop.context.close();
+    }
+  });
+
   await test("320 px mantém doca, assistente e controles sem corte nem sobreposição", async () => {
     const touch = await openFresh(browser, { width: 320, height: 844 }, { hasTouch: true });
     const page = touch.page;
