@@ -23,7 +23,7 @@
   },
   "devDependencies": {
     "esbuild": "^0.25.10",
-    "pdfjs-dist": "^6.2.108",
+    "pdfjs-dist": "^6.3.289",
     "playwright": "^1.55.0"
   },
   "engines": {
