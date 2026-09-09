@@ -514,9 +514,18 @@ function buildPortfolioModel(data, opts) {
 }
 
 /* Exportação para o harness de teste em Node (ignorada no navegador). */
+// Estado inicial do formulário da carteira. Mora no MOTOR pelo mesmo motivo de
+// `freshWealthForm` (js/wealth.js): quem cria e valida é `actions.js`.
+function freshPortfolioForm(typeId) {
+  return {
+    id: null, invType: typeId || "tesouro-selic", name: "",
+    value: "", invested: "", dividends: "", startedAt: todayIso(), note: "",
+  };
+}
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     buildPortfolioModel, portfolioItemModel, portfolioSeries, portfolioBenchmark,
-    annualizeReturn, realReturn, monthsHeldOf, monthlyContribution,
+    annualizeReturn, realReturn, monthsHeldOf, monthlyContribution, freshPortfolioForm,
   };
 }

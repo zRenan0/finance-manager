@@ -21,6 +21,13 @@
 //   resgate = receita em "investimento" COM goalId
 "use strict";
 
+// Ícones que uma meta pode ter. Mora no MOTOR, e não na tela, porque quem
+// valida a escolha é `actions.js` (ao criar meta a partir de um modelo e ao
+// editar), e quem só desenha os botões é a tela. Vocabulário compartilhado
+// entre motor e tela pertence ao motor: com ele na tela, o pacote não conseguia
+// adiar o carregamento de Metas sem levar junto a validação.
+const GOAL_ICON_OPTIONS = ["piggy", "target", "plane"];
+
 const GOAL_PACE_MONTHS = 6;      // janela do ritmo real
 const GOAL_ETA_MAX_MONTHS = 600; // 50 anos; acima disso a estimativa é ruído
 const GOAL_INFLATION_MIN_DAYS = 30; // abaixo de um mês a correção não muda nada

@@ -137,6 +137,10 @@ const APP_SHELL = [
   "js/modules/dynamic-styles.js",
   "js/modules/test-bridge.js",
   "js/modules/app.generated.js",
+  // [M41] Segundo pedaço do pacote (telas fora da primeira pintura). Entra no
+  // pré-cache porque o app promete funcionar inteiro offline: o ganho do corte
+  // é o caminho crítico da primeira pintura, não o total baixado.
+  "js/modules/app.extras.generated.js",
   "icons/icon-192.png",
   "icons/icon-512.png",
 ];

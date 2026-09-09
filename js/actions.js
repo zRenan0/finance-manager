@@ -454,6 +454,11 @@ function onClick(e) {
       setState({ tab: btn.dataset.tab });
       EventBus.emit(APP_EVENTS.TAB_CHANGED, { tab: btn.dataset.tab });
       break;
+    // [M41] Nova tentativa de buscar o segundo pedaço do pacote.
+    case "retry-extras":
+      state.extrasErro = false;
+      render();
+      break;
     case "account-mode": state.account.mode = value === "register" || value === "recover" ? value : "login"; state.account.error = ""; state.account.message = ""; render(); break;
     case "account-submit": accountSubmit(value); break;
     case "account-resend": accountResend(); break;

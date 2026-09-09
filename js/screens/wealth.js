@@ -327,6 +327,3 @@ function renderAssetRow(a, g) {
   </div>`;
 }
 
-function freshWealthForm(cls) {
-  return { id: null, class: cls || "conta", name: "", value: "", monthlyPayment: "", dueDay: "", note: "", inLedger: false };
-}

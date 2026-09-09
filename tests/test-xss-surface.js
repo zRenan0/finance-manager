@@ -46,7 +46,10 @@ function listaFontes() {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) { walk(full); continue; }
       if (!entry.name.endsWith(".js")) continue;
-      if (entry.name === "app.generated.js") continue;
+      // Os dois pedaços do pacote são CONCATENAÇÃO das fontes que já estão
+      // nesta lista; contá-los de novo duplicaria cada sink e faria o teste
+      // acusar arquivo novo a cada `npm run build`.
+      if (entry.name === "app.generated.js" || entry.name === "app.extras.generated.js") continue;
       out.push(path.relative(ROOT, full).replace(/\\/g, "/"));
     }
   })(path.join(ROOT, "js"));

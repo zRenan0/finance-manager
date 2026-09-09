@@ -164,8 +164,73 @@ const testBridge = read("js/modules/test-bridge.js");
 check("ponte de teste só funciona localmente e por opção explícita", /localhost/.test(testBridge) && /__test/.test(testBridge));
 
 console.log("\n4. Cache e política de conteúdo");
+// ==============================================================================
+console.log("\n[M41] O pacote em dois pedaços");
+// ==============================================================================
+// O corte tira 13 telas do caminho crítico da primeira pintura. Ele só é seguro
+// enquanto duas coisas valerem, e as duas estão travadas aqui porque nenhuma
+// delas quebra de forma visível: um núcleo que importa o segundo pedaço de
+// forma ESTÁTICA volta a baixar tudo junto (e ainda cria ciclo no versionamento
+// por conteúdo do dist), e uma ponte chamada fora de `renderScreen` só lança no
+// navegador de quem clicou rápido demais.
+{
+  const build = require(path.join(ROOT, "scripts/build-app-module.js"));
+  const nucleo = read("js/modules/app.generated.js");
+  const extras = read("js/modules/app.extras.generated.js");
+
+  check("os dois pedaços existem", nucleo.length > 0 && extras.length > 0);
+  check("o segundo pedaço tem telas de verdade", build.DEFERRED.length >= 10, `${build.DEFERRED.length}`);
+  check("nenhuma fonte ficou de fora dos dois pedaços",
+    build.CORE.length + build.DEFERRED.length === build.SOURCES.length,
+    `${build.CORE.length} + ${build.DEFERRED.length} != ${build.SOURCES.length}`);
+
+  // O NÚCLEO SÓ FALA DO SEGUNDO PEDAÇO POR `import()`.
+  check("o núcleo busca o segundo pedaço sob demanda",
+    /import\(\s*["']\.\/app\.extras\.generated\.js["']\s*\)/.test(nucleo));
+  check("e não o importa de forma estática",
+    !/^\s*import\s+[^(]/m.test(nucleo) && !/\bfrom\s*["']\.\/app\.extras/.test(nucleo));
+  // Sem isto, `versionarModulos` (scripts/build-dist.js) encontra um ciclo e o
+  // nome por conteúdo deixa de ser possível.
+  check("o segundo pedaço não importa o núcleo de volta",
+    !/^\s*import\s/m.test(extras),
+    "os nomes do núcleo chegam por instalarNucleo(), justamente para não haver ciclo");
+  check("o segundo pedaço recebe o núcleo por instalação",
+    /export function instalarNucleo\(n\) \{/.test(extras));
+
+  // A LISTA DE ABAS QUE ESPERAM SAI DO `switch`, NÃO DE UMA CÓPIA À MÃO.
+  const lista = (nucleo.match(/const TELAS_ADIADAS = (\[[^\]]*\]);/) || [])[1];
+  check("o núcleo declara quais abas esperam o segundo pedaço", !!lista);
+  if (lista) {
+    const abas = JSON.parse(lista);
+    check("uma aba por tela adiada", abas.length === build.DEFERRED.length,
+      `${abas.length} abas para ${build.DEFERRED.length} telas`);
+    check("toda aba adiada é rota conhecida do roteador",
+      abas.every((t) => read("js/router.js").includes(`"${t}"`)), abas.join(","));
+    check("o painel NÃO espera", abas.indexOf("dashboard") === -1);
+  }
+
+  // A guarda que evita o defeito que derrubou a primeira versão do corte.
+  check("renderScreen sabe esperar a tela chegar",
+    /function telaAindaNaoCarregada\(\)/.test(read("js/app.js"))
+    && /if \(telaAindaNaoCarregada\(\)\) \{/.test(read("js/app.js")));
+  check("e há saída quando a rede não responde",
+    /renderScreenUnavailable/.test(read("js/app.js")) && /case "retry-extras"/.test(read("js/actions.js")));
+  check("o segundo pedaço é buscado no ocioso, não no primeiro clique",
+    /idleTask\(\(\) => \{ carregarExtras\(\)/.test(read("js/app.js")));
+
+  // O build recusa um corte inseguro? Provado mexendo na lista, não na fé.
+  const fonte = read("scripts/build-app-module.js");
+  check("o build recusa valor (não-função) atravessando a ponte",
+    /Só função vira ponte/.test(fonte));
+  check("o build recusa ponte chamada fora do switch de renderScreen",
+    /chamadas fora do `switch` de `renderScreen`/.test(fonte));
+  check("o build recusa vínculo reatribuível atravessando a ponte",
+    /Vínculo reatribuível não atravessa a ponte/.test(fonte));
+}
+
 const worker = read("service-worker.js");
 check("cache inclui o artefato modular", worker.includes('"js/modules/app.generated.js"'));
+check("cache inclui o segundo pedaço", worker.includes('"js/modules/app.extras.generated.js"'));
 check("cache inclui os serviços do bootstrap", worker.includes('"js/modules/dynamic-styles.js"') && worker.includes('"js/modules/test-bridge.js"'));
 check("cache não inclui fontes clássicas", !worker.includes('"js/utils.js"') && !worker.includes('"js/app.js"'));
 // A política vive em `vercel.json`; ver tests/test-security.js.

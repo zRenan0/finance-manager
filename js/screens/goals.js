@@ -7,8 +7,7 @@
 // ==================================================================
 // GOALS
 // ==================================================================
-const GOAL_ICON_OPTIONS = ["piggy", "target", "plane"];
-
+// `GOAL_ICON_OPTIONS` mora em js/goals.js: quem valida a escolha e o motor.
 function renderGoalsScreen() {
   const model = goalsModel();
   const gf = state.goalForm;

@@ -220,7 +220,15 @@ function buildWealthModel(data, months) {
   return model;
 }
 
+// Estado inicial do formulário de bem ou dívida. Mora no MOTOR, e não na tela,
+// porque quem cria e valida o formulário é `actions.js`; a tela só desenha os
+// campos. A forma do estado é vocabulário do motor, como GOAL_ICON_OPTIONS em
+// js/goals.js, e com ela na tela o pacote não conseguia adiar Patrimônio.
+function freshWealthForm(cls) {
+  return { id: null, class: cls || "conta", name: "", value: "", monthlyPayment: "", dueDay: "", note: "", inLedger: false };
+}
+
 /* Exportação para o harness de teste em Node (ignorada no navegador). */
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { buildWealthModel, wealthComposition, wealthAnnual, wealthGroups, wealthDelta };
+  module.exports = { buildWealthModel, wealthComposition, wealthAnnual, wealthGroups, wealthDelta, freshWealthForm };
 }

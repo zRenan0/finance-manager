@@ -90,6 +90,10 @@ let state = {
   data: loadData(),
   storageOk: isStorageAvailable(),
   storageWarningDismissed: false,
+  // [M41] O segundo pedaço do pacote não chegou. De sessão: recarregar a página
+  // já refaz a tentativa, e gravar a falha de uma rede momentânea no banco seria
+  // guardar o problema de outra pessoa.
+  extrasErro: false,
   // [M26] Dispensa do aviso de dados locais. De sessão, como o aviso de
   // armazenamento logo acima: o risco não deixa de existir porque a pessoa
   // fechou o aviso, e gravar a dispensa exigiria campo novo no schema para
@@ -1435,7 +1439,60 @@ function renderStorageWarning() {
   </div>`;
 }
 
+// [M41] A TELA QUE AINDA NÃO CHEGOU
+//
+// Dezessete telas vivem no segundo pedaço do pacote (ver
+// `scripts/build-app-module.js`). Este é o único ponto do app que precisa saber
+// disso, e é de propósito: `render()` é chamado por dezenas de caminhos
+// diferentes (troca de aba, `popstate`, gravação, sincronização), e uma guarda
+// em cada um deles seria uma guarda esquecida em algum.
+//
+// Na prática quase ninguém vê o esqueleto: o segundo pedaço começa a ser
+// buscado assim que o primeiro quadro termina, no tempo ocioso. Ele existe para
+// o caso raro de alguém abrir `#/ajustes` direto e clicar antes de a rede
+// responder; e para o caso honesto de a rede não responder.
+function telaAindaNaoCarregada() {
+  return typeof TELAS_ADIADAS !== "undefined"
+    && typeof extrasProntos === "function"
+    && TELAS_ADIADAS.indexOf(state.tab) !== -1
+    && !extrasProntos();
+}
+
+function renderScreenLoading() {
+  return `<div class="screen" aria-busy="true">
+    <div class="screen-header"><div class="dash-greeting"><div class="sk sk--line sk--w120"></div><div class="sk sk--title"></div></div></div>
+    <div class="grid-dashboard">
+      <div class="card span-3 sk-card"><div class="sk sk--line sk--w90"></div><div class="sk sk--hero"></div></div>
+      <div class="card span-3 sk-card"><div class="sk sk--line"></div><div class="sk sk--line sk--w70"></div></div>
+    </div>
+  </div>`;
+}
+
+function renderScreenUnavailable() {
+  return `<div class="screen">
+    ${renderBackHeader("Tela indisponível")}
+    <div class="card card--dashed span-3 banner-inline">
+      ${svgIcon("alertTriangle", 34, "banner-inline__icon")}
+      <div class="banner-inline__text">
+        <strong>Não deu para carregar esta tela</strong>
+        <span>Ela vem em um segundo arquivo, e a rede não respondeu. Seus dados estão salvos neste aparelho e nada foi perdido; tente de novo em instantes.</span>
+      </div>
+      <button class="btn btn--primary btn--sm" data-action="retry-extras">Tentar de novo</button>
+    </div>
+  </div>`;
+}
+
 function renderScreen() {
+  if (telaAindaNaoCarregada()) {
+    if (state.extrasErro) return renderScreenUnavailable();
+    carregarExtras().then(() => {
+      if (extrasProntos()) render();
+    }).catch(() => {
+      state.extrasErro = true;
+      render();
+    });
+    return renderScreenLoading();
+  }
   switch (state.tab) {
     case "add": return renderAddScreen();
     case "analytics": return renderAnalyticsScreen();
@@ -2590,6 +2647,16 @@ async function init() {
     NavHistory.replace(state.tab, [], boot.addressed ? boot.depth : 0);
   }
   window.addEventListener("popstate", applyHistoryRoute);
+
+  // [M41] O SEGUNDO PEDAÇO É BUSCADO DEPOIS DO PRIMEIRO QUADRO, NO OCIOSO.
+  //
+  // Ele sai do caminho crítico (é para isso que o corte existe), mas não fica
+  // esperando o primeiro clique: quando a pessoa abre Ajustes, o arquivo já
+  // está no cache do navegador e a troca de tela é instantânea. O esqueleto de
+  // `renderScreen` só aparece para quem clica mais rápido que a rede.
+  if (typeof carregarExtras === "function") {
+    idleTask(() => { carregarExtras().catch(() => { /* a tela cuida do aviso */ }); });
+  }
 
   // ---- Sincronização em nuvem ----
   // O módulo não conhece o estado do aplicativo; recebe as duas pontas aqui.

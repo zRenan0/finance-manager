@@ -1533,14 +1533,60 @@ index.html
 
 A ordem das fontes está declarada em `scripts/build-app-module.js`, não no HTML.
 Motores e persistência entram primeiro, seguidos pelas telas, `actions.js` e
-`app.js`. `npm run build` reúne essas fontes em `js/modules/app.generated.js`.
-`npm run check:build` compara o artefato com as fontes e recusa uma publicação
+`app.js`. `npm run build` reúne essas fontes em **dois** arquivos.
+`npm run check:build` compara os artefatos com as fontes e recusa uma publicação
 desatualizada.
 
 O navegador carrega apenas `boot.js` e `js/modules/bootstrap.js`. O primeiro
 aplica o tema antes da pintura. O segundo cria a fachada `CofreUI`, inicia o
 serviço de estilos calculados e importa o aplicativo gerado. Os arquivos de
 origem continuam sendo usados diretamente pelos testes unitários.
+
+### O pacote em dois pedaços
+
+Abrir o painel baixava e executava o aplicativo inteiro: simuladores, dívidas,
+privacidade, ajustes. Treze telas que não fazem parte da primeira pintura saíram
+para `js/modules/app.extras.generated.js`, buscado por `import()` depois do
+primeiro quadro, no tempo ocioso.
+
+| | antes | depois |
+| --- | ---: | ---: |
+| caminho crítico, bruto | 1.107.920 | 921.881 |
+| caminho crítico, brotli | 262.499 | 230.208 |
+| segundo pedaço, brotli | — | 43.064 |
+
+São 32 kB brotli e 186 kB de análise a menos antes da primeira pintura. Medido
+no navegador, o segundo pedaço só é pedido aos 438 ms, depois da primeira
+pintura com conteúdo aos 404 ms.
+
+**O corte é verificado pelo build, não pela atenção de quem edita.** Uma função
+que atravessa a fronteira vira uma ponte gerada com o mesmo nome, e por isso
+nenhum arquivo de origem muda. Só que uma ponte chamada antes de o arquivo
+chegar não devolve tela: ela lança. `renderScreen` é o único ponto do app que
+sabe esperar (mostra esqueleto e redesenha quando chega), então
+`scripts/build-app-module.js` derruba o build quando:
+
+- o núcleo lê do segundo pedaço um nome que não é função (valor não se busca
+  depois de lido);
+- uma ponte é chamada fora do `switch` de `renderScreen`, onde não há como
+  esperar;
+- o segundo pedaço lê do núcleo um vínculo reatribuível (`let`/`var`), cuja
+  cópia ficaria velha em silêncio.
+
+A terceira regra tem uma exceção declarada: `state`, que é `let` por motivo
+histórico e nunca é reatribuído.
+
+Seis telas **não** são adiáveis por causa da primeira regra, e a lista está no
+comentário de `DEFERRED`: Categorias, Análises, Simuladores, Patrimônio,
+Carteira e Importar declaram funções que o núcleo chama fora de `renderScreen`
+(a bolha de categoria no onboarding, o histórico do formulário, o cartão de IA
+da Central, a ficha de cálculo das camadas sobrepostas e os remendos de linha da
+importação). Foi assim que a primeira versão do corte quebrou o onboarding.
+
+O segundo pedaço não importa o núcleo de volta: os nomes chegam por
+`instalarNucleo()`. Um `import` estático ali criaria um ciclo, e
+`scripts/build-dist.js` precisa de um grafo acíclico para nomear cada arquivo
+pelo próprio conteúdo.
 
 ## Arquitetura Local-First (nesta versão)
 

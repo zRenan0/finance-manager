@@ -13,13 +13,6 @@
 // Todo cálculo mora em portfolio.js; aqui só há HTML.
 // ==================================================================
 
-function freshPortfolioForm(typeId) {
-  return {
-    id: null, invType: typeId || "tesouro-selic", name: "",
-    value: "", invested: "", dividends: "", startedAt: todayIso(), note: "",
-  };
-}
-
 function renderPortfolioScreen() {
   const m = portfolioModel(state.portfolio.months);
   const f = state.portfolio.form;
