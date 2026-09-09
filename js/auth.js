@@ -82,6 +82,12 @@ function accountExpectedUserId() {
 
 function freshAccountState() {
   return {
+    // [M42] `signupOpen` é a resposta do servidor sobre a coleta nova estar
+    // aberta. Nasce do que ESTE pacote sabe (`legalControllerReady`), para a
+    // tela já decidir certo antes da primeira resposta de rede e continuar
+    // decidindo certo offline; a sessão só confirma. Ver o cabeçalho de
+    // netlify/functions/_shared/legal-controller.js.
+    signupOpen: typeof legalControllerReady === "function" ? legalControllerReady() : true,
     loading: true, configured: null, authenticated: false, knownAccount: false, sessionStatus: "unknown", email: "", userId: "", mode: "login", busy: false, error: "", message: "",
     // Email cadastrado que ainda espera confirmação. Enquanto ele existe, a
     // tela mostra o cartão de "confirmação pendente" com o botão de reenvio;
@@ -844,6 +850,8 @@ async function performAccountSessionRefresh(epoch, signal) {
 
   state.account.loading = false;
   state.account.configured = result.configured !== false;
+  // Publicação antiga não manda o campo; nesse caso vale o que este pacote sabe.
+  if (typeof result.signupOpen === "boolean") state.account.signupOpen = result.signupOpen;
 
   // Uma publicação sem serviço de conta não confirmou logout nenhum. Se este
   // navegador já estava num escopo autenticado, ele continua disponível localmente.

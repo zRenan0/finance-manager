@@ -149,5 +149,72 @@ section("5. O motor não foi alterado, só exposto");
     && /normalizada sobre o peso do que foi/.test(motor));
 }
 
+section("6. [M42] CONTA VENCIDA TIRA PONTO DE 'CONTAS EM DIA'");
+{
+  // O defeito que este bloco tranca: o pilar lia `bills.lateCount`, que conta
+  // só gasto fixo recorrente ainda não lançado. Fatura de cartão vencida sai
+  // com `kind: "card-statement"` e ficava de fora, então cinco faturas em
+  // aberto conviviam com 10 de 10 pontos e a frase "Nenhuma conta fixa em
+  // atraso neste mês" — na mesma tela em que o cartão "Próximas contas" dizia
+  // "5 vencidas", lendo o mesmo objeto pelo campo certo.
+  const mesesAtras = (n, dia) => run(`(() => {
+    const d = new Date();
+    return isoOfDate(new Date(d.getFullYear(), d.getMonth() - ${n}, ${dia}));
+  })()`);
+  ctx.__cenario = (() => {
+    const data = JSON.parse(JSON.stringify(run("defaultData()")));
+    data.settings = data.settings || {};
+    data.settings.monthlyIncome = 7200;
+    data.accounts = [{ id: "a1", name: "Conta", type: "corrente", initialBalance: 20000, initialDate: mesesAtras(8, 1), archived: false }];
+    data.creditCards = [{ id: "c1", name: "Cartão", limit: 6000, closingDay: 1, dueDay: 10, archived: false }];
+    data.transactions = [];
+    for (let m = 5; m >= 0; m--) {
+      ctx.__parcial = { m, iso: mesesAtras(m, 5), isoCartao: mesesAtras(m, 8) };
+      data.transactions.push(run(`makeTransaction({ type: "income", amount: 7200, categoryId: "outros", date: __parcial.iso, description: "Salário", payment: "Transferência", accountId: "a1", nature: "income", recurring: true })`));
+      data.transactions.push(run(`makeTransaction({ type: "expense", amount: 1200, categoryId: "mercado", date: __parcial.isoCartao, description: "Mercado", payment: "Crédito", creditCardId: "c1" })`));
+    }
+    return data;
+  })();
+
+  const contas = run(`upcomingBills(__cenario)`);
+  const nota = run(`computeFinanceScore(__cenario, keyOfDate(new Date()))`);
+  const pilar = nota.pillars.find((p) => p.id === "pontualidade");
+
+  check("o cenário tem fatura vencida e nenhuma conta fixa não lançada",
+    contas.overdueDueCount > 0 && contas.lateCount === 0,
+    { vencidas: contas.overdueDueCount, naoLancadas: contas.lateCount });
+  check("upcomingBills expõe o valor em atraso, não só a contagem",
+    contas.overdueTotal > 0, contas.overdueTotal);
+  check("o pilar é avaliado (não sai da conta)", pilar.applicable === true);
+  check("fatura vencida NÃO devolve nota cheia",
+    pilar.points < pilar.weight, { points: pilar.points, weight: pilar.weight });
+  check("com conta já vencida o pilar não passa de 30% do peso",
+    pilar.points <= pilar.weight * 0.3 + 0.01, pilar.points);
+  check("o motivo não afirma que está tudo em dia",
+    !/Nenhuma conta/.test(pilar.detail), pilar.detail);
+  check("o motivo diz quantas venceram e quanto é",
+    /venceu|venceram/.test(pilar.detail) && /R\$/.test(pilar.detail), pilar.detail);
+  check("o conselho fala de juros da conta vencida",
+    /juros/.test(String(pilar.advice || "")), pilar.advice);
+
+  // A contagem que a tela mostra e a que o score usa têm de ser a mesma.
+  check("score e cartão de contas leem o mesmo número de vencidas",
+    contas.overdueCount === contas.overdueDueCount + contas.lateCount,
+    { overdueCount: contas.overdueCount, vencidas: contas.overdueDueCount, naoLancadas: contas.lateCount });
+
+  // Sem atraso nenhum o pilar continua cheio: a correção não pode punir quem
+  // está em dia.
+  ctx.__emDia = (() => {
+    const data = JSON.parse(JSON.stringify(ctx.__cenario));
+    data.transactions = data.transactions.filter((t) => t.type === "income");
+    return data;
+  })();
+  const emDia = run(`computeFinanceScore(__emDia, keyOfDate(new Date()))`);
+  const pilarEmDia = emDia.pillars.find((p) => p.id === "pontualidade");
+  check("sem nenhuma conta em atraso o pilar não perde ponto",
+    !pilarEmDia.applicable || pilarEmDia.points === pilarEmDia.weight,
+    { applicable: pilarEmDia.applicable, points: pilarEmDia.points });
+}
+
 console.log(`\n${fail ? "FALHAS ENCONTRADAS" : "TODOS OS TESTES PASSARAM"} — ${pass} ok, ${fail} falha(s)`);
 process.exit(fail ? 1 : 0);

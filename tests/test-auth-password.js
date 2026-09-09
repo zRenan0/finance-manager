@@ -47,6 +47,18 @@ async function main() {
   process.env.SUPABASE_PUBLISHABLE_KEY = "public-test";
   process.env.SUPABASE_SERVICE_ROLE_KEY = "service-test";
   process.env.ALLOWED_ORIGIN = "https://cofre.test";
+  // [M42] Esta suite testa outra coisa; o portao do cadastro e cenario aqui.
+  // Sem controlador publicado, /api/account/register recusa com 503 antes de
+  // chegar em qualquer regra de senha. Ver tests/helpers/controlador-definido.js.
+  const restaurarControlador = require("./helpers/controlador-definido").comControladorDefinido();
+  // A rota de cadastro consulta o HaveIBeenPwned de verdade quando a checagem
+  // esta ligada, com 2,5s de espera. Esta suite nao testa isso, e a consulta a
+  // rede tornava o resultado dependente de a maquina estar ocupada: sob carga o
+  // pedido estourava o prazo e a suite ficava vermelha sem nada ter mudado no
+  // codigo. Quem cobre o vazamento e tests/test-senha-vazada.js, que finge o
+  // fetch em vez de sair para a internet.
+  const hibpAnterior = process.env.LEAKED_PASSWORD_CHECK;
+  process.env.LEAKED_PASSWORD_CHECK = "off";
 
   // A senha "de verdade" desta conta de mentira. `signIn` só aceita ela; é o
   // que transforma a reautenticação numa checagem observável.

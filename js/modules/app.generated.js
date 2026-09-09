@@ -8520,6 +8520,12 @@ function accountExpectedUserId() {
 
 function freshAccountState() {
   return {
+    // [M42] `signupOpen` é a resposta do servidor sobre a coleta nova estar
+    // aberta. Nasce do que ESTE pacote sabe (`legalControllerReady`), para a
+    // tela já decidir certo antes da primeira resposta de rede e continuar
+    // decidindo certo offline; a sessão só confirma. Ver o cabeçalho de
+    // netlify/functions/_shared/legal-controller.js.
+    signupOpen: typeof legalControllerReady === "function" ? legalControllerReady() : true,
     loading: true, configured: null, authenticated: false, knownAccount: false, sessionStatus: "unknown", email: "", userId: "", mode: "login", busy: false, error: "", message: "",
     // Email cadastrado que ainda espera confirmação. Enquanto ele existe, a
     // tela mostra o cartão de "confirmação pendente" com o botão de reenvio;
@@ -9282,6 +9288,8 @@ async function performAccountSessionRefresh(epoch, signal) {
 
   state.account.loading = false;
   state.account.configured = result.configured !== false;
+  // Publicação antiga não manda o campo; nesse caso vale o que este pacote sabe.
+  if (typeof result.signupOpen === "boolean") state.account.signupOpen = result.signupOpen;
 
   // Uma publicação sem serviço de conta não confirmou logout nenhum. Se este
   // navegador já estava num escopo autenticado, ele continua disponível localmente.
@@ -16248,19 +16256,57 @@ const SCORE_PILLARS = [
     label: "Contas em dia",
     weight: 10,
     icon: "bell",
+    // [M42] O PILAR LÊ O QUE ESTÁ EM ATRASO, NÃO SÓ O QUE FALTA LANÇAR.
+    //
+    // Ele lia `bills.lateCount`, que conta uma coisa só: gasto fixo recorrente
+    // ainda não lançado. Fatura de cartão vencida e não paga sai com
+    // `kind: "card-statement"` e ficava de fora. O resultado era uma frase
+    // falsa com nota cheia: cinco faturas vencidas, R$ 7.339,56 em atraso, e o
+    // pilar escrevendo "Nenhuma conta fixa em atraso neste mês" com 10 de 10,
+    // ao lado do cartão "Próximas contas", que dizia "5 vencidas" lendo o mesmo
+    // objeto pelo campo certo. Agora os dois leem `overdueCount`.
+    //
+    // AS DUAS SITUAÇÕES PESAM DIFERENTE, DE PROPÓSITO. Não ter lançado o
+    // aluguel é falha de registro: o dinheiro pode até já ter saído. Fatura
+    // vencida é inadimplência de verdade, com rotativo correndo. Por isso a
+    // segunda custa mais e ainda trava o teto do pilar: com qualquer conta já
+    // vencida, "Contas em dia" não pode devolver nota boa, e nenhum outro pilar
+    // deve conseguir mascarar isso no nível global.
     evaluate(data, mKey, ctx) {
-      const late = ctx.bills.lateCount;
       const scheduled = ctx.bills.items.length;
-      if (scheduled === 0 && late === 0) return { applicable: false };
-      const ratio = late === 0 ? 1 : clamp(1 - late * 0.34, 0, 1);
+      const naoLancadas = ctx.bills.lateCount;
+      const vencidas = Math.max(0, Number(ctx.bills.overdueDueCount) || 0);
+      const emAtraso = naoLancadas + vencidas;
+      if (scheduled === 0 && emAtraso === 0) return { applicable: false };
+
+      let ratio = clamp(1 - naoLancadas * 0.34 - vencidas * 0.5, 0, 1);
+      if (vencidas > 0) ratio = Math.min(ratio, 0.3);
+
+      const valor = roundMoney(ctx.bills.overdueTotal);
+      const quanto = valor > 0 ? `, ${fmtBRL(valor)} em atraso` : "";
+      let detail;
+      if (emAtraso === 0) detail = "Nenhuma conta em atraso neste mês.";
+      else if (vencidas === 0) {
+        detail = `${naoLancadas} conta${naoLancadas > 1 ? "s" : ""} fixa${naoLancadas > 1 ? "s" : ""} do mês passado ainda não foi lançada e já passou da data.`;
+      } else if (naoLancadas === 0) {
+        detail = vencidas === 1
+          ? `1 conta já venceu e continua em aberto${quanto}.`
+          : `${vencidas} contas já venceram e continuam em aberto${quanto}.`;
+      } else {
+        const total = valor > 0 ? `, ${fmtBRL(valor)} no total` : "";
+        detail = `${emAtraso} contas em atraso${total}: ${vencidas} já vencida${vencidas > 1 ? "s" : ""} e ${naoLancadas} fixa${naoLancadas > 1 ? "s" : ""} sem lançamento.`;
+      }
+
       return {
         applicable: true,
         ratio,
-        good: late === 0,
-        detail: late === 0
-          ? "Nenhuma conta fixa em atraso neste mês."
-          : `${late} conta${late > 1 ? "s" : ""} fixa${late > 1 ? "s" : ""} do mês passado ainda não foi lançada e já passou da data.`,
-        advice: late === 0 ? null : "Lance ou quite as contas atrasadas para não acumular juros e multas.",
+        good: emAtraso === 0,
+        detail,
+        advice: emAtraso === 0
+          ? null
+          : (vencidas > 0
+            ? "Conta vencida em aberto cobra juros e multa todo dia. Quitar o que já venceu rende mais que qualquer aplicação disponível hoje."
+            : "Lance ou quite as contas atrasadas para não acumular juros e multas."),
       };
     },
   },
@@ -17013,13 +17059,32 @@ function upcomingBills(data, days = 30) {
   });
 
   out.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  const atrasadas = out.filter((b) => b.overdue);
+  const naoLancadas = out.filter((b) => b.kind === "late");
   return {
     items: out,
     total: sumMoney(out, (b) => b.amount),
-    lateCount: out.filter((b) => b.kind === "late").length,
+    lateCount: naoLancadas.length,
     // Vencido e "próximo" não são a mesma coisa, e o cartão não pode chamar os
     // dois de "nos próximos 30 dias".
-    overdueCount: out.filter((b) => b.overdue).length,
+    overdueCount: atrasadas.length,
+    // [M42] O DINHEIRO QUE JÁ ESTÁ EM ATRASO, E NÃO SÓ A CONTAGEM.
+    //
+    // O pilar "Contas em dia" (js/score.js) lia `lateCount` e chamava isso de
+    // atraso. `lateCount` conta UMA coisa só: gasto fixo recorrente que ainda
+    // não foi lançado. Fatura de cartão que passou do vencimento e não foi paga
+    // sai com `kind: "card-statement"` e nunca entrou naquela contagem. Então
+    // inadimplência de cartão, que é a dívida mais cara do mercado brasileiro,
+    // não tirava um ponto da nota. Na mesma tela, o cartão "Próximas contas"
+    // dizia "5 vencidas" enquanto o score dizia "nenhuma conta em atraso".
+    //
+    // `overdueCount` já cobria os dois casos (os itens `late` também nascem com
+    // `overdue: true`); o que faltava era o VALOR, para a frase poder dizer
+    // quanto está em atraso em vez de só quantas linhas são.
+    overdueTotal: sumMoney(atrasadas, (b) => b.amount),
+    // Separado de `lateCount` para a frase distinguir "não lancei" de "não
+    // paguei": as duas são atraso, mas só a segunda cobra juros.
+    overdueDueCount: atrasadas.length - naoLancadas.length,
   };
 }
 
@@ -24879,7 +24944,17 @@ function buildAchievementContext(data, refDate) {
     budgetedCategories,
     budgetClean: budgetClean.clean,
     budgetEvaluated: budgetClean.evaluated,
-    lateBills: bills.lateCount,
+    // [M42] TUDO O QUE ESTÁ EM ATRASO, não só o fixo que faltou lançar.
+    //
+    // Era `bills.lateCount`, que conta uma coisa só: gasto fixo recorrente
+    // ainda não lançado. A conquista se chama "Contas em dia" e promete
+    // "nenhuma conta prevista em atraso", e era entregue a quem tinha cinco
+    // faturas de cartão vencidas, porque fatura vencida sai com
+    // `kind: "card-statement"` e nunca entrou naquela contagem. Premiar
+    // pontualidade de quem está inadimplente é o oposto do que a conquista
+    // existe para reforçar. `overdueCount` cobre os dois casos. Ver o pilar
+    // `pontualidade` em js/score.js.
+    lateBills: bills.overdueCount,
     hasBills: bills.items.length > 0,
     advancedTools,
     sources,
@@ -37706,7 +37781,7 @@ function carregarExtras() {
   if (__extrasCarregados) return Promise.resolve(__extrasCarregados);
   if (!__extrasEmVoo) {
     __extrasEmVoo = import('./app.extras.generated.js').then((mod) => {
-      mod.instalarNucleo({ ACCOUNT_TYPE_LABELS, AI_HIDEABLE_FIELDS, ASSET_CLASSES, BACKUP_ENC_MIN_PASSWORD, BUDGET_GROUPS, BUILTIN_CATEGORY_RULES, CloudSync, DEBT_AMORTIZATION_LABELS, DEBT_TYPE_LABELS, FinanceStore, GOAL_ICON_OPTIONS, GOAL_INFLATION_MIN_DAYS, GOAL_TEMPLATES, GROUP_ICONS, GROUP_LABELS, HEALTH_INDICATORS, INVESTMENT_TYPES, LEGAL_CONTROLLER, LEGAL_DATA_INVENTORY, LEGAL_DATA_INVENTORY_GROUPS, LEGAL_PENDING, LEGAL_RETENTION, LEGAL_REVIEW_DATE, LEGAL_SUBJECT_RIGHTS, LEGAL_TEXT_VERSION, LEGAL_THIRD_PARTIES, LEGAL_THIRD_PARTY_GROUPS, MONTH_ABBR, MONTH_NAMES, RULE_MATCH_TYPES, RULE_WEIGHT_DEFAULT, RULE_WEIGHT_MAX, RULE_WEIGHT_MIN, accountsSummary, assetClassOf, backupCryptoAvailable, buildDataSourcesModel, categoryById, childCategories, clamp, compileCategoryRules, compileRulePattern, computeBudgetStatus, daysBetweenIso, debtMonthlyRateInfo, debtsModel, defaultBudgetAlerts, defaultPrivacy, divMoney, emergencyFund, emergencyLadder, escapeHtml, fmtBRL, fmtBRLShort, fmtDateFull, fmtDateShort, fmtDec, fmtNum, formatMovementTimestamp, freshGuestLink, goalExistingBalance, goalInflationPct, goalsModel, healthModel, inflateMoney, investmentTypeOf, isDashboardStarting, keyOfCurrentMonth, legalAccepted, legalControllerGaps, legalDataInventoryGaps, legalThirdPartyGaps, legalThirdPartyLaunchGaps, marketRatesOf, matchCategoryRules, mergeBackupInto, moneyCompare, moneyDraft, moneyFromCents, moneyOrZero, moneyToCents, monthKeyOf, mulMoney, nextDueDateForDebt, normalizeCategoryRules, normalizePrivacy, normalizeText, notificationsModel, parseMoneyInput, passwordStrength, plural, pluralWord, portfolioModel, reconciliationHeadline, render, renderBackHeader, renderCalculationButton, renderDonut, renderEmptyState, renderGoalRing, renderLastBackupLine, renderScoreGauge, renderSparkline, safeErrorSummary, safePct, scoreGains, simulateExpenseImpact, simulateFinancingImpact, state, subMoney, svgIcon, todayIso, topLevelCategories, wealthModel });
+      mod.instalarNucleo({ ACCOUNT_TYPE_LABELS, AI_HIDEABLE_FIELDS, ASSET_CLASSES, BACKUP_ENC_MIN_PASSWORD, BUDGET_GROUPS, BUILTIN_CATEGORY_RULES, CloudSync, DEBT_AMORTIZATION_LABELS, DEBT_TYPE_LABELS, FinanceStore, GOAL_ICON_OPTIONS, GOAL_INFLATION_MIN_DAYS, GOAL_TEMPLATES, GROUP_ICONS, GROUP_LABELS, HEALTH_INDICATORS, INVESTMENT_TYPES, LEGAL_CONTROLLER, LEGAL_DATA_INVENTORY, LEGAL_DATA_INVENTORY_GROUPS, LEGAL_PENDING, LEGAL_RETENTION, LEGAL_REVIEW_DATE, LEGAL_SUBJECT_RIGHTS, LEGAL_TEXT_VERSION, LEGAL_THIRD_PARTIES, LEGAL_THIRD_PARTY_GROUPS, MONTH_ABBR, MONTH_NAMES, RULE_MATCH_TYPES, RULE_WEIGHT_DEFAULT, RULE_WEIGHT_MAX, RULE_WEIGHT_MIN, accountsSummary, assetClassOf, backupCryptoAvailable, buildDataSourcesModel, categoryById, childCategories, clamp, compileCategoryRules, compileRulePattern, computeBudgetStatus, daysBetweenIso, debtMonthlyRateInfo, debtsModel, defaultBudgetAlerts, defaultPrivacy, divMoney, emergencyFund, emergencyLadder, escapeHtml, fmtBRL, fmtBRLShort, fmtDateFull, fmtDateShort, fmtDec, fmtNum, formatMovementTimestamp, freshGuestLink, goalExistingBalance, goalInflationPct, goalsModel, healthModel, inflateMoney, investmentTypeOf, isDashboardStarting, keyOfCurrentMonth, legalAccepted, legalControllerGaps, legalControllerReady, legalDataInventoryGaps, legalThirdPartyGaps, legalThirdPartyLaunchGaps, marketRatesOf, matchCategoryRules, mergeBackupInto, moneyCompare, moneyDraft, moneyFromCents, moneyOrZero, moneyToCents, monthKeyOf, mulMoney, nextDueDateForDebt, normalizeCategoryRules, normalizePrivacy, normalizeText, notificationsModel, parseMoneyInput, passwordStrength, plural, pluralWord, portfolioModel, reconciliationHeadline, render, renderBackHeader, renderCalculationButton, renderDonut, renderEmptyState, renderGoalRing, renderLastBackupLine, renderScoreGauge, renderSparkline, safeErrorSummary, safePct, scoreGains, simulateExpenseImpact, simulateFinancingImpact, state, subMoney, svgIcon, todayIso, topLevelCategories, wealthModel });
       __extrasCarregados = mod;
       return mod;
     }).catch((erro) => { __extrasEmVoo = null; throw erro; });

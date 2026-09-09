@@ -6,6 +6,9 @@ const { headersOf, cookiesOf, canonicalOrigin, assertSameOrigin, readJson, cooki
 const { observeHandler } = require("./_shared/observability");
 const rateLimit = require("./_shared/rate-limit");
 const { verificarSenhaVazada } = require("./_shared/senha-vazada");
+// [M42] Sem controlador identificado não se abre conta nova. Ver o cabeçalho de
+// _shared/legal-controller.js.
+const { assertLegalControllerReady, legalControllerReady } = require("./_shared/legal-controller");
 
 const ACCESS = "cofre_access";
 const REFRESH = "cofre_refresh";
@@ -518,8 +521,14 @@ async function handler(event) {
     }
 
     if (action === "session" && method === "GET") {
+      // [M42] `signupOpen` diz à tela se ela pode oferecer "criar conta". Sem
+      // isto o portão só apareceria no envio do formulário, depois de a pessoa
+      // ter digitado email e senha; a recusa tem de vir antes de pedir o dado.
+      // Quem JÁ tem conta continua entrando: o portão fecha a coleta nova, não
+      // o acesso de quem já está dentro.
+      const signupOpen = legalControllerReady();
       const session = await sessionOf(event);
-      if (!session) return json(200, { ok: true, configured: true, authenticated: false });
+      if (!session) return json(200, { ok: true, configured: true, authenticated: false, signupOpen });
       // Sessão de email não confirmado não é sessão. Só recusar no `login`
       // deixaria passar o que já tivesse sido emitido antes desta regra.
       if (!emailConfirmed(session.user)) {
@@ -529,6 +538,14 @@ async function handler(event) {
       return json(200, { ok: true, configured: true, authenticated: true, email: session.user.email || "", userId: session.user.id, deviceId: device.deviceId }, { cookies: [...session.cookies, ...device.cookies] });
     }
     if (action === "register" && method === "POST") {
+      // [M42] O PORTÃO VEM ANTES DE QUALQUER LEITURA DO CORPO.
+      //
+      // Sem controlador publicado não existe a quem o titular dirigir um pedido
+      // do art. 18, nem encarregado do art. 41, nem canal do art. 48. A resposta
+      // certa não é aceitar e avisar depois: é não coletar. Recusar antes de
+      // `readJson` garante também que a senha enviada não chega a ser lida nem
+      // a passar pela consulta de vazamento.
+      assertLegalControllerReady();
       const body = readJson(event, 16 * 1024); const flow = pkce();
       const email = emailOf(body.email);
       await limitarPorEmail(event, email);

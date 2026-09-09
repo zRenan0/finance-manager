@@ -160,6 +160,119 @@ check("pendências de lançamento apontam para o marcador no código", /LEGAL_PE
 check("documento deixou de listar a fonte do Google como pendência", !/^\d+\. Avaliar a remoção das fontes remotas do Google/m.test(launchDoc));
 check("contrato efetivo do provedor de IA segue registrado como pendência", /contrato efetivo da Anthropic/i.test(launchDoc));
 
+console.log("\n[M42] Sem controlador publicado, o cadastro fecha de verdade");
+{
+  // O defeito que este bloco tranca: a tela Privacidade dizia que a instalação
+  // "não deve ser oferecida ao público" e o formulário de cadastro continuava
+  // aberto, com o site respondendo 200 para qualquer visitante. Aviso que não
+  // tranca nada é decoração.
+  const gate = require(path.join(ROOT, "netlify/functions/_shared/legal-controller.js"));
+  const storageSrc = read("js/storage.js");
+
+  // ---- O espelho não pode divergir do original ----
+  // `LEGAL_CONTROLLER` mora em js/storage.js, que é código de navegador e não
+  // é carregado pelas funções. A cópia é deliberada (ver o cabeçalho do
+  // módulo); o que não pode acontecer é preencher um lado só e achar que o
+  // portão abriu.
+  const campos = Object.keys(gate.LEGAL_CONTROLLER_FIELDS);
+  check("o espelho declara os mesmos sete campos do controlador", campos.length === 7, campos.length);
+  check("o marcador é o mesmo dos dois lados",
+    storageSrc.includes(`const LEGAL_PENDING = "${gate.LEGAL_PENDING}";`), gate.LEGAL_PENDING);
+  const blocoOriginal = storageSrc.slice(storageSrc.indexOf("const LEGAL_CONTROLLER = {"), storageSrc.indexOf("const LEGAL_CONTROLLER_FIELDS"));
+  campos.forEach((campo) => {
+    const pendenteNoOriginal = new RegExp(`^\\s{2}${campo}: LEGAL_PENDING,$`, "m").test(blocoOriginal);
+    const pendenteNoEspelho = gate.legalControllerGaps().includes(campo);
+    check(`"${campo}" está no mesmo estado nos dois lados`, pendenteNoOriginal === pendenteNoEspelho,
+      { original: pendenteNoOriginal ? "pendente" : "preenchido", espelho: pendenteNoEspelho ? "pendente" : "preenchido" });
+  });
+  const rotulosOriginais = storageSrc.slice(storageSrc.indexOf("const LEGAL_CONTROLLER_FIELDS"), storageSrc.indexOf("function legalControllerGaps"));
+  check("os rótulos legíveis são os mesmos dos dois lados",
+    campos.every((c) => rotulosOriginais.includes(`${c}: "${gate.LEGAL_CONTROLLER_FIELDS[c]}"`)));
+
+  // ---- Enquanto houver marcador, a rota recusa ----
+  const conta = read("netlify/functions/account.js");
+  const registro = conta.slice(conta.indexOf('action === "register"'), conta.indexOf('action === "login"'));
+  check("a rota de cadastro chama o portão", /assertLegalControllerReady\(\);/.test(registro));
+  check("o portão vem ANTES de ler o corpo (a senha não chega a ser processada)",
+    registro.indexOf("assertLegalControllerReady();") < registro.indexOf("readJson(event"));
+  check("recuperar senha e confirmar email continuam abertos: o portão fecha a coleta nova, não o acesso",
+    !/assertLegalControllerReady/.test(conta.slice(conta.indexOf('action === "recover"'), conta.indexOf('action === "verify"'))));
+  check("a sessão informa à tela se o cadastro está aberto", /signupOpen/.test(conta));
+
+  if (!gate.legalControllerReady()) {
+    let recusou = null;
+    try { gate.assertLegalControllerReady(); } catch (erro) { recusou = erro; }
+    check("com campo em branco o portão lança", recusou !== null);
+    check("a recusa é 503 com código próprio",
+      recusou && recusou.statusCode === 503 && recusou.code === "legal_controller_pending",
+      recusou && { statusCode: recusou.statusCode, code: recusou.code });
+    check("a recusa diz o que falta, e a mensagem pode chegar a quem publicou",
+      recusou && recusou.exposeMessage === true && /Falta definir:/.test(recusou.message), recusou && recusou.message);
+    check("a recusa lembra que o app segue funcionando sem conta",
+      recusou && /sem conta/.test(recusou.message));
+  }
+
+  // ---- A tela não pede o dado que a rota vai recusar ----
+  // Renderizada de verdade, não conferida por expressão regular na fonte: o que
+  // importa é o HTML que a pessoa recebe.
+  const telaCtx = {
+    console, module: { exports: {} }, setTimeout, clearTimeout,
+    indexedDB: undefined, localStorage: undefined,
+    document: { addEventListener() {}, visibilityState: "visible", querySelector: () => null },
+    navigator: { userAgent: "node", onLine: true }, addEventListener() {}, removeEventListener() {},
+    fetch: async () => { throw new Error("sem rede no teste"); },
+  };
+  telaCtx.window = telaCtx; telaCtx.self = telaCtx; telaCtx.globalThis = telaCtx;
+  vm.createContext(telaCtx);
+  [
+    "js/utils.js", "js/rules.js", "js/layout.js", "js/icons.js", "js/storage.js", "js/accounts.js",
+    "js/budgets.js", "js/metrics.js", "js/forecast.js", "js/auth.js", "js/screens/account.js",
+  ].forEach((f) => vm.runInContext(read(f), telaCtx, { filename: f }));
+  const renderTela = (codigo) => vm.runInContext(codigo, telaCtx);
+
+  renderTela(`state = { account: freshAccountState(), data: defaultData() };
+    state.account.loading = false;
+    state.account.configured = true;
+    state.account.authenticated = false;
+    state.account.mode = "register";`);
+
+  const fechada = renderTela("accountGuestForm()");
+  check("com controlador pendente, o modo de cadastro não renderiza campo de senha",
+    !/id="account-password"/.test(fechada));
+  check("nem campo de email", !/id="account-email"/.test(fechada));
+  check("nem botão que envia cadastro", !/data-value="register"/.test(fechada));
+  check("a tela explica o motivo em vez de só sumir com o botão",
+    /cadastro está fechado/.test(fechada) && /quem responde pelos seus dados/.test(fechada), fechada.slice(0, 160));
+  check("a tela lembra que o app funciona inteiro sem conta", /funciona inteiro sem conta/.test(fechada));
+  check("a tela leva para onde a pendência está descrita", /data-action="nav" data-tab="privacy"/.test(fechada));
+  check("entrar continua oferecido", /data-value="login"/.test(fechada));
+
+  renderTela(`state.account.mode = "login";`);
+  const login = renderTela("accountGuestForm()");
+  check("o formulário de entrar continua completo", /id="account-email"/.test(login) && /id="account-password"/.test(login));
+  check("com cadastro fechado, o link \"Criar uma conta\" some do rodapé",
+    !/data-value="register"/.test(login), login.slice(login.indexOf("account-auth-links")));
+  check("esqueci minha senha continua oferecido", /data-value="recover"/.test(login));
+
+  // Com o controlador publicado, tudo volta ao normal. O portão fecha uma
+  // situação, não a funcionalidade.
+  renderTela(`Object.keys(LEGAL_CONTROLLER_FIELDS).forEach((c) => { LEGAL_CONTROLLER[c] = "valor real"; });
+    state.account.signupOpen = true;
+    state.account.mode = "register";`);
+  check("preenchido o controlador, o próprio pacote reconhece que está pronto",
+    renderTela("legalControllerReady()") === true);
+  const aberta = renderTela("accountGuestForm()");
+  check("com controlador publicado o cadastro volta a ser oferecido",
+    /data-value="register"/.test(aberta) && /id="account-password"/.test(aberta));
+
+  // ---- A esteira continua rodando; a oferta ao público é que trava ----
+  const checkRelease = read("scripts/check-release.js");
+  check("check:release tem o modo que reprova a oferta ao público",
+    /--publico/.test(checkRelease) && /RELEASE_PUBLICO/.test(checkRelease));
+  check("check:release confere que o portão continua ligado",
+    /assertLegalControllerReady/.test(checkRelease));
+}
+
 if (originalLocalStorage) Object.defineProperty(global, "localStorage", originalLocalStorage);
 else delete global.localStorage;
 if (originalNavigator) Object.defineProperty(global, "navigator", originalNavigator);

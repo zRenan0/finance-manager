@@ -78,6 +78,18 @@ async function main() {
   // Vercel funciona, e é o caminho que precisa continuar montando o retorno
   // com o host de quem chamou, não com um domínio fixo.
   delete process.env.ALLOWED_ORIGIN;
+  // [M42] Esta suite testa outra coisa; o portao do cadastro e cenario aqui.
+  // Sem controlador publicado, /api/account/register recusa com 503 antes de
+  // chegar em qualquer regra de senha. Ver tests/helpers/controlador-definido.js.
+  const restaurarControlador = require("./helpers/controlador-definido").comControladorDefinido();
+  // A rota de cadastro consulta o HaveIBeenPwned de verdade quando a checagem
+  // esta ligada, com 2,5s de espera. Esta suite nao testa isso, e a consulta a
+  // rede tornava o resultado dependente de a maquina estar ocupada: sob carga o
+  // pedido estourava o prazo e a suite ficava vermelha sem nada ter mudado no
+  // codigo. Quem cobre o vazamento e tests/test-senha-vazada.js, que finge o
+  // fetch em vez de sair para a internet.
+  const hibpAnterior = process.env.LEAKED_PASSWORD_CHECK;
+  process.env.LEAKED_PASSWORD_CHECK = "off";
 
   const capturado = {};
   api.auth.signUp = async (email, senha, redirectTo) => {

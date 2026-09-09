@@ -6,10 +6,46 @@ function accountStatusCard() {
   return "";
 }
 
+// [M42] CADASTRO FECHADO ENQUANTO NÃO HOUVER CONTROLADOR PUBLICADO.
+//
+// A tela Privacidade já dizia que esta instalação "não deve ser oferecida ao
+// público" enquanto a identificação do controlador estiver em branco. Dizer não
+// bastava: o formulário de cadastro continuava aberto e a coleta acontecia
+// assim mesmo. Sem controlador identificado (LGPD art. 9, I), sem encarregado
+// nomeado (art. 41) e sem canal de incidente (art. 48), não há a quem o titular
+// dirigir um pedido do art. 18; então a coleta não começa.
+//
+// O que NÃO é bloqueado: entrar numa conta que já existe, recuperar senha e
+// confirmar um email pendente. O portão fecha a coleta nova, não o acesso de
+// quem já está dentro. E o app inteiro continua disponível sem conta, com os
+// dados no aparelho, que é o modo padrão dele.
+//
+// O servidor recusa o mesmo em `/api/account/register`. Recusar só aqui seria
+// recusar nada: a rota continuaria aberta para qualquer chamada direta.
+function accountSignupOpen() {
+  if (state.account.signupOpen === false) return false;
+  return typeof legalControllerReady === "function" ? legalControllerReady() : true;
+}
+
+function accountSignupClosedCard() {
+  return `<div class="card account-auth-card">
+    <p class="eyebrow">Conta opcional</p>
+    <h2 class="card-title">O cadastro está fechado por enquanto</h2>
+    <p class="card-subtitle">Esta instalação ainda não publicou quem responde pelos seus dados: sem controlador identificado e sem encarregado, não haveria a quem você dirigir um pedido sobre eles. Enquanto isso, preferimos não coletar.</p>
+    <p class="card-subtitle">O aplicativo funciona inteiro sem conta. Tudo o que você registrar fica neste aparelho, e o backup em arquivo continua disponível em Privacidade.</p>
+    <div class="account-auth-links">
+      <button type="button" class="link-btn" data-action="nav" data-tab="privacy">Ver o que falta ser definido</button>
+      <button type="button" class="link-btn" data-action="account-mode" data-value="login">Já tenho conta, quero entrar</button>
+    </div>
+  </div>`;
+}
+
 function accountGuestForm() {
   const a = state.account;
-  const register = a.mode === "register";
+  const cadastroAberto = accountSignupOpen();
+  const register = a.mode === "register" && cadastroAberto;
   const recover = a.mode === "recover";
+  if (a.mode === "register" && !cadastroAberto) return accountSignupClosedCard();
   // ESTA TELA PRECISA SER UM `<form>` DE VERDADE.
   //
   // O resto do app monta formulário com `div` + botão delegado, e para os
@@ -27,7 +63,7 @@ function accountGuestForm() {
     ${recover ? "" : `<div class="field"><label class="field__label" for="account-password">Senha</label><input id="account-password" class="input" type="password" name="password" data-field="auth-password" minlength="10" maxlength="128" value="${escapeHtml(a.form.password)}" autocomplete="${register ? "new-password" : "current-password"}" />${register ? renderPasswordStrength(a.form.password, a.form.email) : `<p class="field-hint">Mínimo de 10 caracteres.</p>`}</div>`}
     <button type="submit" class="btn btn--primary btn--block" data-action="account-submit" data-value="${recover ? "recover" : (register ? "register" : "login")}" ${a.busy ? "disabled" : ""}>${a.busy ? svgIcon("loader", 16) : svgIcon(register ? "plus" : (recover ? "refresh" : "shieldCheck"), 16)} ${recover ? "Enviar link" : (register ? "Criar conta" : "Entrar")}</button>
     <div class="account-auth-links">
-      ${recover ? `<button type="button" class="link-btn" data-action="account-mode" data-value="login">Voltar para entrar</button>` : `<button type="button" class="link-btn" data-action="account-mode" data-value="${register ? "login" : "register"}">${register ? "Já tenho uma conta" : "Criar uma conta"}</button><button type="button" class="link-btn" data-action="account-mode" data-value="recover">Esqueci minha senha</button>`}
+      ${recover ? `<button type="button" class="link-btn" data-action="account-mode" data-value="login">Voltar para entrar</button>` : `${cadastroAberto ? `<button type="button" class="link-btn" data-action="account-mode" data-value="${register ? "login" : "register"}">${register ? "Já tenho uma conta" : "Criar uma conta"}</button>` : ""}<button type="button" class="link-btn" data-action="account-mode" data-value="recover">Esqueci minha senha</button>`}
     </div>
   </form>`;
 }

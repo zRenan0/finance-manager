@@ -627,13 +627,32 @@ function upcomingBills(data, days = 30) {
   });
 
   out.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  const atrasadas = out.filter((b) => b.overdue);
+  const naoLancadas = out.filter((b) => b.kind === "late");
   return {
     items: out,
     total: sumMoney(out, (b) => b.amount),
-    lateCount: out.filter((b) => b.kind === "late").length,
+    lateCount: naoLancadas.length,
     // Vencido e "próximo" não são a mesma coisa, e o cartão não pode chamar os
     // dois de "nos próximos 30 dias".
-    overdueCount: out.filter((b) => b.overdue).length,
+    overdueCount: atrasadas.length,
+    // [M42] O DINHEIRO QUE JÁ ESTÁ EM ATRASO, E NÃO SÓ A CONTAGEM.
+    //
+    // O pilar "Contas em dia" (js/score.js) lia `lateCount` e chamava isso de
+    // atraso. `lateCount` conta UMA coisa só: gasto fixo recorrente que ainda
+    // não foi lançado. Fatura de cartão que passou do vencimento e não foi paga
+    // sai com `kind: "card-statement"` e nunca entrou naquela contagem. Então
+    // inadimplência de cartão, que é a dívida mais cara do mercado brasileiro,
+    // não tirava um ponto da nota. Na mesma tela, o cartão "Próximas contas"
+    // dizia "5 vencidas" enquanto o score dizia "nenhuma conta em atraso".
+    //
+    // `overdueCount` já cobria os dois casos (os itens `late` também nascem com
+    // `overdue: true`); o que faltava era o VALOR, para a frase poder dizer
+    // quanto está em atraso em vez de só quantas linhas são.
+    overdueTotal: sumMoney(atrasadas, (b) => b.amount),
+    // Separado de `lateCount` para a frase distinguir "não lancei" de "não
+    // paguei": as duas são atraso, mas só a segunda cobra juros.
+    overdueDueCount: atrasadas.length - naoLancadas.length,
   };
 }
 

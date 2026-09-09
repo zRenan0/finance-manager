@@ -2,9 +2,9 @@
 // Segundo pedaço do pacote: telas que não fazem parte da primeira pintura.
 // Edite os arquivos de origem em js/ e execute npm run build.
 
-let ACCOUNT_TYPE_LABELS, AI_HIDEABLE_FIELDS, ASSET_CLASSES, BACKUP_ENC_MIN_PASSWORD, BUDGET_GROUPS, BUILTIN_CATEGORY_RULES, CloudSync, DEBT_AMORTIZATION_LABELS, DEBT_TYPE_LABELS, FinanceStore, GOAL_ICON_OPTIONS, GOAL_INFLATION_MIN_DAYS, GOAL_TEMPLATES, GROUP_ICONS, GROUP_LABELS, HEALTH_INDICATORS, INVESTMENT_TYPES, LEGAL_CONTROLLER, LEGAL_DATA_INVENTORY, LEGAL_DATA_INVENTORY_GROUPS, LEGAL_PENDING, LEGAL_RETENTION, LEGAL_REVIEW_DATE, LEGAL_SUBJECT_RIGHTS, LEGAL_TEXT_VERSION, LEGAL_THIRD_PARTIES, LEGAL_THIRD_PARTY_GROUPS, MONTH_ABBR, MONTH_NAMES, RULE_MATCH_TYPES, RULE_WEIGHT_DEFAULT, RULE_WEIGHT_MAX, RULE_WEIGHT_MIN, accountsSummary, assetClassOf, backupCryptoAvailable, buildDataSourcesModel, categoryById, childCategories, clamp, compileCategoryRules, compileRulePattern, computeBudgetStatus, daysBetweenIso, debtMonthlyRateInfo, debtsModel, defaultBudgetAlerts, defaultPrivacy, divMoney, emergencyFund, emergencyLadder, escapeHtml, fmtBRL, fmtBRLShort, fmtDateFull, fmtDateShort, fmtDec, fmtNum, formatMovementTimestamp, freshGuestLink, goalExistingBalance, goalInflationPct, goalsModel, healthModel, inflateMoney, investmentTypeOf, isDashboardStarting, keyOfCurrentMonth, legalAccepted, legalControllerGaps, legalDataInventoryGaps, legalThirdPartyGaps, legalThirdPartyLaunchGaps, marketRatesOf, matchCategoryRules, mergeBackupInto, moneyCompare, moneyDraft, moneyFromCents, moneyOrZero, moneyToCents, monthKeyOf, mulMoney, nextDueDateForDebt, normalizeCategoryRules, normalizePrivacy, normalizeText, notificationsModel, parseMoneyInput, passwordStrength, plural, pluralWord, portfolioModel, reconciliationHeadline, render, renderBackHeader, renderCalculationButton, renderDonut, renderEmptyState, renderGoalRing, renderLastBackupLine, renderScoreGauge, renderSparkline, safeErrorSummary, safePct, scoreGains, simulateExpenseImpact, simulateFinancingImpact, state, subMoney, svgIcon, todayIso, topLevelCategories, wealthModel;
+let ACCOUNT_TYPE_LABELS, AI_HIDEABLE_FIELDS, ASSET_CLASSES, BACKUP_ENC_MIN_PASSWORD, BUDGET_GROUPS, BUILTIN_CATEGORY_RULES, CloudSync, DEBT_AMORTIZATION_LABELS, DEBT_TYPE_LABELS, FinanceStore, GOAL_ICON_OPTIONS, GOAL_INFLATION_MIN_DAYS, GOAL_TEMPLATES, GROUP_ICONS, GROUP_LABELS, HEALTH_INDICATORS, INVESTMENT_TYPES, LEGAL_CONTROLLER, LEGAL_DATA_INVENTORY, LEGAL_DATA_INVENTORY_GROUPS, LEGAL_PENDING, LEGAL_RETENTION, LEGAL_REVIEW_DATE, LEGAL_SUBJECT_RIGHTS, LEGAL_TEXT_VERSION, LEGAL_THIRD_PARTIES, LEGAL_THIRD_PARTY_GROUPS, MONTH_ABBR, MONTH_NAMES, RULE_MATCH_TYPES, RULE_WEIGHT_DEFAULT, RULE_WEIGHT_MAX, RULE_WEIGHT_MIN, accountsSummary, assetClassOf, backupCryptoAvailable, buildDataSourcesModel, categoryById, childCategories, clamp, compileCategoryRules, compileRulePattern, computeBudgetStatus, daysBetweenIso, debtMonthlyRateInfo, debtsModel, defaultBudgetAlerts, defaultPrivacy, divMoney, emergencyFund, emergencyLadder, escapeHtml, fmtBRL, fmtBRLShort, fmtDateFull, fmtDateShort, fmtDec, fmtNum, formatMovementTimestamp, freshGuestLink, goalExistingBalance, goalInflationPct, goalsModel, healthModel, inflateMoney, investmentTypeOf, isDashboardStarting, keyOfCurrentMonth, legalAccepted, legalControllerGaps, legalControllerReady, legalDataInventoryGaps, legalThirdPartyGaps, legalThirdPartyLaunchGaps, marketRatesOf, matchCategoryRules, mergeBackupInto, moneyCompare, moneyDraft, moneyFromCents, moneyOrZero, moneyToCents, monthKeyOf, mulMoney, nextDueDateForDebt, normalizeCategoryRules, normalizePrivacy, normalizeText, notificationsModel, parseMoneyInput, passwordStrength, plural, pluralWord, portfolioModel, reconciliationHeadline, render, renderBackHeader, renderCalculationButton, renderDonut, renderEmptyState, renderGoalRing, renderLastBackupLine, renderScoreGauge, renderSparkline, safeErrorSummary, safePct, scoreGains, simulateExpenseImpact, simulateFinancingImpact, state, subMoney, svgIcon, todayIso, topLevelCategories, wealthModel;
 export function instalarNucleo(n) {
-  ({ ACCOUNT_TYPE_LABELS, AI_HIDEABLE_FIELDS, ASSET_CLASSES, BACKUP_ENC_MIN_PASSWORD, BUDGET_GROUPS, BUILTIN_CATEGORY_RULES, CloudSync, DEBT_AMORTIZATION_LABELS, DEBT_TYPE_LABELS, FinanceStore, GOAL_ICON_OPTIONS, GOAL_INFLATION_MIN_DAYS, GOAL_TEMPLATES, GROUP_ICONS, GROUP_LABELS, HEALTH_INDICATORS, INVESTMENT_TYPES, LEGAL_CONTROLLER, LEGAL_DATA_INVENTORY, LEGAL_DATA_INVENTORY_GROUPS, LEGAL_PENDING, LEGAL_RETENTION, LEGAL_REVIEW_DATE, LEGAL_SUBJECT_RIGHTS, LEGAL_TEXT_VERSION, LEGAL_THIRD_PARTIES, LEGAL_THIRD_PARTY_GROUPS, MONTH_ABBR, MONTH_NAMES, RULE_MATCH_TYPES, RULE_WEIGHT_DEFAULT, RULE_WEIGHT_MAX, RULE_WEIGHT_MIN, accountsSummary, assetClassOf, backupCryptoAvailable, buildDataSourcesModel, categoryById, childCategories, clamp, compileCategoryRules, compileRulePattern, computeBudgetStatus, daysBetweenIso, debtMonthlyRateInfo, debtsModel, defaultBudgetAlerts, defaultPrivacy, divMoney, emergencyFund, emergencyLadder, escapeHtml, fmtBRL, fmtBRLShort, fmtDateFull, fmtDateShort, fmtDec, fmtNum, formatMovementTimestamp, freshGuestLink, goalExistingBalance, goalInflationPct, goalsModel, healthModel, inflateMoney, investmentTypeOf, isDashboardStarting, keyOfCurrentMonth, legalAccepted, legalControllerGaps, legalDataInventoryGaps, legalThirdPartyGaps, legalThirdPartyLaunchGaps, marketRatesOf, matchCategoryRules, mergeBackupInto, moneyCompare, moneyDraft, moneyFromCents, moneyOrZero, moneyToCents, monthKeyOf, mulMoney, nextDueDateForDebt, normalizeCategoryRules, normalizePrivacy, normalizeText, notificationsModel, parseMoneyInput, passwordStrength, plural, pluralWord, portfolioModel, reconciliationHeadline, render, renderBackHeader, renderCalculationButton, renderDonut, renderEmptyState, renderGoalRing, renderLastBackupLine, renderScoreGauge, renderSparkline, safeErrorSummary, safePct, scoreGains, simulateExpenseImpact, simulateFinancingImpact, state, subMoney, svgIcon, todayIso, topLevelCategories, wealthModel } = n);
+  ({ ACCOUNT_TYPE_LABELS, AI_HIDEABLE_FIELDS, ASSET_CLASSES, BACKUP_ENC_MIN_PASSWORD, BUDGET_GROUPS, BUILTIN_CATEGORY_RULES, CloudSync, DEBT_AMORTIZATION_LABELS, DEBT_TYPE_LABELS, FinanceStore, GOAL_ICON_OPTIONS, GOAL_INFLATION_MIN_DAYS, GOAL_TEMPLATES, GROUP_ICONS, GROUP_LABELS, HEALTH_INDICATORS, INVESTMENT_TYPES, LEGAL_CONTROLLER, LEGAL_DATA_INVENTORY, LEGAL_DATA_INVENTORY_GROUPS, LEGAL_PENDING, LEGAL_RETENTION, LEGAL_REVIEW_DATE, LEGAL_SUBJECT_RIGHTS, LEGAL_TEXT_VERSION, LEGAL_THIRD_PARTIES, LEGAL_THIRD_PARTY_GROUPS, MONTH_ABBR, MONTH_NAMES, RULE_MATCH_TYPES, RULE_WEIGHT_DEFAULT, RULE_WEIGHT_MAX, RULE_WEIGHT_MIN, accountsSummary, assetClassOf, backupCryptoAvailable, buildDataSourcesModel, categoryById, childCategories, clamp, compileCategoryRules, compileRulePattern, computeBudgetStatus, daysBetweenIso, debtMonthlyRateInfo, debtsModel, defaultBudgetAlerts, defaultPrivacy, divMoney, emergencyFund, emergencyLadder, escapeHtml, fmtBRL, fmtBRLShort, fmtDateFull, fmtDateShort, fmtDec, fmtNum, formatMovementTimestamp, freshGuestLink, goalExistingBalance, goalInflationPct, goalsModel, healthModel, inflateMoney, investmentTypeOf, isDashboardStarting, keyOfCurrentMonth, legalAccepted, legalControllerGaps, legalControllerReady, legalDataInventoryGaps, legalThirdPartyGaps, legalThirdPartyLaunchGaps, marketRatesOf, matchCategoryRules, mergeBackupInto, moneyCompare, moneyDraft, moneyFromCents, moneyOrZero, moneyToCents, monthKeyOf, mulMoney, nextDueDateForDebt, normalizeCategoryRules, normalizePrivacy, normalizeText, notificationsModel, parseMoneyInput, passwordStrength, plural, pluralWord, portfolioModel, reconciliationHeadline, render, renderBackHeader, renderCalculationButton, renderDonut, renderEmptyState, renderGoalRing, renderLastBackupLine, renderScoreGauge, renderSparkline, safeErrorSummary, safePct, scoreGains, simulateExpenseImpact, simulateFinancingImpact, state, subMoney, svgIcon, todayIso, topLevelCategories, wealthModel } = n);
 }
 // source: js/screens/accounts.js
 // js/screens/accounts.js. Contas, cartões e conciliação.
@@ -3053,10 +3053,46 @@ function accountStatusCard() {
   return "";
 }
 
+// [M42] CADASTRO FECHADO ENQUANTO NÃO HOUVER CONTROLADOR PUBLICADO.
+//
+// A tela Privacidade já dizia que esta instalação "não deve ser oferecida ao
+// público" enquanto a identificação do controlador estiver em branco. Dizer não
+// bastava: o formulário de cadastro continuava aberto e a coleta acontecia
+// assim mesmo. Sem controlador identificado (LGPD art. 9, I), sem encarregado
+// nomeado (art. 41) e sem canal de incidente (art. 48), não há a quem o titular
+// dirigir um pedido do art. 18; então a coleta não começa.
+//
+// O que NÃO é bloqueado: entrar numa conta que já existe, recuperar senha e
+// confirmar um email pendente. O portão fecha a coleta nova, não o acesso de
+// quem já está dentro. E o app inteiro continua disponível sem conta, com os
+// dados no aparelho, que é o modo padrão dele.
+//
+// O servidor recusa o mesmo em `/api/account/register`. Recusar só aqui seria
+// recusar nada: a rota continuaria aberta para qualquer chamada direta.
+function accountSignupOpen() {
+  if (state.account.signupOpen === false) return false;
+  return typeof legalControllerReady === "function" ? legalControllerReady() : true;
+}
+
+function accountSignupClosedCard() {
+  return `<div class="card account-auth-card">
+    <p class="eyebrow">Conta opcional</p>
+    <h2 class="card-title">O cadastro está fechado por enquanto</h2>
+    <p class="card-subtitle">Esta instalação ainda não publicou quem responde pelos seus dados: sem controlador identificado e sem encarregado, não haveria a quem você dirigir um pedido sobre eles. Enquanto isso, preferimos não coletar.</p>
+    <p class="card-subtitle">O aplicativo funciona inteiro sem conta. Tudo o que você registrar fica neste aparelho, e o backup em arquivo continua disponível em Privacidade.</p>
+    <div class="account-auth-links">
+      <button type="button" class="link-btn" data-action="nav" data-tab="privacy">Ver o que falta ser definido</button>
+      <button type="button" class="link-btn" data-action="account-mode" data-value="login">Já tenho conta, quero entrar</button>
+    </div>
+  </div>`;
+}
+
 function accountGuestForm() {
   const a = state.account;
-  const register = a.mode === "register";
+  const cadastroAberto = accountSignupOpen();
+  const register = a.mode === "register" && cadastroAberto;
   const recover = a.mode === "recover";
+  if (a.mode === "register" && !cadastroAberto) return accountSignupClosedCard();
   // ESTA TELA PRECISA SER UM `<form>` DE VERDADE.
   //
   // O resto do app monta formulário com `div` + botão delegado, e para os
@@ -3074,7 +3110,7 @@ function accountGuestForm() {
     ${recover ? "" : `<div class="field"><label class="field__label" for="account-password">Senha</label><input id="account-password" class="input" type="password" name="password" data-field="auth-password" minlength="10" maxlength="128" value="${escapeHtml(a.form.password)}" autocomplete="${register ? "new-password" : "current-password"}" />${register ? renderPasswordStrength(a.form.password, a.form.email) : `<p class="field-hint">Mínimo de 10 caracteres.</p>`}</div>`}
     <button type="submit" class="btn btn--primary btn--block" data-action="account-submit" data-value="${recover ? "recover" : (register ? "register" : "login")}" ${a.busy ? "disabled" : ""}>${a.busy ? svgIcon("loader", 16) : svgIcon(register ? "plus" : (recover ? "refresh" : "shieldCheck"), 16)} ${recover ? "Enviar link" : (register ? "Criar conta" : "Entrar")}</button>
     <div class="account-auth-links">
-      ${recover ? `<button type="button" class="link-btn" data-action="account-mode" data-value="login">Voltar para entrar</button>` : `<button type="button" class="link-btn" data-action="account-mode" data-value="${register ? "login" : "register"}">${register ? "Já tenho uma conta" : "Criar uma conta"}</button><button type="button" class="link-btn" data-action="account-mode" data-value="recover">Esqueci minha senha</button>`}
+      ${recover ? `<button type="button" class="link-btn" data-action="account-mode" data-value="login">Voltar para entrar</button>` : `${cadastroAberto ? `<button type="button" class="link-btn" data-action="account-mode" data-value="${register ? "login" : "register"}">${register ? "Já tenho uma conta" : "Criar uma conta"}</button>` : ""}<button type="button" class="link-btn" data-action="account-mode" data-value="recover">Esqueci minha senha</button>`}
     </div>
   </form>`;
 }
@@ -3461,6 +3497,8 @@ export {
   accountPendingCard,
   accountRevokeOthersBlock,
   accountSignedIn,
+  accountSignupClosedCard,
+  accountSignupOpen,
   accountStatusCard,
   accountSyncCard,
   allScreenMatches,

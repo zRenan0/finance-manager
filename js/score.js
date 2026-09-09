@@ -214,19 +214,57 @@ const SCORE_PILLARS = [
     label: "Contas em dia",
     weight: 10,
     icon: "bell",
+    // [M42] O PILAR LÊ O QUE ESTÁ EM ATRASO, NÃO SÓ O QUE FALTA LANÇAR.
+    //
+    // Ele lia `bills.lateCount`, que conta uma coisa só: gasto fixo recorrente
+    // ainda não lançado. Fatura de cartão vencida e não paga sai com
+    // `kind: "card-statement"` e ficava de fora. O resultado era uma frase
+    // falsa com nota cheia: cinco faturas vencidas, R$ 7.339,56 em atraso, e o
+    // pilar escrevendo "Nenhuma conta fixa em atraso neste mês" com 10 de 10,
+    // ao lado do cartão "Próximas contas", que dizia "5 vencidas" lendo o mesmo
+    // objeto pelo campo certo. Agora os dois leem `overdueCount`.
+    //
+    // AS DUAS SITUAÇÕES PESAM DIFERENTE, DE PROPÓSITO. Não ter lançado o
+    // aluguel é falha de registro: o dinheiro pode até já ter saído. Fatura
+    // vencida é inadimplência de verdade, com rotativo correndo. Por isso a
+    // segunda custa mais e ainda trava o teto do pilar: com qualquer conta já
+    // vencida, "Contas em dia" não pode devolver nota boa, e nenhum outro pilar
+    // deve conseguir mascarar isso no nível global.
     evaluate(data, mKey, ctx) {
-      const late = ctx.bills.lateCount;
       const scheduled = ctx.bills.items.length;
-      if (scheduled === 0 && late === 0) return { applicable: false };
-      const ratio = late === 0 ? 1 : clamp(1 - late * 0.34, 0, 1);
+      const naoLancadas = ctx.bills.lateCount;
+      const vencidas = Math.max(0, Number(ctx.bills.overdueDueCount) || 0);
+      const emAtraso = naoLancadas + vencidas;
+      if (scheduled === 0 && emAtraso === 0) return { applicable: false };
+
+      let ratio = clamp(1 - naoLancadas * 0.34 - vencidas * 0.5, 0, 1);
+      if (vencidas > 0) ratio = Math.min(ratio, 0.3);
+
+      const valor = roundMoney(ctx.bills.overdueTotal);
+      const quanto = valor > 0 ? `, ${fmtBRL(valor)} em atraso` : "";
+      let detail;
+      if (emAtraso === 0) detail = "Nenhuma conta em atraso neste mês.";
+      else if (vencidas === 0) {
+        detail = `${naoLancadas} conta${naoLancadas > 1 ? "s" : ""} fixa${naoLancadas > 1 ? "s" : ""} do mês passado ainda não foi lançada e já passou da data.`;
+      } else if (naoLancadas === 0) {
+        detail = vencidas === 1
+          ? `1 conta já venceu e continua em aberto${quanto}.`
+          : `${vencidas} contas já venceram e continuam em aberto${quanto}.`;
+      } else {
+        const total = valor > 0 ? `, ${fmtBRL(valor)} no total` : "";
+        detail = `${emAtraso} contas em atraso${total}: ${vencidas} já vencida${vencidas > 1 ? "s" : ""} e ${naoLancadas} fixa${naoLancadas > 1 ? "s" : ""} sem lançamento.`;
+      }
+
       return {
         applicable: true,
         ratio,
-        good: late === 0,
-        detail: late === 0
-          ? "Nenhuma conta fixa em atraso neste mês."
-          : `${late} conta${late > 1 ? "s" : ""} fixa${late > 1 ? "s" : ""} do mês passado ainda não foi lançada e já passou da data.`,
-        advice: late === 0 ? null : "Lance ou quite as contas atrasadas para não acumular juros e multas.",
+        good: emAtraso === 0,
+        detail,
+        advice: emAtraso === 0
+          ? null
+          : (vencidas > 0
+            ? "Conta vencida em aberto cobra juros e multa todo dia. Quitar o que já venceu rende mais que qualquer aplicação disponível hoje."
+            : "Lance ou quite as contas atrasadas para não acumular juros e multas."),
       };
     },
   },

@@ -147,16 +147,44 @@ check(manifesto.short_name === "Cofre" && manifesto.start_url === "./index.html"
 check(/<meta name="robots" content="noindex, follow" \/>/.test(read("index.html")),
   "o aplicativo voltou a ser indexável e disputa a busca com a landing pelo mesmo título");
 
-// Já os campos que só o dono do app conhece são AVISO, não falha: eles não
-// impedem publicar o beta, impedem oferecer ao público. Reprovar aqui travaria
-// a própria esteira que precisa rodar até esses dados existirem.
+// [M42] O PORTÃO PRECISA EXISTIR NO CÓDIGO, e não só na tela.
+//
+// Antes, os campos que só o dono do app conhece eram AVISO e nada mais. O
+// raciocínio ("não impedem publicar o beta, impedem oferecer ao público") estava
+// certo; o que faltava era alguém APLICAR a segunda metade. O resultado foi um
+// site no ar, com cadastro aberto, imprimindo na própria tela de privacidade que
+// não deveria ser oferecido ao público.
+//
+// Agora a aplicação mora em `netlify/functions/_shared/legal-controller.js`, e o
+// que se confere aqui é que ela continua ligada na rota que INICIA a coleta.
+// Isto é FALHA, não aviso: sem o portão, o marcador volta a ser decoração.
+check(fs.existsSync(path.join(root, "netlify/functions/_shared/legal-controller.js")),
+  "o portão do controlador de dados sumiu (netlify/functions/_shared/legal-controller.js)");
+{
+  const conta = read("netlify/functions/account.js");
+  const registro = conta.slice(conta.indexOf('action === "register"'), conta.indexOf('action === "login"'));
+  check(/assertLegalControllerReady\(\)/.test(registro),
+    "a rota de cadastro voltou a aceitar conta nova sem exigir controlador identificado");
+  check(registro.indexOf("assertLegalControllerReady();") < registro.indexOf("readJson(event"),
+    "o portão do controlador roda depois de ler o corpo: a senha chega a ser processada antes da recusa");
+  check(/signupOpen/.test(conta), "a rota de sessão parou de informar se o cadastro está aberto");
+}
+
+// A contagem continua sendo aviso no fluxo normal, porque a esteira precisa
+// rodar até esses dados existirem. `--publico` transforma em falha: é a
+// verificação de quem está prestes a oferecer o produto ao público.
+const exigirPublico = process.argv.includes("--publico") || process.env.RELEASE_PUBLICO === "1";
 const pendentes = (storage.match(/^\s{2}\w+: LEGAL_PENDING,$/gm) || []).length;
 if (pendentes) {
-  console.warn(`AVISO: ${pendentes} campo(s) do controlador ainda com marcador. Ver docs/LEGAL-LAUNCH.md; sem eles a instalação não pode ser oferecida ao público.`);
+  const recado = `${pendentes} campo(s) do controlador ainda com marcador. Ver docs/LEGAL-LAUNCH.md; sem eles a instalação não pode ser oferecida ao público. O cadastro de contas está FECHADO enquanto isso.`;
+  if (exigirPublico) failures.push(recado);
+  else console.warn(`AVISO: ${recado}`);
 }
 const terceirosPendentes = (storage.match(/^\s{4}status: "pending",$/gm) || []).length;
 if (terceirosPendentes) {
-  console.warn(`AVISO: ${terceirosPendentes} serviço(s) externo(s) ainda sem fornecedor definido. Ver docs/TERCEIROS-E-OPERADORES.md.`);
+  const recado = `${terceirosPendentes} serviço(s) externo(s) ainda sem fornecedor definido. Ver docs/TERCEIROS-E-OPERADORES.md.`;
+  if (exigirPublico) failures.push(recado);
+  else console.warn(`AVISO: ${recado}`);
 }
 
 if (failures.length) {

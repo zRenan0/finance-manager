@@ -186,7 +186,17 @@ function buildAchievementContext(data, refDate) {
     budgetedCategories,
     budgetClean: budgetClean.clean,
     budgetEvaluated: budgetClean.evaluated,
-    lateBills: bills.lateCount,
+    // [M42] TUDO O QUE ESTÁ EM ATRASO, não só o fixo que faltou lançar.
+    //
+    // Era `bills.lateCount`, que conta uma coisa só: gasto fixo recorrente
+    // ainda não lançado. A conquista se chama "Contas em dia" e promete
+    // "nenhuma conta prevista em atraso", e era entregue a quem tinha cinco
+    // faturas de cartão vencidas, porque fatura vencida sai com
+    // `kind: "card-statement"` e nunca entrou naquela contagem. Premiar
+    // pontualidade de quem está inadimplente é o oposto do que a conquista
+    // existe para reforçar. `overdueCount` cobre os dois casos. Ver o pilar
+    // `pontualidade` em js/score.js.
+    lateBills: bills.overdueCount,
     hasBills: bills.items.length > 0,
     advancedTools,
     sources,

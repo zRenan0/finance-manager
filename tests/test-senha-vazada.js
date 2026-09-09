@@ -132,6 +132,10 @@ async function main() {
   process.env.SUPABASE_PUBLISHABLE_KEY = "public-test";
   process.env.SUPABASE_SERVICE_ROLE_KEY = "service-test";
   process.env.ALLOWED_ORIGIN = "https://cofre.test";
+  // [M42] Esta suite testa outra coisa; o portao do cadastro e cenario aqui.
+  // Sem controlador publicado, /api/account/register recusa com 503 antes de
+  // chegar em qualquer regra de senha. Ver tests/helpers/controlador-definido.js.
+  const restaurarControlador = require("./helpers/controlador-definido").comControladorDefinido();
 
   let senhaGravada = null;
   let consultasAoHibp = 0;

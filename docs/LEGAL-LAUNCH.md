@@ -4,9 +4,33 @@ O aplicativo implementa consentimento versionado, controles de IA, exportação,
 
 Isso não torna o produto pronto para oferta pública. Falta preencher os campos que só o dono do aplicativo conhece. Eles vivem em `LEGAL_CONTROLLER`, em `js/storage.js`, com o marcador `LEGAL_PENDING`. Enquanto qualquer um deles estiver com o marcador:
 
+- **o cadastro de novas contas fica FECHADO**, no servidor e na interface (ver abaixo);
 - a tela Privacidade mostra "Ainda não definido" no campo e um aviso listando o que falta;
 - a cláusula 12 dos termos declara a instalação como versão local em desenvolvimento;
-- `npm run check:release` avisa que a identificação está incompleta.
+- `npm run check:release` avisa que a identificação está incompleta, e `npm run check:release -- --publico` REPROVA.
+
+## [M42] O portão do cadastro
+
+Até aqui os três itens acima eram só texto. O site respondia 200 para qualquer visitante, `/api/account/session` respondia `configured: true`, e o formulário de cadastro aceitava email, senha e, na sequência, a base financeira inteira da pessoa. O aplicativo anunciava que não podia ser oferecido ao público e se oferecia ao público assim mesmo.
+
+A LGPD não pede um aviso na tela: pede controlador identificado (art. 9, I), canal para os direitos do art. 18 no prazo do art. 19, encarregado nomeado e publicado (art. 41) e canal de incidente (art. 48). Sem isso, o que não pode existir é a COLETA, e a coleta começa no cadastro.
+
+Onde o portão mora:
+
+| Camada | Arquivo | O que faz |
+|---|---|---|
+| Servidor | `netlify/functions/_shared/legal-controller.js` | Espelho de `LEGAL_CONTROLLER` e a função que recusa |
+| Rota | `netlify/functions/account.js`, ação `register` | Recusa com 503 `legal_controller_pending` ANTES de ler o corpo |
+| Sessão | mesma função, ação `session` | Devolve `signupOpen` para a tela decidir antes de pedir o dado |
+| Interface | `js/screens/account.js` | Esconde "Criar uma conta" e explica o motivo |
+| Esteira | `scripts/check-release.js` | Confere que o portão continua ligado (falha, não aviso) |
+| Suíte | `tests/test-legal-privacy-errors.js` | Compara espelho e original campo a campo |
+
+O que **não** é bloqueado, de propósito: entrar numa conta que já existe, recuperar senha e confirmar um email pendente. O portão fecha a coleta nova, não o acesso de quem já está dentro. E o aplicativo continua inteiro sem conta, que é o modo padrão dele.
+
+O espelho do servidor existe porque `js/storage.js` é código de navegador: as funções não o carregam, e ele não entra no rastreamento de arquivos da função publicada. Ler o arquivo em disco daria um portão que funciona no teste e falha na publicação. A cópia segue o mesmo padrão de `_shared/ai-boundaries.js`, com a suíte reprovando se os dois lados divergirem — então **preencher um lado só não abre o cadastro**.
+
+Para abrir o cadastro é preciso, na mesma edição: preencher `LEGAL_CONTROLLER` em `js/storage.js`, preencher a cópia em `netlify/functions/_shared/legal-controller.js`, e rodar `npm run check:release -- --publico` até passar.
 
 ## Campos a preencher em `LEGAL_CONTROLLER`
 
