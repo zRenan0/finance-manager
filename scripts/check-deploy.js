@@ -144,10 +144,51 @@ function digestNoNome(url) {
   return resultado ? resultado[1] : "";
 }
 
+// [M42] O `dist/` DE ONTEM NÃO PODE ACUSAR A PUBLICAÇÃO DE ESTAR ATRASADA.
+//
+// Esta conferência compara os bytes publicados com os de `dist/app.html` que
+// estiver em disco, e `dist/` é gerado, não versionado. Quem rodasse a
+// conferência sem reconstruir comparava a publicação de HOJE com um pacote
+// gerado antes dos últimos commits, e recebia:
+//
+//   FALHA /index.html entrega os mesmos bytes de dist/app.html
+//
+// A frase é falsa e cara: ela diz "a produção está atrasada" quando o atrasado
+// é o disco de quem conferiu. Foi exatamente o que aconteceu na auditoria de
+// 09/09/2026, onde isso virou um item P0 que não existia; a produção estava
+// idêntica ao `origin/main`, byte a byte.
+//
+// A conferência agora se recusa a comparar com um pacote mais velho que as
+// fontes que o geram. Antes de acusar a publicação, a ferramenta prova que
+// tem com o que comparar.
+function distDesatualizado(appLocalPath) {
+  const geradoEm = fs.statSync(appLocalPath).mtimeMs;
+  const raizes = ["js", "css", "icons", "index.html", "landing.html", "manifest.webmanifest", "service-worker.js", "scripts/build-dist.js"];
+  let maisNova = 0;
+  let culpado = "";
+  const visitar = (relativo) => {
+    const completo = path.join(ROOT, relativo);
+    if (!fs.existsSync(completo)) return;
+    const info = fs.statSync(completo);
+    if (info.isDirectory()) { fs.readdirSync(completo).forEach((n) => visitar(path.join(relativo, n))); return; }
+    if (info.mtimeMs > maisNova) { maisNova = info.mtimeMs; culpado = relativo.split(path.sep).join("/"); }
+  };
+  raizes.forEach(visitar);
+  return maisNova > geradoEm ? { culpado, geradoEm, maisNova } : null;
+}
+
 async function main() {
   const appLocalPath = path.join(DIST, "app.html");
   if (!fs.existsSync(appLocalPath)) {
     throw new Error("dist/app.html não existe. Execute `npm run build:dist` antes da conferência.");
+  }
+  const velho = distDesatualizado(appLocalPath);
+  if (velho) {
+    throw new Error(
+      `dist/ está mais velho que as fontes (${velho.culpado} mudou depois do build). `
+      + "Comparar assim acusaria a publicação de estar atrasada quando o atrasado é este disco. "
+      + "Execute `npm run build:dist` e repita a conferência."
+    );
   }
   console.log(`\nConferindo ${base.origin}  (${procedencia})\n`);
   if (!informado) console.log("Sem argumento, a conferência vai para a produção. Para checar uma pré-visualização, passe o endereço dela.\n");

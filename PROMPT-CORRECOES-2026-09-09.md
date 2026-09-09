@@ -29,6 +29,17 @@ Regras que valem para todos os itens:
 
 ---
 
+## Situação em 09/09/2026, depois das correções
+
+| Item | Estado |
+|---|---|
+| P0.1 cadastro aberto sem controlador LGPD | **corrigido** (portão no servidor e na interface) |
+| P0.2 "Contas em dia" com nota cheia e conta vencida | **corrigido** (score 73 "Bom" virou 63 "Regular" na demonstração) |
+| P0.3 produção atrasada | **não existia**: era o `dist/` local velho enganando o `check:deploy`, que foi corrigido |
+| P1 a P3 | abertos |
+
+---
+
 ## P0 — Impede o lançamento público ou produz veredito falso
 
 ### P0.1 — O site está no ar para o público com o controlador LGPD em branco
@@ -133,28 +144,59 @@ o pilar de pontualidade cheio.
 
 ---
 
-### P0.3 — O que está publicado não é o que foi auditado
+### P0.3 — ~~O que está publicado não é o que foi auditado~~ (era alarme falso da ferramenta)
 
-**Onde:** publicação, não código.
+> **Correção de 09/09/2026, depois de verificar.** Este item estava errado. A
+> produção **não** estava atrasada. Quem estava atrasado era o `dist/` desta
+> máquina, e `check:deploy` não sabia dizer a diferença. O que sobrou de real é
+> o defeito na ferramenta, corrigido abaixo.
+
+**O que eu tinha reportado:**
 
 ```
 $ npm run check:deploy
 FALHA /index.html entrega os mesmos bytes de dist/app.html:
       local 16775851b3183364 != publicado 95ae161acfe58efb
-FALHAS ENCONTRADAS: 84 ok, 1 falha(s), 2 aviso(s)
 ```
 
-**O defeito.** `www.financemanager.dev.br` serve um pacote anterior à branch
-`deploy-atualizado`. Os cinco últimos commits — minificação do `dist`, fusão da
-cascata de CSS, fechamento do curinga da CSP nos testes, os dois alvos de toque
-e a divisão do pacote em dois pedaços — **não estão no ar**. Todo número de
-desempenho e toda correção conferida localmente valem para uma versão que
-nenhum usuário recebe.
+**O que a verificação mostrou.** Construí `origin/main` num worktree limpo e
+comparei com o que o domínio entrega:
 
-**A correção.** Publicar a branch e rodar `npm run check:deploy` até sair
-`0 falha(s)`. Enquanto os 84 "ok" convivem com essa 1 falha, o relatório verde
-engana: ele confere cabeçalho, CSP, `security.txt` e o que o build não publica —
-tudo isso **na versão velha**.
+```
+hash produção   : 95ae161acfe58efb
+hash origin/main: 95ae161acfe58efb
+idênticos?      : true
+```
+
+Byte a byte. `www.financemanager.dev.br` estava, e está, exatamente em
+`origin/main`. Minificação, fusão do CSS, alvos de toque e a divisão do pacote
+em dois pedaços **estão no ar**.
+
+**O defeito real, esse sim.** `scripts/check-deploy.js` compara os bytes
+publicados com o `dist/app.html` que estiver em disco, e `dist/` é gerado, não
+versionado — o `.gitignore` o exclui. Quem roda a conferência sem reconstruir
+compara a publicação de hoje com um pacote gerado antes dos últimos commits, e
+recebe uma frase categórica e falsa: *"a produção está atrasada"*. Foi o que
+aconteceu aqui, e virou um item P0 que não existia.
+
+**A correção, já aplicada.** `check-deploy.js` passou a comparar a data do
+`dist/app.html` com a das fontes que o geram (`js/`, `css/`, `icons/`, os HTML
+da raiz, o `service-worker.js` e o próprio `build-dist.js`). Se o pacote for
+mais velho que qualquer uma delas, a conferência **se recusa a rodar**:
+
+```
+Não foi possível conferir a publicação: dist/ está mais velho que as fontes
+(js/score.js mudou depois do build). Comparar assim acusaria a publicação de
+estar atrasada quando o atrasado é este disco. Execute `npm run build:dist`
+e repita a conferência.
+```
+
+Antes de acusar a publicação, a ferramenta agora prova que tem com o que
+comparar.
+
+**O que continua pendente.** As correções de P0.1 e P0.2 estão commitadas e
+ainda **não publicadas**: enquanto não forem, `check:deploy` aponta a diferença
+de hash — e desta vez ela é verdadeira.
 
 ---
 
