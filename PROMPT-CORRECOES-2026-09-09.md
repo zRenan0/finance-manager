@@ -36,7 +36,11 @@ Regras que valem para todos os itens:
 | P0.1 cadastro aberto sem controlador LGPD | **corrigido** (portão no servidor e na interface) |
 | P0.2 "Contas em dia" com nota cheia e conta vencida | **corrigido** (score 73 "Bom" virou 63 "Regular" na demonstração) |
 | P0.3 produção atrasada | **não existia**: era o `dist/` local velho enganando o `check:deploy`, que foi corrigido |
-| P1 a P3 | abertos |
+| P1.1 "+100% desde abril" para usuário novo | **corrigido** (janela começa no primeiro mês com dado; sem base, sai o valor absoluto) |
+| P1.2 tema congelado no primeiro uso | **corrigido** ("Automático" virou padrão e acompanha o aparelho) |
+| P1.3 dez lugares abaixo de 4,5:1 | **corrigido** nos dois temas, com teste que mede o contraste renderizado |
+| P1.4 checkbox anunciado como "on" | **corrigido** (nome acessível no `<input>`) |
+| P2 e P3 | abertos |
 
 ---
 
