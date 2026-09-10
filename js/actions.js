@@ -1902,7 +1902,13 @@ function onClick(e) {
       setState({ tab: "settings" });
       EventBus.emit(APP_EVENTS.TAB_CHANGED, { tab: "settings" });
       break;
-    case "toggle-theme": setData((d) => ({ ...d, theme: d.theme === "dark" ? "light" : "dark" })); break;
+    // [M42] Três valores, não um interruptor. Ver THEME_CHOICES em js/storage.js.
+    case "set-theme": {
+      const escolhido = THEME_CHOICES.indexOf(value) >= 0 ? value : "system";
+      if (state.data.theme === escolhido) break;
+      setData((d) => ({ ...d, theme: escolhido }));
+      break;
+    }
     case "toggle-gamification": {
       const enabled = !(state.data.achievements && state.data.achievements.enabled);
       state.gamification.celebrating = [];

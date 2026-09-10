@@ -278,6 +278,15 @@ const MIRROR_THROTTLE_MS = 1200;
 // de propósito: uma política que inventa controlador ou canal de atendimento é
 // pior que uma que diz em voz alta o que ainda falta. `check-release.js` trata
 // a presença do marcador como impedimento de oferta ao público.
+// [M42] Os três valores possíveis de `data.theme`.
+//
+// "system" acompanha o aparelho; "light" e "dark" são escolha explícita e
+// param de acompanhar. Antes só existiam os dois últimos, e a preferência do
+// sistema era lida UMA vez, no primeiro uso, e gravada como se fosse escolha:
+// quem instalava o app com o celular no escuro ficava presa no escuro para
+// sempre, inclusive de dia. Ver `applyTheme` em js/app.js.
+const THEME_CHOICES = ["system", "light", "dark"];
+
 const LEGAL_PENDING = "[definir antes da oferta ao público]";
 
 // Identificação do controlador (LGPD art. 9, I e art. 41) e canais de contato.
@@ -1914,7 +1923,8 @@ function defaultData() {
     assets: [],
     monthlyIncome: 0,
     creditCardLimit: 0,
-    theme: "light",
+    // [M42] O padrao e SEGUIR O SISTEMA. Ver applyTheme em js/app.js.
+    theme: "system",
     dismissedCarryForwardMonth: null,
     budgetSplit: defaultBudgetSplit(),
     budgetAlerts: defaultBudgetAlerts(),
@@ -2178,7 +2188,10 @@ function migrate(parsed) {
 
   data.monthlyIncome = roundMoney(data.monthlyIncome);
   data.creditCardLimit = roundMoney(data.creditCardLimit);
-  data.theme = data.theme === "dark" ? "dark" : "light";
+  // [M42] Tres valores: "system" (padrao), "light" e "dark". Base antiga
+  // guardou "light" ou "dark" e continua com o que tinha; so instalacao nova
+  // nasce em "system". Ver o cabecalho de applyTheme em js/app.js.
+  data.theme = THEME_CHOICES.indexOf(data.theme) >= 0 ? data.theme : "system";
   const bs = data.budgetSplit && typeof data.budgetSplit === "object" ? data.budgetSplit : {};
   data.budgetSplit = {
     necessidade: clampPct(bs.necessidade, 50),
@@ -5910,7 +5923,7 @@ function backupPayloadOf(data) {
     assets: data.assets || [],
     monthlyIncome: data.monthlyIncome || 0,
     creditCardLimit: data.creditCardLimit || 0,
-    theme: data.theme || "light",
+    theme: data.theme || "system",
     budgetSplit: data.budgetSplit || defaultBudgetSplit(),
     budgetAlerts: data.budgetAlerts || defaultBudgetAlerts(),
     budgetHistory: normalizeBudgetHistory(data.budgetHistory),

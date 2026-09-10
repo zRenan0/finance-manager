@@ -162,15 +162,38 @@ function renderCreditLimitSettingsCard() {
   </div>`;
 }
 
+// [M42] TRÊS OPÇÕES, PORQUE "SEGUIR O SISTEMA" NÃO CABE NUM INTERRUPTOR.
+//
+// Era um interruptor de duas posições, e a preferência do aparelho era lida uma
+// única vez, no primeiro uso, e gravada como se fosse escolha. Quem instalava o
+// app com o celular no escuro ficava no escuro para sempre, e não havia como
+// voltar para o automático nem apagando nada pela interface. Ver o cabeçalho de
+// `applyTheme` em js/app.js.
+const THEME_OPTIONS = [
+  { id: "system", icon: "refresh", label: "Automático", hint: "Acompanha o aparelho" },
+  { id: "light", icon: "sun", label: "Claro", hint: "Sempre claro" },
+  { id: "dark", icon: "moon", label: "Escuro", hint: "Sempre escuro" },
+];
+
+function themeChoiceLabel(theme) {
+  const opcao = THEME_OPTIONS.find((o) => o.id === theme) || THEME_OPTIONS[0];
+  return opcao.label;
+}
+
 function renderAppearanceSettingsCard() {
-  const escuro = state.data.theme === "dark";
+  const atual = THEME_OPTIONS.some((o) => o.id === state.data.theme) ? state.data.theme : "system";
   const conquistas = !!(state.data.achievements && state.data.achievements.enabled);
   return `<div class="card">
-    <button class="theme-toggle" data-action="toggle-theme" role="switch" aria-checked="${escuro ? "true" : "false"}">
-      ${svgIcon(escuro ? "moon" : "sun", 17)}
-      <span>Modo ${escuro ? "escuro" : "claro"}</span>
-      <span class="switch ${escuro ? "active" : ""}" aria-hidden="true"><span class="switch__knob"></span></span>
-    </button>
+    <fieldset class="theme-choice">
+      <legend class="field__label">Tema</legend>
+      <div class="theme-choice__options" role="radiogroup" aria-label="Tema do aplicativo">
+        ${THEME_OPTIONS.map((o) => `<button type="button" class="theme-choice__option${o.id === atual ? " is-active" : ""}" role="radio" aria-checked="${o.id === atual ? "true" : "false"}" data-action="set-theme" data-value="${o.id}">
+          ${svgIcon(o.icon, 17)}
+          <b>${escapeHtml(o.label)}</b>
+          <small>${escapeHtml(o.hint)}</small>
+        </button>`).join("")}
+      </div>
+    </fieldset>
     <button class="theme-toggle" data-action="toggle-gamification" role="switch" aria-checked="${conquistas ? "true" : "false"}">
       ${svgIcon("star", 17)}
       <span><b>Conquistas e níveis</b><small>Opcional. Fica fora do Início até você ativar.</small></span>
@@ -237,9 +260,8 @@ const SETTINGS_SECTIONS = [
     icon: "sun",
     label: "Aparência",
     resumo() {
-      const escuro = state.data.theme === "dark";
       const conquistas = !!(state.data.achievements && state.data.achievements.enabled);
-      return `Modo ${escuro ? "escuro" : "claro"} · conquistas ${conquistas ? "ligadas" : "desligadas"}`;
+      return `Tema ${themeChoiceLabel(state.data.theme).toLowerCase()} · conquistas ${conquistas ? "ligadas" : "desligadas"}`;
     },
     render: renderAppearanceSettingsCard,
   },

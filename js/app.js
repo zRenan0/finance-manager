@@ -912,8 +912,56 @@ function restoreFocus(key, selStart, selEnd) {
 // não só quando o app.js executa, no fim de trinta scripts.
 const THEME_KEY = "financas_theme";
 
+// [M42] "SEGUIR O SISTEMA" É UM VALOR, NÃO UM PALPITE DE UMA VEZ SÓ.
+//
+// O desenho anterior lia `prefers-color-scheme` UMA vez, no primeiro uso, e
+// gravava o resultado como se fosse escolha da pessoa (`systemThemePreference`
+// só respondia enquanto `__themeNeverChosen`). A partir dali o app parava de
+// olhar para o aparelho. Consequência medida: base limpa com o sistema no
+// escuro grava "dark"; troca-se o sistema para claro, recarrega, e o app segue
+// escuro, com `matchMedia("(prefers-color-scheme: dark)")` valendo falso. Em
+// celular, onde o tema escuro costuma ser automático por horário, o app passava
+// a discordar do aparelho todas as noites. E Ajustes só tinha um interruptor de
+// duas posições: não havia como voltar para o automático.
+//
+// Agora `data.theme` tem três valores (ver THEME_CHOICES em js/storage.js) e o
+// padrão é "system". A resolução acontece a cada aplicação e a cada mudança do
+// sistema, enquanto a escolha for "system".
+//
+// O que NÃO foi feito, de propósito: migrar quem já tem "light" ou "dark"
+// gravado. Não há como distinguir quem escolheu daquele que foi fixado pelo
+// defeito, e trocar o tema de quem escolheu de verdade seria repetir o erro na
+// direção oposta. Instalação nova nasce em "system"; quem já usa encontra a
+// opção em Ajustes.
+function resolveTheme(theme) {
+  if (theme === "dark" || theme === "light") return theme;
+  try {
+    if (typeof window !== "undefined" && window.matchMedia) {
+      return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    }
+  } catch (e) { /* sem matchMedia: cai no claro */ }
+  return "light";
+}
+
+// A escolha vale enquanto a pessoa não trocar; o sistema pode mudar embaixo
+// dela (anoitecer, agendamento, botão de acessibilidade). Sem este ouvinte,
+// "seguir o sistema" só seguiria até a próxima recarga.
+function watchSystemTheme() {
+  try {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const consulta = window.matchMedia("(prefers-color-scheme: dark)");
+    const reagir = () => {
+      if (!state.data || state.data.theme !== "system") return;
+      applyTheme("system");
+    };
+    if (typeof consulta.addEventListener === "function") consulta.addEventListener("change", reagir);
+    else if (typeof consulta.addListener === "function") consulta.addListener(reagir);
+  } catch (e) { /* navegador sem suporte: o tema fica no que foi resolvido */ }
+}
+
 function applyTheme(theme) {
-  const t = theme === "dark" ? "dark" : "light";
+  const escolha = THEME_CHOICES.indexOf(theme) >= 0 ? theme : "system";
+  const t = resolveTheme(escolha);
   document.documentElement.setAttribute("data-theme", t);
   // A faixa da barra de status do app instalado é pintada por esta etiqueta, e
   // o tema é escolha da pessoa, não do sistema (ver js/boot.js, que a escreve
@@ -926,32 +974,13 @@ function applyTheme(theme) {
     const paper = getComputedStyle(document.documentElement).getPropertyValue("--paper").trim();
     if (paper) meta.setAttribute("content", paper);
   }
-  try { localStorage.setItem(THEME_KEY, t); } catch (e) { /* modo anônimo: sem persistência */ }
+  // A chave guarda a ESCOLHA, não o resultado dela: é o que permite ao
+  // `js/boot.js` resolver "system" de novo na próxima abertura, contra a
+  // preferência do aparelho naquele momento. Guardar o resultado era
+  // exatamente o defeito.
+  try { localStorage.setItem(THEME_KEY, escolha); } catch (e) { /* modo anônimo: sem persistência */ }
 }
 
-// "O usuário nunca escolheu tema" tem de ser capturado AGORA, na carga do
-// script, e não dentro do init(): o próprio `applyTheme` grava a chave, então
-// qualquer leitura posterior encontraria um valor escrito pelo app e concluiria
-// que houve escolha. Era exatamente esse o defeito; o app abria em claro para
-// quem usa o aparelho no escuro.
-const __themeNeverChosen = (function () {
-  try {
-    const v = localStorage.getItem(THEME_KEY);
-    return v !== "dark" && v !== "light";
-  } catch (e) {
-    return false;   // sem localStorage não há como distinguir; não força nada
-  }
-})();
-
-// Preferência do sistema, só no primeiro uso. A partir do primeiro toque no
-// interruptor, a escolha do usuário manda.
-function systemThemePreference() {
-  if (!__themeNeverChosen) return null;
-  try {
-    if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) return "dark";
-  } catch (e) { return null; }
-  return null;
-}
 
 // A MESMA TELA REDESENHADA NÃO PODE VOLTAR PARA O TOPO.
 //
@@ -2584,11 +2613,12 @@ async function init() {
   // [M6] Esqueleto em vez de spinner: mesma geometria da tela real, então o
   // conteúdo "preenche" a silhueta em vez de empurrá-la.
   //
-  // Tema do sistema no primeiro uso, resolvido antes de qualquer pintura: o
-  // esqueleto já nasce na cor certa em vez de piscar claro e virar escuro.
-  const __systemTheme = systemThemePreference();
-  if (__systemTheme) state.data = { ...state.data, theme: __systemTheme };
+  // Tema resolvido antes de qualquer pintura: o esqueleto já nasce na cor
+  // certa em vez de piscar claro e virar escuro. Com "system" (o padrão), a
+  // cor vem da preferência do aparelho AGORA, não de um palpite gravado no
+  // primeiro uso. Ver o cabeçalho de `applyTheme`.
   applyTheme(state.data.theme);
+  watchSystemTheme();
   root.innerHTML = renderShell();
   try {
     state.data = await initStorage();
@@ -2634,11 +2664,10 @@ async function init() {
   // A rota inicial vem do endereço, então `#/saude` colado numa aba nova abre a
   // tela de saúde. `replace` (e não `push`) porque a primeira entrada é a raiz:
   // voltar a partir dela tem de sair do app, não empilhar uma tela fantasma.
-  // O snapshot do banco chegou depois do primeiro paint e traz o `theme`
-  // gravado. No primeiro uso a preferência do sistema vira a escolha
-  // registrada; nos seguintes vale o que estava no banco.
-  if (__systemTheme && state.data.theme !== __systemTheme) setData((d) => ({ ...d, theme: __systemTheme }));
-  else applyTheme(state.data.theme);
+  // O snapshot do banco chegou depois do primeiro paint e traz a escolha de
+  // tema gravada. Aplicar de novo aqui é o que faz valer o que estava no
+  // banco quando ele discorda do que o `js/boot.js` resolveu sozinho.
+  applyTheme(state.data.theme);
 
   {
     const boot = NavHistory.current();

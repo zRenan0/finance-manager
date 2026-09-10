@@ -126,8 +126,10 @@ console.log("\n2. O resumo reflete o dado real");
   check("orcamento mostra a regra em vigor", /55\/25\/20/.test(resumo("orcamento")), resumo("orcamento"));
   check("orcamento mostra o limiar de aviso", /70%/.test(resumo("orcamento")), resumo("orcamento"));
   check("backup mostra a data", /10\/08\/2026/.test(resumo("dados")), resumo("dados"));
+  // [M42] O tema deixou de ser um interruptor de duas posições: o resumo agora
+  // nomeia a escolha, e "Automático" (seguir o aparelho) é o padrão.
   check("aparencia descreve tema e conquistas",
-    /claro/.test(resumo("aparencia")) && /desligadas/.test(resumo("aparencia")), resumo("aparencia"));
+    /automático/.test(resumo("aparencia")) && /desligadas/.test(resumo("aparencia")), resumo("aparencia"));
 
   setData(`{ ...state.data, userName: "", monthlyIncome: 0, lastBackupAt: null }`);
   check("perfil sem dado nao imprime lacuna",

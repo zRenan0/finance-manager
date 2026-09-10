@@ -1367,6 +1367,137 @@ async function runOnboardingViewportM4(browser, scenario) {
     }
   });
 
+  // [M42] CONTRASTE MEDIDO NO QUE FOI PINTADO, NOS DOIS TEMAS.
+  //
+  // `tests/test-accessibility.js` confere REGRAS de CSS. Nenhum teste calculava
+  // o contraste do que o navegador de fato desenha, e por isso dez selecionadores
+  // passaram anos abaixo da régua sem ninguém ver. Medido antes desta correção,
+  // no tema claro:
+  //
+  //   "Aportar R$ 350,00"  #A9791F sobre #F7EFDC  3,37:1   (rótulo de BOTÃO)
+  //   "Ritmo baixo"        #A9791F sobre #FFFFFF  3,86:1
+  //   "24% concluída"      #A9791F sobre #FFFFFF  3,86:1
+  //   "Regular" (score)    #A9791F sobre #FFFFFF  3,86:1
+  //   "+R$ 42,1 mil"       #0E8A6E sobre #FAFBFA  4,15:1
+  //   "Cabe"               #0E8A6E sobre #FFFFFF  4,30:1
+  //
+  // E no escuro, "seu alvo" em branco sobre a marca clara: 2,65:1.
+  //
+  // O QUE ESTE TESTE FAZ DE DIFERENTE de uma conferência ingênua:
+  //
+  //   * compõe as camadas translúcidas de verdade, subindo a árvore até achar
+  //     um fundo opaco. Sem isso, uma pastilha `color-mix(... 12%, transparent)`
+  //     é lida como preto e todo selo do app vira falso positivo;
+  //   * ignora quem tem `background-image`, porque gradiente não tem UM valor
+  //     de fundo e mediria errado nos dois sentidos;
+  //   * mede só nós com texto PRÓPRIO, para não atribuir ao pai a cor do filho.
+  //
+  // A régua é a da WCAG 2.1 AA (1.4.3): 4,5:1, ou 3:1 para texto grande
+  // (>= 24px, ou >= 18,66px em negrito).
+  await test("contraste AA nas 23 telas, no tema claro e no escuro", async () => {
+    for (const tema of ["light", "dark"]) {
+      const ctx = await openFresh(browser, { width: 1280, height: 900 }, { colorScheme: tema });
+      const page = ctx.page;
+      try {
+        // A BASE É A DEMONSTRAÇÃO, e isso não é preguiça de montar fixture.
+        //
+        // Texto colorido só existe quando existe o ESTADO que o pinta: meta
+        // atrasada tem "Ritmo baixo" em latão, dívida cadastrada tem a vantagem
+        // da estratégia em verde, patrimônio com histórico tem a variação, e
+        // reserva parcial tem a escada com "seu alvo". Uma fixture de uma meta e
+        // um gasto não desenha nenhum desses, e o teste passaria por ausência do
+        // caso em vez de por acerto — foi o que aconteceu na primeira versão
+        // deste bloco, que só pegava a falha do tema escuro.
+        //
+        // `buildDemoData` (js/demo.js) já monta seis meses com conta, cartão,
+        // faturas, metas, orçamentos, recorrências e patrimônio. É a base mais
+        // rica que o app sabe produzir sozinho, e é determinística.
+        await page.locator('[data-action="demo-enter"]').click();
+        await page.waitForFunction(() => /Dados de demonstra/.test(document.body.innerText));
+
+        const TELAS = ["dashboard", "analytics", "goals", "settings", "health", "wealth",
+          "insights", "accounts", "categories", "debts", "calendar", "subscriptions",
+          "add", "import", "simulate", "simulators", "achievements", "notifications",
+          "all", "rules", "privacy", "account", "invest"];
+        const falhas = [];
+        let medidos = 0;
+        for (const tela of TELAS) {
+          await page.evaluate((t) => CofreUI.test.navigate(t), tela);
+          await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+          const achado = await page.evaluate((nome) => {
+            const parse = (c) => {
+              if (!c) return null;
+              let m = c.match(/^rgba?\(([^)]+)\)/);
+              if (m) { const p = m[1].split(/[ ,/]+/).filter(Boolean).map(Number); return { r: p[0], g: p[1], b: p[2], a: p.length > 3 ? p[3] : 1 }; }
+              m = c.match(/^color\(srgb\s+([^)]+)\)/);
+              if (m) { const p = m[1].split(/[ /]+/).filter(Boolean).map(Number); return { r: p[0] * 255, g: p[1] * 255, b: p[2] * 255, a: p.length > 3 ? p[3] : 1 }; }
+              return null;
+            };
+            const sobre = (fg, bg) => ({ r: fg.r * fg.a + bg.r * (1 - fg.a), g: fg.g * fg.a + bg.g * (1 - fg.a), b: fg.b * fg.a + bg.b * (1 - fg.a), a: 1 });
+            const lum = (c) => {
+              const f = [c.r, c.g, c.b].map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); });
+              return 0.2126 * f[0] + 0.7152 * f[1] + 0.0722 * f[2];
+            };
+            const fundoDe = (el) => {
+              const pilha = []; let e = el; let gradiente = false;
+              while (e && e !== document.documentElement) {
+                const cs = getComputedStyle(e);
+                if (cs.backgroundImage && cs.backgroundImage !== "none") gradiente = true;
+                const c = parse(cs.backgroundColor);
+                if (c && c.a > 0) { pilha.push(c); if (c.a >= 1) break; }
+                e = e.parentElement;
+              }
+              let base = parse(getComputedStyle(document.body).backgroundColor);
+              if (!base || base.a < 1) base = { r: 255, g: 255, b: 255, a: 1 };
+              let acc = base;
+              for (let i = pilha.length - 1; i >= 0; i--) acc = sobre(pilha[i], acc);
+              return { cor: acc, gradiente };
+            };
+            const fora = []; let n = 0;
+            document.querySelectorAll("main *, nav *").forEach((el) => {
+              if (!el.offsetParent) return;
+              const proprio = [...el.childNodes].filter((no) => no.nodeType === 3 && no.textContent.trim()).map((no) => no.textContent.trim()).join(" ");
+              if (!proprio) return;
+              const cs = getComputedStyle(el);
+              const fg = parse(cs.color);
+              if (!fg) return;
+              const { cor: bg, gradiente } = fundoDe(el);
+              if (gradiente) return;
+              n++;
+              const tinta = fg.a < 1 ? sobre(fg, bg) : fg;
+              const a = lum(tinta), b = lum(bg);
+              const razao = (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+              const px = parseFloat(cs.fontSize), peso = Number(cs.fontWeight) || 400;
+              const grande = px >= 24 || (px >= 18.66 && peso >= 700);
+              const minimo = grande ? 3 : 4.5;
+              if (razao < minimo) {
+                fora.push({
+                  tela: nome, razao: Math.round(razao * 100) / 100, minimo,
+                  px: Math.round(px), cor: cs.color,
+                  fundo: `rgb(${Math.round(bg.r)},${Math.round(bg.g)},${Math.round(bg.b)})`,
+                  cls: String(el.className || el.tagName).slice(0, 40),
+                  txt: proprio.slice(0, 28),
+                });
+              }
+            });
+            return { n, fora };
+          }, tela);
+          medidos += achado.n;
+          falhas.push(...achado.fora);
+        }
+        // Guarda de sanidade: se o seletor deixar de casar, o teste passaria por
+        // ausência de texto medido, e não por acerto.
+        assert(medidos > 400, `tema ${tema}: só ${medidos} textos medidos, o teste perdeu o alvo`);
+        const unicos = [];
+        const vistos = new Set();
+        falhas.forEach((f) => { const k = f.cls + f.cor + f.fundo; if (!vistos.has(k)) { vistos.add(k); unicos.push(f); } });
+        assert(unicos.length === 0, `tema ${tema}: contraste abaixo da AA em ${unicos.length} lugar(es): ${JSON.stringify(unicos.slice(0, 5))}`);
+      } finally {
+        await ctx.context.close();
+      }
+    }
+  });
+
   await test("320 px mantém doca, assistente e controles sem corte nem sobreposição", async () => {
     const touch = await openFresh(browser, { width: 320, height: 844 }, { hasTouch: true });
     const page = touch.page;

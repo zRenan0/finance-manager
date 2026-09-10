@@ -408,6 +408,41 @@ function fmtDateShort(iso) {
 }
 function fmtDateFull(iso) { if(!iso) return ""; const [y, m, d] = iso.split("-"); return `${d}/${m}/${y}`; }
 
+// [M42] A TINTA DE SINAL PARA TEXTO MIÚDO.
+//
+// `css/base.css` já tinha as variantes escuras (`--positive-ink`, `--goal-ink`,
+// `--negative-ink`) e escreveu a regra no comentário: preenchimento, barra,
+// ícone e número grande usam a cor de sinal; TEXTO PEQUENO sobre superfície
+// clara usa a variante `-ink`. O que faltava era aplicar isso onde a cor é
+// escolhida em JavaScript e injetada como estilo inline.
+//
+// Medido no navegador, tema claro, compondo as camadas translúcidas de verdade,
+// antes desta correção:
+//
+//   "Aportar R$ 350,00"  #A9791F sobre #F7EFDC  3,37:1   (rótulo de BOTÃO)
+//   "Ritmo baixo"        #A9791F sobre #FFFFFF  3,86:1
+//   "24% concluída"      #A9791F sobre #FFFFFF  3,86:1
+//   "+R$ 42,1 mil"       #0E8A6E sobre #FAFBFA  4,15:1
+//   "Cabe"               #0E8A6E sobre #FFFFFF  4,30:1
+//
+// A régua da WCAG 2.1 AA (1.4.3) para texto miúdo é 4,5:1. Nenhum desses
+// passava, e são justamente as linhas que decidem um aporte.
+//
+// `inkOf` traduz a cor de sinal na variante de texto e deixa passar qualquer
+// outra coisa (`--ink-faint`, `--ink-soft`, cor de categoria) intacta. Assim a
+// troca é de uma palavra por chamada, e só onde a cor pinta LETRA: onde ela
+// pinta bolha, barra ou anel, a chamada não entra.
+const TONE_INK = {
+  "var(--positive)": "var(--positive-ink)",
+  "var(--negative)": "var(--negative-ink)",
+  "var(--goal)": "var(--goal-ink)",
+  "var(--brand)": "var(--brand-ink)",
+};
+function inkOf(color) {
+  const chave = String(color == null ? "" : color).trim();
+  return Object.prototype.hasOwnProperty.call(TONE_INK, chave) ? TONE_INK[chave] : color;
+}
+
 function escapeHtml(str) {
   return String(str == null ? "" : str).replace(/[&<>"']/g, (c) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
@@ -2277,6 +2312,15 @@ const MIRROR_THROTTLE_MS = 1200;
 // de propósito: uma política que inventa controlador ou canal de atendimento é
 // pior que uma que diz em voz alta o que ainda falta. `check-release.js` trata
 // a presença do marcador como impedimento de oferta ao público.
+// [M42] Os três valores possíveis de `data.theme`.
+//
+// "system" acompanha o aparelho; "light" e "dark" são escolha explícita e
+// param de acompanhar. Antes só existiam os dois últimos, e a preferência do
+// sistema era lida UMA vez, no primeiro uso, e gravada como se fosse escolha:
+// quem instalava o app com o celular no escuro ficava presa no escuro para
+// sempre, inclusive de dia. Ver `applyTheme` em js/app.js.
+const THEME_CHOICES = ["system", "light", "dark"];
+
 const LEGAL_PENDING = "[definir antes da oferta ao público]";
 
 // Identificação do controlador (LGPD art. 9, I e art. 41) e canais de contato.
@@ -3913,7 +3957,8 @@ function defaultData() {
     assets: [],
     monthlyIncome: 0,
     creditCardLimit: 0,
-    theme: "light",
+    // [M42] O padrao e SEGUIR O SISTEMA. Ver applyTheme em js/app.js.
+    theme: "system",
     dismissedCarryForwardMonth: null,
     budgetSplit: defaultBudgetSplit(),
     budgetAlerts: defaultBudgetAlerts(),
@@ -4177,7 +4222,10 @@ function migrate(parsed) {
 
   data.monthlyIncome = roundMoney(data.monthlyIncome);
   data.creditCardLimit = roundMoney(data.creditCardLimit);
-  data.theme = data.theme === "dark" ? "dark" : "light";
+  // [M42] Tres valores: "system" (padrao), "light" e "dark". Base antiga
+  // guardou "light" ou "dark" e continua com o que tinha; so instalacao nova
+  // nasce em "system". Ver o cabecalho de applyTheme em js/app.js.
+  data.theme = THEME_CHOICES.indexOf(data.theme) >= 0 ? data.theme : "system";
   const bs = data.budgetSplit && typeof data.budgetSplit === "object" ? data.budgetSplit : {};
   data.budgetSplit = {
     necessidade: clampPct(bs.necessidade, 50),
@@ -7909,7 +7957,7 @@ function backupPayloadOf(data) {
     assets: data.assets || [],
     monthlyIncome: data.monthlyIncome || 0,
     creditCardLimit: data.creditCardLimit || 0,
-    theme: data.theme || "light",
+    theme: data.theme || "system",
     budgetSplit: data.budgetSplit || defaultBudgetSplit(),
     budgetAlerts: data.budgetAlerts || defaultBudgetAlerts(),
     budgetHistory: normalizeBudgetHistory(data.budgetHistory),
@@ -16639,9 +16687,9 @@ function netWorthAtMonthEnd(data, monthKey, acc) {
 // Série de patrimônio dos últimos N meses (mais antigo → mais recente).
 // O ponto do mês corrente usa o patrimônio de HOJE (`netWorth`), não uma
 // projeção de fim de mês: é o número que o usuário vê no topo da tela.
-function netWorthSeries(data, months = 6) {
+function netWorthSeries(data, months = 6, accPronto) {
   const now = new Date();
-  const acc = ledgerAccumulator(data);
+  const acc = accPronto || ledgerAccumulator(data);
   const currentKey = keyOfDate(now);
   const out = [];
   for (let i = months - 1; i >= 0; i--) {
@@ -16673,21 +16721,71 @@ function netWorthSeries(data, months = 6) {
 // nos últimos meses" é só uma afirmação grande.
 const NET_WORTH_GROWTH_MONTHS = 6;
 
+// [M42] A JANELA NÃO PODE COMEÇAR ANTES DE O USUÁRIO EXISTIR.
+//
+// A janela era fixa em seis meses, sempre. Para quem instalou o app este mês, o
+// primeiro ponto caía num mês em que não havia app, não havia conta e não havia
+// dado: `first` valia R$ 0,00. E o ramo `first === 0` devolvia 100.
+//
+// O resultado era a primeira frase que essa pessoa lia sobre o próprio
+// patrimônio:
+//
+//   "Crescimento de 100,0% desde abril: de R$ 0,00 para R$ 5.000,00."
+//
+// Em abril ela não usava o app. O número não estava arredondado errado nem mal
+// formatado: ele afirmava um fato sobre um período que nunca foi medido. Medido
+// com o motor real, TODO usuário entre o primeiro e o quinto mês de uso recebia
+// exatamente "+100,0%", qualquer que fosse o saldo.
+//
+// Duas travas, e as duas precisam existir:
+//
+//   1. A janela começa no primeiro mês em que há dado (`acc.keys[0]`), nunca
+//      antes. `ledgerAccumulator` já calculava essa lista; faltava usá-la.
+//   2. Percentual exige BASE. Com `first` em zero a conta é indefinida, e com
+//      `first` perto de zero ela é aritmeticamente correta e inútil: R$ 150
+//      virando R$ 50.000 são "+33.233%", que ninguém lê como informação. Nesses
+//      casos a resposta honesta é o valor absoluto, que é sempre verdadeiro.
+//
+// `measurable` passou a significar "o percentual se sustenta". É o que os dois
+// consumidores precisam saber: o cartão do painel troca o percentual pelo delta,
+// e o pilar do score sai da conta em vez de pontuar quem ainda não tem base.
+const NET_WORTH_GROWTH_MIN_BASE = 100;
+// Acima de 100x, o divisor deixou de ser um ponto de partida e virou artefato.
+const NET_WORTH_GROWTH_MAX_RATIO = 100;
+
+function monthsBetweenKeys(de, ate) {
+  const [y1, m1] = String(de).split("-").map(Number);
+  const [y2, m2] = String(ate).split("-").map(Number);
+  if (!Number.isFinite(y1) || !Number.isFinite(y2)) return 0;
+  return (y2 - y1) * 12 + (m2 - m1);
+}
+
 function netWorthGrowth(data, months) {
-  const janela = Math.max(2, Number(months) || NET_WORTH_GROWTH_MONTHS);
-  const series = netWorthSeries(data, janela);
+  const teto = Math.max(2, Number(months) || NET_WORTH_GROWTH_MONTHS);
+  const acc = ledgerAccumulator(data);
+  const currentKey = keyOfDate(new Date());
+  // Sem lançamento nenhum, o histórico começa hoje: um mês, nada a comparar.
+  const primeiroKey = acc.keys.length ? acc.keys[0] : currentKey;
+  const historico = Math.max(1, monthsBetweenKeys(primeiroKey, currentKey) + 1);
+  const janela = Math.max(2, Math.min(teto, historico));
+  const series = netWorthSeries(data, janela, acc);
   const first = series[0].value;
   const last = series[series.length - 1].value;
   const delta = subMoney(last, first);
-  // Sem base nenhuma dos dois lados não há crescimento a medir; devolver 0%
-  // seria inventar um fato sobre quem ainda não tem histórico.
-  const measurable = Math.abs(first) >= 1 || Math.abs(last) >= 1;
-  const pct = !measurable ? null
-    : (first !== 0 ? (delta / Math.abs(first)) * 100 : (last > 0 ? 100 : last < 0 ? -100 : 0));
+
+  const base = Math.abs(first);
+  const baseSustenta = base >= NET_WORTH_GROWTH_MIN_BASE
+    && base * NET_WORTH_GROWTH_MAX_RATIO >= Math.abs(last);
+  const measurable = historico >= 2 && baseSustenta;
+  const pct = measurable ? (delta / base) * 100 : null;
+
   const [ano, mes] = String(series[0].key).split("-").map(Number);
   const mesmoAno = ano === series[series.length - 1].year;
   return {
     series, months: janela,
+    // Quantos meses de uso existem de fato, que é o que decide se há o que
+    // comparar. A tela usa para não prometer histórico que não tem.
+    historyMonths: historico,
     first, last, delta, pct, measurable,
     fromKey: series[0].key,
     toKey: series[series.length - 1].key,
@@ -27395,7 +27493,7 @@ function renderScoreCard(m) {
       ${renderScoreGauge(s.score, s.level.color)}
       <div class="score-head__text">
         <p class="card-title" data-ui-css="margin:0">Score financeiro</p>
-        <p class="score-level" data-ui-css="color:${s.level.color}">${s.level.label}</p>
+        <p class="score-level" data-ui-css="color:${inkOf(s.level.color)}">${s.level.label}</p>
         <p class="score-note">${escapeHtml(s.level.note)}</p>
       </div>
     </div>
@@ -27431,6 +27529,31 @@ function renderScoreCard(m) {
   </div>`;
 }
 
+// [M42] A LEGENDA DIZ O QUE PODE SER DITO, e cala o que não pode.
+//
+// Ela só sabia escrever uma frase: "Crescimento de N% desde <mês>". Com a
+// janela fixa em seis meses e o ramo `first === 0` devolvendo 100, quem tinha
+// um mês de uso lia "Crescimento de 100,0% desde abril: de R$ 0,00 para
+// R$ 5.000,00", sobre um período em que não usava o app.
+//
+// Agora são três casos, e nenhum deles inventa período:
+//
+//   * sem histórico para comparar (primeiro mês): nada é escrito;
+//   * com histórico mas sem base que sustente percentual: os dois extremos, sem
+//     percentual nenhum. "De R$ 0,00 para R$ 5.000,00 desde abril" é verdade
+//     inteira e não precisa de divisão;
+//   * com base: a frase de antes, que continua certa.
+//
+// Ver `netWorthGrowth` em js/metrics.js.
+function netWorthGrowthFootnote(g, up) {
+  if (g.historyMonths < 2) return "";
+  const desde = `desde ${escapeHtml(g.sinceLabel)}`;
+  if (!g.measurable || g.pct == null) {
+    return `<p class="footnote" data-ui-css="margin-top:6px">De ${fmtBRL(g.first)} para ${fmtBRL(g.last)} ${desde}.</p>`;
+  }
+  return `<p class="footnote" data-ui-css="margin-top:6px">${up ? "Crescimento" : "Queda"} de ${fmtDec(Math.abs(g.pct), 1)}% ${desde}: de ${fmtBRL(g.first)} para ${fmtBRL(g.last)}.</p>`;
+}
+
 // ---- Patrimônio: total, composição e evolução ----
 function renderNetWorthCard(m) {
   const w = m.worth;
@@ -27464,7 +27587,7 @@ function renderNetWorthCard(m) {
 
     ${renderSparkline(series, up ? "var(--brand)" : "var(--negative)")}
     <div class="networth-axis">${series.map((p) => `<span>${p.label}</span>`).join("")}</div>
-    ${g.measurable && deltaPct != null ? `<p class="footnote" data-ui-css="margin-top:6px">${up ? "Crescimento" : "Queda"} de ${fmtDec(Math.abs(deltaPct), 1)}% desde ${g.sinceLabel}: de ${fmtBRL(g.first)} para ${fmtBRL(g.last)}.</p>` : ""}
+    ${netWorthGrowthFootnote(g, up)}
 
     ${sum > 0 ? `<div class="segment-bar" data-ui-css="margin-top:14px">
       ${parts.filter((p) => p.value > 0).map((p) => `<div data-ui-css="flex:${p.value};background:${p.color}"></div>`).join("")}
@@ -27500,7 +27623,7 @@ function renderReserveCard(m) {
       <span class="icon-bubble icon-bubble--sm" data-ui-css="background:color-mix(in srgb, ${meta.color} 14%, transparent); color:${meta.color}">${svgIcon("shieldCheck", 16)}</span>
       <div>
         <p class="card-title" data-ui-css="margin:0">Reserva de emergência</p>
-        <p class="mini-card__sub" data-ui-css="color:${meta.color}">${meta.label}</p>
+        <p class="mini-card__sub" data-ui-css="color:${inkOf(meta.color)}">${meta.label}</p>
       </div>
     </div>
     <p class="mini-card__value">${fmtBRL(r.current)}</p>
@@ -27538,7 +27661,7 @@ function renderFeaturedGoalCard(m) {
       ${renderGoalRing(f.pct, color, g.icon, 44)}
       <div>
         <p class="card-title" data-ui-css="margin:0">${escapeHtml(g.name)}</p>
-        <p class="mini-card__sub" data-ui-css="color:${color}">${f.done ? `${svgIcon("checkCircle", 13)} Meta concluída` : `${f.pct.toFixed(0)}% concluída`}</p>
+        <p class="mini-card__sub" data-ui-css="color:${inkOf(color)}">${f.done ? `${svgIcon("checkCircle", 13)} Meta concluída` : `${f.pct.toFixed(0)}% concluída`}</p>
       </div>
     </div>
     <p class="mini-card__value">${fmtBRL(g.current)} <span class="mini-card__value-of">de ${fmtBRL(g.target)}</span></p>
@@ -27959,7 +28082,7 @@ function renderBudgetRow(b, thresholds) {
     <div class="budget-row__head">
       <span class="icon-bubble icon-bubble--sm" data-ui-css="background:color-mix(in srgb, ${b.color} 14%, transparent); color:${b.color}">${svgIcon(b.icon, 14)}</span>
       <span class="budget-row__name">${escapeHtml(b.name)}${b.isParent ? `<span class="budget-row__hint"> · inclui ${plural(b.childCount, "subcategoria", "subcategorias")}</span>` : ""}</span>
-      <span class="budget-row__value" data-ui-css="color:${meta.color}">${fmtBRL(b.spent)}<span class="cat-value-muted"> / ${fmtBRL(b.budget)}</span></span>
+      <span class="budget-row__value" data-ui-css="color:${inkOf(meta.color)}">${fmtBRL(b.spent)}<span class="cat-value-muted"> / ${fmtBRL(b.budget)}</span></span>
     </div>
     <div class="progress budget-progress">
       <div class="progress__fill" data-ui-css="width:${pctCapped}%; background:${meta.color}"></div>
@@ -28726,7 +28849,19 @@ function renderMovementEntry(entry) {
   const sign = entry.type === "income" ? "+" : entry.type === "expense" ? "-" : "";
   const icon = entry.type === "income" ? "trendUp" : entry.type === "expense" ? (entry.transaction ? categoryById(state.data, entry.categoryId).icon : "arrowRight") : entry.kind === "transfer" ? "arrowRight" : "creditCard";
   return `<div class="movement-row ${selected ? "movement-row--selected" : ""}">
-    ${entry.kind === "transaction" ? `<label class="movement-check" aria-label="Selecionar ${escapeHtml(entry.description)}"><input type="checkbox" data-action-select="movement-select" data-id="${entry.id}" ${selected ? "checked" : ""} /></label>` : `<span class="movement-check movement-check--empty" aria-hidden="true"></span>`}
+    ${/* [M42] O NOME ACESSÍVEL PERTENCE AO CONTROLE, NÃO À ETIQUETA QUE O ENVOLVE.
+
+          O `aria-label` estava no `<label>`. O leitor de tela para no `<input>`,
+          e a árvore de acessibilidade real do navegador devolvia:
+
+            label "Selecionar Academia"
+              checkbox "on"        <- é aqui que o foco chega
+
+          Numa lista de cinquenta movimentações, quem navega por teclado ouvia
+          "caixa de seleção, on" cinquenta vezes sem saber o que estava marcando.
+          Falha de WCAG 4.1.2 (Nome, Função, Valor). O atributo no `<input>`
+          resolve; o `<label>` continua sendo o alvo de toque de 32x44. */""}
+    ${entry.kind === "transaction" ? `<label class="movement-check"><input type="checkbox" aria-label="Selecionar ${escapeHtml(entry.description)}" data-action-select="movement-select" data-id="${entry.id}" ${selected ? "checked" : ""} /></label>` : `<span class="movement-check movement-check--empty" aria-hidden="true"></span>`}
     <span class="icon-bubble">${svgIcon(icon, 18)}</span>
     <button class="movement-row__main" data-action="${entry.kind === "transaction" ? "edit-tx" : "movement-detail"}" data-id="${entry.id}">
       <span class="tx-title">${escapeHtml(entry.description)}</span>
@@ -34504,7 +34639,13 @@ function onClick(e) {
       setState({ tab: "settings" });
       EventBus.emit(APP_EVENTS.TAB_CHANGED, { tab: "settings" });
       break;
-    case "toggle-theme": setData((d) => ({ ...d, theme: d.theme === "dark" ? "light" : "dark" })); break;
+    // [M42] Três valores, não um interruptor. Ver THEME_CHOICES em js/storage.js.
+    case "set-theme": {
+      const escolhido = THEME_CHOICES.indexOf(value) >= 0 ? value : "system";
+      if (state.data.theme === escolhido) break;
+      setData((d) => ({ ...d, theme: escolhido }));
+      break;
+    }
     case "toggle-gamification": {
       const enabled = !(state.data.achievements && state.data.achievements.enabled);
       state.gamification.celebrating = [];
@@ -35799,8 +35940,56 @@ function restoreFocus(key, selStart, selEnd) {
 // não só quando o app.js executa, no fim de trinta scripts.
 const THEME_KEY = "financas_theme";
 
+// [M42] "SEGUIR O SISTEMA" É UM VALOR, NÃO UM PALPITE DE UMA VEZ SÓ.
+//
+// O desenho anterior lia `prefers-color-scheme` UMA vez, no primeiro uso, e
+// gravava o resultado como se fosse escolha da pessoa (`systemThemePreference`
+// só respondia enquanto `__themeNeverChosen`). A partir dali o app parava de
+// olhar para o aparelho. Consequência medida: base limpa com o sistema no
+// escuro grava "dark"; troca-se o sistema para claro, recarrega, e o app segue
+// escuro, com `matchMedia("(prefers-color-scheme: dark)")` valendo falso. Em
+// celular, onde o tema escuro costuma ser automático por horário, o app passava
+// a discordar do aparelho todas as noites. E Ajustes só tinha um interruptor de
+// duas posições: não havia como voltar para o automático.
+//
+// Agora `data.theme` tem três valores (ver THEME_CHOICES em js/storage.js) e o
+// padrão é "system". A resolução acontece a cada aplicação e a cada mudança do
+// sistema, enquanto a escolha for "system".
+//
+// O que NÃO foi feito, de propósito: migrar quem já tem "light" ou "dark"
+// gravado. Não há como distinguir quem escolheu daquele que foi fixado pelo
+// defeito, e trocar o tema de quem escolheu de verdade seria repetir o erro na
+// direção oposta. Instalação nova nasce em "system"; quem já usa encontra a
+// opção em Ajustes.
+function resolveTheme(theme) {
+  if (theme === "dark" || theme === "light") return theme;
+  try {
+    if (typeof window !== "undefined" && window.matchMedia) {
+      return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    }
+  } catch (e) { /* sem matchMedia: cai no claro */ }
+  return "light";
+}
+
+// A escolha vale enquanto a pessoa não trocar; o sistema pode mudar embaixo
+// dela (anoitecer, agendamento, botão de acessibilidade). Sem este ouvinte,
+// "seguir o sistema" só seguiria até a próxima recarga.
+function watchSystemTheme() {
+  try {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const consulta = window.matchMedia("(prefers-color-scheme: dark)");
+    const reagir = () => {
+      if (!state.data || state.data.theme !== "system") return;
+      applyTheme("system");
+    };
+    if (typeof consulta.addEventListener === "function") consulta.addEventListener("change", reagir);
+    else if (typeof consulta.addListener === "function") consulta.addListener(reagir);
+  } catch (e) { /* navegador sem suporte: o tema fica no que foi resolvido */ }
+}
+
 function applyTheme(theme) {
-  const t = theme === "dark" ? "dark" : "light";
+  const escolha = THEME_CHOICES.indexOf(theme) >= 0 ? theme : "system";
+  const t = resolveTheme(escolha);
   document.documentElement.setAttribute("data-theme", t);
   // A faixa da barra de status do app instalado é pintada por esta etiqueta, e
   // o tema é escolha da pessoa, não do sistema (ver js/boot.js, que a escreve
@@ -35813,32 +36002,13 @@ function applyTheme(theme) {
     const paper = getComputedStyle(document.documentElement).getPropertyValue("--paper").trim();
     if (paper) meta.setAttribute("content", paper);
   }
-  try { localStorage.setItem(THEME_KEY, t); } catch (e) { /* modo anônimo: sem persistência */ }
+  // A chave guarda a ESCOLHA, não o resultado dela: é o que permite ao
+  // `js/boot.js` resolver "system" de novo na próxima abertura, contra a
+  // preferência do aparelho naquele momento. Guardar o resultado era
+  // exatamente o defeito.
+  try { localStorage.setItem(THEME_KEY, escolha); } catch (e) { /* modo anônimo: sem persistência */ }
 }
 
-// "O usuário nunca escolheu tema" tem de ser capturado AGORA, na carga do
-// script, e não dentro do init(): o próprio `applyTheme` grava a chave, então
-// qualquer leitura posterior encontraria um valor escrito pelo app e concluiria
-// que houve escolha. Era exatamente esse o defeito; o app abria em claro para
-// quem usa o aparelho no escuro.
-const __themeNeverChosen = (function () {
-  try {
-    const v = localStorage.getItem(THEME_KEY);
-    return v !== "dark" && v !== "light";
-  } catch (e) {
-    return false;   // sem localStorage não há como distinguir; não força nada
-  }
-})();
-
-// Preferência do sistema, só no primeiro uso. A partir do primeiro toque no
-// interruptor, a escolha do usuário manda.
-function systemThemePreference() {
-  if (!__themeNeverChosen) return null;
-  try {
-    if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) return "dark";
-  } catch (e) { return null; }
-  return null;
-}
 
 // A MESMA TELA REDESENHADA NÃO PODE VOLTAR PARA O TOPO.
 //
@@ -37471,11 +37641,12 @@ async function init() {
   // [M6] Esqueleto em vez de spinner: mesma geometria da tela real, então o
   // conteúdo "preenche" a silhueta em vez de empurrá-la.
   //
-  // Tema do sistema no primeiro uso, resolvido antes de qualquer pintura: o
-  // esqueleto já nasce na cor certa em vez de piscar claro e virar escuro.
-  const __systemTheme = systemThemePreference();
-  if (__systemTheme) state.data = { ...state.data, theme: __systemTheme };
+  // Tema resolvido antes de qualquer pintura: o esqueleto já nasce na cor
+  // certa em vez de piscar claro e virar escuro. Com "system" (o padrão), a
+  // cor vem da preferência do aparelho AGORA, não de um palpite gravado no
+  // primeiro uso. Ver o cabeçalho de `applyTheme`.
   applyTheme(state.data.theme);
+  watchSystemTheme();
   root.innerHTML = renderShell();
   try {
     state.data = await initStorage();
@@ -37521,11 +37692,10 @@ async function init() {
   // A rota inicial vem do endereço, então `#/saude` colado numa aba nova abre a
   // tela de saúde. `replace` (e não `push`) porque a primeira entrada é a raiz:
   // voltar a partir dela tem de sair do app, não empilhar uma tela fantasma.
-  // O snapshot do banco chegou depois do primeiro paint e traz o `theme`
-  // gravado. No primeiro uso a preferência do sistema vira a escolha
-  // registrada; nos seguintes vale o que estava no banco.
-  if (__systemTheme && state.data.theme !== __systemTheme) setData((d) => ({ ...d, theme: __systemTheme }));
-  else applyTheme(state.data.theme);
+  // O snapshot do banco chegou depois do primeiro paint e traz a escolha de
+  // tema gravada. Aplicar de novo aqui é o que faz valer o que estava no
+  // banco quando ele discorda do que o `js/boot.js` resolveu sozinho.
+  applyTheme(state.data.theme);
 
   {
     const boot = NavHistory.current();
@@ -37781,7 +37951,7 @@ function carregarExtras() {
   if (__extrasCarregados) return Promise.resolve(__extrasCarregados);
   if (!__extrasEmVoo) {
     __extrasEmVoo = import('./app.extras.generated.js').then((mod) => {
-      mod.instalarNucleo({ ACCOUNT_TYPE_LABELS, AI_HIDEABLE_FIELDS, ASSET_CLASSES, BACKUP_ENC_MIN_PASSWORD, BUDGET_GROUPS, BUILTIN_CATEGORY_RULES, CloudSync, DEBT_AMORTIZATION_LABELS, DEBT_TYPE_LABELS, FinanceStore, GOAL_ICON_OPTIONS, GOAL_INFLATION_MIN_DAYS, GOAL_TEMPLATES, GROUP_ICONS, GROUP_LABELS, HEALTH_INDICATORS, INVESTMENT_TYPES, LEGAL_CONTROLLER, LEGAL_DATA_INVENTORY, LEGAL_DATA_INVENTORY_GROUPS, LEGAL_PENDING, LEGAL_RETENTION, LEGAL_REVIEW_DATE, LEGAL_SUBJECT_RIGHTS, LEGAL_TEXT_VERSION, LEGAL_THIRD_PARTIES, LEGAL_THIRD_PARTY_GROUPS, MONTH_ABBR, MONTH_NAMES, RULE_MATCH_TYPES, RULE_WEIGHT_DEFAULT, RULE_WEIGHT_MAX, RULE_WEIGHT_MIN, accountsSummary, assetClassOf, backupCryptoAvailable, buildDataSourcesModel, categoryById, childCategories, clamp, compileCategoryRules, compileRulePattern, computeBudgetStatus, daysBetweenIso, debtMonthlyRateInfo, debtsModel, defaultBudgetAlerts, defaultPrivacy, divMoney, emergencyFund, emergencyLadder, escapeHtml, fmtBRL, fmtBRLShort, fmtDateFull, fmtDateShort, fmtDec, fmtNum, formatMovementTimestamp, freshGuestLink, goalExistingBalance, goalInflationPct, goalsModel, healthModel, inflateMoney, investmentTypeOf, isDashboardStarting, keyOfCurrentMonth, legalAccepted, legalControllerGaps, legalControllerReady, legalDataInventoryGaps, legalThirdPartyGaps, legalThirdPartyLaunchGaps, marketRatesOf, matchCategoryRules, mergeBackupInto, moneyCompare, moneyDraft, moneyFromCents, moneyOrZero, moneyToCents, monthKeyOf, mulMoney, nextDueDateForDebt, normalizeCategoryRules, normalizePrivacy, normalizeText, notificationsModel, parseMoneyInput, passwordStrength, plural, pluralWord, portfolioModel, reconciliationHeadline, render, renderBackHeader, renderCalculationButton, renderDonut, renderEmptyState, renderGoalRing, renderLastBackupLine, renderScoreGauge, renderSparkline, safeErrorSummary, safePct, scoreGains, simulateExpenseImpact, simulateFinancingImpact, state, subMoney, svgIcon, todayIso, topLevelCategories, wealthModel });
+      mod.instalarNucleo({ ACCOUNT_TYPE_LABELS, AI_HIDEABLE_FIELDS, ASSET_CLASSES, BACKUP_ENC_MIN_PASSWORD, BUDGET_GROUPS, BUILTIN_CATEGORY_RULES, CloudSync, DEBT_AMORTIZATION_LABELS, DEBT_TYPE_LABELS, FinanceStore, GOAL_ICON_OPTIONS, GOAL_INFLATION_MIN_DAYS, GOAL_TEMPLATES, GROUP_ICONS, GROUP_LABELS, HEALTH_INDICATORS, INVESTMENT_TYPES, LEGAL_CONTROLLER, LEGAL_DATA_INVENTORY, LEGAL_DATA_INVENTORY_GROUPS, LEGAL_PENDING, LEGAL_RETENTION, LEGAL_REVIEW_DATE, LEGAL_SUBJECT_RIGHTS, LEGAL_TEXT_VERSION, LEGAL_THIRD_PARTIES, LEGAL_THIRD_PARTY_GROUPS, MONTH_ABBR, MONTH_NAMES, RULE_MATCH_TYPES, RULE_WEIGHT_DEFAULT, RULE_WEIGHT_MAX, RULE_WEIGHT_MIN, accountsSummary, assetClassOf, backupCryptoAvailable, buildDataSourcesModel, categoryById, childCategories, clamp, compileCategoryRules, compileRulePattern, computeBudgetStatus, daysBetweenIso, debtMonthlyRateInfo, debtsModel, defaultBudgetAlerts, defaultPrivacy, divMoney, emergencyFund, emergencyLadder, escapeHtml, fmtBRL, fmtBRLShort, fmtDateFull, fmtDateShort, fmtDec, fmtNum, formatMovementTimestamp, freshGuestLink, goalExistingBalance, goalInflationPct, goalsModel, healthModel, inflateMoney, inkOf, investmentTypeOf, isDashboardStarting, keyOfCurrentMonth, legalAccepted, legalControllerGaps, legalControllerReady, legalDataInventoryGaps, legalThirdPartyGaps, legalThirdPartyLaunchGaps, marketRatesOf, matchCategoryRules, mergeBackupInto, moneyCompare, moneyDraft, moneyFromCents, moneyOrZero, moneyToCents, monthKeyOf, mulMoney, nextDueDateForDebt, normalizeCategoryRules, normalizePrivacy, normalizeText, notificationsModel, parseMoneyInput, passwordStrength, plural, pluralWord, portfolioModel, reconciliationHeadline, render, renderBackHeader, renderCalculationButton, renderDonut, renderEmptyState, renderGoalRing, renderLastBackupLine, renderScoreGauge, renderSparkline, safeErrorSummary, safePct, scoreGains, simulateExpenseImpact, simulateFinancingImpact, state, subMoney, svgIcon, todayIso, topLevelCategories, wealthModel });
       __extrasCarregados = mod;
       return mod;
     }).catch((erro) => { __extrasEmVoo = null; throw erro; });

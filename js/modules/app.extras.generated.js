@@ -2,9 +2,9 @@
 // Segundo pedaço do pacote: telas que não fazem parte da primeira pintura.
 // Edite os arquivos de origem em js/ e execute npm run build.
 
-let ACCOUNT_TYPE_LABELS, AI_HIDEABLE_FIELDS, ASSET_CLASSES, BACKUP_ENC_MIN_PASSWORD, BUDGET_GROUPS, BUILTIN_CATEGORY_RULES, CloudSync, DEBT_AMORTIZATION_LABELS, DEBT_TYPE_LABELS, FinanceStore, GOAL_ICON_OPTIONS, GOAL_INFLATION_MIN_DAYS, GOAL_TEMPLATES, GROUP_ICONS, GROUP_LABELS, HEALTH_INDICATORS, INVESTMENT_TYPES, LEGAL_CONTROLLER, LEGAL_DATA_INVENTORY, LEGAL_DATA_INVENTORY_GROUPS, LEGAL_PENDING, LEGAL_RETENTION, LEGAL_REVIEW_DATE, LEGAL_SUBJECT_RIGHTS, LEGAL_TEXT_VERSION, LEGAL_THIRD_PARTIES, LEGAL_THIRD_PARTY_GROUPS, MONTH_ABBR, MONTH_NAMES, RULE_MATCH_TYPES, RULE_WEIGHT_DEFAULT, RULE_WEIGHT_MAX, RULE_WEIGHT_MIN, accountsSummary, assetClassOf, backupCryptoAvailable, buildDataSourcesModel, categoryById, childCategories, clamp, compileCategoryRules, compileRulePattern, computeBudgetStatus, daysBetweenIso, debtMonthlyRateInfo, debtsModel, defaultBudgetAlerts, defaultPrivacy, divMoney, emergencyFund, emergencyLadder, escapeHtml, fmtBRL, fmtBRLShort, fmtDateFull, fmtDateShort, fmtDec, fmtNum, formatMovementTimestamp, freshGuestLink, goalExistingBalance, goalInflationPct, goalsModel, healthModel, inflateMoney, investmentTypeOf, isDashboardStarting, keyOfCurrentMonth, legalAccepted, legalControllerGaps, legalControllerReady, legalDataInventoryGaps, legalThirdPartyGaps, legalThirdPartyLaunchGaps, marketRatesOf, matchCategoryRules, mergeBackupInto, moneyCompare, moneyDraft, moneyFromCents, moneyOrZero, moneyToCents, monthKeyOf, mulMoney, nextDueDateForDebt, normalizeCategoryRules, normalizePrivacy, normalizeText, notificationsModel, parseMoneyInput, passwordStrength, plural, pluralWord, portfolioModel, reconciliationHeadline, render, renderBackHeader, renderCalculationButton, renderDonut, renderEmptyState, renderGoalRing, renderLastBackupLine, renderScoreGauge, renderSparkline, safeErrorSummary, safePct, scoreGains, simulateExpenseImpact, simulateFinancingImpact, state, subMoney, svgIcon, todayIso, topLevelCategories, wealthModel;
+let ACCOUNT_TYPE_LABELS, AI_HIDEABLE_FIELDS, ASSET_CLASSES, BACKUP_ENC_MIN_PASSWORD, BUDGET_GROUPS, BUILTIN_CATEGORY_RULES, CloudSync, DEBT_AMORTIZATION_LABELS, DEBT_TYPE_LABELS, FinanceStore, GOAL_ICON_OPTIONS, GOAL_INFLATION_MIN_DAYS, GOAL_TEMPLATES, GROUP_ICONS, GROUP_LABELS, HEALTH_INDICATORS, INVESTMENT_TYPES, LEGAL_CONTROLLER, LEGAL_DATA_INVENTORY, LEGAL_DATA_INVENTORY_GROUPS, LEGAL_PENDING, LEGAL_RETENTION, LEGAL_REVIEW_DATE, LEGAL_SUBJECT_RIGHTS, LEGAL_TEXT_VERSION, LEGAL_THIRD_PARTIES, LEGAL_THIRD_PARTY_GROUPS, MONTH_ABBR, MONTH_NAMES, RULE_MATCH_TYPES, RULE_WEIGHT_DEFAULT, RULE_WEIGHT_MAX, RULE_WEIGHT_MIN, accountsSummary, assetClassOf, backupCryptoAvailable, buildDataSourcesModel, categoryById, childCategories, clamp, compileCategoryRules, compileRulePattern, computeBudgetStatus, daysBetweenIso, debtMonthlyRateInfo, debtsModel, defaultBudgetAlerts, defaultPrivacy, divMoney, emergencyFund, emergencyLadder, escapeHtml, fmtBRL, fmtBRLShort, fmtDateFull, fmtDateShort, fmtDec, fmtNum, formatMovementTimestamp, freshGuestLink, goalExistingBalance, goalInflationPct, goalsModel, healthModel, inflateMoney, inkOf, investmentTypeOf, isDashboardStarting, keyOfCurrentMonth, legalAccepted, legalControllerGaps, legalControllerReady, legalDataInventoryGaps, legalThirdPartyGaps, legalThirdPartyLaunchGaps, marketRatesOf, matchCategoryRules, mergeBackupInto, moneyCompare, moneyDraft, moneyFromCents, moneyOrZero, moneyToCents, monthKeyOf, mulMoney, nextDueDateForDebt, normalizeCategoryRules, normalizePrivacy, normalizeText, notificationsModel, parseMoneyInput, passwordStrength, plural, pluralWord, portfolioModel, reconciliationHeadline, render, renderBackHeader, renderCalculationButton, renderDonut, renderEmptyState, renderGoalRing, renderLastBackupLine, renderScoreGauge, renderSparkline, safeErrorSummary, safePct, scoreGains, simulateExpenseImpact, simulateFinancingImpact, state, subMoney, svgIcon, todayIso, topLevelCategories, wealthModel;
 export function instalarNucleo(n) {
-  ({ ACCOUNT_TYPE_LABELS, AI_HIDEABLE_FIELDS, ASSET_CLASSES, BACKUP_ENC_MIN_PASSWORD, BUDGET_GROUPS, BUILTIN_CATEGORY_RULES, CloudSync, DEBT_AMORTIZATION_LABELS, DEBT_TYPE_LABELS, FinanceStore, GOAL_ICON_OPTIONS, GOAL_INFLATION_MIN_DAYS, GOAL_TEMPLATES, GROUP_ICONS, GROUP_LABELS, HEALTH_INDICATORS, INVESTMENT_TYPES, LEGAL_CONTROLLER, LEGAL_DATA_INVENTORY, LEGAL_DATA_INVENTORY_GROUPS, LEGAL_PENDING, LEGAL_RETENTION, LEGAL_REVIEW_DATE, LEGAL_SUBJECT_RIGHTS, LEGAL_TEXT_VERSION, LEGAL_THIRD_PARTIES, LEGAL_THIRD_PARTY_GROUPS, MONTH_ABBR, MONTH_NAMES, RULE_MATCH_TYPES, RULE_WEIGHT_DEFAULT, RULE_WEIGHT_MAX, RULE_WEIGHT_MIN, accountsSummary, assetClassOf, backupCryptoAvailable, buildDataSourcesModel, categoryById, childCategories, clamp, compileCategoryRules, compileRulePattern, computeBudgetStatus, daysBetweenIso, debtMonthlyRateInfo, debtsModel, defaultBudgetAlerts, defaultPrivacy, divMoney, emergencyFund, emergencyLadder, escapeHtml, fmtBRL, fmtBRLShort, fmtDateFull, fmtDateShort, fmtDec, fmtNum, formatMovementTimestamp, freshGuestLink, goalExistingBalance, goalInflationPct, goalsModel, healthModel, inflateMoney, investmentTypeOf, isDashboardStarting, keyOfCurrentMonth, legalAccepted, legalControllerGaps, legalControllerReady, legalDataInventoryGaps, legalThirdPartyGaps, legalThirdPartyLaunchGaps, marketRatesOf, matchCategoryRules, mergeBackupInto, moneyCompare, moneyDraft, moneyFromCents, moneyOrZero, moneyToCents, monthKeyOf, mulMoney, nextDueDateForDebt, normalizeCategoryRules, normalizePrivacy, normalizeText, notificationsModel, parseMoneyInput, passwordStrength, plural, pluralWord, portfolioModel, reconciliationHeadline, render, renderBackHeader, renderCalculationButton, renderDonut, renderEmptyState, renderGoalRing, renderLastBackupLine, renderScoreGauge, renderSparkline, safeErrorSummary, safePct, scoreGains, simulateExpenseImpact, simulateFinancingImpact, state, subMoney, svgIcon, todayIso, topLevelCategories, wealthModel } = n);
+  ({ ACCOUNT_TYPE_LABELS, AI_HIDEABLE_FIELDS, ASSET_CLASSES, BACKUP_ENC_MIN_PASSWORD, BUDGET_GROUPS, BUILTIN_CATEGORY_RULES, CloudSync, DEBT_AMORTIZATION_LABELS, DEBT_TYPE_LABELS, FinanceStore, GOAL_ICON_OPTIONS, GOAL_INFLATION_MIN_DAYS, GOAL_TEMPLATES, GROUP_ICONS, GROUP_LABELS, HEALTH_INDICATORS, INVESTMENT_TYPES, LEGAL_CONTROLLER, LEGAL_DATA_INVENTORY, LEGAL_DATA_INVENTORY_GROUPS, LEGAL_PENDING, LEGAL_RETENTION, LEGAL_REVIEW_DATE, LEGAL_SUBJECT_RIGHTS, LEGAL_TEXT_VERSION, LEGAL_THIRD_PARTIES, LEGAL_THIRD_PARTY_GROUPS, MONTH_ABBR, MONTH_NAMES, RULE_MATCH_TYPES, RULE_WEIGHT_DEFAULT, RULE_WEIGHT_MAX, RULE_WEIGHT_MIN, accountsSummary, assetClassOf, backupCryptoAvailable, buildDataSourcesModel, categoryById, childCategories, clamp, compileCategoryRules, compileRulePattern, computeBudgetStatus, daysBetweenIso, debtMonthlyRateInfo, debtsModel, defaultBudgetAlerts, defaultPrivacy, divMoney, emergencyFund, emergencyLadder, escapeHtml, fmtBRL, fmtBRLShort, fmtDateFull, fmtDateShort, fmtDec, fmtNum, formatMovementTimestamp, freshGuestLink, goalExistingBalance, goalInflationPct, goalsModel, healthModel, inflateMoney, inkOf, investmentTypeOf, isDashboardStarting, keyOfCurrentMonth, legalAccepted, legalControllerGaps, legalControllerReady, legalDataInventoryGaps, legalThirdPartyGaps, legalThirdPartyLaunchGaps, marketRatesOf, matchCategoryRules, mergeBackupInto, moneyCompare, moneyDraft, moneyFromCents, moneyOrZero, moneyToCents, monthKeyOf, mulMoney, nextDueDateForDebt, normalizeCategoryRules, normalizePrivacy, normalizeText, notificationsModel, parseMoneyInput, passwordStrength, plural, pluralWord, portfolioModel, reconciliationHeadline, render, renderBackHeader, renderCalculationButton, renderDonut, renderEmptyState, renderGoalRing, renderLastBackupLine, renderScoreGauge, renderSparkline, safeErrorSummary, safePct, scoreGains, simulateExpenseImpact, simulateFinancingImpact, state, subMoney, svgIcon, todayIso, topLevelCategories, wealthModel } = n);
 }
 // source: js/screens/accounts.js
 // js/screens/accounts.js. Contas, cartões e conciliação.
@@ -318,7 +318,7 @@ function renderDebtStrategyCard(model) {
           <p class="debt-strategy__call">${chamada}</p>
         </div>
         ${atual === id
-          ? `<span class="status-badge" data-ui-css="background:var(--brand-soft); color:var(--brand)">em uso</span>`
+          ? `<span class="status-badge" data-ui-css="background:var(--brand-soft); color:var(--brand-ink)">em uso</span>`
           : `<button class="btn btn--secondary btn--sm" data-action="debt-strategy" data-value="${id}">Usar esta</button>`}
       </div>
       <div class="debt-strategy__stats">${stats}</div>
@@ -462,7 +462,7 @@ function renderGoalsPlanCard(model) {
             : `Sobra média dos últimos ${p.capacityMonths} meses com movimento`)
           : p.capacityBasis === "renda" ? "Estimativa de 20% da renda informada (ainda sem histórico)" : "Sem histórico para estimar a sobra"}</p>
       </div>
-      <span class="plan-verdict" data-ui-css="color:${tone}">${p.feasible === false ? "Aperta" : p.feasible === true ? "Cabe" : "Sem base"}</span>
+      <span class="plan-verdict" data-ui-css="color:${inkOf(tone)}">${p.feasible === false ? "Aperta" : p.feasible === true ? "Cabe" : "Sem base"}</span>
     </div>
 
     <div class="plan-meter"><div class="plan-meter__fill" data-ui-css="width:${ratio}%; background:${tone}"></div></div>
@@ -629,7 +629,7 @@ function renderGoalCard(m) {
       <div class="goal-header__text">
         <p class="goal-name">${escapeHtml(g.name)}</p>
         <p class="goal-progress-inline"><b>${fmtBRL(m.saved)}</b> de ${fmtBRL(m.target)}</p>
-        <span class="goal-status" data-ui-css="color:${tone}">${svgIcon(m.statusIcon, 12)} ${m.statusLabel}</span>
+        <span class="goal-status" data-ui-css="color:${inkOf(tone)}">${svgIcon(m.statusIcon, 12)} ${m.statusLabel}</span>
       </div>
       <div class="goal-header__actions">
         <button class="icon-btn" data-action="edit-goal" data-id="${g.id}" aria-label="Editar meta">${svgIcon("pencil", 15)}</button>
@@ -653,7 +653,7 @@ function renderGoalCard(m) {
       </div>
       <div class="goal-number">
         <span class="goal-number__label">Ritmo real</span>
-        <b data-ui-css="color:${m.paceActive ? tone : "var(--ink-faint)"}">${m.paceActive ? fmtBRL(m.paceMonthly) : "Sem histórico"}</b>
+        <b data-ui-css="color:${m.paceActive ? inkOf(tone) : "var(--ink-faint)"}">${m.paceActive ? fmtBRL(m.paceMonthly) : "Sem histórico"}</b>
         <span class="goal-number__hint">${m.paceActive ? `média de ${m.paceWindow} ${m.paceWindow === 1 ? "mês" : "meses"}` : "nenhum aporte ainda"}</span>
       </div>
     </div>` : ""}
@@ -1168,7 +1168,7 @@ function renderWealthChartCard(m) {
       ${[["No mês", m.delta.month], ["6 meses", m.delta.sixMonths], [`${m.months} meses`, m.delta.year]].map(([label, d]) => `
         <div class="wealth-delta">
           <span class="wealth-delta__label">${escapeHtml(label)}</span>
-          <b class="wealth-delta__value" data-ui-css="color:${d.comparable ? (d.up ? "var(--positive)" : "var(--negative)") : "var(--ink-faint)"}">
+          <b class="wealth-delta__value" data-ui-css="color:${inkOf(d.comparable ? (d.up ? "var(--positive)" : "var(--negative)") : "var(--ink-faint)")}">
             ${d.comparable ? `${d.up ? "+" : "−"}${fmtBRLShort(Math.abs(d.value))}` : "Sem dados"}
           </b>
         </div>`).join("")}
@@ -1202,13 +1202,13 @@ function renderWealthAnnualCard(m) {
     <div class="wealth-deltas" data-ui-css="margin-top:16px">
       <div class="wealth-delta">
         <span class="wealth-delta__label">No ano (desde 31/12)</span>
-        <b class="wealth-delta__value" data-ui-css="color:${a.ytd.comparable ? (a.ytd.up ? "var(--positive)" : "var(--negative)") : "var(--ink-faint)"}">
+        <b class="wealth-delta__value" data-ui-css="color:${inkOf(a.ytd.comparable ? (a.ytd.up ? "var(--positive)" : "var(--negative)") : "var(--ink-faint)")}">
           ${a.ytd.comparable ? `${a.ytd.up ? "+" : "−"}${fmtBRLShort(Math.abs(a.ytd.value))}` : "Sem dados"}
         </b>
       </div>
       <div class="wealth-delta">
         <span class="wealth-delta__label">Contra 12 meses atrás</span>
-        <b class="wealth-delta__value" data-ui-css="color:${a.yoy.comparable ? (a.yoy.up ? "var(--positive)" : "var(--negative)") : "var(--ink-faint)"}">
+        <b class="wealth-delta__value" data-ui-css="color:${inkOf(a.yoy.comparable ? (a.yoy.up ? "var(--positive)" : "var(--negative)") : "var(--ink-faint)")}">
           ${a.yoy.comparable ? `${a.yoy.up ? "+" : "−"}${fmtDec(Math.abs(a.yoy.pct), 1)}%` : "Sem dados"}
         </b>
       </div>
@@ -2405,15 +2405,38 @@ function renderCreditLimitSettingsCard() {
   </div>`;
 }
 
+// [M42] TRÊS OPÇÕES, PORQUE "SEGUIR O SISTEMA" NÃO CABE NUM INTERRUPTOR.
+//
+// Era um interruptor de duas posições, e a preferência do aparelho era lida uma
+// única vez, no primeiro uso, e gravada como se fosse escolha. Quem instalava o
+// app com o celular no escuro ficava no escuro para sempre, e não havia como
+// voltar para o automático nem apagando nada pela interface. Ver o cabeçalho de
+// `applyTheme` em js/app.js.
+const THEME_OPTIONS = [
+  { id: "system", icon: "refresh", label: "Automático", hint: "Acompanha o aparelho" },
+  { id: "light", icon: "sun", label: "Claro", hint: "Sempre claro" },
+  { id: "dark", icon: "moon", label: "Escuro", hint: "Sempre escuro" },
+];
+
+function themeChoiceLabel(theme) {
+  const opcao = THEME_OPTIONS.find((o) => o.id === theme) || THEME_OPTIONS[0];
+  return opcao.label;
+}
+
 function renderAppearanceSettingsCard() {
-  const escuro = state.data.theme === "dark";
+  const atual = THEME_OPTIONS.some((o) => o.id === state.data.theme) ? state.data.theme : "system";
   const conquistas = !!(state.data.achievements && state.data.achievements.enabled);
   return `<div class="card">
-    <button class="theme-toggle" data-action="toggle-theme" role="switch" aria-checked="${escuro ? "true" : "false"}">
-      ${svgIcon(escuro ? "moon" : "sun", 17)}
-      <span>Modo ${escuro ? "escuro" : "claro"}</span>
-      <span class="switch ${escuro ? "active" : ""}" aria-hidden="true"><span class="switch__knob"></span></span>
-    </button>
+    <fieldset class="theme-choice">
+      <legend class="field__label">Tema</legend>
+      <div class="theme-choice__options" role="radiogroup" aria-label="Tema do aplicativo">
+        ${THEME_OPTIONS.map((o) => `<button type="button" class="theme-choice__option${o.id === atual ? " is-active" : ""}" role="radio" aria-checked="${o.id === atual ? "true" : "false"}" data-action="set-theme" data-value="${o.id}">
+          ${svgIcon(o.icon, 17)}
+          <b>${escapeHtml(o.label)}</b>
+          <small>${escapeHtml(o.hint)}</small>
+        </button>`).join("")}
+      </div>
+    </fieldset>
     <button class="theme-toggle" data-action="toggle-gamification" role="switch" aria-checked="${conquistas ? "true" : "false"}">
       ${svgIcon("star", 17)}
       <span><b>Conquistas e níveis</b><small>Opcional. Fica fora do Início até você ativar.</small></span>
@@ -2480,9 +2503,8 @@ const SETTINGS_SECTIONS = [
     icon: "sun",
     label: "Aparência",
     resumo() {
-      const escuro = state.data.theme === "dark";
       const conquistas = !!(state.data.achievements && state.data.achievements.enabled);
-      return `Modo ${escuro ? "escuro" : "claro"} · conquistas ${conquistas ? "ligadas" : "desligadas"}`;
+      return `Tema ${themeChoiceLabel(state.data.theme).toLowerCase()} · conquistas ${conquistas ? "ligadas" : "desligadas"}`;
     },
     render: renderAppearanceSettingsCard,
   },
@@ -3485,6 +3507,7 @@ export {
   ALL_SECTIONS,
   NOTIF_TONE_CLASS,
   SETTINGS_SECTIONS,
+  THEME_OPTIONS,
   accountDangerCard,
   accountDeviceDate,
   accountDeviceFirstSeen,
@@ -3603,4 +3626,5 @@ export {
   rulesCategoryOptions,
   settingsOpenSection,
   simLabel,
+  themeChoiceLabel,
 };

@@ -224,7 +224,7 @@
 .debt-row { border:1px solid var(--border); border-radius:14px; overflow:hidden; }
 .debt-row.is-open { border-color:color-mix(in srgb,var(--negative) 32%,var(--border)); }
 .debt-row__main { width:100%; display:grid; grid-template-columns:34px minmax(0,1fr) auto 18px; gap:10px; align-items:center; padding:14px; color:inherit; text-align:left; background:transparent; border:0; cursor:pointer; }
-.debt-rank { display:grid; place-items:center; width:30px; height:30px; border-radius:10px; background:color-mix(in srgb,var(--negative) 12%,transparent); color:var(--negative); font-weight:800; }
+.debt-rank { display:grid; place-items:center; width:30px; height:30px; border-radius:10px; background:color-mix(in srgb,var(--negative) 12%,transparent); color:var(--negative-ink); font-weight:800; }
 .debt-row__text b,.debt-row__text small,.debt-row__values b,.debt-row__values small { display:block; }
 .debt-row__text small,.debt-row__values small { color:var(--ink-faint); font-size:.74rem; margin-top:3px; }
 .debt-row__values { text-align:right; }
@@ -245,7 +245,7 @@
 .debt-strategy__stats span { display:block; color:var(--ink-faint); font-size:.7rem; }
 .debt-strategy__stats b { color:var(--ink); font-size:.84rem; }
 .debt-strategy__pro,.debt-strategy__con { display:flex; gap:7px; margin:6px 0 0; font-size:.76rem; line-height:1.45; }
-.debt-strategy__pro { color:var(--positive); }
+.debt-strategy__pro { color:var(--positive-ink); }
 .debt-strategy__con { color:var(--ink-soft); }
 .debt-strategy__pro svg,.debt-strategy__con svg { flex:0 0 auto; margin-top:2px; }
 .debt-strategy__verdict { display:flex; gap:8px; margin:14px 0 0; padding:11px 12px; border-radius:11px; background:color-mix(in srgb,var(--brand) 9%,transparent); color:var(--ink-soft); font-size:.78rem; line-height:1.5; }
@@ -253,7 +253,7 @@
 .debt-late-flag { color:var(--negative); font-weight:700; }
 .debt-burden__value { margin:10px 0 0; font-size:1.6rem; font-weight:800; color:var(--ink); letter-spacing:-0.02em; }
 .debt-burden__label { margin:2px 0 8px; font-size:.8rem; font-weight:700; }
-.debt-burden--ok { color:var(--positive); }
+.debt-burden--ok { color:var(--positive-ink); }
 .debt-burden--atencao { color:var(--brand); }
 .debt-burden--alto { color:var(--goal); }
 .debt-burden--critico { color:var(--negative); }
@@ -287,7 +287,11 @@
   --brand-dark:  #0E7A66;
   --brand-deep:  #04231E;
   --brand-glow:  #2FD6AF;
-  --brand-soft:  rgba(31,179,148,0.15);
+  /* [M42] 15% deixava a marca em cima da própria chapa em 4,46:1, medido no
+     selo "em uso" da tela de dívidas, contra os 4,5:1 da WCAG 1.4.3 AA. Uma
+     chapa mais escura sobe o contraste de TUDO que é escrito nela, então a
+     correção é aqui e não em cada selo. */
+  --brand-soft:  rgba(31,179,148,0.11);
 
   --positive:      #27C79A;
   --positive-soft: rgba(39,199,154,0.15);

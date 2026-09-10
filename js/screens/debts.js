@@ -119,7 +119,7 @@ function renderDebtStrategyCard(model) {
           <p class="debt-strategy__call">${chamada}</p>
         </div>
         ${atual === id
-          ? `<span class="status-badge" data-ui-css="background:var(--brand-soft); color:var(--brand)">em uso</span>`
+          ? `<span class="status-badge" data-ui-css="background:var(--brand-soft); color:var(--brand-ink)">em uso</span>`
           : `<button class="btn btn--secondary btn--sm" data-action="debt-strategy" data-value="${id}">Usar esta</button>`}
       </div>
       <div class="debt-strategy__stats">${stats}</div>

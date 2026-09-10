@@ -187,7 +187,7 @@ function renderWealthChartCard(m) {
       ${[["No mês", m.delta.month], ["6 meses", m.delta.sixMonths], [`${m.months} meses`, m.delta.year]].map(([label, d]) => `
         <div class="wealth-delta">
           <span class="wealth-delta__label">${escapeHtml(label)}</span>
-          <b class="wealth-delta__value" data-ui-css="color:${d.comparable ? (d.up ? "var(--positive)" : "var(--negative)") : "var(--ink-faint)"}">
+          <b class="wealth-delta__value" data-ui-css="color:${inkOf(d.comparable ? (d.up ? "var(--positive)" : "var(--negative)") : "var(--ink-faint)")}">
             ${d.comparable ? `${d.up ? "+" : "−"}${fmtBRLShort(Math.abs(d.value))}` : "Sem dados"}
           </b>
         </div>`).join("")}
@@ -221,13 +221,13 @@ function renderWealthAnnualCard(m) {
     <div class="wealth-deltas" data-ui-css="margin-top:16px">
       <div class="wealth-delta">
         <span class="wealth-delta__label">No ano (desde 31/12)</span>
-        <b class="wealth-delta__value" data-ui-css="color:${a.ytd.comparable ? (a.ytd.up ? "var(--positive)" : "var(--negative)") : "var(--ink-faint)"}">
+        <b class="wealth-delta__value" data-ui-css="color:${inkOf(a.ytd.comparable ? (a.ytd.up ? "var(--positive)" : "var(--negative)") : "var(--ink-faint)")}">
           ${a.ytd.comparable ? `${a.ytd.up ? "+" : "−"}${fmtBRLShort(Math.abs(a.ytd.value))}` : "Sem dados"}
         </b>
       </div>
       <div class="wealth-delta">
         <span class="wealth-delta__label">Contra 12 meses atrás</span>
-        <b class="wealth-delta__value" data-ui-css="color:${a.yoy.comparable ? (a.yoy.up ? "var(--positive)" : "var(--negative)") : "var(--ink-faint)"}">
+        <b class="wealth-delta__value" data-ui-css="color:${inkOf(a.yoy.comparable ? (a.yoy.up ? "var(--positive)" : "var(--negative)") : "var(--ink-faint)")}">
           ${a.yoy.comparable ? `${a.yoy.up ? "+" : "−"}${fmtDec(Math.abs(a.yoy.pct), 1)}%` : "Sem dados"}
         </b>
       </div>

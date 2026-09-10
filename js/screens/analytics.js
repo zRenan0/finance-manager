@@ -68,7 +68,19 @@ function renderMovementEntry(entry) {
   const sign = entry.type === "income" ? "+" : entry.type === "expense" ? "-" : "";
   const icon = entry.type === "income" ? "trendUp" : entry.type === "expense" ? (entry.transaction ? categoryById(state.data, entry.categoryId).icon : "arrowRight") : entry.kind === "transfer" ? "arrowRight" : "creditCard";
   return `<div class="movement-row ${selected ? "movement-row--selected" : ""}">
-    ${entry.kind === "transaction" ? `<label class="movement-check" aria-label="Selecionar ${escapeHtml(entry.description)}"><input type="checkbox" data-action-select="movement-select" data-id="${entry.id}" ${selected ? "checked" : ""} /></label>` : `<span class="movement-check movement-check--empty" aria-hidden="true"></span>`}
+    ${/* [M42] O NOME ACESSÍVEL PERTENCE AO CONTROLE, NÃO À ETIQUETA QUE O ENVOLVE.
+
+          O `aria-label` estava no `<label>`. O leitor de tela para no `<input>`,
+          e a árvore de acessibilidade real do navegador devolvia:
+
+            label "Selecionar Academia"
+              checkbox "on"        <- é aqui que o foco chega
+
+          Numa lista de cinquenta movimentações, quem navega por teclado ouvia
+          "caixa de seleção, on" cinquenta vezes sem saber o que estava marcando.
+          Falha de WCAG 4.1.2 (Nome, Função, Valor). O atributo no `<input>`
+          resolve; o `<label>` continua sendo o alvo de toque de 32x44. */""}
+    ${entry.kind === "transaction" ? `<label class="movement-check"><input type="checkbox" aria-label="Selecionar ${escapeHtml(entry.description)}" data-action-select="movement-select" data-id="${entry.id}" ${selected ? "checked" : ""} /></label>` : `<span class="movement-check movement-check--empty" aria-hidden="true"></span>`}
     <span class="icon-bubble">${svgIcon(icon, 18)}</span>
     <button class="movement-row__main" data-action="${entry.kind === "transaction" ? "edit-tx" : "movement-detail"}" data-id="${entry.id}">
       <span class="tx-title">${escapeHtml(entry.description)}</span>

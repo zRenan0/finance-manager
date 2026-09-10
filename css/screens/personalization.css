@@ -224,7 +224,7 @@
   background: var(--negative-soft);
 }
 .settings-destination__stat--alert .settings-destination__stat-label,
-.settings-destination__stat--alert .settings-destination__stat-value { color: var(--negative); }
+.settings-destination__stat--alert .settings-destination__stat-value { color: var(--negative-ink); }
 
 .settings-destination__foot {
   display: block; margin-top: 12px; padding-top: 11px;

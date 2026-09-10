@@ -300,7 +300,7 @@ function renderScoreCard(m) {
       ${renderScoreGauge(s.score, s.level.color)}
       <div class="score-head__text">
         <p class="card-title" data-ui-css="margin:0">Score financeiro</p>
-        <p class="score-level" data-ui-css="color:${s.level.color}">${s.level.label}</p>
+        <p class="score-level" data-ui-css="color:${inkOf(s.level.color)}">${s.level.label}</p>
         <p class="score-note">${escapeHtml(s.level.note)}</p>
       </div>
     </div>
@@ -336,6 +336,31 @@ function renderScoreCard(m) {
   </div>`;
 }
 
+// [M42] A LEGENDA DIZ O QUE PODE SER DITO, e cala o que não pode.
+//
+// Ela só sabia escrever uma frase: "Crescimento de N% desde <mês>". Com a
+// janela fixa em seis meses e o ramo `first === 0` devolvendo 100, quem tinha
+// um mês de uso lia "Crescimento de 100,0% desde abril: de R$ 0,00 para
+// R$ 5.000,00", sobre um período em que não usava o app.
+//
+// Agora são três casos, e nenhum deles inventa período:
+//
+//   * sem histórico para comparar (primeiro mês): nada é escrito;
+//   * com histórico mas sem base que sustente percentual: os dois extremos, sem
+//     percentual nenhum. "De R$ 0,00 para R$ 5.000,00 desde abril" é verdade
+//     inteira e não precisa de divisão;
+//   * com base: a frase de antes, que continua certa.
+//
+// Ver `netWorthGrowth` em js/metrics.js.
+function netWorthGrowthFootnote(g, up) {
+  if (g.historyMonths < 2) return "";
+  const desde = `desde ${escapeHtml(g.sinceLabel)}`;
+  if (!g.measurable || g.pct == null) {
+    return `<p class="footnote" data-ui-css="margin-top:6px">De ${fmtBRL(g.first)} para ${fmtBRL(g.last)} ${desde}.</p>`;
+  }
+  return `<p class="footnote" data-ui-css="margin-top:6px">${up ? "Crescimento" : "Queda"} de ${fmtDec(Math.abs(g.pct), 1)}% ${desde}: de ${fmtBRL(g.first)} para ${fmtBRL(g.last)}.</p>`;
+}
+
 // ---- Patrimônio: total, composição e evolução ----
 function renderNetWorthCard(m) {
   const w = m.worth;
@@ -369,7 +394,7 @@ function renderNetWorthCard(m) {
 
     ${renderSparkline(series, up ? "var(--brand)" : "var(--negative)")}
     <div class="networth-axis">${series.map((p) => `<span>${p.label}</span>`).join("")}</div>
-    ${g.measurable && deltaPct != null ? `<p class="footnote" data-ui-css="margin-top:6px">${up ? "Crescimento" : "Queda"} de ${fmtDec(Math.abs(deltaPct), 1)}% desde ${g.sinceLabel}: de ${fmtBRL(g.first)} para ${fmtBRL(g.last)}.</p>` : ""}
+    ${netWorthGrowthFootnote(g, up)}
 
     ${sum > 0 ? `<div class="segment-bar" data-ui-css="margin-top:14px">
       ${parts.filter((p) => p.value > 0).map((p) => `<div data-ui-css="flex:${p.value};background:${p.color}"></div>`).join("")}
@@ -405,7 +430,7 @@ function renderReserveCard(m) {
       <span class="icon-bubble icon-bubble--sm" data-ui-css="background:color-mix(in srgb, ${meta.color} 14%, transparent); color:${meta.color}">${svgIcon("shieldCheck", 16)}</span>
       <div>
         <p class="card-title" data-ui-css="margin:0">Reserva de emergência</p>
-        <p class="mini-card__sub" data-ui-css="color:${meta.color}">${meta.label}</p>
+        <p class="mini-card__sub" data-ui-css="color:${inkOf(meta.color)}">${meta.label}</p>
       </div>
     </div>
     <p class="mini-card__value">${fmtBRL(r.current)}</p>
@@ -443,7 +468,7 @@ function renderFeaturedGoalCard(m) {
       ${renderGoalRing(f.pct, color, g.icon, 44)}
       <div>
         <p class="card-title" data-ui-css="margin:0">${escapeHtml(g.name)}</p>
-        <p class="mini-card__sub" data-ui-css="color:${color}">${f.done ? `${svgIcon("checkCircle", 13)} Meta concluída` : `${f.pct.toFixed(0)}% concluída`}</p>
+        <p class="mini-card__sub" data-ui-css="color:${inkOf(color)}">${f.done ? `${svgIcon("checkCircle", 13)} Meta concluída` : `${f.pct.toFixed(0)}% concluída`}</p>
       </div>
     </div>
     <p class="mini-card__value">${fmtBRL(g.current)} <span class="mini-card__value-of">de ${fmtBRL(g.target)}</span></p>
@@ -864,7 +889,7 @@ function renderBudgetRow(b, thresholds) {
     <div class="budget-row__head">
       <span class="icon-bubble icon-bubble--sm" data-ui-css="background:color-mix(in srgb, ${b.color} 14%, transparent); color:${b.color}">${svgIcon(b.icon, 14)}</span>
       <span class="budget-row__name">${escapeHtml(b.name)}${b.isParent ? `<span class="budget-row__hint"> · inclui ${plural(b.childCount, "subcategoria", "subcategorias")}</span>` : ""}</span>
-      <span class="budget-row__value" data-ui-css="color:${meta.color}">${fmtBRL(b.spent)}<span class="cat-value-muted"> / ${fmtBRL(b.budget)}</span></span>
+      <span class="budget-row__value" data-ui-css="color:${inkOf(meta.color)}">${fmtBRL(b.spent)}<span class="cat-value-muted"> / ${fmtBRL(b.budget)}</span></span>
     </div>
     <div class="progress budget-progress">
       <div class="progress__fill" data-ui-css="width:${pctCapped}%; background:${meta.color}"></div>

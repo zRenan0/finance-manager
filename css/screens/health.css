@@ -272,7 +272,10 @@ ol.plan-list { list-style: none; margin: 16px 0 0; padding: 0; display: flex; fl
   display: inline-block;
   padding: 1px 7px;
   border-radius: 999px;
-  background: var(--brand);
+  /* [M42] `--brand-solid`, e nao `--brand`: no tema escuro a marca clareia
+     para #1FB394 e branco em cima dela cai para 2,65:1, medido na tela. O token
+     existe exatamente para chapa de marca que carrega branco; ver css/base.css. */
+  background: var(--brand-solid);
   color: #fff;
   font-size: 11px;
   font-weight: 600;

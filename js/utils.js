@@ -405,6 +405,41 @@ function fmtDateShort(iso) {
 }
 function fmtDateFull(iso) { if(!iso) return ""; const [y, m, d] = iso.split("-"); return `${d}/${m}/${y}`; }
 
+// [M42] A TINTA DE SINAL PARA TEXTO MIÚDO.
+//
+// `css/base.css` já tinha as variantes escuras (`--positive-ink`, `--goal-ink`,
+// `--negative-ink`) e escreveu a regra no comentário: preenchimento, barra,
+// ícone e número grande usam a cor de sinal; TEXTO PEQUENO sobre superfície
+// clara usa a variante `-ink`. O que faltava era aplicar isso onde a cor é
+// escolhida em JavaScript e injetada como estilo inline.
+//
+// Medido no navegador, tema claro, compondo as camadas translúcidas de verdade,
+// antes desta correção:
+//
+//   "Aportar R$ 350,00"  #A9791F sobre #F7EFDC  3,37:1   (rótulo de BOTÃO)
+//   "Ritmo baixo"        #A9791F sobre #FFFFFF  3,86:1
+//   "24% concluída"      #A9791F sobre #FFFFFF  3,86:1
+//   "+R$ 42,1 mil"       #0E8A6E sobre #FAFBFA  4,15:1
+//   "Cabe"               #0E8A6E sobre #FFFFFF  4,30:1
+//
+// A régua da WCAG 2.1 AA (1.4.3) para texto miúdo é 4,5:1. Nenhum desses
+// passava, e são justamente as linhas que decidem um aporte.
+//
+// `inkOf` traduz a cor de sinal na variante de texto e deixa passar qualquer
+// outra coisa (`--ink-faint`, `--ink-soft`, cor de categoria) intacta. Assim a
+// troca é de uma palavra por chamada, e só onde a cor pinta LETRA: onde ela
+// pinta bolha, barra ou anel, a chamada não entra.
+const TONE_INK = {
+  "var(--positive)": "var(--positive-ink)",
+  "var(--negative)": "var(--negative-ink)",
+  "var(--goal)": "var(--goal-ink)",
+  "var(--brand)": "var(--brand-ink)",
+};
+function inkOf(color) {
+  const chave = String(color == null ? "" : color).trim();
+  return Object.prototype.hasOwnProperty.call(TONE_INK, chave) ? TONE_INK[chave] : color;
+}
+
 function escapeHtml(str) {
   return String(str == null ? "" : str).replace(/[&<>"']/g, (c) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",

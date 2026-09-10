@@ -61,7 +61,14 @@
   display: inline-flex; align-items: center; gap: 6px;
   padding: 5px 10px; border-radius: 999px;
   background: color-mix(in srgb, var(--tone) 12%, transparent);
-  color: var(--tone);
+  /* [M42] A COR DE CLASSE PINTA A PASTILHA, NÃO A LETRA.
+     `--tone` aqui é a cor do catálogo de classes (js/storage.js), escolhida
+     para bolinha e barra. Como texto de 12px ela não fecha a conta: "Outros"
+     (#7C8592) dava 3,28:1 sobre a pastilha, contra os 4,5:1 da WCAG 1.4.3 AA.
+     Escurecer no catálogo estragaria a bolinha e obrigaria a auditar as vinte
+     cores; misturar com a tinta preserva o matiz e garante o contraste para
+     QUALQUER cor da lista, inclusive as que vierem depois. */
+  color: color-mix(in srgb, var(--tone) 55%, var(--ink));
   font-size: 0.76rem; font-weight: 600;
 }
 .pf-group-pill b { font-family: var(--font-num); }

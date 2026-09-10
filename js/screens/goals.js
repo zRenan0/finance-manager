@@ -79,7 +79,7 @@ function renderGoalsPlanCard(model) {
             : `Sobra média dos últimos ${p.capacityMonths} meses com movimento`)
           : p.capacityBasis === "renda" ? "Estimativa de 20% da renda informada (ainda sem histórico)" : "Sem histórico para estimar a sobra"}</p>
       </div>
-      <span class="plan-verdict" data-ui-css="color:${tone}">${p.feasible === false ? "Aperta" : p.feasible === true ? "Cabe" : "Sem base"}</span>
+      <span class="plan-verdict" data-ui-css="color:${inkOf(tone)}">${p.feasible === false ? "Aperta" : p.feasible === true ? "Cabe" : "Sem base"}</span>
     </div>
 
     <div class="plan-meter"><div class="plan-meter__fill" data-ui-css="width:${ratio}%; background:${tone}"></div></div>
@@ -246,7 +246,7 @@ function renderGoalCard(m) {
       <div class="goal-header__text">
         <p class="goal-name">${escapeHtml(g.name)}</p>
         <p class="goal-progress-inline"><b>${fmtBRL(m.saved)}</b> de ${fmtBRL(m.target)}</p>
-        <span class="goal-status" data-ui-css="color:${tone}">${svgIcon(m.statusIcon, 12)} ${m.statusLabel}</span>
+        <span class="goal-status" data-ui-css="color:${inkOf(tone)}">${svgIcon(m.statusIcon, 12)} ${m.statusLabel}</span>
       </div>
       <div class="goal-header__actions">
         <button class="icon-btn" data-action="edit-goal" data-id="${g.id}" aria-label="Editar meta">${svgIcon("pencil", 15)}</button>
@@ -270,7 +270,7 @@ function renderGoalCard(m) {
       </div>
       <div class="goal-number">
         <span class="goal-number__label">Ritmo real</span>
-        <b data-ui-css="color:${m.paceActive ? tone : "var(--ink-faint)"}">${m.paceActive ? fmtBRL(m.paceMonthly) : "Sem histórico"}</b>
+        <b data-ui-css="color:${m.paceActive ? inkOf(tone) : "var(--ink-faint)"}">${m.paceActive ? fmtBRL(m.paceMonthly) : "Sem histórico"}</b>
         <span class="goal-number__hint">${m.paceActive ? `média de ${m.paceWindow} ${m.paceWindow === 1 ? "mês" : "meses"}` : "nenhum aporte ainda"}</span>
       </div>
     </div>` : ""}

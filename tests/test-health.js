@@ -459,7 +459,67 @@ console.log("\n10. [M41] Crescimento do patrimônio: uma janela, com o período 
   check("o score não monta mais a própria série de 4 meses", !/netWorthSeries\(data, 4\)/.test(scoreSrc));
   check("o cartão de patrimônio não monta mais a própria série de 6",
     !/netWorthSeries\(state\.data, 6\)/.test(painel) && /netWorthGrowth\(state\.data\)/.test(painel));
-  check("e o cartão escreve o período na tela", /desde \$\{g\.sinceLabel\}/.test(painel));
+  check("e o cartão escreve o período na tela", /netWorthGrowthFootnote\(g, up\)/.test(painel));
+}
+
+/* ------- 11. [M42] A janela não começa antes de o usuário existir ------- */
+// O defeito: a janela era fixa em seis meses e o ramo `first === 0` devolvia
+// 100. Quem instalou o app este mês lia, sobre o próprio patrimônio,
+// "Crescimento de 100,0% desde abril: de R$ 0,00 para R$ 5.000,00" — num
+// período em que não usava o app. Medido no motor real, TODO usuário entre o
+// primeiro e o quinto mês recebia "+100,0%", qualquer que fosse o saldo.
+console.log("\n11. [M42] Usuário novo não recebe percentual sobre mês que não viveu");
+{
+  const mesAtual = ctx.keyOfDate(new Date());
+  const usuarioDe = (mesesDeUso, aberturaBalance, entradaMensal) => {
+    const transactions = [];
+    for (let m = mesesDeUso - 1; m >= 0; m--) {
+      transactions.push(tx({ type: "income", amount: entradaMensal, categoryId: "salario", date: monthsAgo(m, 5) }));
+    }
+    const data = base({ monthlyIncome: 5000, transactions });
+    data.accounts = [{
+      id: "conta-nova", name: "Conta", type: "corrente",
+      openingBalance: aberturaBalance, openingDate: monthsAgo(mesesDeUso, 1), archived: false,
+    }];
+    return data;
+  };
+
+  // ---- Primeiro mês de uso: não há o que comparar ----
+  const primeiroMes = ctx.netWorthGrowth(usuarioDe(1, 0, 5000));
+  check("um mês de uso não vira percentual", primeiroMes.pct === null, primeiroMes.pct);
+  check("e o crescimento não é dado como medido", primeiroMes.measurable === false);
+  check("a janela não passa do histórico que existe",
+    primeiroMes.fromKey >= ctx.keyOfDate(new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1)),
+    { de: primeiroMes.fromKey, ate: mesAtual });
+
+  // ---- Base perto de zero: aritmeticamente certo, informativamente inútil ----
+  const baseMinima = ctx.netWorthGrowth(usuarioDe(2, 50, 5000));
+  check("R$ 50,00 virando R$ 5.050,00 não vira '+10.000%'", baseMinima.pct === null, baseMinima.pct);
+  check("mas os dois extremos continuam disponíveis para a tela",
+    baseMinima.first > 0 && baseMinima.last > baseMinima.first, { first: baseMinima.first, last: baseMinima.last });
+
+  // ---- Base de verdade: o percentual volta, e o período é o real ----
+  const comBase = ctx.netWorthGrowth(usuarioDe(3, 2000, 1000));
+  check("com base real o percentual é calculado", comBase.measurable && Number.isFinite(comBase.pct), comBase.pct);
+  check("o período começa no primeiro mês COM DADO, não seis meses atrás",
+    comBase.historyMonths === comBase.months && comBase.months < 6,
+    { historico: comBase.historyMonths, janela: comBase.months });
+  check("o primeiro ponto não é mais zero por falta de histórico", comBase.first > 0, comBase.first);
+
+  // ---- Quem tem seis meses continua vendo a janela de seis ----
+  const veterano = ctx.netWorthGrowth(usuarioDe(8, 10000, 1000));
+  check("com histórico longo a janela volta a ser de seis meses", veterano.months === 6, veterano.months);
+  check("e o percentual continua sendo calculado", veterano.measurable && Number.isFinite(veterano.pct), veterano.pct);
+
+  // ---- O pilar do score não pontua quem não tem base ----
+  const pilarNovo = ctx.computeFinanceScore(usuarioDe(1, 0, 5000), mesAtual).pillars.find((p) => p.id === "patrimonio");
+  check("sem base, o pilar de patrimônio sai da conta em vez de zerar",
+    pilarNovo.applicable === false, { applicable: pilarNovo.applicable, points: pilarNovo.points });
+
+  // ---- A legenda do cartão fala dos extremos quando não há percentual ----
+  const painelSrc = readSrc("js/screens/dashboard.js");
+  check("a legenda tem um caminho sem percentual", /De \$\{fmtBRL\(g\.first\)\} para \$\{fmtBRL\(g\.last\)\}/.test(painelSrc));
+  check("e cala de vez quando não há histórico", /if \(g\.historyMonths < 2\) return "";/.test(painelSrc));
 }
 
 console.log(`\n${fail === 0 ? "TODOS OS TESTES PASSARAM" : "FALHAS ENCONTRADAS"} — ${pass} ok, ${fail} falha(s)\n`);

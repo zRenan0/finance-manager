@@ -207,9 +207,9 @@ function netWorthAtMonthEnd(data, monthKey, acc) {
 // Série de patrimônio dos últimos N meses (mais antigo → mais recente).
 // O ponto do mês corrente usa o patrimônio de HOJE (`netWorth`), não uma
 // projeção de fim de mês: é o número que o usuário vê no topo da tela.
-function netWorthSeries(data, months = 6) {
+function netWorthSeries(data, months = 6, accPronto) {
   const now = new Date();
-  const acc = ledgerAccumulator(data);
+  const acc = accPronto || ledgerAccumulator(data);
   const currentKey = keyOfDate(now);
   const out = [];
   for (let i = months - 1; i >= 0; i--) {
@@ -241,21 +241,71 @@ function netWorthSeries(data, months = 6) {
 // nos últimos meses" é só uma afirmação grande.
 const NET_WORTH_GROWTH_MONTHS = 6;
 
+// [M42] A JANELA NÃO PODE COMEÇAR ANTES DE O USUÁRIO EXISTIR.
+//
+// A janela era fixa em seis meses, sempre. Para quem instalou o app este mês, o
+// primeiro ponto caía num mês em que não havia app, não havia conta e não havia
+// dado: `first` valia R$ 0,00. E o ramo `first === 0` devolvia 100.
+//
+// O resultado era a primeira frase que essa pessoa lia sobre o próprio
+// patrimônio:
+//
+//   "Crescimento de 100,0% desde abril: de R$ 0,00 para R$ 5.000,00."
+//
+// Em abril ela não usava o app. O número não estava arredondado errado nem mal
+// formatado: ele afirmava um fato sobre um período que nunca foi medido. Medido
+// com o motor real, TODO usuário entre o primeiro e o quinto mês de uso recebia
+// exatamente "+100,0%", qualquer que fosse o saldo.
+//
+// Duas travas, e as duas precisam existir:
+//
+//   1. A janela começa no primeiro mês em que há dado (`acc.keys[0]`), nunca
+//      antes. `ledgerAccumulator` já calculava essa lista; faltava usá-la.
+//   2. Percentual exige BASE. Com `first` em zero a conta é indefinida, e com
+//      `first` perto de zero ela é aritmeticamente correta e inútil: R$ 150
+//      virando R$ 50.000 são "+33.233%", que ninguém lê como informação. Nesses
+//      casos a resposta honesta é o valor absoluto, que é sempre verdadeiro.
+//
+// `measurable` passou a significar "o percentual se sustenta". É o que os dois
+// consumidores precisam saber: o cartão do painel troca o percentual pelo delta,
+// e o pilar do score sai da conta em vez de pontuar quem ainda não tem base.
+const NET_WORTH_GROWTH_MIN_BASE = 100;
+// Acima de 100x, o divisor deixou de ser um ponto de partida e virou artefato.
+const NET_WORTH_GROWTH_MAX_RATIO = 100;
+
+function monthsBetweenKeys(de, ate) {
+  const [y1, m1] = String(de).split("-").map(Number);
+  const [y2, m2] = String(ate).split("-").map(Number);
+  if (!Number.isFinite(y1) || !Number.isFinite(y2)) return 0;
+  return (y2 - y1) * 12 + (m2 - m1);
+}
+
 function netWorthGrowth(data, months) {
-  const janela = Math.max(2, Number(months) || NET_WORTH_GROWTH_MONTHS);
-  const series = netWorthSeries(data, janela);
+  const teto = Math.max(2, Number(months) || NET_WORTH_GROWTH_MONTHS);
+  const acc = ledgerAccumulator(data);
+  const currentKey = keyOfDate(new Date());
+  // Sem lançamento nenhum, o histórico começa hoje: um mês, nada a comparar.
+  const primeiroKey = acc.keys.length ? acc.keys[0] : currentKey;
+  const historico = Math.max(1, monthsBetweenKeys(primeiroKey, currentKey) + 1);
+  const janela = Math.max(2, Math.min(teto, historico));
+  const series = netWorthSeries(data, janela, acc);
   const first = series[0].value;
   const last = series[series.length - 1].value;
   const delta = subMoney(last, first);
-  // Sem base nenhuma dos dois lados não há crescimento a medir; devolver 0%
-  // seria inventar um fato sobre quem ainda não tem histórico.
-  const measurable = Math.abs(first) >= 1 || Math.abs(last) >= 1;
-  const pct = !measurable ? null
-    : (first !== 0 ? (delta / Math.abs(first)) * 100 : (last > 0 ? 100 : last < 0 ? -100 : 0));
+
+  const base = Math.abs(first);
+  const baseSustenta = base >= NET_WORTH_GROWTH_MIN_BASE
+    && base * NET_WORTH_GROWTH_MAX_RATIO >= Math.abs(last);
+  const measurable = historico >= 2 && baseSustenta;
+  const pct = measurable ? (delta / base) * 100 : null;
+
   const [ano, mes] = String(series[0].key).split("-").map(Number);
   const mesmoAno = ano === series[series.length - 1].year;
   return {
     series, months: janela,
+    // Quantos meses de uso existem de fato, que é o que decide se há o que
+    // comparar. A tela usa para não prometer histórico que não tem.
+    historyMonths: historico,
     first, last, delta, pct, measurable,
     fromKey: series[0].key,
     toKey: series[series.length - 1].key,

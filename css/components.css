@@ -636,6 +636,32 @@
 .theme-toggle span:nth-child(2) { flex: 1; text-align: left; font-size: 13.5px; font-weight: 600; }
 .theme-toggle span:nth-child(2) small { display: block; margin-top: 2px; color: var(--ink-faint); font-size: 11.5px; font-weight: 500; line-height: 1.35; }
 .theme-toggle + .theme-toggle { border-top: 1px solid var(--border-soft); margin-top: 6px; padding-top: 6px; }
+
+/* [M42] Seletor de tema com três opções ("Automático", "Claro", "Escuro").
+   Era um interruptor de duas posições, e por isso "seguir o aparelho" não
+   cabia em lugar nenhum. Ver o cabeçalho de `applyTheme` em js/app.js. */
+.theme-choice { border: 0; margin: 0 0 10px; padding: 0; }
+.theme-choice__options { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 8px; }
+.theme-choice__option {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  min-height: 76px; padding: 10px 6px; text-align: center;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface); color: var(--ink-faint);
+  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.theme-choice__option b { font-size: 13px; font-weight: 650; color: var(--ink); }
+.theme-choice__option small { font-size: 11px; font-weight: 500; line-height: 1.3; }
+.theme-choice__option.is-active {
+  border-color: var(--brand); background: color-mix(in srgb, var(--brand) 10%, var(--surface)); color: var(--ink-soft);
+}
+.theme-choice__option.is-active b { color: var(--brand-ink); }
+/* Abaixo de 360px a grade de três colunas espreme o rótulo em duas linhas e o
+   alvo perde altura útil. Empilhado, cada opção fica com a linha inteira. */
+@media (max-width: 359px) {
+  .theme-choice__options { grid-template-columns: 1fr; }
+  .theme-choice__option { flex-direction: row; justify-content: flex-start; gap: 10px; min-height: 48px; text-align: left; }
+  .theme-choice__option small { margin-left: auto; }
+}
 .source-links { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 10px; }
 /* Estes links não estão no meio de uma frase; são alvos por si só, e a
    `min-height` que a folha de utilitários dá a botão nenhum deles herda.
