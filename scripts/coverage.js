@@ -43,10 +43,23 @@ const MINIMO_GLOBAL = Number(process.env.COVERAGE_MIN) || 75;
 // Os pisos abaixo são catracas, como o global: ficam abaixo do medido depois do
 // M41 (88,3% e 76,4%) para não ficarem vermelhos por variação de uma linha, e
 // acima do ponto em que a tela volta a ser um vão.
+//
+// [M42] E ONDE A SESSÃO E A LEITURA DE QR SÃO MANIPULADAS.
+//
+// `js/auth.js` tem 71 kB e estava em 56,5%, o penúltimo do projeto: é ele que
+// decide quando a sessão vale, quando o banco local troca de dono e o que sobra
+// depois de apagar a conta. `js/qrcode.js` estava em 42%: o que os parsers dele
+// devolvem vira, literalmente, o valor de um lançamento.
+//
+// Depois de `tests/test-account-lifecycle.js` e `tests/test-qrcode-parsers.js`,
+// medem 69,0% e 74,4%. Os pisos abaixo ficam sob esses números, como catraca, e
+// não como meta: eles impedem a queda, não celebram o nível.
 const MINIMOS_POR_ARQUIVO = Object.freeze({
   "js/actions.js": Number(process.env.COVERAGE_ACTIONS_MIN) || 35,
   "js/screens/debts.js": Number(process.env.COVERAGE_DEBTS_MIN) || 75,
   "js/screens/add.js": Number(process.env.COVERAGE_ADD_MIN) || 75,
+  "js/auth.js": Number(process.env.COVERAGE_AUTH_MIN) || 65,
+  "js/qrcode.js": Number(process.env.COVERAGE_QRCODE_MIN) || 70,
 });
 
 function limpar() {

@@ -13,6 +13,50 @@ const browserType = { chromium, firefox, webkit }[browserName];
 if (!browserType) throw new Error(`Motor de navegador inválido: ${browserName}`);
 const mime = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json", ".webmanifest": "application/manifest+json", ".png": "image/png" };
 
+// [M42] O SERVIDOR DE TESTE SERVE OS CABEÇALHOS DE VERDADE.
+//
+// Ele mandava só `Content-Type` e `Cache-Control`. Consequência: nenhum teste de
+// navegador exercitava a política de segurança que a publicação aplica, e um
+// token que o navegador RECUSA (era o caso de `ambient-light-sensor=()`, que o
+// Chromium reclamava em toda carga) passava despercebido por não haver quem
+// olhasse o console.
+//
+// A fonte é a mesma de `scripts/serve.js`: `vercel.json`. Repetir a política
+// aqui à mão daria o pior resultado possível, um ambiente de teste que aprova o
+// que a publicação recusa. `Strict-Transport-Security` fica de fora porque este
+// servidor é http, e `upgrade-insecure-requests` também, pelo mesmo motivo.
+// `Strict-Transport-Security` fica de fora porque este servidor é http.
+//
+// `Cross-Origin-Opener-Policy` fica de fora SOMENTE no Firefox, e o motivo é do
+// harness, não do app: COOP obriga a troca do grupo de contextos de navegação, e
+// a emulação de `deviceScaleFactor` do Playwright para Firefox não sobrevive a
+// essa troca — `devicePixelRatio` volta a 1 e o cenário de tela de alta
+// densidade passa a medir outra coisa. Bissectado cabeçalho a cabeçalho: com
+// COOP, o cenário "390x450 CSS com DPR 2" falha no Firefox e só nele; sem COOP,
+// passa. O cabeçalho continua valendo em produção e continua sendo exercitado
+// no Chromium e no WebKit, que é onde a emulação aguenta.
+const CABECALHOS_FORA_DO_LOCAL = new Set([
+  "Strict-Transport-Security",
+  ...(browserName === "firefox" ? ["Cross-Origin-Opener-Policy"] : []),
+]);
+function cabecalhosDaPublicacao() {
+  try {
+    const config = JSON.parse(fs.readFileSync(path.join(root, "vercel.json"), "utf8"));
+    const geral = (config.headers || []).find((regra) => regra.source === "/(.*)");
+    const saida = {};
+    (geral ? geral.headers || [] : []).forEach(({ key, value }) => {
+      if (!key || CABECALHOS_FORA_DO_LOCAL.has(key)) return;
+      saida[key] = key === "Content-Security-Policy"
+        ? String(value).split(";").map((p) => p.trim()).filter((p) => p && p !== "upgrade-insecure-requests").join("; ")
+        : value;
+    });
+    return saida;
+  } catch (_) {
+    return {};
+  }
+}
+const CABECALHOS_PUBLICACAO = cabecalhosDaPublicacao();
+
 const server = http.createServer((request, response) => {
   const urlPath = decodeURIComponent(new URL(request.url, "http://localhost").pathname);
   const relative = urlPath === "/" ? "index.html" : urlPath.replace(/^\/+/, "");
@@ -20,7 +64,11 @@ const server = http.createServer((request, response) => {
   if (!file.startsWith(root + path.sep) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
     response.writeHead(404); response.end("Not found"); return;
   }
-  response.writeHead(200, { "Content-Type": mime[path.extname(file)] || "application/octet-stream", "Cache-Control": "no-store" });
+  response.writeHead(200, {
+    ...CABECALHOS_PUBLICACAO,
+    "Content-Type": mime[path.extname(file)] || "application/octet-stream",
+    "Cache-Control": "no-store",
+  });
   fs.createReadStream(file).pipe(response);
 });
 
@@ -910,10 +958,21 @@ async function runOnboardingViewportM4(browser, scenario) {
   // existiria.
   await test("app instalado respeita entalhe, barra de status e risco de arrastar", async () => {
     const page = shared.page;
+    // [M42] Os recuos entram pelo CSSOM, não por um `<style>` novo.
+    //
+    // Injetar `<style>` com conteúdo era o jeito óbvio e parou de funcionar
+    // quando este servidor de teste passou a mandar os cabeçalhos de verdade:
+    // `style-src 'self'` recusa folha embutida, e o teste falhava dizendo que a
+    // doca invadia a borda insegura — quando o que tinha acontecido é que os
+    // recuos simulados nunca chegaram. Escrever a variável no próprio elemento
+    // raiz é uma gravação de CSSOM, que a política permite, e tem a mesma
+    // precedência sobre o `:root` da folha.
     const simular = (t, b, l, r) => page.evaluate(([top, bottom, left, right]) => {
-      let el = document.getElementById("sim-standalone");
-      if (!el) { el = document.createElement("style"); el.id = "sim-standalone"; document.head.appendChild(el); }
-      el.textContent = `:root{--sa-top:${top}px;--sa-bottom:${bottom}px;--sa-left:${left}px;--sa-right:${right}px;}`;
+      const raiz = document.documentElement;
+      raiz.style.setProperty("--sa-top", `${top}px`);
+      raiz.style.setProperty("--sa-bottom", `${bottom}px`);
+      raiz.style.setProperty("--sa-left", `${left}px`);
+      raiz.style.setProperty("--sa-right", `${right}px`);
     }, [t, b, l, r]);
 
     const invasores = (ladoTop, ladoBottom, ladoLeft, ladoRight) => page.evaluate(([sTop, sBottom, sLeft, sRight]) => {
@@ -1569,6 +1628,39 @@ async function runOnboardingViewportM4(browser, scenario) {
       assert(touch.pageErrors.length === 0, `erros no navegador móvel: ${touch.pageErrors.join("; ")}`);
     } finally {
       await touch.context.close();
+    }
+  });
+
+  // [M42] O NAVEGADOR TEM DE ACEITAR OS CABEÇALHOS QUE MANDAMOS.
+  //
+  // `tests/test-security.js` confere o TEXTO da política em `vercel.json`. Texto
+  // certo não é o mesmo que política aceita: `ambient-light-sensor=()` estava
+  // escrito corretamente e era recusado pelo Chromium, que imprimia
+  // "Unrecognized feature" em toda carga de página. Nenhum teste via isso,
+  // porque nenhum teste olhava o console do navegador.
+  //
+  // Este bloco carrega o app com os cabeçalhos de verdade (o servidor de teste
+  // lê `vercel.json`, igual ao `scripts/serve.js`) e reprova qualquer reclamação
+  // do navegador sobre eles. É a diferença entre "escrevemos a política" e "a
+  // política está valendo".
+  await test("o navegador aceita CSP e Permissions-Policy sem reclamar", async () => {
+    const ctx = await openFresh(browser, { width: 1024, height: 800 });
+    const page = ctx.page;
+    const reclamacoes = [];
+    page.on("console", (msg) => {
+      const texto = msg.text();
+      if (/Permissions-Policy|Content-Security-Policy|Feature-Policy/i.test(texto)) reclamacoes.push(texto);
+    });
+    try {
+      await page.reload({ waitUntil: "load" });
+      await page.waitForSelector('[role="dialog"][aria-label="Configuração inicial"]');
+      // Uma navegação a mais: cabeçalho de documento é reavaliado a cada
+      // resposta, e um token ruim reaparece em toda uma delas.
+      await page.goto(`${globalThis.baseUrl}?__test=1`, { waitUntil: "load" });
+      await page.waitForTimeout(200);
+      assert(reclamacoes.length === 0, `o navegador recusou cabeçalho: ${JSON.stringify([...new Set(reclamacoes)].slice(0, 3))}`);
+    } finally {
+      await ctx.context.close();
     }
   });
 

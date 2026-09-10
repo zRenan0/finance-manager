@@ -146,6 +146,26 @@ async function main() {
     check(`${recurso} está negado para todos`, permissoes.includes(`${recurso}=()`), permissoes);
   });
 
+  // [M42] RECURSO QUE O NAVEGADOR NÃO RECONHECE NÃO PROTEGE NADA, E FAZ BARULHO.
+  //
+  // `ambient-light-sensor=()` estava na lista. O Chromium imprime, em TODA carga
+  // de página, "Error with Permissions-Policy header: Unrecognized feature:
+  // 'ambient-light-sensor'." Medido token a token, num servidor que devolve um
+  // recurso por vez: dos 23 declarados, esse era o ÚNICO recusado, e só no
+  // Chromium (Firefox e WebKit não reclamam de nenhum).
+  //
+  // A conta que sustenta a remoção: a API de luz ambiente não existe em nenhum
+  // dos três motores sem sinalizador, o app não usa sensor nenhum, e
+  // `frame-src 'none'` já impede terceiro de pedir qualquer permissão daqui.
+  // Ou seja, a linha não negava nada de verdade; em troca, imprimia um erro por
+  // carga num app financeiro, que é o jeito mais rápido de ensinar todo mundo a
+  // ignorar o console.
+  //
+  // Se um dia o recurso for reconhecido, ele volta com este teste junto, que é o
+  // que impede a volta às cegas.
+  check("nenhum recurso recusado pelo navegador voltou para a lista",
+    !/ambient-light-sensor/.test(permissoes), permissoes);
+
   // [M5] O SERVIDOR LOCAL NÃO PODE TER UMA SEGUNDA CÓPIA DA POLÍTICA.
   //
   // `scripts/serve.js` existe para que um erro de CSP apareça em `npm start`

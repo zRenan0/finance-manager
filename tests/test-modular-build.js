@@ -3,6 +3,9 @@
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+// [M42] O teto do pacote é medido em byte comprimido, que é o que a rede
+// entrega. Ver "TETO EM BYTES COMPRIMIDOS" mais abaixo.
+const zlib = require("zlib");
 const { spawnSync } = require("child_process");
 
 const ROOT = path.join(__dirname, "..");
@@ -124,6 +127,40 @@ if (distBuild.status === 0) {
     fs.readFileSync(path.join(ROOT, "js/modules/app.generated.js"), "utf8").includes("MOTOR DE MÉTRICAS"));
   check("boot.js publicado também é minificado",
     fs.statSync(path.join(ROOT, "dist/js/boot.js")).size < fs.statSync(path.join(ROOT, "js/boot.js")).size * 0.7);
+
+  // ------------------------------------------------------------------
+  // [M42] TETO EM BYTES COMPRIMIDOS PARA O CAMINHO CRÍTICO
+  // ------------------------------------------------------------------
+  // As asserções acima cobram PROPORÇÃO ("menor que 70% da fonte"). Proporção
+  // não segura tamanho: o pacote pode dobrar e continuar sendo 70% de uma fonte
+  // que também dobrou. Foi assim que o caminho crítico chegou a 902 kB brutos
+  // sem nenhum teste reclamar.
+  //
+  // O que a rede entrega é comprimido, então é em byte comprimido que o teto
+  // tem de ser escrito. Medido nesta publicação: núcleo 278 kB gzip / 225 kB
+  // brotli, segundo pedaço 49 / 42, folha de estilo 34 / 28.
+  //
+  // Os tetos abaixo têm folga de ~6% sobre o medido. A folga existe para uma
+  // correção normal não virar build vermelho; ela NÃO é espaço para crescer de
+  // propósito. Quem estourar tem duas saídas honestas: adiar código que não é
+  // do primeiro quadro (ver DEFERRED em scripts/build-app-module.js) ou subir o
+  // teto conscientemente, no mesmo commit, explicando o que passou a viajar.
+  //
+  // Por que gzip E brotli: o provedor escolhe um dos dois conforme o
+  // `Accept-Encoding` do visitante, e as duas curvas não crescem juntas.
+  const tetos = [
+    { rotulo: "núcleo (primeira pintura)", arquivo: appGerado, gzip: 295, brotli: 240 },
+    { rotulo: "segundo pedaço", arquivo: moduleFiles.find((f) => /app\.extras\./.test(f)), gzip: 55, brotli: 48 },
+    { rotulo: "folha de estilo", arquivo: "dist/css/style.css", gzip: 38, brotli: 32 },
+  ];
+  tetos.forEach(({ rotulo, arquivo, gzip, brotli }) => {
+    if (!arquivo) { check(`${rotulo}: arquivo publicado encontrado`, false, "ausente"); return; }
+    const bytes = fs.readFileSync(path.join(ROOT, arquivo));
+    const kbGzip = zlib.gzipSync(bytes, { level: 9 }).length / 1024;
+    const kbBrotli = zlib.brotliCompressSync(bytes).length / 1024;
+    check(`${rotulo}: até ${gzip} kB gzip`, kbGzip <= gzip, `${kbGzip.toFixed(1)} kB`);
+    check(`${rotulo}: até ${brotli} kB brotli`, kbBrotli <= brotli, `${kbBrotli.toFixed(1)} kB`);
+  });
 
   // ------------------------------------------------------------------
   // [M41] A CASCATA DE @import NÃO VAI PARA O AR
