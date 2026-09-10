@@ -172,6 +172,20 @@ function onbCanAdvance(step) {
   return true;
 }
 
+// [M42] O PORTÃO DE "PULAR" E DE "JÁ TENHO CONTA".
+//
+// Os dois saem do assistente sem passar pelos passos, e por isso o único
+// requisito que vale para eles é o aceite da política. Antes quem barrava era o
+// atributo `disabled` do navegador; agora esses botões usam `aria-disabled`
+// (para o leitor de tela ouvir o motivo) e continuam recebendo o clique, então o
+// bloqueio precisa existir em código. Ver o `switch` em js/actions.js.
+//
+// A condição é lida do MESMO lugar que desenha o estado do botão. Duplicar a
+// regra aqui criaria a chance de a tela dizer "travado" e a ação deixar passar.
+function onbBloqueado() {
+  return !onbCanAdvance(1);
+}
+
 // POR QUE O MOTIVO DO BLOQUEIO PRECISA ESTAR ESCRITO NA TELA.
 //
 // "Continuar" e "Pular por agora" nascem desabilitados e nada dizia por quê:
@@ -205,8 +219,22 @@ function renderOnboardingLayer() {
       <div class="onb__head">
         <div class="onb__brand">${svgIcon("wallet", 18)}<span>Cofre</span></div>
         <div class="onb__head-actions">
-          <button class="btn btn--ghost btn--sm" data-action="onb-have-account" ${o.legalAccepted ? "" : `disabled aria-describedby="onb-block-reason"`}>Já tenho conta</button>
-          <button class="btn btn--ghost btn--sm" data-action="onb-skip" ${o.legalAccepted ? "" : `disabled aria-describedby="onb-block-reason"`}>Pular por agora</button>
+          ${/* [M42] `aria-disabled`, E NÃO `disabled`: A RAZÃO PRECISA SER OUVIDA.
+
+                O assistente faz certo em explicar por que o botão está travado
+                (`aria-describedby` apontando para a linha do motivo). Só que um
+                `<button disabled>` sai da ordem de tabulação e a maioria dos
+                leitores de tela não anuncia a descrição de um controle
+                desabilitado. Ou seja: a explicação existia e não chegava a
+                quem mais precisava dela: quem não vê a linha logo acima.
+
+                Com `aria-disabled` o botão continua alcançável pelo Tab, é
+                anunciado como desabilitado E leva a razão junto. Quem barra a
+                ação passa a ser o manipulador, não o navegador; ver o `switch`
+                em js/actions.js, onde cada uma destas ações confere a mesma
+                condição antes de agir. */""}
+          <button class="btn btn--ghost btn--sm" data-action="onb-have-account" ${o.legalAccepted ? "" : `aria-disabled="true" aria-describedby="onb-block-reason"`}>Já tenho conta</button>
+          <button class="btn btn--ghost btn--sm" data-action="onb-skip" ${o.legalAccepted ? "" : `aria-disabled="true" aria-describedby="onb-block-reason"`}>Pular por agora</button>
         </div>
       </div>
       ${renderOnbProgress(o.step)}
@@ -214,7 +242,7 @@ function renderOnboardingLayer() {
       ${motivo ? `<p class="onb__block-hint" id="onb-block-reason" ${travado ? "" : "hidden"}>${svgIcon("info", 14)}<span>${motivo}</span>${o.step === 1 && !o.legalAccepted ? `<button type="button" class="link-btn onb__block-jump" data-action="onb-goto-legal">Ir para o aceite</button>` : ""}</p>` : ""}
       <div class="onb__foot">
         ${o.step > 1 ? `<button class="btn btn--secondary" data-action="onb-back">${svgIcon("chevronLeft", 16)} Voltar</button>` : `<span></span>`}
-        <button id="onb-advance" class="btn btn--primary" data-action="${last ? "onb-finish" : "onb-next"}" ${travado ? `disabled aria-describedby="onb-block-reason"` : ""}>
+        <button id="onb-advance" class="btn btn--primary" data-action="${last ? "onb-finish" : "onb-next"}" ${travado ? `aria-disabled="true" aria-describedby="onb-block-reason"` : ""}>
           ${last ? `${svgIcon("checkCircle", 16)} Concluir` : "Continuar"}
         </button>
       </div>
@@ -230,12 +258,11 @@ function patchOnboardingFooter() {
   const btn = document.getElementById("onb-advance");
   const aviso = document.getElementById("onb-block-reason");
   if (btn) {
-    btn.disabled = !pode;
-    // O motivo só descreve o botão enquanto ele está travado. Um
-    // aria-describedby fixo faria o leitor de tela anunciar, a cada foco, uma
-    // exigência que o usuário já cumpriu.
-    if (pode) btn.removeAttribute("aria-describedby");
-    else btn.setAttribute("aria-describedby", "onb-block-reason");
+    // [M42] `aria-disabled` no lugar de `disabled`: ver o comentário no
+    // `renderOnboardingLayer`. O botão continua focável, e é por isso que a
+    // razão do bloqueio chega ao leitor de tela.
+    if (pode) { btn.removeAttribute("aria-disabled"); btn.removeAttribute("aria-describedby"); }
+    else { btn.setAttribute("aria-disabled", "true"); btn.setAttribute("aria-describedby", "onb-block-reason"); }
   }
   // O aviso acompanha o botão no patch: sem isto ele continuaria na tela
   // depois de a renda ser digitada, contradizendo um botão já liberado.

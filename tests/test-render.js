@@ -940,7 +940,13 @@ console.log("\n[M7] Central inteligente, assinaturas e recorrências");
   const dash = run("renderDashboardScreen()");
   auditHtml("dashboard com M7", dash);
   check("M7: cartão da central aparece no dashboard", /Central inteligente/.test(dash));
-  check("M7: cartão de assinaturas cita o custo anual", /por ano em assinaturas/.test(dash));
+  // [M42] O cartão passou a falar em MÊS nas duas linhas. O número grande é
+  // `committedMonthly` (tudo que se repete) e a legenda era anual, então quem
+  // lia comparava R$/ano com R$/mês sem perceber. Agora a linha de cima diz
+  // quanto das assinaturas pesa por mês, na mesma unidade do total, e o total
+  // ganhou o rótulo "comprometido/mês" para dizer de que ele é.
+  check("M7: cartão de assinaturas separa assinaturas do total comprometido",
+    /só em assinaturas/.test(dash) && /comprometido\/mês/.test(dash));
 
   // ---- Base vazia não quebra nenhuma tela nova ----
   setData(run("defaultData()"));

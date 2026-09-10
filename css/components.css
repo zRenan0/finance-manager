@@ -992,6 +992,11 @@
 .leak-header > div { flex: 1 1 160px; min-width: 0; }
 .leak-header__icon { flex-shrink: 0; color: var(--ink-faint); }
 .leak-total { margin-left: auto; font-size: 15px; font-weight: 650; white-space: nowrap; flex-shrink: 0; }
+/* [M42] Quando o total vem com rótulo, ele empilha: valor em cima, o que ele é
+   embaixo. Sem isto, "comprometido/mês" ficava na mesma linha do número e
+   empurrava o cartão para fora em 320px. */
+.leak-total:has(small) { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.15; text-align: right; }
+.leak-total small { font-family: var(--font-sans); font-size: 10.5px; font-weight: 600; color: var(--ink-faint); letter-spacing: 0.01em; }
 .leak-list { margin-top: 14px; display: flex; flex-direction: column; gap: 2px; }
 .leak-row { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border-soft); }
 .leak-row:last-child { border-bottom: none; }

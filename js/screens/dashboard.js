@@ -530,7 +530,7 @@ function renderUpcomingBillsCard(m) {
         <span class="icon-bubble icon-bubble--sm" data-ui-css="background:color-mix(in srgb, ${it.color} 14%, transparent); color:${it.color}">${svgIcon(it.icon, 14)}</span>
         <div class="bill-row__info">
           <p class="bill-row__label">${escapeHtml(it.label)}${it.installment ? ` <span class="bill-row__inst">${it.installment}</span>` : ""}</p>
-          <p class="bill-row__meta" data-ui-css="color:${it.overdue ? "var(--negative)" : (KIND_COLOR[it.kind] || "var(--ink-faint)")}">${it.overdue && it.kind === "card-statement" ? "Fatura vencida" : (KIND_LABEL[it.kind] || "Prevista")} · ${fmtDateShort(it.date)}${!it.overdue && it.daysLeft >= 0 ? ` · em ${it.daysLeft}d` : ""}</p>
+          <p class="bill-row__meta" data-ui-css="color:${inkOf(it.overdue ? "var(--negative)" : (KIND_COLOR[it.kind] || "var(--ink-faint)"))}">${it.overdue && it.kind === "card-statement" ? "Fatura vencida" : (KIND_LABEL[it.kind] || "Prevista")} · ${fmtDateShort(it.date)}${!it.overdue && it.daysLeft >= 0 ? ` · em ${it.daysLeft}d` : ""}</p>
         </div>
         <span class="bill-row__amount">${fmtBRL(it.amount)}</span>
       </div>`).join("")}

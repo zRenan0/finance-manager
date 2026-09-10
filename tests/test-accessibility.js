@@ -135,5 +135,45 @@ console.log("\n7. O que o aplicativo já fazia certo continua de pé");
   check("o atalho de pular o menu existe", /skip-to-content/.test(app));
 }
 
+/* ------- [M42] Controle travado: anunciado, alcançável, mas não é a porta ------- */
+// O assistente trocou `disabled` por `aria-disabled` nos botões travados, para
+// que a razão do bloqueio (`aria-describedby`) chegue ao leitor de tela: um
+// `<button disabled>` sai da ordem de tabulação e a descrição não é anunciada.
+//
+// O primeiro corte dessa troca criou um defeito novo: como `aria-disabled` não
+// tira o elemento do foco, o foco INICIAL do diálogo passou a cair em "Já tenho
+// conta", que está desabilitado. Quem usa leitor de tela era recebido pelo
+// único controle que não podia usar.
+//
+// A regra que ficou separa os dois momentos, e é isto que este bloco tranca.
+console.log("\n5. [M42] Foco inicial não cai em controle desabilitado por ARIA");
+{
+  check("existe um seletor próprio para o foco inicial",
+    /const FOCO_INICIAL_SELECTOR/.test(dialogo));
+  check("ele exclui quem está marcado como desabilitado",
+    /:not\(\[aria-disabled="true"\]\)/.test(dialogo));
+  check("o foco inicial prefere esse seletor",
+    /dialog\.querySelector\(FOCO_INICIAL_SELECTOR\)/.test(dialogo));
+  // Sem a reserva, um diálogo em que TODOS os controles estejam travados
+  // ficaria sem foco nenhum e o Escape deixaria de funcionar.
+  check("mas continua havendo reserva quando tudo está travado",
+    /\|\| dialog\.querySelector\(FOCUSABLE_SELECTOR\)/.test(dialogo));
+
+  // O ciclo do Tab NÃO pode excluir: tirar o controle da roda desfaria
+  // exatamente o ganho que motivou a troca.
+  const cicloTab = dialogo.slice(dialogo.indexOf("if (event.key !== 'Tab') return;"));
+  check("o ciclo do Tab continua alcançando o controle travado",
+    /querySelectorAll\(FOCUSABLE_SELECTOR\)/.test(cicloTab) && !/FOCO_INICIAL_SELECTOR/.test(cicloTab));
+
+  // E o assistente precisa continuar usando `aria-disabled`, não `disabled`:
+  // é a marcação que sustenta tudo acima.
+  const assistente = read("js/screens/onboarding.js");
+  check("o assistente trava por ARIA, não pelo atributo do navegador",
+    /aria-disabled="true" aria-describedby="onb-block-reason"/.test(assistente)
+    && !/disabled aria-describedby="onb-block-reason"/.test(assistente));
+  check("e quem barra a ação é o despachante",
+    /case "onb-skip": if \(!onbBloqueado\(\)\)/.test(read("js/actions.js")));
+}
+
 console.log(`\n${fail === 0 ? "TODOS OS TESTES PASSARAM" : "FALHAS ENCONTRADAS"} — ${pass} ok, ${fail} falha(s)\n`);
 process.exit(fail === 0 ? 0 : 1);

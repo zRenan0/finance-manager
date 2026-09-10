@@ -211,5 +211,77 @@ section("5. Nada foi ampliado por acidente");
     /source: "demo"/.test(readSrc("js/demo.js")));
 }
 
+/* ------------- [M42] A demonstração é a vitrine, e precisa ser boa ------------- */
+// O conjunto fictício é o PRIMEIRO contato de um visitante com o produto. Dois
+// defeitos o tornavam uma má primeira impressão, e nenhum dos dois aparecia em
+// teste porque todos os testes daqui olhavam estrutura, não plausibilidade.
+console.log("\n[M42] O conjunto fictício descreve um domicílio plausível");
+{
+  ctx.__demoM42 = run("buildDemoData()");
+  const contas = run("upcomingBills(__demoM42)");
+  const nota = run("computeFinanceScore(__demoM42, keyOfDate(new Date()))");
+  const pontualidade = nota.pillars.find((p) => p.id === "pontualidade");
+
+  // ---- Defeito 1: seis meses de compras e nenhum pagamento de fatura ----
+  // Sem `cardPayments`, TODA fatura fechada continuava em aberto. O painel
+  // abria dizendo "5 vencidas · R$ 11.805,80", com mais de uma renda mensal
+  // descontada do saldo, ao lado de um score "Bom". Um domicílio que guarda
+  // R$ 8.400 de reserva não deixa cinco faturas vencerem.
+  check("as faturas já vencidas estão quitadas",
+    contas.overdueDueCount === 0, { vencidas: contas.overdueDueCount, total: contas.overdueTotal });
+  check("os pagamentos existem de verdade no conjunto",
+    (ctx.__demoM42.cardPayments || []).length > 0, (ctx.__demoM42.cardPayments || []).length);
+  check("e o pilar de pontualidade fala a verdade",
+    !pontualidade.applicable || pontualidade.points === pontualidade.weight,
+    { points: pontualidade.points, detail: pontualidade.detail });
+
+  // A fatura que ainda NÃO venceu continua aberta: é ela que dá conteúdo ao
+  // cartão de fatura, e é a situação normal de quem usa cartão.
+  const faturaAberta = run(`cardLiabilitySummary(__demoM42, todayIso()).total`);
+  check("a fatura do ciclo corrente continua em aberto", faturaAberta > 0, faturaAberta);
+
+  // Pagamento não pode ser inventado: cada um quita o valor exato do ciclo.
+  const sobrando = run(`cardLiabilityStatements(__demoM42, "demo-cartao", todayIso())
+    .filter((f) => f.dueDate <= todayIso() && f.outstanding > 0).length`);
+  check("nenhum ciclo vencido ficou com sobra", sobrando === 0, sobrando);
+
+  // ---- Defeito 2: todo lançamento do mês corrente na mesma data ----
+  // `demoIsoDay` limitava o dia a `min(28, hoje)`. No dia 9, os dias nominais
+  // 10, 12, 14, 16, 18 e 20 viravam todos dia 9: "Últimos lançamentos" mostrava
+  // seis linhas com a mesma data e o mês parecia ter acontecido num dia só.
+  const mesAtual = run("keyOfDate(new Date())");
+  const doMes = (ctx.__demoM42.transactions || []).filter((t) => String(t.date).slice(0, 7) === mesAtual);
+  const hoje = run("todayIso()");
+  const diaDeHoje = Number(hoje.slice(8, 10));
+  check("o mês corrente tem lançamentos", doMes.length > 0, doMes.length);
+  check("nada cai no futuro", doMes.every((t) => t.date <= hoje), doMes.filter((t) => t.date > hoje).map((t) => t.date));
+
+  // A MEDIDA É CONCENTRAÇÃO, NÃO CONTAGEM DE DIAS DISTINTOS.
+  //
+  // "Pelo menos três datas" não pegaria o defeito: com a regra antiga, no dia 9
+  // os lançamentos caíam em quatro datas e NOVE dos treze empilhavam no dia 9.
+  // O que estraga a leitura é o pico, não a variedade. Medido nos dois lados:
+  //
+  //          antes            depois
+  //   dia 5   100% num dia      31%
+  //   dia 9    69%              23%
+  //   dia 15   38%              23%
+  //
+  // A partir do dia 6 há espaço para espalhar treze lançamentos; antes disso o
+  // mês é curto demais e concentrar é aritmética, não defeito.
+  const porDia = {};
+  doMes.forEach((t) => { porDia[t.date] = (porDia[t.date] || 0) + 1; });
+  const pico = Math.max(0, ...Object.values(porDia));
+  if (diaDeHoje >= 6) {
+    check("e nenhum dia concentra mais de 35% do mês",
+      pico <= doMes.length * 0.35,
+      { pico, de: doMes.length, pct: Math.round((pico / doMes.length) * 100), hoje });
+  }
+
+  // ---- A saudação não inventa gênero ----
+  check("a demonstração não dá um nome com gênero a quem está de visita",
+    run("displayFirstName(__demoM42)") === null, run("displayFirstName(__demoM42)"));
+}
+
 console.log(`\n${fail ? "FALHAS ENCONTRADAS" : "TODOS OS TESTES PASSARAM"} — ${pass} ok, ${fail} falha(s)`);
 process.exit(fail ? 1 : 0);

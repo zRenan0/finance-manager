@@ -52,8 +52,32 @@ export function createDialogController() {
     });
   }
 
+  // [M42] O FOCO INICIAL NÃO CAI NUM CONTROLE DESABILITADO POR ARIA.
+  //
+  // `FOCUSABLE_SELECTOR` exclui `[disabled]` porque o navegador já tira esses
+  // elementos da ordem de tabulação. `aria-disabled` é outra coisa: ele diz
+  // "desabilitado" para a tecnologia assistiva e MANTÉM o controle alcançável,
+  // que é justamente o motivo de o assistente usá-lo (só assim o leitor de tela
+  // anuncia a razão do bloqueio; ver js/screens/onboarding.js).
+  //
+  // O efeito colateral, que apareceu no primeiro corte: ao abrir o assistente,
+  // o foco inicial passou a cair em "Já tenho conta", um botão que está
+  // desabilitado. Quem usa leitor de tela era recebido pelo controle que não
+  // pode usar, em vez do começo do conteúdo.
+  //
+  // A regra certa separa os dois momentos: para o foco INICIAL, um controle
+  // marcado como desabilitado não é candidato; para o CICLO do Tab, ele
+  // continua na roda, porque tirá-lo de lá desfaria o ganho de acessibilidade.
+  const FOCO_INICIAL_SELECTOR = FOCUSABLE_SELECTOR
+    .split(',')
+    .map((parte) => `${parte.trim()}:not([aria-disabled="true"])`)
+    .join(',');
+
   function focusFirst(dialog) {
-    const target = dialog.querySelector('[autofocus]') || dialog.querySelector(FOCUSABLE_SELECTOR) || dialog;
+    const target = dialog.querySelector('[autofocus]')
+      || dialog.querySelector(FOCO_INICIAL_SELECTOR)
+      || dialog.querySelector(FOCUSABLE_SELECTOR)
+      || dialog;
     if (!dialog.hasAttribute('tabindex')) dialog.setAttribute('tabindex', '-1');
     if (!dialog.contains(document.activeElement)) target.focus({ preventScroll: true });
   }

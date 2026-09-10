@@ -192,13 +192,26 @@ function simFixedIncome(params) {
   if (principal > 0) lots.push({ month: 0, amount: principal });
   for (let m = 1; m <= months; m++) if (monthly > 0) lots.push({ month: m, amount: monthly });
 
+  // [M42] A SÉRIE NÃO CARREGA MAIS UM CAMPO `net` QUE ERA O BRUTO.
+  //
+  // Ela gravava `net: balance`, e `balance` é o saldo BRUTO. Nenhuma tela lia
+  // esse campo (o gráfico de Investir usa outro objeto, com `total`), então não
+  // havia número errado na tela; havia uma armadilha esperando o próximo
+  // gráfico que quisesse desenhar "líquido ao longo do tempo" e confiasse no
+  // nome. O líquido de verdade existe, e é `netFinal`/`tax` no retorno: ele
+  // depende da tabela regressiva de IR aplicada LOTE A LOTE, coisa que não cabe
+  // num campo por mês sem refazer a conta em cada ponto.
+  //
+  // Campo removido em vez de corrigido: a regra deste projeto é tirar caminho,
+  // não somar mais um. Quem precisar da curva líquida um dia vai ter de
+  // construí-la, e vai construí-la certa.
   let balance = roundMoney(principal);
   let contributed = roundMoney(principal);
-  series.push({ month: 0, gross: balance, contributed, net: balance });
+  series.push({ month: 0, gross: balance, contributed });
   for (let m = 1; m <= months; m++) {
     balance = addMoney(mulMoney(balance, 1 + i), monthly);
     contributed = addMoney(contributed, monthly);
-    series.push({ month: m, gross: balance, contributed, net: balance });
+    series.push({ month: m, gross: balance, contributed });
   }
 
   // Resgate no fim do prazo: valor de cada lote e imposto do próprio lote.
@@ -288,8 +301,13 @@ function fixedIncomeShortTerm(o) {
     months: held, days: o.days, indexer: o.indexer, exempt: o.exempt, shortTerm: true,
     grossAnnual: o.grossAnnual, feeAnnual: o.feeAnnual, netOfFeeAnnual: o.netOfFeeAnnual,
     monthlyRate: o.monthlyRate,
-    series: [{ month: 0, gross: o.principal, contributed: o.principal, net: o.principal },
-             { month: held, gross: grossFinal, contributed: o.principal, net: netFinal }],
+    // Sem `net` aqui também, pela mesma razão do ramo mensal: as duas séries
+    // saem da MESMA função e precisam ter a mesma forma. Aqui o valor até era
+    // líquido de verdade, e é justamente isso que tornaria a diferença
+    // invisível para quem lesse uma e assumisse a outra. O líquido continua em
+    // `netFinal`, no retorno.
+    series: [{ month: 0, gross: o.principal, contributed: o.principal },
+             { month: held, gross: grossFinal, contributed: o.principal }],
     lots: [{ month: 0, amount: o.principal, days: o.days, finalValue: grossFinal, earnings: grossEarnings, aliquot, tax, iof }],
     contributed: roundMoney(o.principal),
     grossFinal, grossEarnings, tax, iof, netFinal, netEarnings,

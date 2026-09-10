@@ -434,13 +434,25 @@ function onClick(e) {
     }
     case "diagnostics-clear":
       clearSafeErrors(); render(); notify("Diagnóstico apagado"); break;
-    case "onb-skip": skipOnboarding(); break;
+    // [M42] O NAVEGADOR NAO BARRA MAIS: QUEM BARRA E AQUI.
+    //
+    // Estes três botões trocaram o atributo "disabled" pelo "aria-disabled"
+    // para que a razão do bloqueio chegue ao leitor de tela (ver o comentário
+    // longo em js/screens/onboarding.js). "aria-disabled" é semântica, não
+    // comportamento: o clique continua chegando. Sem a checagem aqui, quem usa
+    // teclado pularia o aceite da política, que é exatamente o portão que o
+    // assistente existe para segurar.
+    //
+    // onbBloqueado() consulta o MESMO onbCanAdvance que desenha o estado do
+    // botão, então o que a tela mostra e o que a ação permite não têm como
+    // discordar.
+    case "onb-skip": if (!onbBloqueado()) skipOnboarding(); break;
     case "protect-data": openProtectDataDialog(); break;
     case "local-only-dismiss": state.localOnlyDismissed = true; render(); break;
     case "demo-enter": enterDemoMode(); break;
     case "demo-exit": exitDemoMode(); break;
-    case "onb-have-account": openAccountFromOnboarding(); break;
-    case "onb-finish": finishOnboarding(); break;
+    case "onb-have-account": if (!onbBloqueado()) openAccountFromOnboarding(); break;
+    case "onb-finish": if (onbCanAdvance(state.onboarding.step)) finishOnboarding(); break;
     case "onb-restart": startOnboarding(); break;
     case "skip-to-content": {
       e.preventDefault();

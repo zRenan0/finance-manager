@@ -822,8 +822,12 @@ function blocoF18() {
   const camada = run(`renderOnboardingLayer()`);
   check("o assistente oferece a entrada na conta", /data-action="onb-have-account"/.test(camada));
   check("com rótulo que diz o que faz", /Já tenho conta/.test(camada));
+  // [M42] O despachante passou a conferir o aceite antes de agir. O botão agora
+  // usa `aria-disabled` em vez de `disabled`, para o leitor de tela ouvir o
+  // motivo do bloqueio, e `aria-disabled` não impede o clique: sem esta
+  // checagem, o teclado pularia o aceite da política.
   check("a ação está ligada no despachante",
-    /case "onb-have-account": openAccountFromOnboarding\(\);/.test(readSrc("js/actions.js")));
+    /case "onb-have-account": if \(!onbBloqueado\(\)\) openAccountFromOnboarding\(\);/.test(readSrc("js/actions.js")));
 
   // Entrar na conta não pode gravar configuração nenhuma: se gravasse, a base
   // de visitante passaria a contar como conteúdo e toda entrada exigiria a

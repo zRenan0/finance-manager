@@ -342,9 +342,27 @@ function renderSubscriptionsCard() {
       ${svgIcon("refresh", 18, "leak-header__icon")}
       <div>
         <p class="card-title" data-ui-css="margin:0">Assinaturas e recorrências</p>
-        <p class="card-subtitle" data-ui-css="margin:2px 0 0">${m.counts.tracked} ${m.counts.tracked === 1 ? "recorrência identificada" : "recorrências identificadas"}, ${m.counts.subscriptions} ${m.counts.subscriptions === 1 ? "delas assinatura" : "delas assinaturas"} · ${fmtBRL(m.annualTotal)} por ano em assinaturas</p>
+        <p class="card-subtitle" data-ui-css="margin:2px 0 0">${m.counts.tracked} ${m.counts.tracked === 1 ? "recorrência identificada" : "recorrências identificadas"}, ${m.counts.subscriptions} ${m.counts.subscriptions === 1 ? "delas assinatura" : "delas assinaturas"} · ${fmtBRL(m.monthlyTotal)}/mês só em assinaturas</p>
       </div>
-      <span class="leak-total">${fmtBRL(m.committedMonthly)}/mês</span>
+      ${/* [M42] O NÚMERO GRANDE PRECISA DIZER DE QUE ELE É.
+
+            O cartão se chama "Assinaturas e recorrências" e o número em
+            destaque é `committedMonthly`, que soma assinaturas MAIS essenciais
+            MAIS recorrentes variáveis (js/recurring.js). Sem rótulo, ele era
+            lido como "minhas assinaturas custam isto por mês". Na demonstração
+            saía assim:
+
+              4 delas assinaturas · R$ 3.920,40 por ano em assinaturas
+                                                    R$ 3.748,58/mês
+
+            R$ 3.920,40 por ano são R$ 326,70 por mês. O número grande era outra
+            grandeza, e por acaso idêntico ao total de despesas do mês, o que
+            reforçava a leitura errada.
+
+            Agora o rótulo diz "comprometido", e a linha de cima passou a falar
+            em mês (a mesma unidade), para os dois números poderem ser
+            comparados sem o leitor ter de dividir por doze de cabeça. */""}
+      <span class="leak-total"><b>${fmtBRL(m.committedMonthly)}</b><small>comprometido/mês</small></span>
     </div>
     <div class="leak-list">
       ${top.map((s) => `<div class="leak-row">

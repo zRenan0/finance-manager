@@ -75,6 +75,14 @@
 }
 .btn:active { transform: scale(0.975); }
 .btn[disabled] { opacity: 0.38; pointer-events: none; box-shadow: none; }
+/* [M42] Botão travado que PRECISA continuar alcançável pelo teclado.
+   `disabled` tira o botão da ordem de tabulação, e leitor de tela nenhum
+   anuncia o `aria-describedby` de um controle desabilitado: a razão do bloqueio
+   existia e não chegava a quem não enxerga a linha logo acima. Com
+   `aria-disabled` ele continua focável e anunciado; quem barra a ação é o
+   manipulador (js/actions.js). Sem `pointer-events: none`, de propósito: o
+   clique tem de chegar para o app poder responder. */
+.btn[aria-disabled="true"] { opacity: 0.38; box-shadow: none; cursor: not-allowed; }
 .btn--primary {
   background: linear-gradient(170deg, color-mix(in srgb, var(--brand) 88%, #fff), var(--brand) 60%, var(--brand-dark));
   color: #fff; box-shadow: var(--shadow-brand), inset 0 1px 0 rgba(255,255,255,0.2);

@@ -23412,13 +23412,26 @@ function simFixedIncome(params) {
   if (principal > 0) lots.push({ month: 0, amount: principal });
   for (let m = 1; m <= months; m++) if (monthly > 0) lots.push({ month: m, amount: monthly });
 
+  // [M42] A SÉRIE NÃO CARREGA MAIS UM CAMPO `net` QUE ERA O BRUTO.
+  //
+  // Ela gravava `net: balance`, e `balance` é o saldo BRUTO. Nenhuma tela lia
+  // esse campo (o gráfico de Investir usa outro objeto, com `total`), então não
+  // havia número errado na tela; havia uma armadilha esperando o próximo
+  // gráfico que quisesse desenhar "líquido ao longo do tempo" e confiasse no
+  // nome. O líquido de verdade existe, e é `netFinal`/`tax` no retorno: ele
+  // depende da tabela regressiva de IR aplicada LOTE A LOTE, coisa que não cabe
+  // num campo por mês sem refazer a conta em cada ponto.
+  //
+  // Campo removido em vez de corrigido: a regra deste projeto é tirar caminho,
+  // não somar mais um. Quem precisar da curva líquida um dia vai ter de
+  // construí-la, e vai construí-la certa.
   let balance = roundMoney(principal);
   let contributed = roundMoney(principal);
-  series.push({ month: 0, gross: balance, contributed, net: balance });
+  series.push({ month: 0, gross: balance, contributed });
   for (let m = 1; m <= months; m++) {
     balance = addMoney(mulMoney(balance, 1 + i), monthly);
     contributed = addMoney(contributed, monthly);
-    series.push({ month: m, gross: balance, contributed, net: balance });
+    series.push({ month: m, gross: balance, contributed });
   }
 
   // Resgate no fim do prazo: valor de cada lote e imposto do próprio lote.
@@ -23508,8 +23521,13 @@ function fixedIncomeShortTerm(o) {
     months: held, days: o.days, indexer: o.indexer, exempt: o.exempt, shortTerm: true,
     grossAnnual: o.grossAnnual, feeAnnual: o.feeAnnual, netOfFeeAnnual: o.netOfFeeAnnual,
     monthlyRate: o.monthlyRate,
-    series: [{ month: 0, gross: o.principal, contributed: o.principal, net: o.principal },
-             { month: held, gross: grossFinal, contributed: o.principal, net: netFinal }],
+    // Sem `net` aqui também, pela mesma razão do ramo mensal: as duas séries
+    // saem da MESMA função e precisam ter a mesma forma. Aqui o valor até era
+    // líquido de verdade, e é justamente isso que tornaria a diferença
+    // invisível para quem lesse uma e assumisse a outra. O líquido continua em
+    // `netFinal`, no retorno.
+    series: [{ month: 0, gross: o.principal, contributed: o.principal },
+             { month: held, gross: grossFinal, contributed: o.principal }],
     lots: [{ month: 0, amount: o.principal, days: o.days, finalValue: grossFinal, earnings: grossEarnings, aliquot, tax, iof }],
     contributed: roundMoney(o.principal),
     grossFinal, grossEarnings, tax, iof, netFinal, netEarnings,
@@ -26311,12 +26329,56 @@ const DEMO_MONTHS = 6;
 // redondos de propósito: é demonstração, não simulação de caso real.
 const DEMO_INCOME = 7200;
 
+// [M42] O MÊS CORRENTE É COMPRIMIDO, NÃO EMPILHADO.
+//
+// A regra antiga era `Math.min(dia, hoje)`: no dia 9, TODO lançamento do mês
+// corrente com dia nominal 10, 12, 14, 16, 18 ou 20 virava dia 9. O resultado
+// era "Últimos lançamentos" com seis linhas na mesma data e um mês que parecia
+// ter acontecido num dia só. Pior: as estimativas de ritmo diário ("cerca de
+// R$ X por dia") saíam de um mês onde nada aconteceu até hoje.
+//
+// Agora o calendário de 28 dias é ESCALADO para a parte do mês que já passou.
+// O dia 20 de 28, visto no dia 9, cai no dia 6; o dia 5 cai no dia 2. A ordem
+// relativa dos lançamentos se mantém, que é o que faz o extrato ler como
+// extrato, e nada cai no futuro, que é o que os saldos exigem.
+//
+// No dia 1º tudo ainda converge para o dia 1. Não há como distribuir seis
+// lançamentos num mês que tem um dia de idade, e inventar datas futuras seria
+// pior: o app corretamente ignora o que ainda não aconteceu.
 function demoIsoDay(monthsAgo, day) {
   const hoje = new Date();
   const base = new Date(hoje.getFullYear(), hoje.getMonth() - monthsAgo, 1);
-  const limite = monthsAgo === 0 ? Math.min(28, hoje.getDate()) : 28;
-  const escolhido = Math.max(1, Math.min(Number(day) || 1, limite));
+  const nominal = Math.max(1, Math.min(Number(day) || 1, 28));
+  const escolhido = monthsAgo === 0
+    ? Math.max(1, Math.min(hoje.getDate(), Math.round((nominal * hoje.getDate()) / 28)))
+    : nominal;
   return isoOfDate(new Date(base.getFullYear(), base.getMonth(), escolhido));
+}
+
+// [M42] Quita as faturas que JÁ VENCERAM, pelo motor de faturas do app.
+//
+// `cardLiabilityStatements` devolve, por ciclo, quanto foi comprado, quanto foi
+// pago e qual é o vencimento. Aqui um pagamento é criado para cada ciclo cujo
+// vencimento já passou, no valor exato do que ficou em aberto e datado no
+// próprio dia do vencimento. O ciclo que ainda não venceu fica intacto: é ele
+// que dá conteúdo ao cartão de fatura, e é a situação normal de quem usa
+// cartão.
+//
+// Os ids são fixos (`demo-payment-<ciclo>`) pela mesma razão que `demoWave` não
+// usa `Math.random`: a demonstração precisa ser idêntica a cada abertura.
+function demoCardPayments(data, contaId, cartaoId) {
+  const hoje = todayIso();
+  return cardLiabilityStatements(data, cartaoId, hoje)
+    .filter((fatura) => fatura.outstanding > 0 && fatura.dueDate && fatura.dueDate <= hoje)
+    .map((fatura) => ({
+      id: `demo-payment-${fatura.key}`,
+      accountId: contaId,
+      creditCardId: cartaoId,
+      amount: fatura.outstanding,
+      statementKey: fatura.key,
+      date: fatura.dueDate,
+      source: "card-payment",
+    }));
 }
 
 // Variação suave e DETERMINÍSTICA. Sem `Math.random`: a demonstração precisa
@@ -26408,7 +26470,14 @@ function buildDemoData() {
 
   const data = {
     ...base,
-    userName: "Convidada",
+    // [M42] SEM NOME, DE PROPÓSITO.
+    //
+    // Era "Convidada", e a saudação saía "Boa noite, Convidada" para todo mundo
+    // que abrisse a demonstração. Gênero fixo numa tela que nem sabe quem está
+    // olhando. `displayFirstName` devolve null quando o campo está vazio e a
+    // saudação cai em "Boa noite" limpo, que é o certo: quem está de visita
+    // ainda não disse como quer ser chamado.
+    userName: "",
     monthlyIncome: DEMO_INCOME,
     creditCardLimit: 6000,
     accounts: [conta],
@@ -26420,6 +26489,26 @@ function buildDemoData() {
     dashboardFocus: "month",
     onboarding: { done: true, skipped: false, completedAt: demoIsoDay(DEMO_MONTHS, 1) },
   };
+
+  // [M42] AS FATURAS VENCIDAS SÃO PAGAS: A DEMONSTRAÇÃO NÃO NASCE INADIMPLENTE.
+  //
+  // Não havia `cardPayments` nenhum. Como o conjunto tem seis meses de compras
+  // no cartão, TODA fatura fechada continuava em aberto, e o primeiro contato de
+  // um visitante com o produto era o painel dizendo "5 vencidas · R$ 11.805,80",
+  // com R$ 7.339,56 (mais de uma renda mensal) descontados do saldo. Um
+  // domicílio que paga aluguel, guarda R$ 8.400 de reserva e tem R$ 15.200
+  // investidos não deixa cinco faturas vencerem; a demonstração descrevia uma
+  // situação que ela mesma não recomenda.
+  //
+  // As faturas são pagas pelo MOTOR do app (`cardLiabilityStatements`), e não
+  // por valores escritos à mão aqui: o ciclo de fechamento e vencimento é regra
+  // de `js/accounts.js`, e uma segunda cópia dela nesta fixture divergiria do
+  // produto na primeira vez que alguém mexesse em um dos dois.
+  //
+  // O que fica em aberto, de propósito, é a fatura que AINDA NÃO VENCEU. Ela é
+  // o que faz o cartão "Fatura do cartão de crédito" ter o que mostrar, e é a
+  // situação normal de quem usa cartão.
+  data.cardPayments = demoCardPayments(data, contaId, cartaoId);
 
   // Tetos por categoria a partir da regra padrão, pelo mesmo motor do
   // assistente: a demonstração precisa mostrar orçamento com barra cheia, e
@@ -26720,6 +26809,20 @@ function onbCanAdvance(step) {
   return true;
 }
 
+// [M42] O PORTÃO DE "PULAR" E DE "JÁ TENHO CONTA".
+//
+// Os dois saem do assistente sem passar pelos passos, e por isso o único
+// requisito que vale para eles é o aceite da política. Antes quem barrava era o
+// atributo `disabled` do navegador; agora esses botões usam `aria-disabled`
+// (para o leitor de tela ouvir o motivo) e continuam recebendo o clique, então o
+// bloqueio precisa existir em código. Ver o `switch` em js/actions.js.
+//
+// A condição é lida do MESMO lugar que desenha o estado do botão. Duplicar a
+// regra aqui criaria a chance de a tela dizer "travado" e a ação deixar passar.
+function onbBloqueado() {
+  return !onbCanAdvance(1);
+}
+
 // POR QUE O MOTIVO DO BLOQUEIO PRECISA ESTAR ESCRITO NA TELA.
 //
 // "Continuar" e "Pular por agora" nascem desabilitados e nada dizia por quê:
@@ -26753,8 +26856,22 @@ function renderOnboardingLayer() {
       <div class="onb__head">
         <div class="onb__brand">${svgIcon("wallet", 18)}<span>Cofre</span></div>
         <div class="onb__head-actions">
-          <button class="btn btn--ghost btn--sm" data-action="onb-have-account" ${o.legalAccepted ? "" : `disabled aria-describedby="onb-block-reason"`}>Já tenho conta</button>
-          <button class="btn btn--ghost btn--sm" data-action="onb-skip" ${o.legalAccepted ? "" : `disabled aria-describedby="onb-block-reason"`}>Pular por agora</button>
+          ${/* [M42] `aria-disabled`, E NÃO `disabled`: A RAZÃO PRECISA SER OUVIDA.
+
+                O assistente faz certo em explicar por que o botão está travado
+                (`aria-describedby` apontando para a linha do motivo). Só que um
+                `<button disabled>` sai da ordem de tabulação e a maioria dos
+                leitores de tela não anuncia a descrição de um controle
+                desabilitado. Ou seja: a explicação existia e não chegava a
+                quem mais precisava dela: quem não vê a linha logo acima.
+
+                Com `aria-disabled` o botão continua alcançável pelo Tab, é
+                anunciado como desabilitado E leva a razão junto. Quem barra a
+                ação passa a ser o manipulador, não o navegador; ver o `switch`
+                em js/actions.js, onde cada uma destas ações confere a mesma
+                condição antes de agir. */""}
+          <button class="btn btn--ghost btn--sm" data-action="onb-have-account" ${o.legalAccepted ? "" : `aria-disabled="true" aria-describedby="onb-block-reason"`}>Já tenho conta</button>
+          <button class="btn btn--ghost btn--sm" data-action="onb-skip" ${o.legalAccepted ? "" : `aria-disabled="true" aria-describedby="onb-block-reason"`}>Pular por agora</button>
         </div>
       </div>
       ${renderOnbProgress(o.step)}
@@ -26762,7 +26879,7 @@ function renderOnboardingLayer() {
       ${motivo ? `<p class="onb__block-hint" id="onb-block-reason" ${travado ? "" : "hidden"}>${svgIcon("info", 14)}<span>${motivo}</span>${o.step === 1 && !o.legalAccepted ? `<button type="button" class="link-btn onb__block-jump" data-action="onb-goto-legal">Ir para o aceite</button>` : ""}</p>` : ""}
       <div class="onb__foot">
         ${o.step > 1 ? `<button class="btn btn--secondary" data-action="onb-back">${svgIcon("chevronLeft", 16)} Voltar</button>` : `<span></span>`}
-        <button id="onb-advance" class="btn btn--primary" data-action="${last ? "onb-finish" : "onb-next"}" ${travado ? `disabled aria-describedby="onb-block-reason"` : ""}>
+        <button id="onb-advance" class="btn btn--primary" data-action="${last ? "onb-finish" : "onb-next"}" ${travado ? `aria-disabled="true" aria-describedby="onb-block-reason"` : ""}>
           ${last ? `${svgIcon("checkCircle", 16)} Concluir` : "Continuar"}
         </button>
       </div>
@@ -26778,12 +26895,11 @@ function patchOnboardingFooter() {
   const btn = document.getElementById("onb-advance");
   const aviso = document.getElementById("onb-block-reason");
   if (btn) {
-    btn.disabled = !pode;
-    // O motivo só descreve o botão enquanto ele está travado. Um
-    // aria-describedby fixo faria o leitor de tela anunciar, a cada foco, uma
-    // exigência que o usuário já cumpriu.
-    if (pode) btn.removeAttribute("aria-describedby");
-    else btn.setAttribute("aria-describedby", "onb-block-reason");
+    // [M42] `aria-disabled` no lugar de `disabled`: ver o comentário no
+    // `renderOnboardingLayer`. O botão continua focável, e é por isso que a
+    // razão do bloqueio chega ao leitor de tela.
+    if (pode) { btn.removeAttribute("aria-disabled"); btn.removeAttribute("aria-describedby"); }
+    else { btn.setAttribute("aria-disabled", "true"); btn.setAttribute("aria-describedby", "onb-block-reason"); }
   }
   // O aviso acompanha o botão no patch: sem isto ele continuaria na tela
   // depois de a renda ser digitada, contradizendo um botão já liberado.
@@ -27723,7 +27839,7 @@ function renderUpcomingBillsCard(m) {
         <span class="icon-bubble icon-bubble--sm" data-ui-css="background:color-mix(in srgb, ${it.color} 14%, transparent); color:${it.color}">${svgIcon(it.icon, 14)}</span>
         <div class="bill-row__info">
           <p class="bill-row__label">${escapeHtml(it.label)}${it.installment ? ` <span class="bill-row__inst">${it.installment}</span>` : ""}</p>
-          <p class="bill-row__meta" data-ui-css="color:${it.overdue ? "var(--negative)" : (KIND_COLOR[it.kind] || "var(--ink-faint)")}">${it.overdue && it.kind === "card-statement" ? "Fatura vencida" : (KIND_LABEL[it.kind] || "Prevista")} · ${fmtDateShort(it.date)}${!it.overdue && it.daysLeft >= 0 ? ` · em ${it.daysLeft}d` : ""}</p>
+          <p class="bill-row__meta" data-ui-css="color:${inkOf(it.overdue ? "var(--negative)" : (KIND_COLOR[it.kind] || "var(--ink-faint)"))}">${it.overdue && it.kind === "card-statement" ? "Fatura vencida" : (KIND_LABEL[it.kind] || "Prevista")} · ${fmtDateShort(it.date)}${!it.overdue && it.daysLeft >= 0 ? ` · em ${it.daysLeft}d` : ""}</p>
         </div>
         <span class="bill-row__amount">${fmtBRL(it.amount)}</span>
       </div>`).join("")}
@@ -31394,9 +31510,27 @@ function renderSubscriptionsCard() {
       ${svgIcon("refresh", 18, "leak-header__icon")}
       <div>
         <p class="card-title" data-ui-css="margin:0">Assinaturas e recorrências</p>
-        <p class="card-subtitle" data-ui-css="margin:2px 0 0">${m.counts.tracked} ${m.counts.tracked === 1 ? "recorrência identificada" : "recorrências identificadas"}, ${m.counts.subscriptions} ${m.counts.subscriptions === 1 ? "delas assinatura" : "delas assinaturas"} · ${fmtBRL(m.annualTotal)} por ano em assinaturas</p>
+        <p class="card-subtitle" data-ui-css="margin:2px 0 0">${m.counts.tracked} ${m.counts.tracked === 1 ? "recorrência identificada" : "recorrências identificadas"}, ${m.counts.subscriptions} ${m.counts.subscriptions === 1 ? "delas assinatura" : "delas assinaturas"} · ${fmtBRL(m.monthlyTotal)}/mês só em assinaturas</p>
       </div>
-      <span class="leak-total">${fmtBRL(m.committedMonthly)}/mês</span>
+      ${/* [M42] O NÚMERO GRANDE PRECISA DIZER DE QUE ELE É.
+
+            O cartão se chama "Assinaturas e recorrências" e o número em
+            destaque é `committedMonthly`, que soma assinaturas MAIS essenciais
+            MAIS recorrentes variáveis (js/recurring.js). Sem rótulo, ele era
+            lido como "minhas assinaturas custam isto por mês". Na demonstração
+            saía assim:
+
+              4 delas assinaturas · R$ 3.920,40 por ano em assinaturas
+                                                    R$ 3.748,58/mês
+
+            R$ 3.920,40 por ano são R$ 326,70 por mês. O número grande era outra
+            grandeza, e por acaso idêntico ao total de despesas do mês, o que
+            reforçava a leitura errada.
+
+            Agora o rótulo diz "comprometido", e a linha de cima passou a falar
+            em mês (a mesma unidade), para os dois números poderem ser
+            comparados sem o leitor ter de dividir por doze de cabeça. */""}
+      <span class="leak-total"><b>${fmtBRL(m.committedMonthly)}</b><small>comprometido/mês</small></span>
     </div>
     <div class="leak-list">
       ${top.map((s) => `<div class="leak-row">
@@ -33171,13 +33305,25 @@ function onClick(e) {
     }
     case "diagnostics-clear":
       clearSafeErrors(); render(); notify("Diagnóstico apagado"); break;
-    case "onb-skip": skipOnboarding(); break;
+    // [M42] O NAVEGADOR NAO BARRA MAIS: QUEM BARRA E AQUI.
+    //
+    // Estes três botões trocaram o atributo "disabled" pelo "aria-disabled"
+    // para que a razão do bloqueio chegue ao leitor de tela (ver o comentário
+    // longo em js/screens/onboarding.js). "aria-disabled" é semântica, não
+    // comportamento: o clique continua chegando. Sem a checagem aqui, quem usa
+    // teclado pularia o aceite da política, que é exatamente o portão que o
+    // assistente existe para segurar.
+    //
+    // onbBloqueado() consulta o MESMO onbCanAdvance que desenha o estado do
+    // botão, então o que a tela mostra e o que a ação permite não têm como
+    // discordar.
+    case "onb-skip": if (!onbBloqueado()) skipOnboarding(); break;
     case "protect-data": openProtectDataDialog(); break;
     case "local-only-dismiss": state.localOnlyDismissed = true; render(); break;
     case "demo-enter": enterDemoMode(); break;
     case "demo-exit": exitDemoMode(); break;
-    case "onb-have-account": openAccountFromOnboarding(); break;
-    case "onb-finish": finishOnboarding(); break;
+    case "onb-have-account": if (!onbBloqueado()) openAccountFromOnboarding(); break;
+    case "onb-finish": if (onbCanAdvance(state.onboarding.step)) finishOnboarding(); break;
     case "onb-restart": startOnboarding(); break;
     case "skip-to-content": {
       e.preventDefault();
