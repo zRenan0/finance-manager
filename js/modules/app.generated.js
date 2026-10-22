@@ -7920,7 +7920,14 @@ function makeInstallmentTransactions(base, installments) {
     amount: value,
     date: addMonthsToIso(base.date || todayIso(), i),
     description: n > 1 ? `${label} (${i + 1}/${n})` : described,
-    recurring: false,
+    // O INTERRUPTOR "GASTO FIXO MENSAL" ERA DESCARTADO AQUI. Todo lançamento
+    // manual passa por esta fábrica com n = 1, e `recurring: false` fixo
+    // apagava a escolha feita no formulário: o aluguel marcado como fixo nascia
+    // comum, e nada do que depende da marca (previsão de fechamento, "Próximas
+    // contas", "Lançar gastos fixos pendentes", calendário) acordava. Só a
+    // edição preservava a marca, porque não passa por aqui. Parcela continua
+    // nunca sendo fixa: ela já tem data própria para cada mês.
+    recurring: n > 1 ? false : !!base.recurring,
     installmentGroupId: n > 1 ? groupId : null,
     installmentIndex: n > 1 ? i + 1 : null,
     installmentTotal: n > 1 ? n : null,
@@ -12394,7 +12401,15 @@ function buildTransactionReviewModel(data) {
 
   (data.accounts || []).filter((account) => !account.archived).forEach((account) => {
     const last = account.reconciledAt || null;
-    const overdue = !last || daysBetweenIso(last, todayIso()) > 30;
+    // Conta recém-cadastrada não nasce pendente. Antes, "ainda não foi
+    // conferida" aparecia no minuto em que a conta era criada, com saldo
+    // inicial digitado pela própria pessoa e nenhum movimento: era a primeira
+    // "pendência" que todo usuário novo via, e não havia o que conferir. A
+    // cobrança passa a valer 30 dias depois da criação (ou da abertura, para
+    // registros antigos sem data de criação), o mesmo prazo da reconferência.
+    const criada = String(account.createdAt || "").slice(0, 10) || account.openingDate || null;
+    const referencia = last || criada;
+    const overdue = !referencia || daysBetweenIso(referencia, todayIso()) > 30;
     if (overdue) issues.push({ key: `account:${account.id}`, type: "account", accountId: account.id, txIds: [], title: "Saldo da conta precisa ser conferido", detail: last ? `${account.name} não é conferida há mais de 30 dias.` : `${account.name} ainda não foi conferida.`, date: last || account.openingDate, amount: accountBalance(data, account.id, todayIso()) });
   });
 
@@ -25957,6 +25972,25 @@ const NOTIF_RULES = [
           }));
           return;
         }
+        // FATURA VENCIDA NÃO É "VENCE HOJE". `upcomingBills` mantém a fatura
+        // de cartão em aberto depois do vencimento (`overdue`, `daysLeft`
+        // negativo), e a frase abaixo arredondava qualquer atraso para "hoje":
+        // uma fatura de 24 dias atrás saía como "Vence hoje · em 28/09", duas
+        // afirmações que se contradizem na mesma linha. Atraso tem aviso
+        // próprio, com tom de alerta e a data em que venceu.
+        if (b.overdue || b.daysLeft < 0) {
+          out.push(notifCandidate({
+            key: `conta-vencida:${b.id}:${b.date}`,
+            group: "contas",
+            tone: "danger",
+            icon: "alertTriangle",
+            title: b.kind === "card-statement" ? "Fatura vencida" : "Conta vencida",
+            message: `${b.label} venceu em ${fmtDateShort(b.date)} e continua em aberto. ${fmtBRL(b.amount)}.`,
+            tab: b.kind === "card-statement" ? "accounts" : "calendar",
+            amount: b.amount,
+          }));
+          return;
+        }
         if (b.daysLeft > NOTIF_BILL_DAYS) return;
         const quando = b.daysLeft <= 0 ? "hoje" : (b.daysLeft === 1 ? "amanhã" : `em ${b.daysLeft} dias`);
         out.push(notifCandidate({
@@ -26319,8 +26353,25 @@ function syncNotificationState(current, candidates, opts) {
     });
   });
 
+  // AVISO DE CONTA RESOLVIDO DEIXA DE COBRAR. Os avisos são histórico: uma
+  // vez criados, ficavam "não lidos" até a pessoa tocar, mesmo depois de a
+  // fatura ser paga ou a conta lançada. Medido: fatura paga, e o sino
+  // continuava com "1 não lido" sobre ela, inclusive depois de recarregar.
+  // Quando a regra de contas deixa de produzir a mesma chave (a conta saiu da
+  // janela porque foi paga, lançada, ou virou um aviso de atraso com chave
+  // própria), o item antigo é marcado como lido no mesmo ato. Só o grupo
+  // "contas": é o único cuja condição desaparece por ação da pessoa.
+  const chavesAtuais = new Set((candidates || []).filter((c) => c && c.key).map((c) => c.key));
+  const resolved = [];
+  const resolvidos = state.items.map((n) => {
+    if (n.group !== "contas" || n.readAt || chavesAtuais.has(n.key)) return n;
+    const lido = { ...n, readAt: today };
+    resolved.push(lido);
+    return lido;
+  });
+
   const cutoff = isoOfDate(new Date(dateFromIso(today).getTime() - NOTIF_RETENTION_DAYS * 86400000));
-  const items = created.concat(state.items)
+  const items = created.concat(resolvidos)
     .filter((n) => n.createdAt >= cutoff)
     .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : NOTIF_TONE_ORDER[a.tone] - NOTIF_TONE_ORDER[b.tone]))
     .slice(0, NOTIF_MAX_ITEMS);
@@ -26328,6 +26379,9 @@ function syncNotificationState(current, candidates, opts) {
   return {
     state: { items, muted: { ...state.muted }, lastSyncAt: today, initialized: true },
     created: created.filter((n) => !n.readAt),
+    // Avisos de conta que deixaram de cobrar nesta passada. Quem chama precisa
+    // saber que algo mudou mesmo sem aviso novo, senão o estado não é gravado.
+    resolved,
   };
 }
 
@@ -34688,8 +34742,22 @@ function onClick(e) {
     case "carry-post-all": {
       const mKey = keyOfCurrentMonth();
       const pending = getPendingRecurring(state.data, mKey);
+      // A DATA É A DO VENCIMENTO, NÃO A DE HOJE. O gasto fixo tem dia próprio
+      // (o aluguel do dia 10), e "lançar pendentes" registra que ele
+      // aconteceu, não que aconteceu agora. Datado em hoje, o dia da conta
+      // derivava a cada mês em que a pessoa lançava atrasado (10, depois 22,
+      // depois 25), o intervalo deixava de parecer mensal e a recorrência
+      // sumia da tela de assinaturas. O dia é o do modelo, dentro do mês
+      // corrente e nunca no futuro.
+      const hoje = todayIso();
+      const [ano, mes] = mKey.split("-").map(Number);
+      const dataDoModelo = (t) => {
+        const dia = Number(String(t.date || "").slice(8, 10)) || 1;
+        const estimada = isoOfDate(new Date(ano, mes - 1, Math.min(dia, daysInMonthOf(ano, mes - 1))));
+        return estimada <= hoje ? estimada : hoje;
+      };
       const newTx = pending.map((t) => makeTransaction({
-        type: "expense", amount: t.amount, categoryId: t.categoryId, date: todayIso(),
+        type: "expense", amount: t.amount, categoryId: t.categoryId, date: dataDoModelo(t),
         payment: t.payment, description: t.description, recurring: true, source: "manual",
         accountId: t.accountId || ((state.data.accounts || []).find((a) => !a.archived) || {}).id || null,
         creditCardId: t.creditCardId || null,
@@ -35178,6 +35246,13 @@ function onClick(e) {
       // Categoria com filhas não pode virar filha: o modelo tem um nível só, e
       // aninhar mais esconderia gasto de todos os tetos.
       const parentId = draft.id && childCategories(state.data, draft.id).length > 0 ? null : (draft.parentId || null);
+      // Duas "Moradia" no mesmo nível não são duas categorias: são a mesma
+      // etiqueta dividindo o gasto em dois tetos, e a lista de chips, os
+      // filtros e os relatórios mostram nomes iguais sem nada que os distinga.
+      // Medido: o editor aceitava "Moradia" de novo com "Categoria criada".
+      const nomeChave = normalizeText(name);
+      const repetida = (state.data.categories || []).some((c) => c.id !== draft.id && (c.parentId || null) === parentId && normalizeText(c.name) === nomeChave);
+      if (repetida) { showFormErrors({ "cat-editor-name": parentId ? "Já existe uma subcategoria com esse nome aqui." : "Já existe uma categoria com esse nome." }, "Nome repetido"); break; }
       const group = BUDGET_GROUPS.includes(draft.group) ? draft.group : "necessidade";
       const patch = { name, parentId, group, icon: draft.icon, color: draft.color, budget };
       setData((d) => withBudgetSnapshot(draft.id
@@ -36301,7 +36376,8 @@ function syncNotifications(opts) {
     return;
   }
 
-  const changed = result.created.length > 0 || result.state.lastSyncAt !== current.lastSyncAt || silent;
+  const resolvidos = Array.isArray(result.resolved) ? result.resolved.length : 0;
+  const changed = result.created.length > 0 || resolvidos > 0 || result.state.lastSyncAt !== current.lastSyncAt || silent;
   if (!changed) return;
 
   __notifSyncing = true;

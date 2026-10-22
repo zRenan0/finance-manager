@@ -220,6 +220,22 @@ const catId = (nome) => run(`state.data.categories.find((c) => c.name === ${JSON
   `) === "f");
   check("descrição curta demais não casa com nada", run(`similarExpensesByMerchant({ transactions: [{ id: "a", type: "expense", description: "PIX" }] }, "PIX", "zz").length`) === 0);
 
+  section("6. Categoria com nome repetido no mesmo nível não é criada");
+  run(`state.data = migrate(defaultData()); state.categoriesUi.editor = null; state.overlayStack = [];`);
+  const antes = run("state.data.categories.length");
+  click("cat-editor-open");
+  run(`state.categoriesUi.editor.name = "moradia";`);
+  click("cat-editor-save");
+  check("nome igual ao de uma categoria existente é recusado (sem diferenciar maiúsculas)", run("state.data.categories.length") === antes);
+  check("o editor continua aberto para corrigir", !!run("state.categoriesUi.editor"));
+  run(`state.categoriesUi.editor.name = "Mercado";`);
+  click("cat-editor-save");
+  check("o mesmo nome em outro nível (subcategoria existente) continua permitido", run("state.data.categories.length") === antes + 1);
+  click("cat-editor-open");
+  run(`state.categoriesUi.editor.name = "Pets";`);
+  click("cat-editor-save");
+  check("nome novo entra normalmente", run("state.data.categories.length") === antes + 2 && run(`state.data.categories.some((c) => c.name === "Pets")`));
+
   console.log(`\n${failed ? "FALHAS ENCONTRADAS" : "TODOS OS TESTES PASSARAM"}: ${passed} ok, ${failed} falha(s)`);
   process.exit(failed ? 1 : 0);
 })();

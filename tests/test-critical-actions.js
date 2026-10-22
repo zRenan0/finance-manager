@@ -257,6 +257,36 @@ async function main() {
   check("restauração chega ao fluxo validado de backup", ctx.__calls.backup === 1, ctx.__calls);
   check("arquivo protegido volta ao importador com a senha", ctx.__calls.importRetry === 1, ctx.__calls);
 
+  section("9. O interruptor 'Gasto fixo mensal' sobrevive à gravação de um gasto novo");
+  // Medido antes da correção: o formulário mostrava o interruptor ligado, o
+  // lançamento era salvo e, reaberto na edição, vinha desligado. A fábrica de
+  // parcelas, por onde todo gasto manual passa com n = 1, gravava
+  // `recurring: false` fixo. Só a edição preservava a marca.
+  resetState();
+  run(`state.form = { ...freshTxForm(), amount: "1.200,00", description: "Aluguel", categoryId: state.data.categories[0].id, date: todayIso(), payment: "Pix", recurring: true };`);
+  click("submit-tx");
+  check("gasto novo marcado como fixo é gravado como fixo", run("state.data.transactions.length === 1 && state.data.transactions[0].recurring === true"), run("JSON.stringify(state.data.transactions.map((t) => [t.description, t.recurring]))"));
+  run(`state.form = { ...freshTxForm(), amount: "300,00", description: "Tênis", categoryId: state.data.categories[0].id, date: todayIso(), payment: "Crédito", creditCardId: "", installments: "3", recurring: true };`);
+  click("submit-tx");
+  check("compra parcelada nunca vira gasto fixo, mesmo com o interruptor ligado", run("state.data.transactions.filter((t) => t.installmentGroupId).length === 3 && state.data.transactions.filter((t) => t.installmentGroupId).every((t) => t.recurring === false)"));
+  check("a fábrica preserva a marca em lançamento único", run(`makeInstallmentTransactions({ type: "expense", amount: 50, categoryId: "outros", date: todayIso(), recurring: true }, 1)[0].recurring === true`));
+  check("o gasto fixo recém-salvo já entra na previsão do mês seguinte", run(`recurringTemplates(state.data, todayIso()).some((t) => t.description === "Aluguel")`));
+
+  // "Lançar gastos fixos pendentes" data o lançamento no dia do vencimento (o
+  // dia do modelo), não em hoje: datado em hoje, o dia da conta derivava a cada
+  // mês lançado atrasado e a recorrência deixava de parecer mensal.
+  resetState();
+  run(`
+    const hoje = dateFromIso(todayIso());
+    const mesPassado = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 10);
+    state.data = migrate({ ...state.data, transactions: [makeTransaction({ type: "expense", amount: 1200, categoryId: state.data.categories[0].id, date: isoOfDate(mesPassado), description: "Aluguel", recurring: true, payment: "Pix" })] });
+  `);
+  click("carry-post-all");
+  const esperado = run(`(() => { const hoje = dateFromIso(todayIso()); const d = new Date(hoje.getFullYear(), hoje.getMonth(), 10); return d <= hoje ? isoOfDate(d) : todayIso(); })()`);
+  const lancado = run(`JSON.stringify(state.data.transactions.filter((t) => t.date >= todayIso().slice(0, 7) + "-01").map((t) => [t.description, t.date, t.recurring]))`);
+  check("o pendente é lançado no dia do vencimento, não em hoje", run(`state.data.transactions.some((t) => t.description === "Aluguel" && t.date === ${JSON.stringify(esperado)} && t.recurring === true)`), { esperado, lancado });
+  check("lançar pendentes não cria lançamento no futuro", run(`state.data.transactions.every((t) => t.date <= todayIso())`));
+
   console.log(`\n${failed === 0 ? "TODOS OS TESTES PASSARAM" : "FALHAS"}: ${passed} ok, ${failed} falha(s)`);
   process.exit(failed === 0 ? 0 : 1);
 }

@@ -5856,7 +5856,14 @@ function makeInstallmentTransactions(base, installments) {
     amount: value,
     date: addMonthsToIso(base.date || todayIso(), i),
     description: n > 1 ? `${label} (${i + 1}/${n})` : described,
-    recurring: false,
+    // O INTERRUPTOR "GASTO FIXO MENSAL" ERA DESCARTADO AQUI. Todo lançamento
+    // manual passa por esta fábrica com n = 1, e `recurring: false` fixo
+    // apagava a escolha feita no formulário: o aluguel marcado como fixo nascia
+    // comum, e nada do que depende da marca (previsão de fechamento, "Próximas
+    // contas", "Lançar gastos fixos pendentes", calendário) acordava. Só a
+    // edição preservava a marca, porque não passa por aqui. Parcela continua
+    // nunca sendo fixa: ela já tem data própria para cada mês.
+    recurring: n > 1 ? false : !!base.recurring,
     installmentGroupId: n > 1 ? groupId : null,
     installmentIndex: n > 1 ? i + 1 : null,
     installmentTotal: n > 1 ? n : null,

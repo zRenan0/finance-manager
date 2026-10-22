@@ -410,7 +410,15 @@ function buildTransactionReviewModel(data) {
 
   (data.accounts || []).filter((account) => !account.archived).forEach((account) => {
     const last = account.reconciledAt || null;
-    const overdue = !last || daysBetweenIso(last, todayIso()) > 30;
+    // Conta recém-cadastrada não nasce pendente. Antes, "ainda não foi
+    // conferida" aparecia no minuto em que a conta era criada, com saldo
+    // inicial digitado pela própria pessoa e nenhum movimento: era a primeira
+    // "pendência" que todo usuário novo via, e não havia o que conferir. A
+    // cobrança passa a valer 30 dias depois da criação (ou da abertura, para
+    // registros antigos sem data de criação), o mesmo prazo da reconferência.
+    const criada = String(account.createdAt || "").slice(0, 10) || account.openingDate || null;
+    const referencia = last || criada;
+    const overdue = !referencia || daysBetweenIso(referencia, todayIso()) > 30;
     if (overdue) issues.push({ key: `account:${account.id}`, type: "account", accountId: account.id, txIds: [], title: "Saldo da conta precisa ser conferido", detail: last ? `${account.name} não é conferida há mais de 30 dias.` : `${account.name} ainda não foi conferida.`, date: last || account.openingDate, amount: accountBalance(data, account.id, todayIso()) });
   });
 

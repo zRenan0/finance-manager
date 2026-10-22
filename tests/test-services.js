@@ -315,5 +315,39 @@ console.log("\n5. Persistência (schema corrente)");
   check("a mesclagem de backup inclui as notificações", run("__mergedData.notifications.items.length") === 3);
 }
 
+/* ===================================== 9. FATURA VENCIDA E AVISO RESOLVIDO */
+// Medido no navegador antes da correção: uma fatura vencida há 24 dias saía
+// como "Vence hoje · em 28/09", e depois de paga continuava "não lida", inclusive
+// após recarregar. Duas afirmações que o próprio app sabia serem falsas.
+console.log("\n9. Fatura vencida e aviso resolvido");
+{
+  ctx.__acc = run(`makeAccount({ id: "acc-a", name: "Conta A", openingBalance: 2000, openingDate: "2025-01-01" })`);
+  ctx.__card = run(`makeCreditCard({ id: "card-a", name: "Cartão X", accountId: "acc-a", limit: 3000, closingDay: 20, dueDay: 28 }, [__acc])`);
+  const vencida = baseData({
+    accounts: [ctx.__acc], creditCards: [ctx.__card],
+    transactions: [tx({ type: "expense", amount: 420, categoryId: "lazer", date: monthsAgo(1, 5), payment: "Crédito", creditCardId: "card-a", description: "Compra antiga" })],
+  });
+  ctx.__vencida = vencida;
+  const cands = run("buildNotificationCandidates(__vencida)");
+  const atrasada = cands.find((c) => c.key.startsWith("conta-vencida:"));
+  check("fatura vencida gera aviso próprio de atraso", !!atrasada, cands.map((c) => c.key));
+  check("o título diz que venceu, não que vence hoje", !!atrasada && /vencida/i.test(atrasada.title) && !/Vence hoje/.test(atrasada.title), atrasada && atrasada.title);
+  check("a mensagem traz a data em que venceu e o valor", !!atrasada && /venceu em \d{2}\/\d{2}/.test(atrasada.message) && /420,00/.test(atrasada.message), atrasada && atrasada.message);
+  check("tom de alerta e atalho para contas e cartões", !!atrasada && atrasada.tone === "danger" && atrasada.tab === "accounts");
+  check("não sai também como 'Vence hoje'", !cands.some((c) => c.key.startsWith("conta:") && /hoje/.test(c.title)));
+
+  const s1 = run("syncNotificationState(null, buildNotificationCandidates(__vencida), { silent: false })");
+  ctx.__s1 = s1.state;
+  check("o aviso entra não lido", s1.state.items.some((n) => n.key.startsWith("conta-vencida:") && !n.readAt));
+  const s2 = run("syncNotificationState(__s1, [])");
+  check("fatura paga (aviso some das candidatas): é marcado como lido sozinho", s2.state.items.every((n) => n.readAt) && s2.resolved.length === 1, s2.state.items.map((n) => [n.key, n.readAt]));
+  check("resolver não cria aviso novo", s2.created.length === 0);
+  const s3 = run("syncNotificationState(__s1, buildNotificationCandidates(__vencida))");
+  check("enquanto a fatura segue em aberto, o aviso segue não lido", s3.state.items.some((n) => n.key.startsWith("conta-vencida:") && !n.readAt) && s3.resolved.length === 0);
+  ctx.__s4 = { ...s1.state, items: [...s1.state.items, { id: "orc-x", key: "orcamento:mercado:2026-10", group: "orcamento", tone: "warn", icon: "pie", title: "Orçamento", message: "x", tab: "settings", amount: null, createdAt: today, readAt: null }] };
+  const s4 = run("syncNotificationState(__s4, [])");
+  check("outros grupos não são resolvidos sozinhos", s4.state.items.find((n) => n.key.startsWith("orcamento:")).readAt === null);
+}
+
 console.log(`\n${fail === 0 ? "TODOS OS TESTES PASSARAM" : "FALHAS ENCONTRADAS"} — ${pass} ok, ${fail} falha(s)\n`);
 process.exit(fail === 0 ? 0 : 1);

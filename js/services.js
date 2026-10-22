@@ -273,6 +273,25 @@ const NOTIF_RULES = [
           }));
           return;
         }
+        // FATURA VENCIDA NÃO É "VENCE HOJE". `upcomingBills` mantém a fatura
+        // de cartão em aberto depois do vencimento (`overdue`, `daysLeft`
+        // negativo), e a frase abaixo arredondava qualquer atraso para "hoje":
+        // uma fatura de 24 dias atrás saía como "Vence hoje · em 28/09", duas
+        // afirmações que se contradizem na mesma linha. Atraso tem aviso
+        // próprio, com tom de alerta e a data em que venceu.
+        if (b.overdue || b.daysLeft < 0) {
+          out.push(notifCandidate({
+            key: `conta-vencida:${b.id}:${b.date}`,
+            group: "contas",
+            tone: "danger",
+            icon: "alertTriangle",
+            title: b.kind === "card-statement" ? "Fatura vencida" : "Conta vencida",
+            message: `${b.label} venceu em ${fmtDateShort(b.date)} e continua em aberto. ${fmtBRL(b.amount)}.`,
+            tab: b.kind === "card-statement" ? "accounts" : "calendar",
+            amount: b.amount,
+          }));
+          return;
+        }
         if (b.daysLeft > NOTIF_BILL_DAYS) return;
         const quando = b.daysLeft <= 0 ? "hoje" : (b.daysLeft === 1 ? "amanhã" : `em ${b.daysLeft} dias`);
         out.push(notifCandidate({
@@ -635,8 +654,25 @@ function syncNotificationState(current, candidates, opts) {
     });
   });
 
+  // AVISO DE CONTA RESOLVIDO DEIXA DE COBRAR. Os avisos são histórico: uma
+  // vez criados, ficavam "não lidos" até a pessoa tocar, mesmo depois de a
+  // fatura ser paga ou a conta lançada. Medido: fatura paga, e o sino
+  // continuava com "1 não lido" sobre ela, inclusive depois de recarregar.
+  // Quando a regra de contas deixa de produzir a mesma chave (a conta saiu da
+  // janela porque foi paga, lançada, ou virou um aviso de atraso com chave
+  // própria), o item antigo é marcado como lido no mesmo ato. Só o grupo
+  // "contas": é o único cuja condição desaparece por ação da pessoa.
+  const chavesAtuais = new Set((candidates || []).filter((c) => c && c.key).map((c) => c.key));
+  const resolved = [];
+  const resolvidos = state.items.map((n) => {
+    if (n.group !== "contas" || n.readAt || chavesAtuais.has(n.key)) return n;
+    const lido = { ...n, readAt: today };
+    resolved.push(lido);
+    return lido;
+  });
+
   const cutoff = isoOfDate(new Date(dateFromIso(today).getTime() - NOTIF_RETENTION_DAYS * 86400000));
-  const items = created.concat(state.items)
+  const items = created.concat(resolvidos)
     .filter((n) => n.createdAt >= cutoff)
     .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : NOTIF_TONE_ORDER[a.tone] - NOTIF_TONE_ORDER[b.tone]))
     .slice(0, NOTIF_MAX_ITEMS);
@@ -644,6 +680,9 @@ function syncNotificationState(current, candidates, opts) {
   return {
     state: { items, muted: { ...state.muted }, lastSyncAt: today, initialized: true },
     created: created.filter((n) => !n.readAt),
+    // Avisos de conta que deixaram de cobrar nesta passada. Quem chama precisa
+    // saber que algo mudou mesmo sem aviso novo, senão o estado não é gravado.
+    resolved,
   };
 }
 

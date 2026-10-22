@@ -552,7 +552,12 @@ async function runOnboardingViewportM4(browser, scenario) {
     await page.selectOption("#movement-bulk-category", { index:1 });
     await page.locator('[data-action="movement-bulk-apply"]').click();
     await page.locator('[data-action="movement-review-toggle"]').click();
-    assert(await page.locator(".review-issue").count() >= 1, "a conta sem conferência não entrou na caixa de revisão");
+    // A conta criada no onboarding tem minutos de vida e, desde a revisão de
+    // uso, não nasce com "saldo precisa ser conferido" (a cobrança vale 30 dias
+    // depois da criação). A caixa de revisão continua tendo de abrir e dizer
+    // o que tem: pendências, quando existem, ou "Nenhuma pendência encontrada".
+    const caixa = await page.locator(".movement-review, .review-box, [data-action=\"movement-review-toggle\"]").first().textContent();
+    assert(await page.locator(".review-issue").count() >= 1 || /Nenhuma pendência encontrada/.test(caixa), "a caixa de revisão não abriu nem disse que está vazia");
     await page.locator('[data-action="movement-filters-toggle"]').click();
     await page.selectOption("#movement-type", "expense");
     assert(await page.locator(".movement-row").count() >= 1, "o filtro removeu saídas válidas");

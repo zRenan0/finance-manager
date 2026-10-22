@@ -107,5 +107,18 @@ console.log("\n4. Conciliação sem diferença");
 ctx.__reconciled = run("reconcileAccount(__data, 'a1', accountBalance(__data, 'a1', '2026-08-12'), '2026-08-12')");
 check("conferência exata grava a data sem criar ajuste", ctx.__reconciled.adjustment === null && ctx.__reconciled.data.accounts.find((a) => a.id === "a1").reconciledAt === "2026-08-12");
 
+console.log("\n5. Conta recém-criada não nasce pendente");
+// "ainda não foi conferida" aparecia no minuto em que a conta era criada, com
+// saldo inicial digitado pela própria pessoa e nenhum movimento. A cobrança vale
+// 30 dias depois da criação, o mesmo prazo da reconferência.
+ctx.__nova = run(`migrate({ ...defaultData(), accounts: [makeAccount({ id: "n1", name: "Nova", openingBalance: 100, openingDate: "2024-01-01" })] })`);
+check("conta criada agora não tem pendência de conferência", !run("buildTransactionReviewModel(__nova).issues.some((i) => i.type === 'account')"));
+ctx.__velha = run(`(() => { const d = migrate({ ...defaultData(), accounts: [makeAccount({ id: "v1", name: "Velha", openingBalance: 100, openingDate: "2024-01-01" })] }); const h = new Date(); h.setDate(h.getDate() - 40); d.accounts[0].createdAt = h.toISOString(); return d; })()`);
+check("depois de 30 dias sem conferir, a pendência aparece", run("buildTransactionReviewModel(__velha).issues.some((i) => i.type === 'account')"));
+ctx.__conferida = run(`(() => { const d = JSON.parse(JSON.stringify(__velha)); d.accounts[0].reconciledAt = todayIso(); return d; })()`);
+check("conferida hoje, a pendência some", !run("buildTransactionReviewModel(__conferida).issues.some((i) => i.type === 'account')"));
+ctx.__semData = run(`(() => { const d = JSON.parse(JSON.stringify(__velha)); delete d.accounts[0].createdAt; d.accounts[0].openingDate = "2024-01-01"; return d; })()`);
+check("registro antigo sem data de criação cai na data de abertura", run("buildTransactionReviewModel(__semData).issues.some((i) => i.type === 'account')"));
+
 console.log(`\nResultado: ${pass} passou, ${fail} falhou.`);
 if (fail) process.exit(1);

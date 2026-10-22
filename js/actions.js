@@ -1599,8 +1599,22 @@ function onClick(e) {
     case "carry-post-all": {
       const mKey = keyOfCurrentMonth();
       const pending = getPendingRecurring(state.data, mKey);
+      // A DATA É A DO VENCIMENTO, NÃO A DE HOJE. O gasto fixo tem dia próprio
+      // (o aluguel do dia 10), e "lançar pendentes" registra que ele
+      // aconteceu, não que aconteceu agora. Datado em hoje, o dia da conta
+      // derivava a cada mês em que a pessoa lançava atrasado (10, depois 22,
+      // depois 25), o intervalo deixava de parecer mensal e a recorrência
+      // sumia da tela de assinaturas. O dia é o do modelo, dentro do mês
+      // corrente e nunca no futuro.
+      const hoje = todayIso();
+      const [ano, mes] = mKey.split("-").map(Number);
+      const dataDoModelo = (t) => {
+        const dia = Number(String(t.date || "").slice(8, 10)) || 1;
+        const estimada = isoOfDate(new Date(ano, mes - 1, Math.min(dia, daysInMonthOf(ano, mes - 1))));
+        return estimada <= hoje ? estimada : hoje;
+      };
       const newTx = pending.map((t) => makeTransaction({
-        type: "expense", amount: t.amount, categoryId: t.categoryId, date: todayIso(),
+        type: "expense", amount: t.amount, categoryId: t.categoryId, date: dataDoModelo(t),
         payment: t.payment, description: t.description, recurring: true, source: "manual",
         accountId: t.accountId || ((state.data.accounts || []).find((a) => !a.archived) || {}).id || null,
         creditCardId: t.creditCardId || null,
@@ -2089,6 +2103,13 @@ function onClick(e) {
       // Categoria com filhas não pode virar filha: o modelo tem um nível só, e
       // aninhar mais esconderia gasto de todos os tetos.
       const parentId = draft.id && childCategories(state.data, draft.id).length > 0 ? null : (draft.parentId || null);
+      // Duas "Moradia" no mesmo nível não são duas categorias: são a mesma
+      // etiqueta dividindo o gasto em dois tetos, e a lista de chips, os
+      // filtros e os relatórios mostram nomes iguais sem nada que os distinga.
+      // Medido: o editor aceitava "Moradia" de novo com "Categoria criada".
+      const nomeChave = normalizeText(name);
+      const repetida = (state.data.categories || []).some((c) => c.id !== draft.id && (c.parentId || null) === parentId && normalizeText(c.name) === nomeChave);
+      if (repetida) { showFormErrors({ "cat-editor-name": parentId ? "Já existe uma subcategoria com esse nome aqui." : "Já existe uma categoria com esse nome." }, "Nome repetido"); break; }
       const group = BUDGET_GROUPS.includes(draft.group) ? draft.group : "necessidade";
       const patch = { name, parentId, group, icon: draft.icon, color: draft.color, budget };
       setData((d) => withBudgetSnapshot(draft.id

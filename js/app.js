@@ -796,7 +796,8 @@ function syncNotifications(opts) {
     return;
   }
 
-  const changed = result.created.length > 0 || result.state.lastSyncAt !== current.lastSyncAt || silent;
+  const resolvidos = Array.isArray(result.resolved) ? result.resolved.length : 0;
+  const changed = result.created.length > 0 || resolvidos > 0 || result.state.lastSyncAt !== current.lastSyncAt || silent;
   if (!changed) return;
 
   __notifSyncing = true;

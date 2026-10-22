@@ -2,6 +2,31 @@
 
 ## Não publicado
 
+### Auditoria de uso: avisos, contas novas e categorias repetidas
+
+- **"Gasto fixo mensal" passou a valer ao salvar um gasto novo.** O interruptor
+  do formulário era descartado na gravação (só a edição preservava a marca).
+  Na prática, previsão de fechamento, "Próximas contas", "Lançar gastos fixos
+  pendentes" e o calendário nunca ligavam para quem marcava na hora de lançar.
+  Parcelas continuam nunca sendo fixas.
+- **"Lançar gastos fixos pendentes" data o lançamento no dia do vencimento**, não
+  em hoje. Datado em hoje, o dia da conta derivava a cada mês lançado atrasado e
+  a recorrência sumia da tela de assinaturas por não parecer mais mensal.
+- **Fatura vencida deixou de aparecer como "Vence hoje".** Uma fatura 24 dias
+  atrasada saía como "Vence hoje · em 28/09", duas afirmações que se
+  contradizem. Atraso tem aviso próprio ("Fatura vencida"), com a data em que
+  venceu, tom de alerta e atalho para Contas e cartões.
+- **Aviso de conta paga para de cobrar.** Depois de pagar a fatura ou lançar a
+  conta, o aviso continuava "não lido", inclusive após recarregar. Quando a
+  condição que gerou o aviso desaparece, ele é marcado como lido sozinho; o
+  histórico continua lá.
+- **Conta recém-cadastrada não nasce com pendência.** "Ainda não foi
+  conferida" aparecia no minuto em que a conta era criada, sem nenhum
+  movimento para conferir. A cobrança passa a valer 30 dias depois da criação.
+- **Duas categorias com o mesmo nome no mesmo nível não são mais aceitas.** O
+  editor aceitava "Moradia" de novo e a lista ficava com dois chips iguais.
+  Agora avisa no campo; o mesmo nome em outro nível continua permitido.
+
 ### Corrigir uma vez, valer para o estabelecimento inteiro
 
 - **Na revisão da importação, a categoria escolhida numa linha se espalha para
