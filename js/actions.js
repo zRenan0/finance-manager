@@ -1595,6 +1595,61 @@ function onClick(e) {
       render();
       break;
     case "toggle-recurring": state.form.recurring = !state.form.recurring; render(); break;
+    case "set-date": {
+      const hoje = todayIso();
+      state.form.date = value === "ontem" ? addDaysToIso(hoje, -1) : hoje;
+      render();
+      break;
+    }
+    // Repetir um lançamento recente (ver renderRecentTemplates em
+    // js/screens/add.js). O modelo é recalculado aqui a partir dos dados, não
+    // lido da tela: o HTML carrega só a chave, e nada que venha do DOM vira
+    // valor gravado. Conta e cartão só entram se ainda existirem e não
+    // estiverem arquivados; senão fica o padrão do formulário novo.
+    case "tx-template-apply": {
+      if (typeof recentTransactionTemplates !== "function") break;
+      const modelo = recentTransactionTemplates(state.data, { type: state.form.type, limit: 12 }).find((m) => m.key === value);
+      if (!modelo) break;
+      const contas = (state.data.accounts || []).filter((a) => !a.archived);
+      const cartoes = (state.data.creditCards || []).filter((c) => !c.archived);
+      const base = freshTxForm();
+      state.form = {
+        ...base,
+        type: modelo.type,
+        date: state.form.date || base.date,
+        amount: modelo.amount.toFixed(2).replace(".", ","),
+        categoryId: modelo.type === "income" ? null : (modelo.categoryId || base.categoryId),
+        payment: PAYMENT_METHODS.includes(modelo.payment) ? modelo.payment : base.payment,
+        description: modelo.description,
+        accountId: contas.some((a) => a.id === modelo.accountId) ? modelo.accountId : base.accountId,
+        creditCardId: cartoes.some((c) => c.id === modelo.creditCardId) ? modelo.creditCardId : base.creditCardId,
+      };
+      if (state.form.payment !== "Crédito") state.form.creditCardId = "";
+      if (typeof window !== "undefined" && window.CofreUI) window.CofreUI.forms.clearAll();
+      render();
+      break;
+    }
+    // Duplicar: o editor vira um formulário NOVO com os mesmos dados e a data de
+    // hoje. Parcelas e recorrência não são copiadas; meta e dívida (goalId,
+    // debtId, nature) são, porque "repetir o aporte" é exatamente o uso.
+    case "duplicate-tx": {
+      const t = state.data.transactions.find((x) => x.id === id);
+      if (!t) break;
+      const base = freshTxForm();
+      state.editingTxId = null;
+      state.form = {
+        ...base,
+        type: t.type, amount: t.amount.toFixed(2).replace(".", ","), categoryId: t.categoryId,
+        date: todayIso(), payment: t.payment, description: t.description,
+        nature: t.nature || "", goalId: t.goalId || null, debtId: t.debtId || null,
+        accountId: t.accountId || base.accountId, creditCardId: t.creditCardId || base.creditCardId,
+        recurring: false, installments: "1", source: "manual", origin: null,
+      };
+      if (state.form.payment !== "Crédito") state.form.creditCardId = "";
+      notify("Cópia pronta: confira data e valor antes de salvar.");
+      render();
+      break;
+    }
     case "toggle-nature-field": state.natureFieldOpen = !state.natureFieldOpen; render(); break;
     case "set-nature": {
       // A escolha do usuário vale sobre a dedução. É o que permite marcar um
@@ -1919,6 +1974,23 @@ function onClick(e) {
       const escolhido = THEME_CHOICES.indexOf(value) >= 0 ? value : "system";
       if (state.data.theme === escolhido) break;
       setData((d) => ({ ...d, theme: escolhido }));
+      break;
+    }
+    // Instalar como app (ver setupInstallPrompt em js/app.js). O evento só pode
+    // ser disparado uma vez: o botão some na hora e, se a pessoa recusar, o
+    // aviso diz que o menu do navegador continua servindo.
+    case "pwa-install": {
+      const pedido = state.installPrompt;
+      if (!pedido || typeof pedido.prompt !== "function") break;
+      state.installPrompt = null;
+      render();
+      Promise.resolve()
+        .then(() => pedido.prompt())
+        .then(() => pedido.userChoice)
+        .then((escolha) => {
+          if (!escolha || escolha.outcome !== "accepted") notify("Tudo bem. Dá para instalar depois pelo menu do navegador.");
+        })
+        .catch(() => { notify("Não foi possível abrir a instalação agora. Tente pelo menu do navegador."); });
       break;
     }
     case "toggle-gamification": {

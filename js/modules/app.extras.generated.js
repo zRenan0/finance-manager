@@ -2,9 +2,9 @@
 // Segundo pedaço do pacote: telas que não fazem parte da primeira pintura.
 // Edite os arquivos de origem em js/ e execute npm run build.
 
-let ACCOUNT_TYPE_LABELS, AI_HIDEABLE_FIELDS, ASSET_CLASSES, BACKUP_ENC_MIN_PASSWORD, BUDGET_GROUPS, BUILTIN_CATEGORY_RULES, CloudSync, DEBT_AMORTIZATION_LABELS, DEBT_TYPE_LABELS, FinanceStore, GOAL_ICON_OPTIONS, GOAL_INFLATION_MIN_DAYS, GOAL_TEMPLATES, GROUP_ICONS, GROUP_LABELS, HEALTH_INDICATORS, INVESTMENT_TYPES, LEGAL_CONTROLLER, LEGAL_DATA_INVENTORY, LEGAL_DATA_INVENTORY_GROUPS, LEGAL_PENDING, LEGAL_RETENTION, LEGAL_REVIEW_DATE, LEGAL_SUBJECT_RIGHTS, LEGAL_TEXT_VERSION, LEGAL_THIRD_PARTIES, LEGAL_THIRD_PARTY_GROUPS, MONTH_ABBR, MONTH_NAMES, RULE_MATCH_TYPES, RULE_WEIGHT_DEFAULT, RULE_WEIGHT_MAX, RULE_WEIGHT_MIN, accountsSummary, assetClassOf, backupCryptoAvailable, buildDataSourcesModel, categoryById, childCategories, clamp, compileCategoryRules, compileRulePattern, computeBudgetStatus, daysBetweenIso, debtMonthlyRateInfo, debtsModel, defaultBudgetAlerts, defaultPrivacy, divMoney, emergencyFund, emergencyLadder, escapeHtml, fmtBRL, fmtBRLShort, fmtDateFull, fmtDateShort, fmtDec, fmtNum, formatMovementTimestamp, freshGuestLink, goalExistingBalance, goalInflationPct, goalsModel, healthModel, inflateMoney, inkOf, investmentTypeOf, isDashboardStarting, keyOfCurrentMonth, legalAccepted, legalControllerGaps, legalControllerReady, legalDataInventoryGaps, legalThirdPartyGaps, legalThirdPartyLaunchGaps, marketRatesOf, matchCategoryRules, mergeBackupInto, moneyCompare, moneyDraft, moneyFromCents, moneyOrZero, moneyToCents, monthKeyOf, mulMoney, nextDueDateForDebt, normalizeCategoryRules, normalizePrivacy, normalizeText, notificationsModel, parseMoneyInput, passwordStrength, plural, pluralWord, portfolioModel, reconciliationHeadline, render, renderBackHeader, renderCalculationButton, renderDonut, renderEmptyState, renderGoalRing, renderLastBackupLine, renderScoreGauge, renderSparkline, safeErrorSummary, safePct, scoreGains, simulateExpenseImpact, simulateFinancingImpact, state, subMoney, svgIcon, todayIso, topLevelCategories, wealthModel;
+let ACCOUNT_TYPE_LABELS, AI_HIDEABLE_FIELDS, ASSET_CLASSES, BACKUP_ENC_MIN_PASSWORD, BUDGET_GROUPS, BUILTIN_CATEGORY_RULES, CloudSync, DEBT_AMORTIZATION_LABELS, DEBT_TYPE_LABELS, FinanceStore, GOAL_ICON_OPTIONS, GOAL_INFLATION_MIN_DAYS, GOAL_TEMPLATES, GROUP_ICONS, GROUP_LABELS, HEALTH_INDICATORS, INVESTMENT_TYPES, LEGAL_CONTROLLER, LEGAL_DATA_INVENTORY, LEGAL_DATA_INVENTORY_GROUPS, LEGAL_PENDING, LEGAL_RETENTION, LEGAL_REVIEW_DATE, LEGAL_SUBJECT_RIGHTS, LEGAL_TEXT_VERSION, LEGAL_THIRD_PARTIES, LEGAL_THIRD_PARTY_GROUPS, MONTH_ABBR, MONTH_NAMES, RULE_MATCH_TYPES, RULE_WEIGHT_DEFAULT, RULE_WEIGHT_MAX, RULE_WEIGHT_MIN, accountsSummary, assetClassOf, backupCryptoAvailable, buildDataSourcesModel, categoryById, childCategories, clamp, compileCategoryRules, compileRulePattern, computeBudgetStatus, daysBetweenIso, debtMonthlyRateInfo, debtsModel, defaultBudgetAlerts, defaultPrivacy, divMoney, emergencyFund, emergencyLadder, escapeHtml, fmtBRL, fmtBRLShort, fmtDateFull, fmtDateShort, fmtDec, fmtNum, formatMovementTimestamp, freshGuestLink, goalExistingBalance, goalInflationPct, goalsModel, healthModel, inflateMoney, inkOf, installAvailability, investmentTypeOf, isDashboardStarting, keyOfCurrentMonth, legalAccepted, legalControllerGaps, legalControllerReady, legalDataInventoryGaps, legalThirdPartyGaps, legalThirdPartyLaunchGaps, marketRatesOf, matchCategoryRules, mergeBackupInto, moneyCompare, moneyDraft, moneyFromCents, moneyOrZero, moneyToCents, monthKeyOf, mulMoney, nextDueDateForDebt, normalizeCategoryRules, normalizePrivacy, normalizeText, notificationsModel, parseMoneyInput, passwordStrength, plural, pluralWord, portfolioModel, reconciliationHeadline, render, renderBackHeader, renderCalculationButton, renderDonut, renderEmptyState, renderGoalRing, renderLastBackupLine, renderScoreGauge, renderSparkline, safeErrorSummary, safePct, scoreGains, simulateExpenseImpact, simulateFinancingImpact, state, subMoney, svgIcon, todayIso, topLevelCategories, wealthModel;
 export function instalarNucleo(n) {
-  ({ ACCOUNT_TYPE_LABELS, AI_HIDEABLE_FIELDS, ASSET_CLASSES, BACKUP_ENC_MIN_PASSWORD, BUDGET_GROUPS, BUILTIN_CATEGORY_RULES, CloudSync, DEBT_AMORTIZATION_LABELS, DEBT_TYPE_LABELS, FinanceStore, GOAL_ICON_OPTIONS, GOAL_INFLATION_MIN_DAYS, GOAL_TEMPLATES, GROUP_ICONS, GROUP_LABELS, HEALTH_INDICATORS, INVESTMENT_TYPES, LEGAL_CONTROLLER, LEGAL_DATA_INVENTORY, LEGAL_DATA_INVENTORY_GROUPS, LEGAL_PENDING, LEGAL_RETENTION, LEGAL_REVIEW_DATE, LEGAL_SUBJECT_RIGHTS, LEGAL_TEXT_VERSION, LEGAL_THIRD_PARTIES, LEGAL_THIRD_PARTY_GROUPS, MONTH_ABBR, MONTH_NAMES, RULE_MATCH_TYPES, RULE_WEIGHT_DEFAULT, RULE_WEIGHT_MAX, RULE_WEIGHT_MIN, accountsSummary, assetClassOf, backupCryptoAvailable, buildDataSourcesModel, categoryById, childCategories, clamp, compileCategoryRules, compileRulePattern, computeBudgetStatus, daysBetweenIso, debtMonthlyRateInfo, debtsModel, defaultBudgetAlerts, defaultPrivacy, divMoney, emergencyFund, emergencyLadder, escapeHtml, fmtBRL, fmtBRLShort, fmtDateFull, fmtDateShort, fmtDec, fmtNum, formatMovementTimestamp, freshGuestLink, goalExistingBalance, goalInflationPct, goalsModel, healthModel, inflateMoney, inkOf, investmentTypeOf, isDashboardStarting, keyOfCurrentMonth, legalAccepted, legalControllerGaps, legalControllerReady, legalDataInventoryGaps, legalThirdPartyGaps, legalThirdPartyLaunchGaps, marketRatesOf, matchCategoryRules, mergeBackupInto, moneyCompare, moneyDraft, moneyFromCents, moneyOrZero, moneyToCents, monthKeyOf, mulMoney, nextDueDateForDebt, normalizeCategoryRules, normalizePrivacy, normalizeText, notificationsModel, parseMoneyInput, passwordStrength, plural, pluralWord, portfolioModel, reconciliationHeadline, render, renderBackHeader, renderCalculationButton, renderDonut, renderEmptyState, renderGoalRing, renderLastBackupLine, renderScoreGauge, renderSparkline, safeErrorSummary, safePct, scoreGains, simulateExpenseImpact, simulateFinancingImpact, state, subMoney, svgIcon, todayIso, topLevelCategories, wealthModel } = n);
+  ({ ACCOUNT_TYPE_LABELS, AI_HIDEABLE_FIELDS, ASSET_CLASSES, BACKUP_ENC_MIN_PASSWORD, BUDGET_GROUPS, BUILTIN_CATEGORY_RULES, CloudSync, DEBT_AMORTIZATION_LABELS, DEBT_TYPE_LABELS, FinanceStore, GOAL_ICON_OPTIONS, GOAL_INFLATION_MIN_DAYS, GOAL_TEMPLATES, GROUP_ICONS, GROUP_LABELS, HEALTH_INDICATORS, INVESTMENT_TYPES, LEGAL_CONTROLLER, LEGAL_DATA_INVENTORY, LEGAL_DATA_INVENTORY_GROUPS, LEGAL_PENDING, LEGAL_RETENTION, LEGAL_REVIEW_DATE, LEGAL_SUBJECT_RIGHTS, LEGAL_TEXT_VERSION, LEGAL_THIRD_PARTIES, LEGAL_THIRD_PARTY_GROUPS, MONTH_ABBR, MONTH_NAMES, RULE_MATCH_TYPES, RULE_WEIGHT_DEFAULT, RULE_WEIGHT_MAX, RULE_WEIGHT_MIN, accountsSummary, assetClassOf, backupCryptoAvailable, buildDataSourcesModel, categoryById, childCategories, clamp, compileCategoryRules, compileRulePattern, computeBudgetStatus, daysBetweenIso, debtMonthlyRateInfo, debtsModel, defaultBudgetAlerts, defaultPrivacy, divMoney, emergencyFund, emergencyLadder, escapeHtml, fmtBRL, fmtBRLShort, fmtDateFull, fmtDateShort, fmtDec, fmtNum, formatMovementTimestamp, freshGuestLink, goalExistingBalance, goalInflationPct, goalsModel, healthModel, inflateMoney, inkOf, installAvailability, investmentTypeOf, isDashboardStarting, keyOfCurrentMonth, legalAccepted, legalControllerGaps, legalControllerReady, legalDataInventoryGaps, legalThirdPartyGaps, legalThirdPartyLaunchGaps, marketRatesOf, matchCategoryRules, mergeBackupInto, moneyCompare, moneyDraft, moneyFromCents, moneyOrZero, moneyToCents, monthKeyOf, mulMoney, nextDueDateForDebt, normalizeCategoryRules, normalizePrivacy, normalizeText, notificationsModel, parseMoneyInput, passwordStrength, plural, pluralWord, portfolioModel, reconciliationHeadline, render, renderBackHeader, renderCalculationButton, renderDonut, renderEmptyState, renderGoalRing, renderLastBackupLine, renderScoreGauge, renderSparkline, safeErrorSummary, safePct, scoreGains, simulateExpenseImpact, simulateFinancingImpact, state, subMoney, svgIcon, todayIso, topLevelCategories, wealthModel } = n);
 }
 // source: js/screens/accounts.js
 // js/screens/accounts.js. Contas, cartões e conciliação.
@@ -2546,6 +2546,30 @@ function renderSettingsTopic(section, aberto) {
   </section>`;
 }
 
+// INSTALAR NO APARELHO (ver installAvailability em js/app.js). Fica fora do
+// acordeão, como o cartão de categorias: é uma ação, não um ajuste, e some
+// sozinha quando o app já roda instalado ou quando o navegador não oferece
+// instalação nenhuma.
+function renderInstallCard() {
+  const modo = typeof installAvailability === "function" ? installAvailability() : "none";
+  if (modo !== "prompt" && modo !== "ios") return "";
+  return `<div class="card install-card">
+    <div class="install-card__head">
+      <span class="tool-link__icon">${svgIcon("phone", 17)}</span>
+      <div>
+        <p class="card-title">Instalar no aparelho</p>
+        <p class="card-subtitle">Abre pelo ícone na tela inicial, em tela cheia e sem a barra do navegador. Os dados continuam os mesmos: instalar não copia nem move nada.</p>
+      </div>
+    </div>
+    ${modo === "prompt"
+      ? `<button class="btn btn--primary btn--sm" data-action="pwa-install">${svgIcon("download", 16)} Instalar o Cofre</button>`
+      : `<ol class="install-card__steps">
+        <li>No Safari, toque em <b>Compartilhar</b> (o quadrado com a seta para cima).</li>
+        <li>Escolha <b>Adicionar à Tela de Início</b> e confirme.</li>
+      </ol>`}
+  </div>`;
+}
+
 function renderSettingsScreen() {
   const aberto = settingsOpenSection();
   return `<div class="screen screen--narrow">
@@ -2556,6 +2580,8 @@ function renderSettingsScreen() {
     </div>
 
     ${renderCategoriesSettingsCard()}
+
+    ${renderInstallCard()}
 
     <div class="card">
       <p class="card-title">Ir para outras telas</p>
@@ -3575,6 +3601,7 @@ export {
   renderHealthPlan,
   renderHealthScreen,
   renderIncomeSettingsCard,
+  renderInstallCard,
   renderLegacyBalance,
   renderLegalControllerField,
   renderLegalDataInventoryGroup,

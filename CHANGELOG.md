@@ -2,6 +2,24 @@
 
 ## Não publicado
 
+### Lançar mais rápido e instalar no aparelho
+
+- **"Repetir um recente" no formulário de lançamento.** Os gastos e receitas que
+  você mais repete (mesma categoria e descrição, nos últimos 120 dias) aparecem
+  como atalhos acima do valor, com os dados da última vez: um toque preenche
+  valor, categoria, pagamento, conta e descrição; a data continua sendo a do
+  formulário. Parcelas, gastos fixos e aportes de meta ficam de fora de
+  propósito, porque um toque distraído não pode criar outra parcela nem mexer
+  numa meta. Receita fixa (salário) entra, porque não tinha outro atalho.
+- **"Hoje" e "Ontem" ao lado da data.** O registro feito de noite ou na manhã
+  seguinte deixa de exigir o calendário do navegador.
+- **"Duplicar como novo lançamento" na edição.** Abre um lançamento novo com os
+  mesmos dados e a data de hoje, sem tocar no original.
+- **"Instalar no aparelho" em Ajustes.** Quando o navegador aceita instalar o
+  app, Ajustes mostra o botão (e a faixa própria do navegador deixa de aparecer
+  por cima do app). No iPhone, que não tem esse evento, a tela explica o
+  caminho pelo Safari. Quando o app já roda instalado, o cartão some.
+
 ### Revisão de uso: fechamento do mês, cartão de meta e abas no celular
 
 - **O fechamento do mês existe também no último dia do mês.** A caminhada da

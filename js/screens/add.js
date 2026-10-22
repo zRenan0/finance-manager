@@ -221,6 +221,48 @@ function txOriginChipText(origin) {
   return reference ? `${label} · ${reference}` : label;
 }
 
+// REPETIR UM LANÇAMENTO RECENTE
+//
+// O formulário pedia tudo de novo a cada registro, inclusive para o mercado de
+// toda semana e o salário de todo mês. Os modelos vêm de
+// `recentTransactionTemplates` (js/movements.js): os lançamentos que mais se
+// repetem, com os dados da última vez. Um toque preenche tipo, valor,
+// categoria, pagamento, conta e descrição; a data continua sendo a do
+// formulário (hoje, por padrão), porque "repetir" é lançar de novo, não
+// relançar na data antiga. Em edição o bloco some: ali a pessoa está mexendo
+// num registro que já existe, e trocar tudo por outro modelo seria sabotagem.
+function renderRecentTemplates(f, editing) {
+  if (editing || typeof recentTransactionTemplates !== "function") return "";
+  const modelos = recentTransactionTemplates(state.data, { type: f.type, limit: 4 });
+  if (!modelos.length) return "";
+  const valorAtual = parseMoneyInput(f.amount);
+  return `<div class="recent-templates" role="group" aria-label="Repetir um lançamento recente">
+    <p class="field__label">Repetir um recente</p>
+    <div class="recent-templates__list">
+      ${modelos.map((m) => {
+        const ativo = f.description === m.description && (f.type === "income" || f.categoryId === m.categoryId) && valorAtual === m.amount;
+        const vezes = m.count === 1 ? "1 vez nos últimos meses" : `${m.count} vezes nos últimos meses`;
+        return `<button type="button" class="recent-template ${ativo ? "active" : ""}" data-action="tx-template-apply" data-value="${escapeHtml(m.key)}" aria-pressed="${ativo ? "true" : "false"}" aria-label="${escapeHtml(`${m.label}, ${fmtBRL(m.amount)}, ${vezes}`)}">
+          <span class="icon-bubble recent-template__icon" ${m.color ? `data-ui-css="background:color-mix(in srgb, ${m.color} 14%, transparent); color:${m.color}"` : ""}>${svgIcon(m.icon, 15)}</span>
+          <span class="recent-template__text"><span class="recent-template__label">${escapeHtml(m.label)}</span><span class="recent-template__amount">${fmtBRL(m.amount)}</span></span>
+        </button>`;
+      }).join("")}
+    </div>
+  </div>`;
+}
+
+// "Hoje" e "Ontem" ao lado do campo de data: o registro feito de noite ou na
+// manhã seguinte é o caso mais comum, e abrir o calendário do navegador para
+// voltar um dia era mais trabalho que o lançamento inteiro.
+function renderDateShortcuts(f) {
+  const hoje = todayIso();
+  const ontem = addDaysToIso(hoje, -1);
+  return `<div class="payment-chips payment-chips--date" role="group" aria-label="Atalhos de data">
+    <button type="button" class="payment-chip ${f.date === hoje ? "active" : ""}" data-action="set-date" data-value="hoje" aria-pressed="${f.date === hoje ? "true" : "false"}">Hoje</button>
+    <button type="button" class="payment-chip ${f.date === ontem ? "active" : ""}" data-action="set-date" data-value="ontem" aria-pressed="${f.date === ontem ? "true" : "false"}">Ontem</button>
+  </div>`;
+}
+
 function renderAddScreen() {
   const f = state.form;
   // A conversão tem outras regras, outros campos e outro botão. Tentar
@@ -248,6 +290,8 @@ function renderAddScreen() {
       <button class="segmented__option ${f.type === "expense" ? "active" : ""}" data-action="set-type" data-value="expense">Gasto</button>
       <button class="segmented__option segmented__option--income ${isIncome ? "active" : ""}" data-action="set-type" data-value="income">Receita</button>
     </div>
+
+    ${renderRecentTemplates(f, editing)}
 
     <div class="amount-input-wrap">
       <p class="field__label center">Valor</p>
@@ -299,6 +343,7 @@ function renderAddScreen() {
       <div class="field">
         <label class="field__label" for="tx-date-input">Data</label>
         <input id="tx-date-input" type="date" class="input" data-field="tx-date" value="${f.date}" />
+        ${renderDateShortcuts(f)}
       </div>
       ${!isIncome ? `
       <div class="field">
@@ -351,7 +396,10 @@ function renderAddScreen() {
 
     ${renderNatureField(f, isIncome)}
 
-    ${editing ? `<button class="btn btn--danger btn--block" data-action="delete-tx" data-id="${state.editingTxId}" data-ui-css="margin-top:14px">${svgIcon("trash", 16)} Excluir lançamento</button>` : ""}
+    ${editing ? `<div class="edit-tools">
+      <button class="btn btn--secondary btn--block" data-action="duplicate-tx" data-id="${state.editingTxId}">${svgIcon("plus", 16)} Duplicar como novo lançamento</button>
+      <button class="btn btn--danger btn--block" data-action="delete-tx" data-id="${state.editingTxId}">${svgIcon("trash", 16)} Excluir lançamento</button>
+    </div>` : ""}
 
     <div id="form-warnings-slot">${renderFormWarnings()}</div>
 

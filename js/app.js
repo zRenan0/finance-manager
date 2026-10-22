@@ -103,6 +103,10 @@ let state = {
   // banco, então recarregar a página encerra a demonstração e devolve os dados
   // reais. Ver js/demo.js.
   demo: { active: false },
+  // Instalação como app. O navegador avisa com `beforeinstallprompt` quando
+  // aceita instalar; o evento fica guardado aqui, só em memória, para a tela
+  // de Ajustes oferecer o botão. Ver setupInstallPrompt().
+  installPrompt: null,
   tab: "dashboard",
   monthOffset: 0,
   toast: null,
@@ -2906,6 +2910,50 @@ if (window.CofreUI && window.CofreUI.test && window.CofreUI.test.enabled) {
   });
 }
 
+// ------------------------------------------------------------------------------
+// INSTALAR COMO APLICATIVO
+// ------------------------------------------------------------------------------
+// O manifesto e o service worker tornam o Cofre instalável há muito tempo, mas
+// nenhuma tela dizia isso: quem não conhece o menu do navegador nunca
+// descobria o ícone na tela inicial, e no celular é o ícone que faz o app ser
+// aberto todo dia. Em Chromium o navegador avisa com `beforeinstallprompt`; o
+// evento é guardado para a tela de Ajustes oferecer o botão na hora em que a
+// pessoa quiser, em vez da faixa do navegador que aparece quando ela está no
+// meio de outra coisa. No iPhone não existe evento nenhum: lá a tela explica o
+// caminho (Compartilhar > Adicionar à Tela de Início).
+function isStandaloneDisplay() {
+  try {
+    if (typeof navigator !== "undefined" && navigator.standalone === true) return true;
+    return typeof matchMedia === "function" && !!matchMedia("(display-mode: standalone)").matches;
+  } catch (e) {
+    return false;
+  }
+}
+
+// O que a tela de Ajustes pode oferecer agora: "prompt" (botão que instala),
+// "ios" (instruções do Safari), "installed" (já roda como app) ou "none".
+function installAvailability() {
+  if (isStandaloneDisplay()) return "installed";
+  if (state.installPrompt) return "prompt";
+  if (typeof isAppleTouchBrowser === "function" && isAppleTouchBrowser()) return "ios";
+  return "none";
+}
+
+function setupInstallPrompt() {
+  if (typeof window === "undefined" || typeof window.addEventListener !== "function") return;
+  window.addEventListener("beforeinstallprompt", (event) => {
+    // Sem isto o Chromium mostra a própria faixa de instalação por cima do app.
+    if (event && typeof event.preventDefault === "function") event.preventDefault();
+    state.installPrompt = event || null;
+    if (state.tab === "settings" && !state.booting) render();
+  });
+  window.addEventListener("appinstalled", () => {
+    state.installPrompt = null;
+    notify("Cofre instalado. Abra pelo ícone na tela inicial.");
+  });
+}
+
 setupServiceWorker();
+setupInstallPrompt();
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init, { once: true });
 else init();

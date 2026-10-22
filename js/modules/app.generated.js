@@ -67,6 +67,14 @@ function dateFromIso(iso) {
   const [y, m, d] = String(iso || todayIso()).slice(0, 10).split("-").map(Number);
   return new Date(y, (m || 1) - 1, d || 1);
 }
+// Desloca uma data ISO em dias pelo calendário local (`setDate`), não por
+// múltiplos de 86400000: é o que atravessa mês, ano e qualquer mudança de
+// horário sem cair no dia errado.
+function addDaysToIso(iso, n) {
+  const d = dateFromIso(iso);
+  d.setDate(d.getDate() + (Number(n) || 0));
+  return isoOfDate(d);
+}
 function daysBetweenIso(a, b) {
   return Math.round((dateFromIso(b) - dateFromIso(a)) / 86400000);
 }
@@ -11972,6 +11980,85 @@ const MOVEMENT_SOURCE_META = Object.freeze({
 function movementSourceMeta(source, origin) {
   const base = MOVEMENT_SOURCE_META[source] || { label: "Outra origem", icon: "file" };
   return { ...base, label: origin && origin.label ? origin.label : base.label };
+}
+
+// ------------------------------------------------------------------------------
+// MODELOS DE REPETIÇÃO
+// ------------------------------------------------------------------------------
+// O lançamento mais comum do dia a dia é o que já aconteceu semana passada: o
+// mesmo mercado, a mesma academia, o mesmo salário. Digitar tudo de novo é o
+// atrito que faz a pessoa adiar o registro e perder o mês. Aqui saem os
+// lançamentos que mais se repetem, agrupados por tipo, categoria e descrição,
+// para o formulário oferecer "repetir" com um toque (ver js/screens/add.js e a
+// ação `tx-template-apply` em js/actions.js).
+//
+// Ficam de fora, de propósito:
+//   * parcelas (`installmentGroupId`): repetir uma parcela criaria outra compra;
+//   * gastos fixos (`recurring`): eles já têm caminho próprio, "Lançar gastos
+//     fixos pendentes", e um modelo aqui seria uma segunda porta para o mesmo
+//     aluguel no mesmo mês. Receita fixa NÃO tem esse caminho (o relançamento
+//     em js/recurring.js só olha despesa), então o salário marcado como fixo
+//     entra: repetir é justamente o que a pessoa quer fazer com ele;
+//   * naturezas especiais (aporte, resgate, estorno, principal, encargos,
+//     transferência): mexem em meta ou dívida, e um toque distraído não pode
+//     fazer isso;
+//   * o que está no futuro ou tem mais de `windowDays` dias: modelo é hábito,
+//     não arquivo.
+//
+// Cada modelo leva os dados do lançamento MAIS RECENTE do grupo (valor, forma
+// de pagamento, conta, cartão): é o que a pessoa fez da última vez, não uma
+// média. A função é pura, percorre a lista uma vez e devolve no máximo `limit`.
+const TEMPLATE_WINDOW_DAYS = 120;
+
+function recentTransactionTemplates(data, options) {
+  const opts = options || {};
+  const type = opts.type === "income" ? "income" : "expense";
+  const limit = Math.max(1, Number(opts.limit) || 4);
+  const hoje = opts.today || todayIso();
+  const windowDays = Number(opts.windowDays) || TEMPLATE_WINDOW_DAYS;
+  const groups = new Map();
+  // Só consumo e renda comuns: é a natureza que todo lançamento normalizado
+  // carrega (`deriveTransactionNature`); as outras mexem em meta, dívida ou
+  // caixa entre contas e ficam de fora.
+  const naturezaComum = type === "income" ? TRANSACTION_NATURES.renda : TRANSACTION_NATURES.consumo;
+  ((data && data.transactions) || []).forEach((t) => {
+    if (!t || t.type !== type) return;
+    if (t.installmentGroupId || (t.recurring && type === "expense")) return;
+    const natureza = t.nature || (typeof deriveTransactionNature === "function" ? deriveTransactionNature(t) : naturezaComum);
+    if (natureza !== naturezaComum) return;
+    if (!(roundMoney(t.amount) > 0)) return;
+    if (!t.date || t.date > hoje || daysBetweenIso(t.date, hoje) > windowDays) return;
+    const description = String(t.description || "").trim();
+    const categoryId = type === "expense" ? (t.categoryId || "") : "";
+    const key = `${type}|${categoryId}|${normalizeText(description)}`;
+    const createdAt = String(t.createdAt || "");
+    const snapshot = {
+      lastDate: t.date, lastCreatedAt: createdAt, description,
+      amount: roundMoney(t.amount), payment: t.payment || "",
+      accountId: t.accountId || "", creditCardId: t.creditCardId || "",
+    };
+    const atual = groups.get(key);
+    if (!atual) {
+      groups.set(key, { key, type, categoryId: categoryId || null, count: 1, ...snapshot });
+      return;
+    }
+    atual.count += 1;
+    const maisNovo = t.date > atual.lastDate || (t.date === atual.lastDate && createdAt > atual.lastCreatedAt);
+    if (maisNovo) Object.assign(atual, snapshot);
+  });
+  return [...groups.values()]
+    .sort((a, b) => b.count - a.count || b.lastDate.localeCompare(a.lastDate) || a.key.localeCompare(b.key))
+    .slice(0, limit)
+    .map((g) => {
+      const cat = g.type === "expense" && g.categoryId && typeof categoryById === "function" ? categoryById(data, g.categoryId) : null;
+      return {
+        ...g,
+        label: g.description || (cat ? cat.name : "Receita"),
+        categoryName: cat ? cat.name : "",
+        icon: cat ? cat.icon : "trendUp",
+        color: cat ? cat.color : "",
+      };
+    });
 }
 
 function movementEntries(data) {
@@ -28459,6 +28546,48 @@ function txOriginChipText(origin) {
   return reference ? `${label} · ${reference}` : label;
 }
 
+// REPETIR UM LANÇAMENTO RECENTE
+//
+// O formulário pedia tudo de novo a cada registro, inclusive para o mercado de
+// toda semana e o salário de todo mês. Os modelos vêm de
+// `recentTransactionTemplates` (js/movements.js): os lançamentos que mais se
+// repetem, com os dados da última vez. Um toque preenche tipo, valor,
+// categoria, pagamento, conta e descrição; a data continua sendo a do
+// formulário (hoje, por padrão), porque "repetir" é lançar de novo, não
+// relançar na data antiga. Em edição o bloco some: ali a pessoa está mexendo
+// num registro que já existe, e trocar tudo por outro modelo seria sabotagem.
+function renderRecentTemplates(f, editing) {
+  if (editing || typeof recentTransactionTemplates !== "function") return "";
+  const modelos = recentTransactionTemplates(state.data, { type: f.type, limit: 4 });
+  if (!modelos.length) return "";
+  const valorAtual = parseMoneyInput(f.amount);
+  return `<div class="recent-templates" role="group" aria-label="Repetir um lançamento recente">
+    <p class="field__label">Repetir um recente</p>
+    <div class="recent-templates__list">
+      ${modelos.map((m) => {
+        const ativo = f.description === m.description && (f.type === "income" || f.categoryId === m.categoryId) && valorAtual === m.amount;
+        const vezes = m.count === 1 ? "1 vez nos últimos meses" : `${m.count} vezes nos últimos meses`;
+        return `<button type="button" class="recent-template ${ativo ? "active" : ""}" data-action="tx-template-apply" data-value="${escapeHtml(m.key)}" aria-pressed="${ativo ? "true" : "false"}" aria-label="${escapeHtml(`${m.label}, ${fmtBRL(m.amount)}, ${vezes}`)}">
+          <span class="icon-bubble recent-template__icon" ${m.color ? `data-ui-css="background:color-mix(in srgb, ${m.color} 14%, transparent); color:${m.color}"` : ""}>${svgIcon(m.icon, 15)}</span>
+          <span class="recent-template__text"><span class="recent-template__label">${escapeHtml(m.label)}</span><span class="recent-template__amount">${fmtBRL(m.amount)}</span></span>
+        </button>`;
+      }).join("")}
+    </div>
+  </div>`;
+}
+
+// "Hoje" e "Ontem" ao lado do campo de data: o registro feito de noite ou na
+// manhã seguinte é o caso mais comum, e abrir o calendário do navegador para
+// voltar um dia era mais trabalho que o lançamento inteiro.
+function renderDateShortcuts(f) {
+  const hoje = todayIso();
+  const ontem = addDaysToIso(hoje, -1);
+  return `<div class="payment-chips payment-chips--date" role="group" aria-label="Atalhos de data">
+    <button type="button" class="payment-chip ${f.date === hoje ? "active" : ""}" data-action="set-date" data-value="hoje" aria-pressed="${f.date === hoje ? "true" : "false"}">Hoje</button>
+    <button type="button" class="payment-chip ${f.date === ontem ? "active" : ""}" data-action="set-date" data-value="ontem" aria-pressed="${f.date === ontem ? "true" : "false"}">Ontem</button>
+  </div>`;
+}
+
 function renderAddScreen() {
   const f = state.form;
   // A conversão tem outras regras, outros campos e outro botão. Tentar
@@ -28486,6 +28615,8 @@ function renderAddScreen() {
       <button class="segmented__option ${f.type === "expense" ? "active" : ""}" data-action="set-type" data-value="expense">Gasto</button>
       <button class="segmented__option segmented__option--income ${isIncome ? "active" : ""}" data-action="set-type" data-value="income">Receita</button>
     </div>
+
+    ${renderRecentTemplates(f, editing)}
 
     <div class="amount-input-wrap">
       <p class="field__label center">Valor</p>
@@ -28537,6 +28668,7 @@ function renderAddScreen() {
       <div class="field">
         <label class="field__label" for="tx-date-input">Data</label>
         <input id="tx-date-input" type="date" class="input" data-field="tx-date" value="${f.date}" />
+        ${renderDateShortcuts(f)}
       </div>
       ${!isIncome ? `
       <div class="field">
@@ -28589,7 +28721,10 @@ function renderAddScreen() {
 
     ${renderNatureField(f, isIncome)}
 
-    ${editing ? `<button class="btn btn--danger btn--block" data-action="delete-tx" data-id="${state.editingTxId}" data-ui-css="margin-top:14px">${svgIcon("trash", 16)} Excluir lançamento</button>` : ""}
+    ${editing ? `<div class="edit-tools">
+      <button class="btn btn--secondary btn--block" data-action="duplicate-tx" data-id="${state.editingTxId}">${svgIcon("plus", 16)} Duplicar como novo lançamento</button>
+      <button class="btn btn--danger btn--block" data-action="delete-tx" data-id="${state.editingTxId}">${svgIcon("trash", 16)} Excluir lançamento</button>
+    </div>` : ""}
 
     <div id="form-warnings-slot">${renderFormWarnings()}</div>
 
@@ -34485,6 +34620,61 @@ function onClick(e) {
       render();
       break;
     case "toggle-recurring": state.form.recurring = !state.form.recurring; render(); break;
+    case "set-date": {
+      const hoje = todayIso();
+      state.form.date = value === "ontem" ? addDaysToIso(hoje, -1) : hoje;
+      render();
+      break;
+    }
+    // Repetir um lançamento recente (ver renderRecentTemplates em
+    // js/screens/add.js). O modelo é recalculado aqui a partir dos dados, não
+    // lido da tela: o HTML carrega só a chave, e nada que venha do DOM vira
+    // valor gravado. Conta e cartão só entram se ainda existirem e não
+    // estiverem arquivados; senão fica o padrão do formulário novo.
+    case "tx-template-apply": {
+      if (typeof recentTransactionTemplates !== "function") break;
+      const modelo = recentTransactionTemplates(state.data, { type: state.form.type, limit: 12 }).find((m) => m.key === value);
+      if (!modelo) break;
+      const contas = (state.data.accounts || []).filter((a) => !a.archived);
+      const cartoes = (state.data.creditCards || []).filter((c) => !c.archived);
+      const base = freshTxForm();
+      state.form = {
+        ...base,
+        type: modelo.type,
+        date: state.form.date || base.date,
+        amount: modelo.amount.toFixed(2).replace(".", ","),
+        categoryId: modelo.type === "income" ? null : (modelo.categoryId || base.categoryId),
+        payment: PAYMENT_METHODS.includes(modelo.payment) ? modelo.payment : base.payment,
+        description: modelo.description,
+        accountId: contas.some((a) => a.id === modelo.accountId) ? modelo.accountId : base.accountId,
+        creditCardId: cartoes.some((c) => c.id === modelo.creditCardId) ? modelo.creditCardId : base.creditCardId,
+      };
+      if (state.form.payment !== "Crédito") state.form.creditCardId = "";
+      if (typeof window !== "undefined" && window.CofreUI) window.CofreUI.forms.clearAll();
+      render();
+      break;
+    }
+    // Duplicar: o editor vira um formulário NOVO com os mesmos dados e a data de
+    // hoje. Parcelas e recorrência não são copiadas; meta e dívida (goalId,
+    // debtId, nature) são, porque "repetir o aporte" é exatamente o uso.
+    case "duplicate-tx": {
+      const t = state.data.transactions.find((x) => x.id === id);
+      if (!t) break;
+      const base = freshTxForm();
+      state.editingTxId = null;
+      state.form = {
+        ...base,
+        type: t.type, amount: t.amount.toFixed(2).replace(".", ","), categoryId: t.categoryId,
+        date: todayIso(), payment: t.payment, description: t.description,
+        nature: t.nature || "", goalId: t.goalId || null, debtId: t.debtId || null,
+        accountId: t.accountId || base.accountId, creditCardId: t.creditCardId || base.creditCardId,
+        recurring: false, installments: "1", source: "manual", origin: null,
+      };
+      if (state.form.payment !== "Crédito") state.form.creditCardId = "";
+      notify("Cópia pronta: confira data e valor antes de salvar.");
+      render();
+      break;
+    }
     case "toggle-nature-field": state.natureFieldOpen = !state.natureFieldOpen; render(); break;
     case "set-nature": {
       // A escolha do usuário vale sobre a dedução. É o que permite marcar um
@@ -34809,6 +34999,23 @@ function onClick(e) {
       const escolhido = THEME_CHOICES.indexOf(value) >= 0 ? value : "system";
       if (state.data.theme === escolhido) break;
       setData((d) => ({ ...d, theme: escolhido }));
+      break;
+    }
+    // Instalar como app (ver setupInstallPrompt em js/app.js). O evento só pode
+    // ser disparado uma vez: o botão some na hora e, se a pessoa recusar, o
+    // aviso diz que o menu do navegador continua servindo.
+    case "pwa-install": {
+      const pedido = state.installPrompt;
+      if (!pedido || typeof pedido.prompt !== "function") break;
+      state.installPrompt = null;
+      render();
+      Promise.resolve()
+        .then(() => pedido.prompt())
+        .then(() => pedido.userChoice)
+        .then((escolha) => {
+          if (!escolha || escolha.outcome !== "accepted") notify("Tudo bem. Dá para instalar depois pelo menu do navegador.");
+        })
+        .catch(() => { notify("Não foi possível abrir a instalação agora. Tente pelo menu do navegador."); });
       break;
     }
     case "toggle-gamification": {
@@ -35296,6 +35503,10 @@ let state = {
   // banco, então recarregar a página encerra a demonstração e devolve os dados
   // reais. Ver js/demo.js.
   demo: { active: false },
+  // Instalação como app. O navegador avisa com `beforeinstallprompt` quando
+  // aceita instalar; o evento fica guardado aqui, só em memória, para a tela
+  // de Ajustes oferecer o botão. Ver setupInstallPrompt().
+  installPrompt: null,
   tab: "dashboard",
   monthOffset: 0,
   toast: null,
@@ -38099,7 +38310,51 @@ if (window.CofreUI && window.CofreUI.test && window.CofreUI.test.enabled) {
   });
 }
 
+// ------------------------------------------------------------------------------
+// INSTALAR COMO APLICATIVO
+// ------------------------------------------------------------------------------
+// O manifesto e o service worker tornam o Cofre instalável há muito tempo, mas
+// nenhuma tela dizia isso: quem não conhece o menu do navegador nunca
+// descobria o ícone na tela inicial, e no celular é o ícone que faz o app ser
+// aberto todo dia. Em Chromium o navegador avisa com `beforeinstallprompt`; o
+// evento é guardado para a tela de Ajustes oferecer o botão na hora em que a
+// pessoa quiser, em vez da faixa do navegador que aparece quando ela está no
+// meio de outra coisa. No iPhone não existe evento nenhum: lá a tela explica o
+// caminho (Compartilhar > Adicionar à Tela de Início).
+function isStandaloneDisplay() {
+  try {
+    if (typeof navigator !== "undefined" && navigator.standalone === true) return true;
+    return typeof matchMedia === "function" && !!matchMedia("(display-mode: standalone)").matches;
+  } catch (e) {
+    return false;
+  }
+}
+
+// O que a tela de Ajustes pode oferecer agora: "prompt" (botão que instala),
+// "ios" (instruções do Safari), "installed" (já roda como app) ou "none".
+function installAvailability() {
+  if (isStandaloneDisplay()) return "installed";
+  if (state.installPrompt) return "prompt";
+  if (typeof isAppleTouchBrowser === "function" && isAppleTouchBrowser()) return "ios";
+  return "none";
+}
+
+function setupInstallPrompt() {
+  if (typeof window === "undefined" || typeof window.addEventListener !== "function") return;
+  window.addEventListener("beforeinstallprompt", (event) => {
+    // Sem isto o Chromium mostra a própria faixa de instalação por cima do app.
+    if (event && typeof event.preventDefault === "function") event.preventDefault();
+    state.installPrompt = event || null;
+    if (state.tab === "settings" && !state.booting) render();
+  });
+  window.addEventListener("appinstalled", () => {
+    state.installPrompt = null;
+    notify("Cofre instalado. Abra pelo ícone na tela inicial.");
+  });
+}
+
 setupServiceWorker();
+setupInstallPrompt();
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init, { once: true });
 else init();
 
@@ -38116,7 +38371,7 @@ function carregarExtras() {
   if (__extrasCarregados) return Promise.resolve(__extrasCarregados);
   if (!__extrasEmVoo) {
     __extrasEmVoo = import('./app.extras.generated.js').then((mod) => {
-      mod.instalarNucleo({ ACCOUNT_TYPE_LABELS, AI_HIDEABLE_FIELDS, ASSET_CLASSES, BACKUP_ENC_MIN_PASSWORD, BUDGET_GROUPS, BUILTIN_CATEGORY_RULES, CloudSync, DEBT_AMORTIZATION_LABELS, DEBT_TYPE_LABELS, FinanceStore, GOAL_ICON_OPTIONS, GOAL_INFLATION_MIN_DAYS, GOAL_TEMPLATES, GROUP_ICONS, GROUP_LABELS, HEALTH_INDICATORS, INVESTMENT_TYPES, LEGAL_CONTROLLER, LEGAL_DATA_INVENTORY, LEGAL_DATA_INVENTORY_GROUPS, LEGAL_PENDING, LEGAL_RETENTION, LEGAL_REVIEW_DATE, LEGAL_SUBJECT_RIGHTS, LEGAL_TEXT_VERSION, LEGAL_THIRD_PARTIES, LEGAL_THIRD_PARTY_GROUPS, MONTH_ABBR, MONTH_NAMES, RULE_MATCH_TYPES, RULE_WEIGHT_DEFAULT, RULE_WEIGHT_MAX, RULE_WEIGHT_MIN, accountsSummary, assetClassOf, backupCryptoAvailable, buildDataSourcesModel, categoryById, childCategories, clamp, compileCategoryRules, compileRulePattern, computeBudgetStatus, daysBetweenIso, debtMonthlyRateInfo, debtsModel, defaultBudgetAlerts, defaultPrivacy, divMoney, emergencyFund, emergencyLadder, escapeHtml, fmtBRL, fmtBRLShort, fmtDateFull, fmtDateShort, fmtDec, fmtNum, formatMovementTimestamp, freshGuestLink, goalExistingBalance, goalInflationPct, goalsModel, healthModel, inflateMoney, inkOf, investmentTypeOf, isDashboardStarting, keyOfCurrentMonth, legalAccepted, legalControllerGaps, legalControllerReady, legalDataInventoryGaps, legalThirdPartyGaps, legalThirdPartyLaunchGaps, marketRatesOf, matchCategoryRules, mergeBackupInto, moneyCompare, moneyDraft, moneyFromCents, moneyOrZero, moneyToCents, monthKeyOf, mulMoney, nextDueDateForDebt, normalizeCategoryRules, normalizePrivacy, normalizeText, notificationsModel, parseMoneyInput, passwordStrength, plural, pluralWord, portfolioModel, reconciliationHeadline, render, renderBackHeader, renderCalculationButton, renderDonut, renderEmptyState, renderGoalRing, renderLastBackupLine, renderScoreGauge, renderSparkline, safeErrorSummary, safePct, scoreGains, simulateExpenseImpact, simulateFinancingImpact, state, subMoney, svgIcon, todayIso, topLevelCategories, wealthModel });
+      mod.instalarNucleo({ ACCOUNT_TYPE_LABELS, AI_HIDEABLE_FIELDS, ASSET_CLASSES, BACKUP_ENC_MIN_PASSWORD, BUDGET_GROUPS, BUILTIN_CATEGORY_RULES, CloudSync, DEBT_AMORTIZATION_LABELS, DEBT_TYPE_LABELS, FinanceStore, GOAL_ICON_OPTIONS, GOAL_INFLATION_MIN_DAYS, GOAL_TEMPLATES, GROUP_ICONS, GROUP_LABELS, HEALTH_INDICATORS, INVESTMENT_TYPES, LEGAL_CONTROLLER, LEGAL_DATA_INVENTORY, LEGAL_DATA_INVENTORY_GROUPS, LEGAL_PENDING, LEGAL_RETENTION, LEGAL_REVIEW_DATE, LEGAL_SUBJECT_RIGHTS, LEGAL_TEXT_VERSION, LEGAL_THIRD_PARTIES, LEGAL_THIRD_PARTY_GROUPS, MONTH_ABBR, MONTH_NAMES, RULE_MATCH_TYPES, RULE_WEIGHT_DEFAULT, RULE_WEIGHT_MAX, RULE_WEIGHT_MIN, accountsSummary, assetClassOf, backupCryptoAvailable, buildDataSourcesModel, categoryById, childCategories, clamp, compileCategoryRules, compileRulePattern, computeBudgetStatus, daysBetweenIso, debtMonthlyRateInfo, debtsModel, defaultBudgetAlerts, defaultPrivacy, divMoney, emergencyFund, emergencyLadder, escapeHtml, fmtBRL, fmtBRLShort, fmtDateFull, fmtDateShort, fmtDec, fmtNum, formatMovementTimestamp, freshGuestLink, goalExistingBalance, goalInflationPct, goalsModel, healthModel, inflateMoney, inkOf, installAvailability, investmentTypeOf, isDashboardStarting, keyOfCurrentMonth, legalAccepted, legalControllerGaps, legalControllerReady, legalDataInventoryGaps, legalThirdPartyGaps, legalThirdPartyLaunchGaps, marketRatesOf, matchCategoryRules, mergeBackupInto, moneyCompare, moneyDraft, moneyFromCents, moneyOrZero, moneyToCents, monthKeyOf, mulMoney, nextDueDateForDebt, normalizeCategoryRules, normalizePrivacy, normalizeText, notificationsModel, parseMoneyInput, passwordStrength, plural, pluralWord, portfolioModel, reconciliationHeadline, render, renderBackHeader, renderCalculationButton, renderDonut, renderEmptyState, renderGoalRing, renderLastBackupLine, renderScoreGauge, renderSparkline, safeErrorSummary, safePct, scoreGains, simulateExpenseImpact, simulateFinancingImpact, state, subMoney, svgIcon, todayIso, topLevelCategories, wealthModel });
       __extrasCarregados = mod;
       return mod;
     }).catch((erro) => { __extrasEmVoo = null; throw erro; });

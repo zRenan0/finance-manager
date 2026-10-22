@@ -303,6 +303,30 @@ function renderSettingsTopic(section, aberto) {
   </section>`;
 }
 
+// INSTALAR NO APARELHO (ver installAvailability em js/app.js). Fica fora do
+// acordeão, como o cartão de categorias: é uma ação, não um ajuste, e some
+// sozinha quando o app já roda instalado ou quando o navegador não oferece
+// instalação nenhuma.
+function renderInstallCard() {
+  const modo = typeof installAvailability === "function" ? installAvailability() : "none";
+  if (modo !== "prompt" && modo !== "ios") return "";
+  return `<div class="card install-card">
+    <div class="install-card__head">
+      <span class="tool-link__icon">${svgIcon("phone", 17)}</span>
+      <div>
+        <p class="card-title">Instalar no aparelho</p>
+        <p class="card-subtitle">Abre pelo ícone na tela inicial, em tela cheia e sem a barra do navegador. Os dados continuam os mesmos: instalar não copia nem move nada.</p>
+      </div>
+    </div>
+    ${modo === "prompt"
+      ? `<button class="btn btn--primary btn--sm" data-action="pwa-install">${svgIcon("download", 16)} Instalar o Cofre</button>`
+      : `<ol class="install-card__steps">
+        <li>No Safari, toque em <b>Compartilhar</b> (o quadrado com a seta para cima).</li>
+        <li>Escolha <b>Adicionar à Tela de Início</b> e confirme.</li>
+      </ol>`}
+  </div>`;
+}
+
 function renderSettingsScreen() {
   const aberto = settingsOpenSection();
   return `<div class="screen screen--narrow">
@@ -313,6 +337,8 @@ function renderSettingsScreen() {
     </div>
 
     ${renderCategoriesSettingsCard()}
+
+    ${renderInstallCard()}
 
     <div class="card">
       <p class="card-title">Ir para outras telas</p>

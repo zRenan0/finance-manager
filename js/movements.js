@@ -20,6 +20,85 @@ function movementSourceMeta(source, origin) {
   return { ...base, label: origin && origin.label ? origin.label : base.label };
 }
 
+// ------------------------------------------------------------------------------
+// MODELOS DE REPETIÇÃO
+// ------------------------------------------------------------------------------
+// O lançamento mais comum do dia a dia é o que já aconteceu semana passada: o
+// mesmo mercado, a mesma academia, o mesmo salário. Digitar tudo de novo é o
+// atrito que faz a pessoa adiar o registro e perder o mês. Aqui saem os
+// lançamentos que mais se repetem, agrupados por tipo, categoria e descrição,
+// para o formulário oferecer "repetir" com um toque (ver js/screens/add.js e a
+// ação `tx-template-apply` em js/actions.js).
+//
+// Ficam de fora, de propósito:
+//   * parcelas (`installmentGroupId`): repetir uma parcela criaria outra compra;
+//   * gastos fixos (`recurring`): eles já têm caminho próprio, "Lançar gastos
+//     fixos pendentes", e um modelo aqui seria uma segunda porta para o mesmo
+//     aluguel no mesmo mês. Receita fixa NÃO tem esse caminho (o relançamento
+//     em js/recurring.js só olha despesa), então o salário marcado como fixo
+//     entra: repetir é justamente o que a pessoa quer fazer com ele;
+//   * naturezas especiais (aporte, resgate, estorno, principal, encargos,
+//     transferência): mexem em meta ou dívida, e um toque distraído não pode
+//     fazer isso;
+//   * o que está no futuro ou tem mais de `windowDays` dias: modelo é hábito,
+//     não arquivo.
+//
+// Cada modelo leva os dados do lançamento MAIS RECENTE do grupo (valor, forma
+// de pagamento, conta, cartão): é o que a pessoa fez da última vez, não uma
+// média. A função é pura, percorre a lista uma vez e devolve no máximo `limit`.
+const TEMPLATE_WINDOW_DAYS = 120;
+
+function recentTransactionTemplates(data, options) {
+  const opts = options || {};
+  const type = opts.type === "income" ? "income" : "expense";
+  const limit = Math.max(1, Number(opts.limit) || 4);
+  const hoje = opts.today || todayIso();
+  const windowDays = Number(opts.windowDays) || TEMPLATE_WINDOW_DAYS;
+  const groups = new Map();
+  // Só consumo e renda comuns: é a natureza que todo lançamento normalizado
+  // carrega (`deriveTransactionNature`); as outras mexem em meta, dívida ou
+  // caixa entre contas e ficam de fora.
+  const naturezaComum = type === "income" ? TRANSACTION_NATURES.renda : TRANSACTION_NATURES.consumo;
+  ((data && data.transactions) || []).forEach((t) => {
+    if (!t || t.type !== type) return;
+    if (t.installmentGroupId || (t.recurring && type === "expense")) return;
+    const natureza = t.nature || (typeof deriveTransactionNature === "function" ? deriveTransactionNature(t) : naturezaComum);
+    if (natureza !== naturezaComum) return;
+    if (!(roundMoney(t.amount) > 0)) return;
+    if (!t.date || t.date > hoje || daysBetweenIso(t.date, hoje) > windowDays) return;
+    const description = String(t.description || "").trim();
+    const categoryId = type === "expense" ? (t.categoryId || "") : "";
+    const key = `${type}|${categoryId}|${normalizeText(description)}`;
+    const createdAt = String(t.createdAt || "");
+    const snapshot = {
+      lastDate: t.date, lastCreatedAt: createdAt, description,
+      amount: roundMoney(t.amount), payment: t.payment || "",
+      accountId: t.accountId || "", creditCardId: t.creditCardId || "",
+    };
+    const atual = groups.get(key);
+    if (!atual) {
+      groups.set(key, { key, type, categoryId: categoryId || null, count: 1, ...snapshot });
+      return;
+    }
+    atual.count += 1;
+    const maisNovo = t.date > atual.lastDate || (t.date === atual.lastDate && createdAt > atual.lastCreatedAt);
+    if (maisNovo) Object.assign(atual, snapshot);
+  });
+  return [...groups.values()]
+    .sort((a, b) => b.count - a.count || b.lastDate.localeCompare(a.lastDate) || a.key.localeCompare(b.key))
+    .slice(0, limit)
+    .map((g) => {
+      const cat = g.type === "expense" && g.categoryId && typeof categoryById === "function" ? categoryById(data, g.categoryId) : null;
+      return {
+        ...g,
+        label: g.description || (cat ? cat.name : "Receita"),
+        categoryName: cat ? cat.name : "",
+        icon: cat ? cat.icon : "trendUp",
+        color: cat ? cat.color : "",
+      };
+    });
+}
+
 function movementEntries(data) {
   const tx = (data.transactions || []).map((t) => {
     const category = categoryById(data, t.categoryId);

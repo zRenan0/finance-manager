@@ -440,6 +440,39 @@
 .payment-chip.active { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-ink); }
 .payment-chip--income.active { border-color: var(--positive); background: color-mix(in srgb, var(--positive) 12%, transparent); color: var(--positive); }
 
+/* REPETIR UM RECENTE (js/screens/add.js). Cada modelo é um botão com ícone da
+   categoria, descrição e o valor da última vez. Altura mínima de 44px porque é
+   alvo de toque; a lista quebra linha em vez de rolar de lado para o alvo
+   nunca ficar meio cortado na borda. */
+.recent-templates { margin: 0 0 16px; }
+.recent-templates .field__label { margin-bottom: 8px; }
+.recent-templates__list { display: flex; flex-wrap: wrap; gap: 8px; }
+.recent-template {
+  display: inline-flex; align-items: center; gap: 9px; min-height: 44px; max-width: 100%;
+  padding: 5px 13px 5px 6px; border-radius: 12px;
+  border: 1px solid var(--border-strong); background: var(--card); color: var(--ink);
+  box-shadow: var(--shadow-xs); text-align: left;
+  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.recent-template__icon { width: 32px; height: 32px; border-radius: 10px; }
+.recent-template__text { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
+.recent-template__label { font-size: 12.5px; font-weight: 600; color: var(--ink); max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent-template__amount { font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: 12px; font-weight: 650; color: var(--ink-soft); }
+.recent-template:hover { border-color: var(--brand); }
+.recent-template:active { transform: scale(0.97); }
+.recent-template.active { border-color: var(--brand); background: var(--brand-soft); }
+.recent-template.active .recent-template__label, .recent-template.active .recent-template__amount { color: var(--brand-ink); }
+.add-form--income .recent-template.active { border-color: var(--positive); background: color-mix(in srgb, var(--positive) 12%, transparent); }
+.add-form--income .recent-template.active .recent-template__label, .add-form--income .recent-template.active .recent-template__amount { color: var(--positive); }
+.payment-chips--date { margin-top: 8px; }
+.edit-tools { display: grid; gap: 8px; margin-top: 14px; }
+
+/* Instalar no aparelho (js/screens/settings.js). */
+.install-card__head { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 12px; }
+.install-card__head .card-subtitle { margin-bottom: 0; }
+.install-card__steps { margin: 0; padding-left: 20px; font-size: 13px; color: var(--ink-soft); line-height: 1.5; }
+.install-card__steps li + li { margin-top: 4px; }
+
 .installments-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(56px, 1fr)); gap: 8px; margin: 0 0 4px; }
 .installment-chip {
   height: 44px; border-radius: 12px; border: 1px solid var(--border-strong); background: var(--card);

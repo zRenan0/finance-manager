@@ -64,6 +64,14 @@ function dateFromIso(iso) {
   const [y, m, d] = String(iso || todayIso()).slice(0, 10).split("-").map(Number);
   return new Date(y, (m || 1) - 1, d || 1);
 }
+// Desloca uma data ISO em dias pelo calendário local (`setDate`), não por
+// múltiplos de 86400000: é o que atravessa mês, ano e qualquer mudança de
+// horário sem cair no dia errado.
+function addDaysToIso(iso, n) {
+  const d = dateFromIso(iso);
+  d.setDate(d.getDate() + (Number(n) || 0));
+  return isoOfDate(d);
+}
 function daysBetweenIso(a, b) {
   return Math.round((dateFromIso(b) - dateFromIso(a)) / 86400000);
 }
