@@ -208,6 +208,43 @@ function commitDebtPayment(p) {
   notify("Pagamento vinculado à dívida");
 }
 
+// UMA CORREÇÃO DE CATEGORIA VALE PARA O ESTABELECIMENTO, NÃO SÓ PARA A LINHA.
+//
+// Quem corrigia "UBER *TRIP" de Outros para Transporte precisava repetir o
+// gesto nas outras vinte linhas do histórico, e a memória de categorias
+// (js/rules.js) só aprendia com aquela uma. Depois de salvar uma edição em
+// que a categoria mudou, o app conta os outros lançamentos do mesmo
+// estabelecimento que estão em categoria diferente e PERGUNTA antes de mover:
+// nada em bloco sem confirmação, porque pode haver uma exceção deliberada no
+// meio. Os movidos recebem registro de edição, o que é exatamente o sinal
+// que faz a memória preferir essa categoria nas próximas importações.
+function offerCategoryToSimilar(anterior, form) {
+  if (!anterior || !form || anterior.type !== "expense" || form.type !== "expense") return;
+  if (!form.categoryId || anterior.categoryId === form.categoryId) return;
+  if (typeof similarExpensesByMerchant !== "function") return;
+  const parecidos = similarExpensesByMerchant(state.data, anterior.description, anterior.id)
+    .filter((t) => t.categoryId !== form.categoryId);
+  if (!parecidos.length) return;
+  const categoria = categoryById(state.data, form.categoryId);
+  const nome = categoria ? categoria.name : "a nova categoria";
+  const rotulo = String(anterior.description || "").trim() || "este lugar";
+  requestConfirmation({
+    title: "Aplicar aos lançamentos parecidos?",
+    message: `${plural(parecidos.length, "outro lançamento", "outros lançamentos")} de “${rotulo}” ${parecidos.length === 1 ? "está" : "estão"} em outra categoria. Mover para ${nome} também? O app passa a sugerir ${nome} para este lugar nas próximas importações.`,
+    confirmLabel: `Mover ${plural(parecidos.length, "lançamento", "lançamentos")}`,
+    icon: "tag",
+    onConfirm: () => {
+      const ids = new Set(parecidos.map((t) => t.id));
+      const categoriaId = form.categoryId;
+      setData((d) => ({
+        ...d,
+        transactions: d.transactions.map((t) => (ids.has(t.id) ? updateTransaction(t, { categoryId: categoriaId }) : t)),
+      }));
+      notify(`${plural(ids.size, "lançamento movido", "lançamentos movidos")} para ${nome}`);
+    },
+  });
+}
+
 function onClick(e) {
   const btn = e.target.closest("[data-action]");
   if (!btn) return;
@@ -1736,6 +1773,9 @@ function onClick(e) {
       // o usuário tomou a decisão (e não o estado já com o gasto embutido).
       const impact = f.type === "expense" ? evaluateBudgetImpact(state.data, f.categoryId, amt, monthKeyOf(f.date)) : null;
 
+      // Guardado antes da gravação: é a comparação com ele que diz se a
+      // categoria mudou e se vale oferecer a correção aos parecidos.
+      const anterior = state.editingTxId ? state.data.transactions.find((t) => t.id === state.editingTxId) || null : null;
       if (state.editingTxId) {
         const txId = state.editingTxId;
         setData((d) => {
@@ -1775,6 +1815,7 @@ function onClick(e) {
       state.form = freshTxForm();
       setState({ tab:returnTab });
       announceBudgetCrossings(impact);
+      offerCategoryToSimilar(anterior, f);
       break;
     }
 

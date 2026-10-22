@@ -444,6 +444,46 @@ function markDuplicates(rows, existingTx) {
   });
 }
 
+// UMA CORREÇÃO VALE PARA O ESTABELECIMENTO INTEIRO DENTRO DO ARQUIVO.
+//
+// Quem corrigia "UBER *TRIP" para Transporte numa linha precisava repetir o
+// gesto nas outras onze do mesmo extrato. Agora a escolha se espalha para as
+// linhas parecidas (mesmo núcleo de estabelecimento, ver statementMerchantCore)
+// que ainda carregam o palpite do app. Linha em que a pessoa já escolheu à mão
+// (`categoryChosen`) não é sobrescrita: a segunda correção nunca desfaz a
+// primeira. Devolve os índices alterados, para a tela redesenhar só eles.
+function propagateImportCategory(rows, idx) {
+  const origem = rows && rows[idx];
+  if (!origem || origem.type !== "expense" || !origem.categoryId) return [];
+  const minimo = typeof CATEGORY_MEMORY_MIN_CORE === "number" ? CATEGORY_MEMORY_MIN_CORE : 4;
+  const core = statementMerchantCore(origem.description);
+  if (!core || core.length < minimo) return [];
+  const alteradas = [];
+  rows.forEach((row, i) => {
+    if (i === idx || !row || row.type !== "expense" || row.importAs === "transfer") return;
+    if (row.categoryChosen === true || row.categoryId === origem.categoryId) return;
+    if (statementMerchantCore(row.description) !== core) return;
+    row.categoryId = origem.categoryId;
+    row.confidence = "alta";
+    row.categoryReason = "igual à linha que você corrigiu";
+    alteradas.push(i);
+  });
+  return alteradas;
+}
+
+// A categoria escolhida na revisão é decisão da pessoa, e a memória de
+// categorias (js/rules.js) só dá peso de decisão ao que tem um registro de
+// edição no histórico. Sem este registro, corrigir o extrato ensinava o app
+// tão pouco quanto aceitar o palpite dele: no mês seguinte, a mesma linha
+// voltava com a mesma sugestão errada.
+function importCategoryChosenLog() {
+  const novoId = () => (typeof uid === "function" ? uid() : undefined);
+  return [
+    { id: novoId(), action: "created", fields: [], actor: "system" },
+    { id: novoId(), action: "edited", fields: ["categoryId"], actor: "user" },
+  ];
+}
+
 // Monta as linhas prontas para a tela de revisão (com categoria já sugerida).
 
 function prepareImportRows(rawFile, filename, data) {
@@ -471,6 +511,7 @@ function prepareImportRows(rawFile, filename, data) {
       categoryId: suggestion ? suggestion.categoryId : null,
       confidence: suggestion ? suggestion.confidence : "alta",
       categoryReason: suggestion ? suggestion.reason : null,
+      categoryChosen: false,
     };
   }).sort((a, b) => (a.date < b.date ? 1 : -1));
   const roleCounts = prepared.reduce((count, r) => (r.role ? { ...count, [r.role]: (count[r.role] || 0) + 1 } : count), {});
@@ -513,6 +554,7 @@ function buildTransactionsFromRows(rows, format, destination, filename) {
       payment: documentKind === "card" ? "Crédito" : (r.type === "expense" ? "Débito" : "Outro"),
       description: r.description,
       source,
+      changeLog: r.categoryChosen === true ? importCategoryChosenLog() : undefined,
       // `externalId` é o identificador do banco (FITID do OFX). Guardá-lo é o
       // que permite reconhecer a mesma linha numa reimportação futura sem
       // depender de valor, data e texto continuarem idênticos.

@@ -2139,10 +2139,17 @@ function onChange(e) {
   }
   if (actionSelect === "import-category") {
     const idx = Number(e.target.dataset.id);
-    if (state.importRows && state.importRows[idx]) state.importRows[idx].categoryId = e.target.value;
-    // Nada mais na tela depende da categoria de uma linha: o `<select>` já
-    // mostra a escolha, e redesenhar aqui só tiraria o foco de quem está
-    // corrigindo várias linhas seguidas.
+    const row = state.importRows && state.importRows[idx];
+    if (!row) return;
+    row.categoryId = e.target.value;
+    row.categoryChosen = true;
+    // A escolha se espalha para as linhas parecidas do mesmo arquivo (ver
+    // propagateImportCategory). Só essas linhas são redesenhadas; o `<select>`
+    // que a pessoa acabou de usar já mostra a escolha, e redesenhar a tela
+    // inteira tiraria o foco de quem está corrigindo várias linhas seguidas.
+    const alteradas = typeof propagateImportCategory === "function" ? propagateImportCategory(state.importRows, idx) : [];
+    alteradas.forEach((i) => { if (typeof patchImportRow === "function") patchImportRow(i); });
+    if (alteradas.length) notify(`Aplicada também a ${plural(alteradas.length, "linha parecida", "linhas parecidas")} deste arquivo`);
     return;
   }
   if (actionSelect === "import-record-type") {

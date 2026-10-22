@@ -1540,6 +1540,12 @@ function statementMerchantCore(description) {
   STATEMENT_TAIL_RE.forEach((re) => { text = text.replace(re, " "); });
   text = text.replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
   for (let i = 0; i < 2; i++) text = text.replace(STATEMENT_UF_RE, "").trim();
+  // Número de três ou mais dígitos no meio do texto é sequência de pedido,
+  // autorização ou terminal ("UBER *TRIP 4471", "IFOOD *PEDIDO 20394"), não
+  // parte do nome: sem tirá-lo, cada corrida virava um estabelecimento novo e a
+  // memória nunca reconhecia o mesmo lugar. O primeiro token fica, porque há
+  // marcas que começam por número ("99 FOOD", "7 ELEVEN", "5 A SEC").
+  text = text.split(" ").filter((token, i) => i === 0 || !/^\d{3,}$/.test(token)).join(" ").trim();
   // Sobrou nada (a linha era só verbo e número): devolve o texto original
   // normalizado, que ao menos é estável para comparar com ele mesmo.
   return text || normalizeText(description);
@@ -1624,6 +1630,21 @@ function recallCategoryFromMemory(data, description) {
   return best;
 }
 
+// Os outros lançamentos do MESMO estabelecimento (ver statementMerchantCore).
+// É o que a correção de categoria de um deles usa para oferecer "aplicar aos
+// parecidos" e o que a revisão de importação usa para corrigir o extrato de
+// uma vez. Só consumo comum: aporte, dívida e transferência não mudam de
+// categoria em bloco.
+function similarExpensesByMerchant(data, description, excludeId) {
+  const core = statementMerchantCore(description);
+  if (!core || core.length < CATEGORY_MEMORY_MIN_CORE) return [];
+  return ((data && Array.isArray(data.transactions)) ? data.transactions : []).filter((t) => (
+    t && t.id !== excludeId && t.type === "expense"
+    && (!t.nature || t.nature === "consumo") && !t.goalId && !t.debtId
+    && statementMerchantCore(t.description) === core
+  ));
+}
+
 // ------------------------------------------------------------------------------
 // APLICAR ÀS TRANSAÇÕES JÁ EXISTENTES
 // ------------------------------------------------------------------------------
@@ -1675,6 +1696,7 @@ if (typeof module !== "undefined" && module.exports) {
     previewRuleApplication, applyRulesToTransactions,
     STATEMENT_ROW_ROLES, classifyStatementRow, statementMerchantCore,
     buildCategoryMemory, recallCategoryFromMemory, transactionCategoryChosenByUser,
+    similarExpensesByMerchant,
   };
 }
 
@@ -15080,6 +15102,46 @@ function markDuplicates(rows, existingTx) {
   });
 }
 
+// UMA CORREÇÃO VALE PARA O ESTABELECIMENTO INTEIRO DENTRO DO ARQUIVO.
+//
+// Quem corrigia "UBER *TRIP" para Transporte numa linha precisava repetir o
+// gesto nas outras onze do mesmo extrato. Agora a escolha se espalha para as
+// linhas parecidas (mesmo núcleo de estabelecimento, ver statementMerchantCore)
+// que ainda carregam o palpite do app. Linha em que a pessoa já escolheu à mão
+// (`categoryChosen`) não é sobrescrita: a segunda correção nunca desfaz a
+// primeira. Devolve os índices alterados, para a tela redesenhar só eles.
+function propagateImportCategory(rows, idx) {
+  const origem = rows && rows[idx];
+  if (!origem || origem.type !== "expense" || !origem.categoryId) return [];
+  const minimo = typeof CATEGORY_MEMORY_MIN_CORE === "number" ? CATEGORY_MEMORY_MIN_CORE : 4;
+  const core = statementMerchantCore(origem.description);
+  if (!core || core.length < minimo) return [];
+  const alteradas = [];
+  rows.forEach((row, i) => {
+    if (i === idx || !row || row.type !== "expense" || row.importAs === "transfer") return;
+    if (row.categoryChosen === true || row.categoryId === origem.categoryId) return;
+    if (statementMerchantCore(row.description) !== core) return;
+    row.categoryId = origem.categoryId;
+    row.confidence = "alta";
+    row.categoryReason = "igual à linha que você corrigiu";
+    alteradas.push(i);
+  });
+  return alteradas;
+}
+
+// A categoria escolhida na revisão é decisão da pessoa, e a memória de
+// categorias (js/rules.js) só dá peso de decisão ao que tem um registro de
+// edição no histórico. Sem este registro, corrigir o extrato ensinava o app
+// tão pouco quanto aceitar o palpite dele: no mês seguinte, a mesma linha
+// voltava com a mesma sugestão errada.
+function importCategoryChosenLog() {
+  const novoId = () => (typeof uid === "function" ? uid() : undefined);
+  return [
+    { id: novoId(), action: "created", fields: [], actor: "system" },
+    { id: novoId(), action: "edited", fields: ["categoryId"], actor: "user" },
+  ];
+}
+
 // Monta as linhas prontas para a tela de revisão (com categoria já sugerida).
 
 function prepareImportRows(rawFile, filename, data) {
@@ -15107,6 +15169,7 @@ function prepareImportRows(rawFile, filename, data) {
       categoryId: suggestion ? suggestion.categoryId : null,
       confidence: suggestion ? suggestion.confidence : "alta",
       categoryReason: suggestion ? suggestion.reason : null,
+      categoryChosen: false,
     };
   }).sort((a, b) => (a.date < b.date ? 1 : -1));
   const roleCounts = prepared.reduce((count, r) => (r.role ? { ...count, [r.role]: (count[r.role] || 0) + 1 } : count), {});
@@ -15149,6 +15212,7 @@ function buildTransactionsFromRows(rows, format, destination, filename) {
       payment: documentKind === "card" ? "Crédito" : (r.type === "expense" ? "Débito" : "Outro"),
       description: r.description,
       source,
+      changeLog: r.categoryChosen === true ? importCategoryChosenLog() : undefined,
       // `externalId` é o identificador do banco (FITID do OFX). Guardá-lo é o
       // que permite reconhecer a mesma linha numa reimportação futura sem
       // depender de valor, data e texto continuarem idênticos.
@@ -33233,6 +33297,43 @@ function commitDebtPayment(p) {
   notify("Pagamento vinculado à dívida");
 }
 
+// UMA CORREÇÃO DE CATEGORIA VALE PARA O ESTABELECIMENTO, NÃO SÓ PARA A LINHA.
+//
+// Quem corrigia "UBER *TRIP" de Outros para Transporte precisava repetir o
+// gesto nas outras vinte linhas do histórico, e a memória de categorias
+// (js/rules.js) só aprendia com aquela uma. Depois de salvar uma edição em
+// que a categoria mudou, o app conta os outros lançamentos do mesmo
+// estabelecimento que estão em categoria diferente e PERGUNTA antes de mover:
+// nada em bloco sem confirmação, porque pode haver uma exceção deliberada no
+// meio. Os movidos recebem registro de edição, o que é exatamente o sinal
+// que faz a memória preferir essa categoria nas próximas importações.
+function offerCategoryToSimilar(anterior, form) {
+  if (!anterior || !form || anterior.type !== "expense" || form.type !== "expense") return;
+  if (!form.categoryId || anterior.categoryId === form.categoryId) return;
+  if (typeof similarExpensesByMerchant !== "function") return;
+  const parecidos = similarExpensesByMerchant(state.data, anterior.description, anterior.id)
+    .filter((t) => t.categoryId !== form.categoryId);
+  if (!parecidos.length) return;
+  const categoria = categoryById(state.data, form.categoryId);
+  const nome = categoria ? categoria.name : "a nova categoria";
+  const rotulo = String(anterior.description || "").trim() || "este lugar";
+  requestConfirmation({
+    title: "Aplicar aos lançamentos parecidos?",
+    message: `${plural(parecidos.length, "outro lançamento", "outros lançamentos")} de “${rotulo}” ${parecidos.length === 1 ? "está" : "estão"} em outra categoria. Mover para ${nome} também? O app passa a sugerir ${nome} para este lugar nas próximas importações.`,
+    confirmLabel: `Mover ${plural(parecidos.length, "lançamento", "lançamentos")}`,
+    icon: "tag",
+    onConfirm: () => {
+      const ids = new Set(parecidos.map((t) => t.id));
+      const categoriaId = form.categoryId;
+      setData((d) => ({
+        ...d,
+        transactions: d.transactions.map((t) => (ids.has(t.id) ? updateTransaction(t, { categoryId: categoriaId }) : t)),
+      }));
+      notify(`${plural(ids.size, "lançamento movido", "lançamentos movidos")} para ${nome}`);
+    },
+  });
+}
+
 function onClick(e) {
   const btn = e.target.closest("[data-action]");
   if (!btn) return;
@@ -34761,6 +34862,9 @@ function onClick(e) {
       // o usuário tomou a decisão (e não o estado já com o gasto embutido).
       const impact = f.type === "expense" ? evaluateBudgetImpact(state.data, f.categoryId, amt, monthKeyOf(f.date)) : null;
 
+      // Guardado antes da gravação: é a comparação com ele que diz se a
+      // categoria mudou e se vale oferecer a correção aos parecidos.
+      const anterior = state.editingTxId ? state.data.transactions.find((t) => t.id === state.editingTxId) || null : null;
       if (state.editingTxId) {
         const txId = state.editingTxId;
         setData((d) => {
@@ -34800,6 +34904,7 @@ function onClick(e) {
       state.form = freshTxForm();
       setState({ tab:returnTab });
       announceBudgetCrossings(impact);
+      offerCategoryToSimilar(anterior, f);
       break;
     }
 
@@ -37539,10 +37644,17 @@ function onChange(e) {
   }
   if (actionSelect === "import-category") {
     const idx = Number(e.target.dataset.id);
-    if (state.importRows && state.importRows[idx]) state.importRows[idx].categoryId = e.target.value;
-    // Nada mais na tela depende da categoria de uma linha: o `<select>` já
-    // mostra a escolha, e redesenhar aqui só tiraria o foco de quem está
-    // corrigindo várias linhas seguidas.
+    const row = state.importRows && state.importRows[idx];
+    if (!row) return;
+    row.categoryId = e.target.value;
+    row.categoryChosen = true;
+    // A escolha se espalha para as linhas parecidas do mesmo arquivo (ver
+    // propagateImportCategory). Só essas linhas são redesenhadas; o `<select>`
+    // que a pessoa acabou de usar já mostra a escolha, e redesenhar a tela
+    // inteira tiraria o foco de quem está corrigindo várias linhas seguidas.
+    const alteradas = typeof propagateImportCategory === "function" ? propagateImportCategory(state.importRows, idx) : [];
+    alteradas.forEach((i) => { if (typeof patchImportRow === "function") patchImportRow(i); });
+    if (alteradas.length) notify(`Aplicada também a ${plural(alteradas.length, "linha parecida", "linhas parecidas")} deste arquivo`);
     return;
   }
   if (actionSelect === "import-record-type") {

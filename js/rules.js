@@ -421,6 +421,12 @@ function statementMerchantCore(description) {
   STATEMENT_TAIL_RE.forEach((re) => { text = text.replace(re, " "); });
   text = text.replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
   for (let i = 0; i < 2; i++) text = text.replace(STATEMENT_UF_RE, "").trim();
+  // Número de três ou mais dígitos no meio do texto é sequência de pedido,
+  // autorização ou terminal ("UBER *TRIP 4471", "IFOOD *PEDIDO 20394"), não
+  // parte do nome: sem tirá-lo, cada corrida virava um estabelecimento novo e a
+  // memória nunca reconhecia o mesmo lugar. O primeiro token fica, porque há
+  // marcas que começam por número ("99 FOOD", "7 ELEVEN", "5 A SEC").
+  text = text.split(" ").filter((token, i) => i === 0 || !/^\d{3,}$/.test(token)).join(" ").trim();
   // Sobrou nada (a linha era só verbo e número): devolve o texto original
   // normalizado, que ao menos é estável para comparar com ele mesmo.
   return text || normalizeText(description);
@@ -505,6 +511,21 @@ function recallCategoryFromMemory(data, description) {
   return best;
 }
 
+// Os outros lançamentos do MESMO estabelecimento (ver statementMerchantCore).
+// É o que a correção de categoria de um deles usa para oferecer "aplicar aos
+// parecidos" e o que a revisão de importação usa para corrigir o extrato de
+// uma vez. Só consumo comum: aporte, dívida e transferência não mudam de
+// categoria em bloco.
+function similarExpensesByMerchant(data, description, excludeId) {
+  const core = statementMerchantCore(description);
+  if (!core || core.length < CATEGORY_MEMORY_MIN_CORE) return [];
+  return ((data && Array.isArray(data.transactions)) ? data.transactions : []).filter((t) => (
+    t && t.id !== excludeId && t.type === "expense"
+    && (!t.nature || t.nature === "consumo") && !t.goalId && !t.debtId
+    && statementMerchantCore(t.description) === core
+  ));
+}
+
 // ------------------------------------------------------------------------------
 // APLICAR ÀS TRANSAÇÕES JÁ EXISTENTES
 // ------------------------------------------------------------------------------
@@ -556,5 +577,6 @@ if (typeof module !== "undefined" && module.exports) {
     previewRuleApplication, applyRulesToTransactions,
     STATEMENT_ROW_ROLES, classifyStatementRow, statementMerchantCore,
     buildCategoryMemory, recallCategoryFromMemory, transactionCategoryChosenByUser,
+    similarExpensesByMerchant,
   };
 }

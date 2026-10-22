@@ -2,6 +2,25 @@
 
 ## Não publicado
 
+### Corrigir uma vez, valer para o estabelecimento inteiro
+
+- **Na revisão da importação, a categoria escolhida numa linha se espalha para
+  as linhas parecidas do mesmo arquivo** (mesmo estabelecimento, pelo mesmo
+  reconhecimento que a memória de categorias já usa). Linha que você já tinha
+  corrigido à mão não é sobrescrita. Um aviso diz quantas foram.
+- **A correção feita na revisão agora ensina o app de verdade.** Antes ela
+  pesava o mesmo que um palpite automático, e no mês seguinte a mesma linha
+  voltava com a mesma sugestão errada. A categoria escolhida na revisão passa
+  a contar como decisão sua na memória de categorias.
+- **Ao mudar a categoria de um lançamento na edição, o app oferece mover os
+  outros do mesmo estabelecimento.** Pergunta antes, diz quantos são e para
+  onde vão; nada é movido em bloco sem confirmação. Os movidos passam a
+  orientar as próximas importações.
+- **O reconhecimento de estabelecimento ignora números de pedido.** "UBER *TRIP
+  4471" e "UBER *TRIP 9820" eram dois lugares diferentes para a memória; agora
+  são o mesmo. Marcas que começam por número ("99 FOOD", "7 ELEVEN") continuam
+  inteiras.
+
 ### Lançar mais rápido e instalar no aparelho
 
 - **"Repetir um recente" no formulário de lançamento.** Os gastos e receitas que
