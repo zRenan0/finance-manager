@@ -55,7 +55,7 @@ function renderGoalsHero(model) {
     </div>
 
     <div class="hero-chips">
-      <div class="hero-chip">${svgIcon("piggy", 17)}<div><span class="hero-chip__label">Aportado neste mês</span><span class="hero-chip__value">${fmtBRL(t.contributedThisMonth)}</span></div></div>
+      <div class="hero-chip">${svgIcon("piggy", 17)}<div><span class="hero-chip__label">Aportado no mês</span><span class="hero-chip__value">${fmtBRL(t.contributedThisMonth)}</span></div></div>
       <div class="hero-chip">${svgIcon("target", 17)}<div><span class="hero-chip__label">Metas ativas</span><span class="hero-chip__value">${model.counts.total - model.counts.done}</span></div></div>
       ${model.counts.done > 0 ? `<div class="hero-chip">${svgIcon("checkCircle", 17)}<div><span class="hero-chip__label">Concluídas</span><span class="hero-chip__value">${model.counts.done}</span></div></div>` : ""}
     </div>

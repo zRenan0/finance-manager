@@ -27,7 +27,7 @@
    "Saldo dos seus lançamentos até hoj..." e a explicação se perdia. O limite
    de duas linhas mantém a altura dos itens previsível. */
 .wealth-legend__note {
-  font-size: 10.5px; color: rgba(255,255,255,0.6); line-height: 1.4;
+  font-size: 10.5px; color: rgba(255,255,255,0.78); line-height: 1.4;
   overflow: hidden;
   display: -webkit-box; -webkit-box-orient: vertical;
   -webkit-line-clamp: 2; line-clamp: 2;

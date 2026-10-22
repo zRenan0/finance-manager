@@ -259,8 +259,8 @@
   gap: 8px; margin-top: 14px;
 }
 .goal-number {
-  background: var(--card-alt); border: 1px solid var(--border-soft);
-  border-radius: var(--radius-xs); padding: 9px 10px; min-width: 0;
+  background: transparent; border: 0; border-top: 2px solid var(--border);
+  border-radius: 0; padding: 9px 2px 0; min-width: 0;
 }
 .goal-number__label {
   display: block; font-size: 10px; font-weight: 700; text-transform: uppercase;
@@ -314,8 +314,8 @@
 .plan-meter__fill { height: 100%; border-radius: 999px; transition: width var(--dur-slow) var(--ease); }
 .plan-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-bottom: 12px; }
 .plan-cell {
-  background: var(--card-alt); border: 1px solid var(--border-soft);
-  border-radius: var(--radius-xs); padding: 10px 12px; min-width: 0;
+  background: transparent; border: 0; border-top: 2px solid var(--border);
+  border-radius: 0; padding: 9px 2px 0; min-width: 0;
 }
 .plan-cell span { display: block; font-size: 11px; color: var(--ink-faint); margin-bottom: 3px; }
 .plan-cell b {

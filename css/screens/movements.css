@@ -36,7 +36,7 @@
 .movement-periods .segmented__option { min-width:max-content; min-height:44px; }
 .movement-dates { margin-top:12px; }
 .movement-summary { display:grid; grid-template-columns:repeat(4, 1fr); gap:10px; margin:14px 0; }
-.movement-summary__item { min-width:0; display:flex; flex-direction:column; gap:3px; padding:12px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--surface-soft); }
+.movement-summary__item { min-width:0; display:flex; flex-direction:column; gap:3px; padding:10px 2px 0; border:0; border-top:2px solid var(--border); border-radius:0; background:transparent; }
 .movement-summary__item span { color:var(--ink-faint); font-size:var(--text-xs); }
 .movement-summary__item b { overflow-wrap:anywhere; }
 .movement-bulk { position:sticky; top:8px; z-index:5; display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:10px 0; padding:10px; border:1px solid color-mix(in srgb, var(--brand) 35%, var(--border)); border-radius:var(--radius-sm); background:var(--surface); box-shadow:var(--shadow-sm); }

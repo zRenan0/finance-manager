@@ -14,10 +14,10 @@
   padding: 6px;
   border-radius: var(--radius-lg);
   background: var(--glass);
-  -webkit-backdrop-filter: blur(22px) saturate(180%);
-  backdrop-filter: blur(22px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  backdrop-filter: blur(16px) saturate(140%);
   border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
-  box-shadow: var(--shadow-lg), var(--sheen);
+  box-shadow: var(--shadow-md), var(--sheen);
 }
 .bottom-nav__item,
 .bottom-nav__fab-wrap {
@@ -41,9 +41,9 @@
 /* FAB integrado à doca (nada mais protrai e briga com o conteúdo). */
 .bottom-nav__fab {
   position: static; width: 38px; height: 38px; border-radius: 50%;
-  background: linear-gradient(155deg, var(--brand-glow), var(--brand) 55%, var(--brand-dark));
+  background: var(--brand-solid);
   color: #fff; display: flex; align-items: center; justify-content: center;
-  box-shadow: var(--shadow-brand), inset 0 1px 0 rgba(255,255,255,0.28);
+  box-shadow: var(--shadow-sm);
   transition: transform var(--dur-fast) var(--ease), box-shadow var(--dur) var(--ease);
   flex-shrink: 0;
 }
@@ -83,26 +83,23 @@
    manipulador (js/actions.js). Sem `pointer-events: none`, de propósito: o
    clique tem de chegar para o app poder responder. */
 .btn[aria-disabled="true"] { opacity: 0.38; box-shadow: none; cursor: not-allowed; }
-.btn--primary {
-  background: linear-gradient(170deg, color-mix(in srgb, var(--brand) 88%, #fff), var(--brand) 60%, var(--brand-dark));
-  color: #fff; box-shadow: var(--shadow-brand), inset 0 1px 0 rgba(255,255,255,0.2);
-}
-.btn--positive {
-  background: linear-gradient(170deg, color-mix(in srgb, var(--positive) 88%, #fff), var(--positive));
-  color: #fff; box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255,255,255,0.2);
-}
+/* REVISÃO VISUAL: botão de cor chapada, sem gradiente nem brilho. A chapa usa
+   os tokens de TINTA (`--brand-solid`, `--positive-ink`, `--goal-ink`), que já
+   são os que passam em AA com texto branco no tema claro; no escuro, onde a
+   cor de sinal clareia, o texto vira o próprio papel escuro. */
+.btn--primary { background: var(--brand-solid); color: #fff; box-shadow: none; }
+.btn--positive { background: var(--positive-ink); color: #fff; box-shadow: none; }
+[data-theme="dark"] .btn--positive { color: var(--paper); }
 .btn--secondary { background: var(--paper-alt); color: var(--ink); border-color: var(--border); }
 .btn--secondary:hover { background: var(--border-soft); }
 .btn--ghost { background: transparent; color: var(--ink-soft); }
 .btn--ghost:hover { background: var(--paper-alt); color: var(--ink); }
 .btn--danger { background: var(--negative-soft); color: var(--negative); }
-.btn--goal {
-  background: linear-gradient(170deg, color-mix(in srgb, var(--goal) 88%, #fff), var(--goal));
-  color: #fff; box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255,255,255,0.22);
-}
+.btn--goal { background: var(--goal-ink); color: #fff; box-shadow: none; }
+[data-theme="dark"] .btn--goal { color: var(--paper); }
 .btn--goal-soft { background: var(--goal-soft); color: var(--goal-ink); }
 .btn--block { width: 100%; }
-.btn--sm { height: 38px; padding: 0 14px; font-size: 13px; border-radius: 11px; }
+.btn--sm { height: 38px; padding: 0 14px; font-size: 13px; border-radius: 9px; }
 
 .input {
   width: 100%; height: 48px; border-radius: var(--radius-sm); padding: 0 15px;

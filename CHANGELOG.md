@@ -2,6 +2,31 @@
 
 ## Não publicado
 
+### Revisão visual: menos efeito, mais leitura
+
+- **O cartão principal (saldo, metas, contas, dívidas) passou a ser de cor
+  chapada.** Saíram o degradê, o brilho e a textura de fundo que davam ao app a
+  cara de painel feito em gerador. O verde escuro da marca ficou sozinho e o
+  número ganhou mais destaque.
+- **Caixinhas dentro de cartão viraram linhas.** Receitas e despesas do mês, a
+  legenda do patrimônio, os números de cada meta, o resumo de movimentações,
+  os indicadores da saúde financeira e as contagens de categorias nos Ajustes
+  deixaram de ser retângulos cinza dentro de outro retângulo. Cada dado agora é
+  um rótulo com um filete em cima, o que também corrigiu a legenda do patrimônio
+  no celular, que cortava "Em conta" para "Em co...".
+- **Botões sem degradê nem reflexo.** Primário, de meta, de receita, o "+" da
+  barra inferior e o botão de lançamento rápido usam uma cor só e sombra curta.
+- **Cantos e sombras menores em tudo.** Cartões, campos e chips arredondam
+  menos e a sombra longa dos cartões (e a elevação ao passar o mouse) saiu;
+  fica só um contorno discreto. Os lavados coloridos no fundo da página também
+  saíram.
+- **Degradês decorativos em fundos de bloco** (campo de valor, painéis de
+  investimento, simulador, importação, backup, categorias, assistente, acesso)
+  viraram cor lisa. Degradês que carregam informação (barras, listras de
+  previsão, esqueleto de carregamento, cartão de conquista) ficaram.
+- O contraste AA nos dois temas, as áreas de toque e a ausência de rolagem
+  lateral de 320 a 1440 px continuam cobertos pela suíte de navegador.
+
 ### Auditoria de uso: avisos, contas novas e categorias repetidas
 
 - **"Gasto fixo mensal" passou a valer ao salvar um gasto novo.** O interruptor

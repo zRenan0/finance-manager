@@ -160,21 +160,28 @@
   --text-sm:       13px;
 
   /* --- Elevação em camadas (nunca uma sombra só) --- */
+  /* Sombras curtas: o cartão assenta na página em vez de flutuar sobre ela.
+     `--sheen` (o fio de luz no topo de cada superfície) virou um valor nulo
+     válido: fica declarado porque dezenas de regras o somam a outra sombra, e
+     `none` dentro de uma lista de sombras invalida a declaração inteira. */
   --shadow-xs: 0 1px 1px rgba(11,21,18,0.03), 0 1px 2px rgba(11,21,18,0.04);
-  --shadow:    0 1px 2px rgba(11,21,18,0.04), 0 2px 6px rgba(11,21,18,0.05);
-  --shadow-sm: 0 1px 2px rgba(11,21,18,0.04), 0 2px 6px rgba(11,21,18,0.05);
-  --shadow-md: 0 2px 4px rgba(11,21,18,0.04), 0 10px 24px -6px rgba(11,21,18,0.12);
-  --shadow-lg: 0 4px 8px rgba(11,21,18,0.05), 0 22px 48px -12px rgba(11,21,18,0.18);
-  --shadow-brand: 0 2px 6px rgba(6,75,64,0.18), 0 12px 28px -10px rgba(6,75,64,0.38);
-  --sheen: inset 0 1px 0 rgba(255,255,255,0.85);
+  --shadow:    0 1px 2px rgba(11,21,18,0.05);
+  --shadow-sm: 0 1px 2px rgba(11,21,18,0.05);
+  --shadow-md: 0 2px 6px rgba(11,21,18,0.06), 0 8px 20px -8px rgba(11,21,18,0.10);
+  --shadow-lg: 0 4px 10px rgba(11,21,18,0.06), 0 16px 36px -12px rgba(11,21,18,0.14);
+  --shadow-brand: 0 1px 2px rgba(6,75,64,0.18);
+  --sheen: inset 0 0 0 0 transparent;
   --ring: 0 0 0 3px color-mix(in srgb, var(--brand) 22%, transparent);
 
   /* --- Raios --- */
-  --radius-xs: 9px;
-  --radius-sm: 13px;
-  --radius:    18px;
-  --radius-lg: 24px;
-  --radius-xl: 30px;
+  /* REVISÃO VISUAL: raios menores. Canto de 18 a 30 px em tudo (cartão,
+     botão, pílula, doca) é o que mais aproxima uma interface do "modelo de
+     dashboard genérico". O cartão fica em 14, controle em 10, folha em 20. */
+  --radius-xs: 8px;
+  --radius-sm: 10px;
+  --radius:    14px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
 
   /* --- Ritmo vertical --- */
   --stack:   16px;
@@ -197,9 +204,11 @@
   --font-body:    "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 
   /* --- Atmosfera da página --- */
-  --wash-a: color-mix(in srgb, var(--brand) 8%, transparent);
-  --wash-b: color-mix(in srgb, var(--goal) 7%, transparent);
-  --glass:  color-mix(in srgb, var(--card) 78%, transparent);
+  /* Fundo liso. Os dois banhos radiais atrás dos cartões ficam declarados
+     como transparentes: `body::before` continua existindo, sem pintar nada. */
+  --wash-a: transparent;
+  --wash-b: transparent;
+  --glass:  color-mix(in srgb, var(--card) 86%, transparent);
 }
 
 /* Central de Dívidas */
@@ -210,7 +219,7 @@
 .debt-rate-row,.debt-extra-row { display:grid; grid-template-columns:minmax(0,1fr) minmax(120px,.55fr); gap:8px; }
 .debt-extra-row { grid-template-columns:minmax(0,1fr) auto; }
 .debt-plan-summary,.debt-facts { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin:16px 0; }
-.debt-plan-summary>div,.debt-facts>div,.debt-compare>div { padding:12px; border:1px solid var(--border); border-radius:12px; background:var(--card-alt); }
+.debt-plan-summary>div,.debt-facts>div,.debt-compare>div { padding:10px 0 0; border:0; border-top:2px solid var(--border); border-radius:0; background:transparent; }
 .debt-plan-summary span,.debt-facts span,.debt-compare span { display:block; color:var(--ink-faint); font-size:.75rem; margin-bottom:5px; }
 .debt-plan-summary b,.debt-facts b,.debt-compare b { color:var(--ink); font-size:.92rem; }
 .debt-timeline { display:grid; gap:7px; margin:16px 0; }
@@ -317,13 +326,13 @@
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.4), 0 2px 8px rgba(0,0,0,0.3);
   --shadow-md: 0 2px 6px rgba(0,0,0,0.45), 0 12px 28px -8px rgba(0,0,0,0.6);
   --shadow-lg: 0 6px 14px rgba(0,0,0,0.5), 0 28px 56px -14px rgba(0,0,0,0.75);
-  --shadow-brand: 0 2px 8px rgba(0,0,0,0.5), 0 14px 32px -12px rgba(31,179,148,0.35);
-  --sheen: inset 0 1px 0 rgba(255,255,255,0.055);
+  --shadow-brand: 0 2px 8px rgba(0,0,0,0.5);
+  --sheen: inset 0 0 0 0 transparent;
   --ring: 0 0 0 3px color-mix(in srgb, var(--brand) 30%, transparent);
 
-  --wash-a: color-mix(in srgb, var(--brand) 13%, transparent);
-  --wash-b: color-mix(in srgb, var(--goal) 8%, transparent);
-  --glass:  color-mix(in srgb, var(--card) 74%, transparent);
+  --wash-a: transparent;
+  --wash-b: transparent;
+  --glass:  color-mix(in srgb, var(--card) 86%, transparent);
 }
 
 /* ==================================================================
@@ -473,8 +482,8 @@ a { color: inherit; }
   display: inline-flex; align-items: center; gap: 8px;
 }
 .eyebrow::before {
-  content: ""; width: 16px; height: 2px; border-radius: 2px;
-  background: linear-gradient(90deg, var(--brand), transparent);
+  content: ""; width: 14px; height: 2px; border-radius: 2px;
+  background: var(--brand);
 }
 .page-title {
   font-family: var(--font-display);
@@ -483,7 +492,7 @@ a { color: inherit; }
   letter-spacing: -0.028em; line-height: 1.15;
 }
 .card-title {
-  font-size: 14.5px; font-weight: 700; margin: 0 0 11px;
+  font-size: 15px; font-weight: 650; margin: 0 0 11px;
   letter-spacing: -0.012em; color: var(--ink);
 }
 .card-subtitle { font-size: 12.5px; color: var(--ink-soft); margin: -5px 0 13px; line-height: 1.55; }

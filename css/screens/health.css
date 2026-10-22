@@ -7,18 +7,25 @@
    ================================================================== */
 
 /* ---- Cabeçalho do diagnóstico ---- */
+/* Texto pequeno em cor de status: `--tone` é a cor da ocasião (latão,
+   verde, vermelho), boa para fundo e ícone, mas no tema claro as duas
+   mais claras não chegam a 4,5:1 em 12px. `--tone-ink` escurece só o
+   texto; no escuro os tons já nascem claros e passam sem mexer. */
+.card--health-hero, .health-chip, .card--indicator, .plan-item {
+  --tone-ink: color-mix(in srgb, var(--tone) 78%, var(--ink));
+}
+[data-theme="dark"] .card--health-hero, [data-theme="dark"] .health-chip,
+[data-theme="dark"] .card--indicator, [data-theme="dark"] .plan-item { --tone-ink: var(--tone); }
 .card--health-hero {
   position: relative;
   overflow: hidden;
   border-color: color-mix(in srgb, var(--tone) 26%, var(--border));
-  background:
-    radial-gradient(120% 140% at 100% 0%, color-mix(in srgb, var(--tone) 9%, transparent) 0%, transparent 62%),
-    var(--card);
+  background: var(--card);
 }
 .card--health-hero::before {
   content: "";
   position: absolute; inset: 0 0 auto 0; height: 3px;
-  background: linear-gradient(90deg, var(--tone), color-mix(in srgb, var(--tone) 22%, transparent));
+  background: var(--tone);
 }
 .health-hero__grid {
   display: grid;
@@ -35,7 +42,7 @@
 .health-hero__text { min-width: 0; }
 .health-hero__eyebrow {
   display: inline-flex; align-items: center; gap: 7px; margin: 0;
-  font-size: 11.5px; font-weight: 700; color: var(--tone);
+  font-size: 11.5px; font-weight: 700; color: var(--tone-ink);
   text-transform: uppercase; letter-spacing: 0.06em;
 }
 .health-hero__eyebrow svg { flex-shrink: 0; }
@@ -56,7 +63,7 @@
 }
 .health-chip b {
   font-family: var(--font-num); font-variant-numeric: tabular-nums;
-  font-size: 12.5px; font-weight: 700; color: var(--tone);
+  font-size: 12.5px; font-weight: 700; color: var(--tone-ink);
 }
 
 /* ---- Cartão de indicador ---- */
@@ -166,7 +173,7 @@ ol.plan-list { list-style: none; margin: 16px 0 0; padding: 0; display: flex; fl
   flex-shrink: 0; width: 24px; height: 24px; border-radius: 8px;
   display: grid; place-items: center;
   font-family: var(--font-num); font-variant-numeric: tabular-nums;
-  font-size: 12px; font-weight: 700; color: var(--tone);
+  font-size: 12px; font-weight: 700; color: var(--tone-ink);
   background: color-mix(in srgb, var(--tone) 13%, transparent);
 }
 .plan-item__body { min-width: 0; flex: 1; }
@@ -177,7 +184,7 @@ ol.plan-list { list-style: none; margin: 16px 0 0; padding: 0; display: flex; fl
 .plan-item__label svg { color: var(--tone); flex-shrink: 0; }
 .plan-item__tag {
   font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
-  color: var(--tone); background: color-mix(in srgb, var(--tone) 11%, transparent);
+  color: var(--tone-ink); background: color-mix(in srgb, var(--tone) 11%, transparent);
   border-radius: 999px; padding: 2px 8px;
 }
 .plan-item__text { font-size: 12.5px; color: var(--ink-soft); line-height: 1.6; margin: 6px 0 0; }

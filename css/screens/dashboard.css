@@ -15,9 +15,9 @@
 .dash-greeting__icon { color: var(--goal); flex-shrink: 0; }
 
 /* ---- Chip de economia no painel principal ---- */
-.hero-chip--save { background: rgba(255,255,255,0.16); }
+.hero-chip--save { background: transparent; }
 .hero-chip--save .hero-chip__value { color: #dcfff2; }
-.hero-chip--warn { background: rgba(255,255,255,0.13); }
+.hero-chip--warn { background: transparent; }
 .hero-chip--warn .hero-chip__value { color: #ffe3dd; }
 
 /* ---- Score financeiro ---- */
@@ -90,14 +90,17 @@
   gap: 10px; margin-top: 14px;
 }
 .networth-legend__item {
-  display: flex; align-items: center; gap: 8px; min-width: 0;
-  background: var(--card-alt); border: 1px solid var(--border-soft);
-  border-radius: var(--radius-sm); padding: 9px 11px;
+  display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 7px; row-gap: 2px;
+  align-items: center; min-width: 0;
+  background: transparent; border: 0; border-top: 2px solid var(--border);
+  border-radius: 0; padding: 9px 2px 0;
 }
-.networth-legend__label { flex: 1; font-size: 11.5px; color: var(--ink-soft); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Rótulo em cima e valor embaixo: no celular a legenda em duas colunas
+   cortava "Em conta" para "Em co...". */
+.networth-legend__label { font-size: 11.5px; color: var(--ink-soft); min-width: 0; line-height: 1.25; }
 .networth-legend__item b {
-  font-family: var(--font-num); font-variant-numeric: tabular-nums;
-  font-size: 12.5px; font-weight: 650; white-space: nowrap;
+  grid-column: 2; font-family: var(--font-num); font-variant-numeric: tabular-nums;
+  font-size: 13px; font-weight: 650; white-space: nowrap;
 }
 
 /* ---- Cartões compactos (reserva, meta, contas) ---- */

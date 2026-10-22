@@ -438,7 +438,7 @@ function renderGoalsHero(model) {
     </div>
 
     <div class="hero-chips">
-      <div class="hero-chip">${svgIcon("piggy", 17)}<div><span class="hero-chip__label">Aportado neste mês</span><span class="hero-chip__value">${fmtBRL(t.contributedThisMonth)}</span></div></div>
+      <div class="hero-chip">${svgIcon("piggy", 17)}<div><span class="hero-chip__label">Aportado no mês</span><span class="hero-chip__value">${fmtBRL(t.contributedThisMonth)}</span></div></div>
       <div class="hero-chip">${svgIcon("target", 17)}<div><span class="hero-chip__label">Metas ativas</span><span class="hero-chip__value">${model.counts.total - model.counts.done}</span></div></div>
       ${model.counts.done > 0 ? `<div class="hero-chip">${svgIcon("checkCircle", 17)}<div><span class="hero-chip__label">Concluídas</span><span class="hero-chip__value">${model.counts.done}</span></div></div>` : ""}
     </div>
@@ -1356,7 +1356,6 @@ function renderPortfolioScreen() {
 // ---- Painel principal ----
 function renderPortfolioHero(m) {
   const t = m.totals;
-  const tone = t.up ? "var(--positive)" : "var(--negative)";
   return `<div class="card card--hero span-3">
     <div class="hero-glow"></div>
     <p class="hero-label">Total aplicado (valor de mercado)</p>
@@ -1369,7 +1368,7 @@ function renderPortfolioHero(m) {
 
     <div class="hero-chips">
       <div class="hero-chip">${svgIcon("piggy", 17)}<div><span class="hero-chip__label">Total aportado</span><span class="hero-chip__value">${fmtBRL(t.invested)}</span></div></div>
-      <div class="hero-chip">${svgIcon(t.up ? "trendUp" : "arrowDownRight", 17)}<div><span class="hero-chip__label">${t.up ? "Lucro" : "Prejuízo"}</span><span class="hero-chip__value" data-ui-css="color:${tone}">${fmtBRL(Math.abs(t.profit))}</span></div></div>
+      <div class="hero-chip ${t.up ? "hero-chip--save" : "hero-chip--warn"}">${svgIcon(t.up ? "trendUp" : "arrowDownRight", 17)}<div><span class="hero-chip__label">${t.up ? "Lucro" : "Prejuízo"}</span><span class="hero-chip__value">${fmtBRL(Math.abs(t.profit))}</span></div></div>
       ${t.dividends > 0 ? `<div class="hero-chip">${svgIcon("gift", 17)}<div><span class="hero-chip__label">Proventos</span><span class="hero-chip__value">${fmtBRL(t.dividends)}</span></div></div>` : ""}
       ${t.annualizedPct != null ? `<div class="hero-chip">${svgIcon("bolt", 17)}<div><span class="hero-chip__label">Rentabilidade a.a.</span><span class="hero-chip__value">${fmtNum(t.annualizedPct)}%</span></div></div>` : ""}
       ${t.realPct != null ? `<div class="hero-chip">${svgIcon("shieldCheck", 17)}<div><span class="hero-chip__label">Acima da inflação</span><span class="hero-chip__value">${fmtNum(t.realPct)}%</span></div></div>` : ""}

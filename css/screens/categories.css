@@ -27,7 +27,7 @@
   display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 12px; margin-top: 16px;
   border: 1px solid var(--border-soft); border-radius: var(--radius-sm); padding: 14px;
-  background: linear-gradient(165deg, var(--card-alt), var(--paper));
+  background: var(--card-alt);
 }
 .cat-overview__stats span { display: block; font-size: 11px; color: var(--ink-faint); font-weight: 650; }
 .cat-overview__stats b { display: block; margin-top: 4px; font-family: var(--font-num); font-size: 16px; font-weight: 600; letter-spacing: -0.02em; }

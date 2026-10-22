@@ -202,9 +202,9 @@
   gap: 8px; margin-top: 14px;
 }
 .settings-destination__stat {
-  min-width: 0; padding: 10px 12px; border-radius: var(--radius-xs);
-  border: 1px solid var(--border-soft);
-  background: linear-gradient(165deg, var(--card-alt), var(--paper));
+  min-width: 0; padding: 9px 2px 0; border-radius: 0;
+  border: 0; border-top: 2px solid var(--border);
+  background: transparent;
 }
 .settings-destination__stat-label {
   display: block; font-size: 10px; font-weight: 700; text-transform: uppercase;
@@ -220,8 +220,8 @@
   color: var(--ink-faint); letter-spacing: 0;
 }
 .settings-destination__stat--alert {
-  border-color: color-mix(in srgb, var(--negative) 32%, var(--border));
-  background: var(--negative-soft);
+  border-top-color: var(--negative);
+  background: transparent;
 }
 .settings-destination__stat--alert .settings-destination__stat-label,
 .settings-destination__stat--alert .settings-destination__stat-value { color: var(--negative-ink); }
