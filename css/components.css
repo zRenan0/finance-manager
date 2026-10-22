@@ -355,6 +355,20 @@
   color: var(--ink-soft); letter-spacing: -0.01em;
   transition: background var(--dur) var(--ease), color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
 }
+/* UMA ABA NÃO PODE QUEBRAR NO MEIO DA PALAVRA.
+   O `overflow-wrap: break-word` do corpo vale para parágrafo; numa aba ele
+   produzia "Recomendaçõe" numa linha e "s" na outra. Medido na Central: em
+   360 px cada uma das três abas tem 103 px e "Recomendações" precisa de 111.
+   Com três ou mais abas em tela estreita a letra encolhe um pouco e o
+   respiro lateral cede; sem `:has` (navegador antigo) a regra abaixo apenas
+   não se aplica e a palavra passa a transbordar centrada em vez de partir. */
+.segmented__option { min-width: 0; overflow-wrap: normal; hyphens: none; }
+@media (max-width: 400px) {
+  .segmented:has(> :nth-child(3)) .segmented__option { font-size: 12.5px; letter-spacing: -0.02em; padding-left: 3px; padding-right: 3px; }
+}
+@media (max-width: 340px) {
+  .segmented:has(> :nth-child(3)) .segmented__option { font-size: 11.5px; }
+}
 .segmented__option:hover:not(.active) { color: var(--ink); }
 .segmented__option.active {
   background: var(--card); color: var(--ink);
@@ -1017,7 +1031,14 @@
    porcentagem para 4px: "50%" aparecia cortado ao lado do nome. Ela e curta e
    nunca deve encolher; quem cede espaco e o nome do grupo. */
 .split-bar-row__pct { flex-shrink: 0; font-weight: 700; color: var(--ink-faint); font-size: 11px; }
-.split-bar-row__value { font-size: 12.5px; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.split-bar-row__value { font-size: 12.5px; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
+/* O VALOR PODE DESCER UMA LINHA; O TETO NÃO PODE SAIR DA TELA.
+   "R$ 123.456,78 / R$ 493.827,16" em `nowrap` passava 16 px da borda direita
+   num aparelho de 320 px e dava rolagem horizontal ao Início inteiro. O único
+   ponto de quebra aceitável é o espaço antes da barra: o gasto fica numa linha
+   e "/ teto" desce para a seguinte, inteiro, porque dentro de cada quantia o
+   espaço é inseparável. Em qualquer largura em que caiba, nada muda. */
+.split-bar-row__value .cat-value-muted { white-space: nowrap; }
 
 .split-warning {
   display: flex; gap: 11px; align-items: flex-start; margin-top: 16px; padding: 13px 15px;

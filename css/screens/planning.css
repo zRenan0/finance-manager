@@ -271,6 +271,16 @@
   font-size: 14px; font-weight: 700; letter-spacing: -0.02em;
 }
 .goal-number__hint { display: block; font-size: 10.5px; color: var(--ink-faint); margin-top: 2px; line-height: 1.35; }
+/* TRÊS COLUNAS NÃO CABEM NUM CELULAR COMUM.
+   `fmtBRL` escreve "R$ 1.100,00" com espaço inseparável, então a quantia é uma
+   palavra só. Em 390 px cada coluna sobrava 82 px de texto e o `overflow-wrap`
+   global partia o número no meio: "R$ 1.100,0" numa linha e "0" na seguinte,
+   que lê como outro valor. Até 440 px as colunas viram duas e o terceiro número
+   ocupa a linha inteira; acima disso as três cabem com folga. */
+@media (max-width: 440px) {
+  .goal-numbers { grid-template-columns: 1fr 1fr; }
+  .goal-number:nth-child(3):last-child { grid-column: 1 / -1; }
+}
 
 /* CADA PEDACO DE TEXTO SOLTO VIRA UM ITEM FLEX SEPARADO.
    A frase e "icone + texto", e o texto traz um <b> no meio com a data. Sem o

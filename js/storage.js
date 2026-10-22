@@ -970,6 +970,10 @@ const TRANSACTION_ORIGIN_LABELS = Object.freeze({
   "qrcode-nfce": "Nota fiscal lida por QR Code",
   transfer: "Transferência entre contas",
   "card-payment": "Pagamento de fatura",
+  // O conjunto fictício marca cada lançamento com `source: "demo"` (ver
+  // js/demo.js). Sem um rótulo aqui, as 47 linhas da demonstração saíam como
+  // "Outra origem", que para quem está conhecendo o produto parece defeito.
+  demo: "Dados de demonstração",
 });
 
 function transactionSourceOf(value) {

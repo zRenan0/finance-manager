@@ -3004,6 +3004,10 @@ const TRANSACTION_ORIGIN_LABELS = Object.freeze({
   "qrcode-nfce": "Nota fiscal lida por QR Code",
   transfer: "Transferência entre contas",
   "card-payment": "Pagamento de fatura",
+  // O conjunto fictício marca cada lançamento com `source: "demo"` (ver
+  // js/demo.js). Sem um rótulo aqui, as 47 linhas da demonstração saíam como
+  // "Outra origem", que para quem está conhecendo o produto parece defeito.
+  demo: "Dados de demonstração",
 });
 
 function transactionSourceOf(value) {
@@ -11962,6 +11966,7 @@ const MOVEMENT_SOURCE_META = Object.freeze({
   "qrcode-nfce": { label: "QR nota fiscal", icon: "scan" },
   transfer: { label: "Transferência", icon: "arrowRight" },
   "card-payment": { label: "Pagamento de fatura", icon: "creditCard" },
+  demo: { label: "Demonstração", icon: "sparkles" },
 });
 
 function movementSourceMeta(source, origin) {
@@ -12300,7 +12305,7 @@ if (typeof module !== "undefined" && module.exports) {
 // data-sources.js. Visão agregada e local das contas e origens dos dados.
 "use strict";
 
-const DATA_SOURCE_ORDER = ["manual", "import-ofx", "import-csv", "import-pdf", "qrcode-pix", "qrcode-nfce", "nlp", "transfer", "card-payment", "adjustment"];
+const DATA_SOURCE_ORDER = ["manual", "import-ofx", "import-csv", "import-pdf", "qrcode-pix", "qrcode-nfce", "nlp", "transfer", "card-payment", "adjustment", "demo"];
 
 function sourceTimestamp(entry) {
   return String(entry.updatedAt || entry.createdAt || (entry.origin && entry.origin.importedAt) || entry.date || "");
@@ -12338,6 +12343,7 @@ function buildDataSourcesModel(data) {
     transfer: { label: "Transferências", icon: "arrowRight", status: "Movimento interno", detail: "Move dinheiro entre contas sem criar receita ou despesa." },
     "card-payment": { label: "Pagamentos de fatura", icon: "creditCard", status: "Movimento interno", detail: "Reduz a conta sem duplicar as compras do cartão." },
     adjustment: { label: "Ajustes de conciliação", icon: "refresh", status: "Ajuste interno", detail: "Diferenças registradas ao conferir o saldo no banco." },
+    demo: { label: "Dados de demonstração", icon: "sparkles", status: "Conjunto fictício", detail: "Existe só enquanto a demonstração está aberta; nada é salvo." },
   };
   const sources = DATA_SOURCE_ORDER.filter((key) => grouped.has(key)).map((key) => ({ ...sourceMeta[key], ...grouped.get(key) }));
   const unknown = [...grouped.keys()].filter((key) => !DATA_SOURCE_ORDER.includes(key));
@@ -19213,16 +19219,29 @@ function monthCloseForecast(forecast) {
   if (!forecast || !Array.isArray(forecast.days) || forecast.days.length === 0) return null;
   const hoje = forecast.today;
   const mKey = String(hoje).slice(0, 7);
-  const doMes = forecast.days.filter((d) => String(d.iso).slice(0, 7) === mKey);
-  if (doMes.length === 0) return null;
+  let doMes = forecast.days.filter((d) => String(d.iso).slice(0, 7) === mKey);
+  const variaveis = roundMoney((forecast.baseline && forecast.baseline.remainingCurrentMonth) || 0);
+  const saldoAtual = roundMoney(forecast.balance);
+
+  // O ÚLTIMO DIA DO MÊS TAMBÉM É UM DIA DO MÊS.
+  //
+  // A caminhada de `buildForecast` começa AMANHÃ. No dia 31 não sobra dia do
+  // mês corrente nela, `doMes` ficava vazio e esta função devolvia null: o
+  // bloco "Como o mês fecha", a margem de segurança e o limite diário sumiam
+  // do Início e do calendário justamente no dia em que o mês fecha, enquanto
+  // o cartão de saúde ao lado seguia falando em "1 dia". Hoje é o fechamento:
+  // nenhum evento futuro cai mais neste mês, então as receitas e contas
+  // previstas são zero e o saldo projetado é o de agora menos o que ainda se
+  // estima de gasto variável para o dia. `dailyAllowance` lê `endIso` daqui e
+  // passa a dividir a folga por um dia, que é o que falta.
+  if (doMes.length === 0) {
+    doMes = [{ iso: hoje, income: 0, expense: variaveis, balance: roundMoney(subMoney(saldoAtual, variaveis)) }];
+  }
   const ultimo = doMes[doMes.length - 1];
 
   const ateOFim = (forecast.events || []).filter((e) => e.cashEffect !== false && e.iso <= ultimo.iso);
   const receitas = sumMoney(ateOFim.filter((e) => e.type === "income"), (e) => e.amount);
   const contas = sumMoney(ateOFim.filter((e) => e.type !== "income"), (e) => e.amount);
-  const variaveis = roundMoney((forecast.baseline && forecast.baseline.remainingCurrentMonth) || 0);
-
-  const saldoAtual = roundMoney(forecast.balance);
 
   // O NÚMERO MOSTRADO É O DA PRÓPRIA CONTA, NÃO O DA CAMINHADA DIÁRIA.
   //
@@ -28032,7 +28051,7 @@ function renderBudgetHealth(refDate, isCurrentMonth, monthExpense, fixedSpent, v
       // contradizia sozinha - "você fecha em R$ 246" ao lado de "pode gastar
       // R$ 957 por dia durante 5 dias" - e a leitura natural era que um dos
       // dois números estava errado.
-      ? `No ritmo atual, o mês fecha em <b>${fmtBRL(projected)}</b> de gastos. Descontadas as contas que ainda vencem, o teto que ainda cabe na renda é de <b data-ui-css="color:${status.color}">${fmtBRL(dailyBudget)} por dia</b> nos próximos ${plural(daysLeft, "dia", "dias")}; é limite, não meta.${limite && limite.limitadoPorCaixa ? " O teto está preso ao saldo em conta, não à renda: o que ainda vai entrar não chegou." : ""}`
+      ? `No ritmo atual, o mês fecha em <b>${fmtBRL(projected)}</b> de gastos. Descontadas as contas que ainda vencem, o teto que ainda cabe na renda é de <b data-ui-css="color:${status.color}">${fmtBRL(dailyBudget)} por dia</b> ${daysLeft === 1 ? "hoje, último dia do mês" : `nos próximos ${plural(daysLeft, "dia", "dias")}`}; é limite, não meta.${limite && limite.limitadoPorCaixa ? " O teto está preso ao saldo em conta, não à renda: o que ainda vai entrar não chegou." : ""}`
       : `Você já ultrapassou sua renda em <b data-ui-css="color:var(--negative)">${fmtBRL(Math.abs(remaining))}</b> este mês. Vale segurar os gastos esporádicos até o próximo salário.`)
     : (remaining >= 0
       ? `Sobraram <b data-ui-css="color:var(--positive)">${fmtBRL(remaining)}</b> depois de todos os gastos do mês.`
@@ -29647,7 +29666,7 @@ function renderDailyAllowance(f) {
   return `<p class="daily-allowance">
     ${svgIcon("target", 14)}
     <span>Para terminar o mês com <b>${fmtBRL(d.alvo)}</b> guardados, sobram <b>${fmtBRL(d.disponivel)}</b> para gasto variável,
-    o equivalente a cerca de <b>${fmtBRL(d.porDia)} por dia</b> nos ${d.diasRestantes} dias que faltam.
+    o equivalente a cerca de <b>${fmtBRL(d.porDia)} por dia</b> ${d.diasRestantes === 1 ? "no dia que falta" : `nos ${d.diasRestantes} dias que faltam`}.
     A conta parte da renda deste mês que ainda não está comprometida${d.limitadoPorCaixa ? ", limitada pelo saldo que você tem em conta hoje" : ""}; o que já está guardado não entra.
     O alvo vem ${fonte}. É referência, não obrigação.</span>
   </p>`;

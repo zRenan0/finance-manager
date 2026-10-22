@@ -102,10 +102,20 @@ section("1b. [M41] O limite sai da renda; o saldo é só piso de segurança");
   check("a renda do mês é a base declarada", rendaDoMes > 0, rendaDoMes);
   check("o teto nunca passa da renda do mês",
     limite.teto <= rendaDoMes + 0.01, { teto: limite.teto, renda: rendaDoMes });
-  const diasDoMes = run(`daysInMonthOf(Number(__fc.today.slice(0, 4)), Number(__fc.today.slice(5, 7)) - 1)`);
-  check("o limite diário não passa da renda diária",
-    limite.porDia <= rendaDoMes / diasDoMes + 0.01,
-    { porDia: limite.porDia, rendaDiaria: +(rendaDoMes / diasDoMes).toFixed(2) });
+  // A INVARIANTE É SOBRE O QUE SOBRA, NÃO SOBRE A MÉDIA DO MÊS. A versão
+  // anterior cobrava `porDia <= renda / dias do mês`, e isso só vale quando o
+  // gasto já feito acompanha a fração do mês decorrida. No dia 22, com o gasto
+  // variável abaixo da média, a sobra dividida pelos dez dias que faltam passa
+  // legitimamente da renda diária média; o teste reprovava do dia 22 ao 30 de
+  // todo mês, sem defeito nenhum no aplicativo. O que o motor garante é que o
+  // limite nunca distribui mais do que a renda ainda livre deste mês.
+  const livreHoje = rendaDoMes - limite.realizado - limite.compromissos;
+  check("o limite diário não passa da renda ainda livre dividida pelos dias que faltam",
+    limite.porDia <= livreHoje / limite.diasRestantes + 0.01,
+    { porDia: limite.porDia, livrePorDia: +(livreHoje / limite.diasRestantes).toFixed(2), diasRestantes: limite.diasRestantes });
+  check("e o total distribuído nunca passa da renda do mês",
+    limite.porDia * limite.diasRestantes <= rendaDoMes + 0.01,
+    { distribuido: +(limite.porDia * limite.diasRestantes).toFixed(2), renda: rendaDoMes });
 
   // Encher a conta de dinheiro NÃO aumenta o quanto dá para gastar no mês.
   ctx.__rico = run(`(() => {

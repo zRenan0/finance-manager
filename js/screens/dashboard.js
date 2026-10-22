@@ -723,7 +723,7 @@ function renderBudgetHealth(refDate, isCurrentMonth, monthExpense, fixedSpent, v
       // contradizia sozinha - "você fecha em R$ 246" ao lado de "pode gastar
       // R$ 957 por dia durante 5 dias" - e a leitura natural era que um dos
       // dois números estava errado.
-      ? `No ritmo atual, o mês fecha em <b>${fmtBRL(projected)}</b> de gastos. Descontadas as contas que ainda vencem, o teto que ainda cabe na renda é de <b data-ui-css="color:${status.color}">${fmtBRL(dailyBudget)} por dia</b> nos próximos ${plural(daysLeft, "dia", "dias")}; é limite, não meta.${limite && limite.limitadoPorCaixa ? " O teto está preso ao saldo em conta, não à renda: o que ainda vai entrar não chegou." : ""}`
+      ? `No ritmo atual, o mês fecha em <b>${fmtBRL(projected)}</b> de gastos. Descontadas as contas que ainda vencem, o teto que ainda cabe na renda é de <b data-ui-css="color:${status.color}">${fmtBRL(dailyBudget)} por dia</b> ${daysLeft === 1 ? "hoje, último dia do mês" : `nos próximos ${plural(daysLeft, "dia", "dias")}`}; é limite, não meta.${limite && limite.limitadoPorCaixa ? " O teto está preso ao saldo em conta, não à renda: o que ainda vai entrar não chegou." : ""}`
       : `Você já ultrapassou sua renda em <b data-ui-css="color:var(--negative)">${fmtBRL(Math.abs(remaining))}</b> este mês. Vale segurar os gastos esporádicos até o próximo salário.`)
     : (remaining >= 0
       ? `Sobraram <b data-ui-css="color:var(--positive)">${fmtBRL(remaining)}</b> depois de todos os gastos do mês.`

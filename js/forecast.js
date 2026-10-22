@@ -480,16 +480,29 @@ function monthCloseForecast(forecast) {
   if (!forecast || !Array.isArray(forecast.days) || forecast.days.length === 0) return null;
   const hoje = forecast.today;
   const mKey = String(hoje).slice(0, 7);
-  const doMes = forecast.days.filter((d) => String(d.iso).slice(0, 7) === mKey);
-  if (doMes.length === 0) return null;
+  let doMes = forecast.days.filter((d) => String(d.iso).slice(0, 7) === mKey);
+  const variaveis = roundMoney((forecast.baseline && forecast.baseline.remainingCurrentMonth) || 0);
+  const saldoAtual = roundMoney(forecast.balance);
+
+  // O ÚLTIMO DIA DO MÊS TAMBÉM É UM DIA DO MÊS.
+  //
+  // A caminhada de `buildForecast` começa AMANHÃ. No dia 31 não sobra dia do
+  // mês corrente nela, `doMes` ficava vazio e esta função devolvia null: o
+  // bloco "Como o mês fecha", a margem de segurança e o limite diário sumiam
+  // do Início e do calendário justamente no dia em que o mês fecha, enquanto
+  // o cartão de saúde ao lado seguia falando em "1 dia". Hoje é o fechamento:
+  // nenhum evento futuro cai mais neste mês, então as receitas e contas
+  // previstas são zero e o saldo projetado é o de agora menos o que ainda se
+  // estima de gasto variável para o dia. `dailyAllowance` lê `endIso` daqui e
+  // passa a dividir a folga por um dia, que é o que falta.
+  if (doMes.length === 0) {
+    doMes = [{ iso: hoje, income: 0, expense: variaveis, balance: roundMoney(subMoney(saldoAtual, variaveis)) }];
+  }
   const ultimo = doMes[doMes.length - 1];
 
   const ateOFim = (forecast.events || []).filter((e) => e.cashEffect !== false && e.iso <= ultimo.iso);
   const receitas = sumMoney(ateOFim.filter((e) => e.type === "income"), (e) => e.amount);
   const contas = sumMoney(ateOFim.filter((e) => e.type !== "income"), (e) => e.amount);
-  const variaveis = roundMoney((forecast.baseline && forecast.baseline.remainingCurrentMonth) || 0);
-
-  const saldoAtual = roundMoney(forecast.balance);
 
   // O NÚMERO MOSTRADO É O DA PRÓPRIA CONTA, NÃO O DA CAMINHADA DIÁRIA.
   //

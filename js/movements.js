@@ -12,6 +12,7 @@ const MOVEMENT_SOURCE_META = Object.freeze({
   "qrcode-nfce": { label: "QR nota fiscal", icon: "scan" },
   transfer: { label: "Transferência", icon: "arrowRight" },
   "card-payment": { label: "Pagamento de fatura", icon: "creditCard" },
+  demo: { label: "Demonstração", icon: "sparkles" },
 });
 
 function movementSourceMeta(source, origin) {

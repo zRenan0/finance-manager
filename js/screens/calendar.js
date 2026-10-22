@@ -281,7 +281,7 @@ function renderDailyAllowance(f) {
   return `<p class="daily-allowance">
     ${svgIcon("target", 14)}
     <span>Para terminar o mês com <b>${fmtBRL(d.alvo)}</b> guardados, sobram <b>${fmtBRL(d.disponivel)}</b> para gasto variável,
-    o equivalente a cerca de <b>${fmtBRL(d.porDia)} por dia</b> nos ${d.diasRestantes} dias que faltam.
+    o equivalente a cerca de <b>${fmtBRL(d.porDia)} por dia</b> ${d.diasRestantes === 1 ? "no dia que falta" : `nos ${d.diasRestantes} dias que faltam`}.
     A conta parte da renda deste mês que ainda não está comprometida${d.limitadoPorCaixa ? ", limitada pelo saldo que você tem em conta hoje" : ""}; o que já está guardado não entra.
     O alvo vem ${fonte}. É referência, não obrigação.</span>
   </p>`;

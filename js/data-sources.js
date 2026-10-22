@@ -1,7 +1,7 @@
 // data-sources.js. Visão agregada e local das contas e origens dos dados.
 "use strict";
 
-const DATA_SOURCE_ORDER = ["manual", "import-ofx", "import-csv", "import-pdf", "qrcode-pix", "qrcode-nfce", "nlp", "transfer", "card-payment", "adjustment"];
+const DATA_SOURCE_ORDER = ["manual", "import-ofx", "import-csv", "import-pdf", "qrcode-pix", "qrcode-nfce", "nlp", "transfer", "card-payment", "adjustment", "demo"];
 
 function sourceTimestamp(entry) {
   return String(entry.updatedAt || entry.createdAt || (entry.origin && entry.origin.importedAt) || entry.date || "");
@@ -39,6 +39,7 @@ function buildDataSourcesModel(data) {
     transfer: { label: "Transferências", icon: "arrowRight", status: "Movimento interno", detail: "Move dinheiro entre contas sem criar receita ou despesa." },
     "card-payment": { label: "Pagamentos de fatura", icon: "creditCard", status: "Movimento interno", detail: "Reduz a conta sem duplicar as compras do cartão." },
     adjustment: { label: "Ajustes de conciliação", icon: "refresh", status: "Ajuste interno", detail: "Diferenças registradas ao conferir o saldo no banco." },
+    demo: { label: "Dados de demonstração", icon: "sparkles", status: "Conjunto fictício", detail: "Existe só enquanto a demonstração está aberta; nada é salvo." },
   };
   const sources = DATA_SOURCE_ORDER.filter((key) => grouped.has(key)).map((key) => ({ ...sourceMeta[key], ...grouped.get(key) }));
   const unknown = [...grouped.keys()].filter((key) => !DATA_SOURCE_ORDER.includes(key));

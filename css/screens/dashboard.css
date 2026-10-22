@@ -75,10 +75,16 @@
   margin: 4px 0 0; line-height: 1.05;
 }
 .sparkline { display: block; width: 100%; height: 60px; margin-top: 6px; }
-.networth-axis {
+.networth-axis, .chart-axis {
   display: flex; justify-content: space-between; gap: 4px; margin-top: 2px;
   font-size: 10.5px; font-weight: 600; color: var(--ink-faint); letter-spacing: 0.02em;
 }
+/* `.chart-axis` é o eixo do gráfico de metas e da previsão do calendário. Ele
+   nunca teve regra própria: os meses saíam colados ("MaiJunJulAgoSetOut") e as
+   duas datas da previsão ficavam encostadas à esquerda, longe das pontas da
+   linha que rotulam. Compartilha o estilo do eixo de patrimônio de propósito,
+   para os três gráficos lerem como um sistema só. */
+.chart-axis span { min-width: 0; white-space: nowrap; }
 .networth-legend {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
   gap: 10px; margin-top: 14px;

@@ -2,6 +2,39 @@
 
 ## Não publicado
 
+### Revisão de uso: fechamento do mês, cartão de meta e abas no celular
+
+- **O fechamento do mês existe também no último dia do mês.** A caminhada da
+  previsão começa amanhã; no dia 31 não sobrava dia do mês nela e o bloco
+  "Como o mês fecha", a margem de segurança e o limite diário sumiam do Início
+  e do calendário justamente no dia em que o mês fecha, enquanto o cartão de
+  saúde ao lado continuava falando em "1 dia". Agora o fechamento é hoje: nada
+  mais entra nem sai por previsão, o saldo projetado é o de agora menos a
+  estimativa de variável do dia, e a folga é dividida por um dia. As frases
+  concordam ("no dia que falta", "hoje, último dia do mês") em vez de "nos 1
+  dias".
+- **O cartão de meta não parte mais o número no meio.** Em celulares até 440 px
+  as três colunas (Necessário, Planejado, Ritmo real) viravam "R$ 1.100,0" numa
+  linha e "0" na seguinte. Passam a ser duas colunas e o terceiro número ocupa
+  a linha inteira.
+- **Os meses do gráfico de meta e as datas da previsão do calendário ganharam
+  espaço.** O eixo nunca teve regra de estilo e saía "MaiJunJulAgoSetOut";
+  agora segue o mesmo desenho do eixo de patrimônio.
+- **As abas da Central não quebram mais "Recomendações" no meio.** Em telas até
+  400 px, controles com três ou mais abas usam letra um pouco menor; uma aba
+  nunca parte a palavra.
+- **Em 320 px o Início não rola mais de lado** quando a regra 50/30/20 mostra
+  valores na casa das centenas de milhar: o teto desce para a linha de baixo,
+  inteiro, em vez de sair da tela.
+- **A demonstração deixou de rotular todo lançamento como "Outra origem".** Os
+  dados fictícios aparecem como "Dados de demonstração" nas movimentações e na
+  aba de fontes.
+- **Um teste que reprovava do dia 22 ao 30 de todo mês foi corrigido.** Ele
+  cobrava que o limite diário nunca passasse da renda dividida pelos dias do
+  mês, o que só vale quando o gasto acompanha a fração do mês decorrida. A
+  invariante agora é a que o motor garante: o limite nunca distribui mais do
+  que a renda ainda livre. O último dia do mês ganhou teste próprio.
+
 ### O M40 mediu o app de 320 a 1440 pixels
 
 - **Sete larguras, 23 telas, com dado de verdade.** A verificação anterior

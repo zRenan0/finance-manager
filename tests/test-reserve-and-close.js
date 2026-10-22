@@ -25,9 +25,10 @@ const ctx = {
 ctx.window = ctx; ctx.self = ctx; ctx.globalThis = ctx;
 vm.createContext(ctx);
 
-// Relógio congelado. O fechamento do mês não existe no último dia do mês (não
-// sobra nenhum dia para projetar), e a escada da reserva depende de meses de
-// histórico. Ver `tests/helpers/fixed-clock.js`.
+// Relógio congelado. A escada da reserva depende de meses de histórico e as
+// fixtures falam em dias fixos do mês. Ver `tests/helpers/fixed-clock.js`.
+// O último dia do mês tem seção própria abaixo (3b): o fechamento precisa
+// existir nele também, com um dia só pela frente.
 const relogio = require("./helpers/fixed-clock").congelar(ctx);
 const Date = relogio.DataFixa;
 [
@@ -136,8 +137,11 @@ section("4. [M29] Margem e risco dizem a verdade");
   // o próprio saldo projetado, para a tela não mostrar dois números quase
   // iguais lado a lado. As duas rotas diferem por arredondamento, não por
   // cálculo.
+  // No último dia do mês a caminhada não tem dia do mês corrente (ver 3b): o
+  // pior dia é o próprio fechamento, e a margem é o saldo projetado.
+  const minimo = diasDoMes.length ? Math.min(...diasDoMes) : m.projetado;
   check("a margem é o menor saldo do mês",
-    Math.abs(m.margem - Math.min(...diasDoMes)) < 0.10, { margem: m.margem, minimo: Math.min(...diasDoMes) });
+    Math.abs(m.margem - minimo) < 0.10, { margem: m.margem, minimo });
   check("quando o pior dia é o último, margem e projetado são o MESMO número",
     m.fundoIso !== m.endIso || m.margem === m.projetado, { fundoIso: m.fundoIso, endIso: m.endIso });
   check("a margem nunca é maior que o saldo projetado pela caminhada",
@@ -187,6 +191,48 @@ section("5. Os motores continuam puros e nada foi reescrito");
     && !/document\.|\bstate\./.test(fc.slice(fc.indexOf("function monthCloseForecast"), fc.indexOf("function forecastAssumptions"))));
   check("modelo ausente não quebra a cadeia",
     run(`monthCloseForecast(null)`) === null && run(`monthCloseForecast({ days: [] })`) === null);
+}
+
+// ------------------------------------------------------------------------------
+// O ÚLTIMO DIA DO MÊS TAMBÉM É UM DIA DO MÊS
+// ------------------------------------------------------------------------------
+// A caminhada de `buildForecast` começa amanhã. No dia 31 não sobrava dia do
+// mês corrente nela, `monthCloseForecast` devolvia null e, em cascata, o bloco
+// "Como o mês fecha", a margem de segurança e o limite diário sumiam do Início
+// e do calendário, enquanto o cartão de saúde ao lado continuava falando em
+// "1 dia". Esta seção prende o comportamento certo: no fechamento, nada mais
+// entra nem sai por previsão, o saldo projetado é o de hoje menos a estimativa
+// de variável do dia, e o limite diário divide a folga por um dia.
+section("3b. O fechamento existe no último dia do mês");
+{
+  const hoje = run(`todayIso()`);
+  const [ano, mes] = hoje.split("-").map(Number);
+  const ultimoDia = run(`daysInMonthOf(${ano}, ${mes - 1})`);
+  ctx.__ultimoIso = `${hoje.slice(0, 7)}-${String(ultimoDia).padStart(2, "0")}`;
+  ctx.__fcUltimo = run(`buildForecast(__demo, __ultimoIso)`);
+  const m = run(`monthCloseForecast(__fcUltimo)`);
+  check("a cadeia é produzida no último dia", !!m, ctx.__ultimoIso);
+  if (m) {
+    check("o fechamento é hoje", m.endIso === ctx.__ultimoIso, m.endIso);
+    check("nenhuma receita ou conta futura cai mais neste mês", m.receitas === 0 && m.contas === 0, { receitas: m.receitas, contas: m.contas });
+    const soma = m.saldoAtual + m.receitas - m.contas - m.variaveis;
+    check("a soma das parcelas continua dando o total exibido",
+      Math.abs(soma - m.projetado) < 0.005, { soma: +soma.toFixed(2), projetado: m.projetado });
+    check("as duas rotas concordam", m.divergencia === 0, m.divergencia);
+    check("o pior dia é o próprio fechamento", m.fundoIso === ctx.__ultimoIso && m.margem === m.projetado);
+  }
+  const limite = run(`dailyAllowance(__demo, __fcUltimo)`);
+  check("o limite diário existe no último dia", !!limite);
+  if (limite) {
+    check("falta exatamente um dia", limite.diasRestantes === 1, limite.diasRestantes);
+    check("o dia que falta recebe a folga inteira",
+      Math.abs(limite.porDia - Math.max(0, limite.disponivel)) < 0.005, { porDia: limite.porDia, disponivel: limite.disponivel });
+  }
+  // O caminho normal não mudou: no meio do mês o fechamento continua sendo o
+  // último dia da caminhada, não hoje.
+  const meio = run(`monthCloseForecast(buildForecast(__demo))`);
+  check("no meio do mês o fechamento continua no fim do mês", !!meio && meio.endIso === ctx.__ultimoIso);
+  if (hoje !== ctx.__ultimoIso) check("e, fora do último dia, ele não é hoje", !!meio && meio.endIso !== hoje, meio && meio.endIso);
 }
 
 console.log(`\n${fail ? "FALHAS ENCONTRADAS" : "TODOS OS TESTES PASSARAM"} — ${pass} ok, ${fail} falha(s)`);
