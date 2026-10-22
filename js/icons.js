@@ -25,6 +25,10 @@ const ICONS = {
   chevronUp: '<polyline points="7 14.5 12 9.5 17 14.5"/>',
   arrowUpRight: '<line x1="6" y1="18" x2="18" y2="6"/><polyline points="8 6 18 6 18 16"/>',
   arrowDownRight: '<line x1="6" y1="6" x2="18" y2="18"/><polyline points="18 8 18 18 8 18"/>',
+  // Marca do app: o cofre com o botão do segredo apontando para cima e para a
+  // direita. O mesmo desenho vive em icons/cofre-mark.svg (origem dos PNG do
+  // manifesto, via scripts/make-icons.js) e na marca da página comercial.
+  cofre: '<rect x="2.5" y="3" width="19" height="15.5" rx="4.2"/><circle cx="12" cy="10.75" r="4.1"/><path d="M12 10.75l2.3-2.3"/><path d="M7 18.5V21M17 18.5V21"/>',
   wallet: '<path d="M3 7a2 2 0 0 1 2-2h13a1 1 0 0 1 1 1v2"/><path d="M3 7v11a2 2 0 0 0 2 2h14a1 1 0 0 0 1-1v-5"/><path d="M15 12h5v4h-5a2 2 0 0 1 0-4Z"/>',
   bank: '<path d="M3 9h18L12 3 3 9Z"/><path d="M5 10v8M9.5 10v8M14.5 10v8M19 10v8"/><path d="M3 21h18M4 18h16"/>',
   archive: '<rect x="3" y="5" width="18" height="4" rx="1"/><path d="M5 9v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9"/><path d="M9 13h6"/>',

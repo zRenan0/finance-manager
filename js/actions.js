@@ -1577,10 +1577,17 @@ function onClick(e) {
     case "sim-select":
       setState({ sim: { ...state.sim, id: value || "juros" } });
       break;
-    case "sim-set":
-      state.sim.values = { ...state.sim.values, [id]: value };
+    case "sim-set": {
+      const values = { ...state.sim.values, [id]: value };
+      // Trocar o produto da renda fixa troca o significado de "taxa" (% do
+      // CDI, spread sobre a Selic, juro real, prefixado) e o padrão da
+      // custódia. O rascunho digitado para o produto anterior não pode
+      // sobreviver à troca: "110" como ágio sobre a Selic é um absurdo.
+      if (id === "rendafixa.produto") { delete values["rendafixa.taxa"]; delete values["rendafixa.custodia"]; }
+      state.sim.values = values;
       render();
       break;
+    }
     case "rates-reset":
       setData((d) => ({ ...d, marketRates: defaultMarketRates() }));
       state.ratesDraft = {};

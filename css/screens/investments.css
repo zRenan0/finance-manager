@@ -158,7 +158,14 @@
   font-size: 0.82rem; color: var(--ink-soft);
 }
 .sim-breakdown__row:last-child { border-bottom: 0; }
-.sim-breakdown__row b { font-family: var(--font-num); font-weight: 600; color: var(--ink); text-align: right; }
+/* O rótulo cede primeiro: o número à direita nunca quebra no meio
+   ("R$ 5.000,0 / 0"); um valor longo com espaços ainda pode ocupar duas
+   linhas, mas sempre entre palavras. */
+.sim-breakdown__row span { flex: 1 1 auto; min-width: 0; }
+.sim-breakdown__row b {
+  font-family: var(--font-num); font-weight: 600; color: var(--ink); text-align: right;
+  flex: 0 1 auto; max-width: 62%; overflow-wrap: normal; word-break: keep-all;
+}
 .sim-breakdown__row--total { border-top: 1px solid var(--border); margin-top: 4px; }
 .sim-breakdown__row--total span { font-weight: 650; color: var(--ink); }
 .sim-breakdown__row--total b { font-size: 0.95rem; }

@@ -259,15 +259,40 @@ function recPrefsOf(data) {
 // Aqui a cadência não é medida, é lida do que foi declarado: mensal, no dia do
 // próprio lançamento. Assim que a segunda ocorrência aparecer, o caminho normal
 // assume e passa a valer a evidência em vez da declaração.
-function recDeclaredCommitment(data, tx, todayKey) {
+//
+// A MARCA TAMBÉM VENCE QUANDO O HISTÓRICO NÃO FORMA PADRÃO. Com duas ou mais
+// cobranças cujas datas não caem em nenhuma cadência (lançado dia 5, depois
+// dia 28, depois 45 dias de intervalo), o caminho da evidência devolvia nada,
+// e o gasto marcado como fixo sumia de Assinaturas, da previsão desta tela e
+// do "o que vai sair da conta"; mesmo com a pessoa tendo dito, no formulário,
+// que ele é mensal. A regra passou a ser: evidência regular manda; sem
+// evidência regular, a declaração manda; sem nenhuma das duas, nada. `history`
+// traz o grupo inteiro para a tela mostrar quantas cobranças existem e como o
+// valor andou, em vez de fingir que só houve uma.
+function recDeclaredCommitment(data, tx, todayKey, history) {
   const cadence = recCadenceById("mensal");
   const cat = categoryById(data, tx.categoryId);
+  const sorted = Array.isArray(history) && history.length ? history : [tx];
+  const first = sorted[0];
+  const prev = sorted.length > 1 ? sorted[sorted.length - 2] : tx;
   const amount = roundMoney(tx.amount);
+  const amounts = sorted.map((t) => moneyToCents(t.amount));
+  const medianAmount = recMedian(amounts) || moneyToCents(amount) || 1;
+  const spread = (Math.max(...amounts) - Math.min(...amounts)) / medianAmount;
   const day = Number(String(tx.date).slice(8, 10)) || 1;
   const today = todayIso();
   let next = tx.date;
   let guard = 0;
   while (next <= today && guard++ < 400) next = recSameDayNextMonths(next, 1, day);
+
+  // O mesmo relógio do caminho da evidência: uma cobrança declarada mensal que
+  // não aparece há mais de dois meses e meio parou, e dizer "ativa" para sempre
+  // seria somar ao mês um gasto que já não sai da conta.
+  const daysLate = daysBetweenIso(tx.date, today);
+  const status = daysLate > cadence.days * REC_ENDED_FACTOR ? "encerrada"
+    : daysLate > cadence.days * REC_LATE_FACTOR ? "atrasada"
+    : "ativa";
+  const increasePct = safePct(subMoney(tx.amount, prev.amount), prev.amount);
 
   return {
     key: recGroupKey(tx),
@@ -281,39 +306,49 @@ function recDeclaredCommitment(data, tx, todayKey) {
     cadenceLabel: cadence.label,
     cadenceDays: cadence.days,
     perYear: cadence.perYear,
-    occurrences: 1,
-    firstDate: tx.date,
+    occurrences: sorted.length,
+    firstDate: first.date,
     lastDate: tx.date,
     lastAmount: amount,
-    prevAmount: amount,
-    firstAmount: amount,
-    medianAmount: amount,
+    prevAmount: roundMoney(prev.amount),
+    firstAmount: roundMoney(first.amount),
+    medianAmount: moneyFromCents(Math.round(medianAmount)),
     monthlyEquivalent: amount,
     annualCost: mulMoney(amount, cadence.perYear),
-    increasePct: 0,
-    sinceFirstPct: 0,
-    increaseAnnualImpact: 0,
-    amountSpread: 0,
+    increasePct,
+    sinceFirstPct: safePct(subMoney(tx.amount, first.amount), first.amount),
+    increaseAnnualImpact: increasePct > 0 ? mulMoney(subMoney(tx.amount, prev.amount), cadence.perYear) : 0,
+    amountSpread: Math.round(spread * 100) / 100,
     dayOfMonth: day,
     dayConsistency: 1,
     regularity: 1,
     nextDate: next,
     daysToNext: daysBetweenIso(today, next),
-    daysSinceLast: daysBetweenIso(tx.date, today),
-    status: "ativa",
+    daysSinceLast: daysLate,
+    status,
     // O que sustenta este compromisso é a marcação, não o histórico. Quem lê
     // precisa poder dizer isso na tela em vez de prometer uma média que não
     // existe.
     flaggedRecurring: true,
     declaredOnly: true,
+    cadenceSource: "declarada",
+    // Verdadeiro quando há mais de uma cobrança e mesmo assim as datas não
+    // formaram cadência: a tela explica que a mensalidade vem da marcação.
+    irregularHistory: sorted.length > 1,
     payment: tx.payment || "Outro",
-    monthKeys: [monthKeyOf(tx.date)],
+    monthKeys: Array.from(new Set(sorted.map((t) => monthKeyOf(t.date)))),
     isCurrentMonth: monthKeyOf(tx.date) === todayKey,
   };
 }
 
 function recAnalyzeGroup(data, list, todayKey) {
   const sorted = [...list].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  // A última cobrança marcada como fixa é a que fala pela declaração: é dela
+  // que saem valor, dia do mês e a data da próxima cobrança.
+  const flagged = sorted.filter((t) => t.recurring);
+  const declared = flagged.length ? flagged[flagged.length - 1] : null;
+  const porDeclaracao = () => (declared ? recDeclaredCommitment(data, declared, todayKey, sorted) : null);
+
   if (sorted.length === 1 && sorted[0].recurring) return recDeclaredCommitment(data, sorted[0], todayKey);
   if (sorted.length < 2) return null;
 
@@ -322,18 +357,18 @@ function recAnalyzeGroup(data, list, todayKey) {
     const d = daysBetweenIso(sorted[i - 1].date, sorted[i].date);
     if (d > 0) intervals.push(d);
   }
-  if (!intervals.length) return null;
+  if (!intervals.length) return porDeclaracao();
 
   const medianInterval = recMedian(intervals);
   const cadence = recCadenceOf(medianInterval);
-  if (!cadence) return null;
+  if (!cadence) return porDeclaracao();
 
   // Regularidade: com apenas dois lançamentos não existe "regularidade" para
   // medir; o único intervalo já caiu na janela, então ele vale 1. A partir do
   // terceiro, exigimos que a maioria dos intervalos concorde entre si.
   const inWindow = intervals.filter((d) => d >= cadence.min && d <= cadence.max).length;
   const regularity = inWindow / intervals.length;
-  if (intervals.length >= 2 && regularity < REC_MIN_REGULARITY) return null;
+  if (intervals.length >= 2 && regularity < REC_MIN_REGULARITY) return porDeclaracao();
 
   const amounts = sorted.map((t) => moneyToCents(t.amount));
   const medianAmount = recMedian(amounts) || 1;
@@ -424,6 +459,7 @@ function recAnalyzeGroup(data, list, todayKey) {
     daysSinceLast: daysLate,
     status,
     flaggedRecurring: sorted.some((t) => t.recurring),
+    cadenceSource: "medida",
     payment: last.payment || "Outro",
     monthKeys: Array.from(new Set(sorted.map((t) => monthKeyOf(t.date)))),
     isCurrentMonth: monthKeyOf(last.date) === todayKey,

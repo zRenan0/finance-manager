@@ -16,45 +16,43 @@
    1. TOKENS
    ================================================================== */
 /* ==================================================================
-   FONTES LOCAIS
+   0. FONTES
    ------------------------------------------------------------------
-   O app carregava Inter e Space Grotesk de `fonts.googleapis.com`. Num
-   aplicativo cuja proposta é manter os dados no aparelho, isso enviava o
-   IP do usuário a um terceiro em toda abertura, sem constar da política
-   de privacidade; deixava a primeira carga offline sem fonte; e obrigava
-   a CSP a liberar dois domínios externos.
+   Inter (texto) e Space Grotesk (títulos e números) são servidas DAQUI,
+   de `fonts/`, em WOFF2 variável com o subconjunto latino (cobre todo o
+   português). Nada vem de terceiro: a CSP só libera `font-src 'self'` e
+   o service worker guarda os dois arquivos junto com o restante do shell,
+   então a primeira abertura offline já sai com a tipografia certa.
 
-   As duas famílias são resolvidas SÓ por `local()`, e é uma decisão, não
-   uma pendência. O `url("../fonts/...woff2")` que existia aqui apontava
-   para arquivo que nunca esteve no repositório: quem não tivesse a família
-   instalada pagava duas requisições 404 por abertura, recebia a página de
-   erro em HTML no lugar de um WOFF2, e caía na pilha do sistema mesmo
-   assim. Ou seja: o custo era real e o resultado, nenhum.
+   Por que embarcar em vez de só `local()`: resolvida apenas pela fonte
+   instalada no sistema, a interface mudava de cara conforme o aparelho
+   (Segoe UI no Windows, Roboto no Android, SF no iPhone) e, onde havia
+   uma Inter estática instalada, `local("Inter")` casava só o peso 400 e
+   o navegador fabricava o negrito. Com o arquivo próprio o desenho é um
+   só em todo lugar, 70 kB no total, baixados uma vez.
 
-   Sem `url()`, quem tem Inter ou Space Grotesk instaladas continua vendo
-   as duas; quem não tem cai na pilha do sistema declarada logo abaixo, que
-   é a mesma escolha da página comercial (ver css/landing.css). Em nenhum
-   dos casos sai requisição, nem para terceiro nem para arquivo ausente.
+   Licença: SIL Open Font License 1.1 (fonts/LICENSE-Inter.txt e
+   fonts/LICENSE-SpaceGrotesk.txt). Origem dos arquivos: fonts/README.md.
 
-   PARA VOLTAR ÀS FONTES DO PROJETO: coloque os WOFF2 licenciados em
-   `fonts/` e devolva o `url()` ao fim de cada `src` (ver fonts/README.md).
-
-   `font-display: swap` fica: ele volta a valer no dia em que houver
-   arquivo para baixar.
+   A página comercial continua na pilha do sistema (ver css/landing.css):
+   lá a tipografia foi ajustada para essa pilha e não há promessa de
+   funcionar offline.
    ================================================================== */
 @font-face {
   font-family: "Inter";
   font-style: normal;
   font-weight: 400 700;
   font-display: swap;
-  src: local("Inter"), local("Inter Regular");
+  src: url("../fonts/inter-latin-wght-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 @font-face {
   font-family: "Space Grotesk";
   font-style: normal;
   font-weight: 500 700;
   font-display: swap;
-  src: local("Space Grotesk"), local("Space Grotesk Medium");
+  src: url("../fonts/space-grotesk-latin-wght-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
 :root {

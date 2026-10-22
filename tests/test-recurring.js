@@ -298,5 +298,47 @@ console.log("\n12. Modelo resistente a base vazia e a dado quebrado");
   check("recPrefsOf tolera null", !!prefs.ignored && !!prefs.dismissed && !!prefs.confirmed);
 }
 
+/* ================================================================= 13 */
+console.log("\n13. Marca de gasto fixo vence quando as datas não formam cadência");
+{
+  // Três cobranças marcadas como fixas, com intervalos que não caem em janela
+  // nenhuma (dia 3, dia 25 do mês seguinte, e 47 dias depois). Antes o grupo
+  // era descartado e o gasto sumia de Assinaturas apesar da marca.
+  const hoje = new Date();
+  const d1 = iso(new Date(hoje.getFullYear(), hoje.getMonth() - 3, 3));
+  const d2 = iso(new Date(hoje.getFullYear(), hoje.getMonth() - 2, 25));
+  const d3 = iso(new Date(new Date(d2 + "T00:00:00").getTime() + 47 * 86400000));
+  const transactions = [d1, d2, d3].map((date, i) => tx({
+    type: "expense", amount: 89.9 + i, categoryId: "outros", date, description: "Plano celular", recurring: true,
+  }));
+  const m = buildRecurringModel(withTx(transactions));
+  const plano = find(m.subscriptions, "Plano celular") || find(m.essentials, "Plano celular") || find(m.variable, "Plano celular") || find(m.ended, "Plano celular");
+  check("o gasto marcado aparece mesmo sem intervalo regular", !!plano);
+  check("a cadência vem da declaração (mensal)", plano && plano.cadenceId === "mensal" && plano.cadenceSource === "declarada", plano && plano.cadenceSource);
+  check("as três cobranças são contadas", plano && plano.occurrences === 3, plano && plano.occurrences);
+  check("o valor é o da última cobrança", plano && near(plano.lastAmount, 91.9), plano && plano.lastAmount);
+  check("a tela sabe que o histórico é irregular", plano && plano.irregularHistory === true);
+  check("a cobrança mais recente conta no mês corrente quando é deste mês",
+    plano && plano.monthKeys.length === 3, plano && plano.monthKeys && plano.monthKeys.join(","));
+
+  // Sem a marca, o mesmo grupo irregular continua fora: a declaração é o que
+  // sustenta o compromisso, não a mera repetição do nome.
+  const semMarca = buildRecurringModel(withTx(transactions.map((t) => ({ ...t, recurring: false }))));
+  check("sem a marca, o grupo irregular segue fora da lista", !find(semMarca.subscriptions, "Plano celular") && !find(semMarca.variable, "Plano celular"));
+
+  // Evidência regular continua mandando sobre a declaração: seis cobranças
+  // mensais marcadas como fixas saem pelo caminho medido.
+  const regulares = [];
+  for (let k = 5; k >= 0; k--) regulares.push(tx({ type: "expense", amount: 120, categoryId: "outros", date: monthsAgo(k, 8), description: "Internet fibra", recurring: true }));
+  const mr = buildRecurringModel(withTx(regulares));
+  const fibra = find(mr.subscriptions, "Internet fibra") || find(mr.essentials, "Internet fibra");
+  check("com datas regulares a cadência é medida, não declarada", fibra && fibra.cadenceSource === "medida" && !fibra.declaredOnly, fibra && fibra.cadenceSource);
+
+  // Declaração antiga sem repetição: depois de dois meses e meio sem cobrança,
+  // o compromisso é dado como encerrado em vez de somar ao mês para sempre.
+  const velho = buildRecurringModel(withTx([tx({ type: "expense", amount: 60, categoryId: "outros", date: daysAgo(100), description: "Curso antigo", recurring: true })]));
+  check("declaração sem repetição há 100 dias sai do total como encerrada", !!find(velho.ended, "Curso antigo") && !find(velho.subscriptions, "Curso antigo"));
+}
+
 console.log(`\n${pass} passaram, ${fail} falharam.\n`);
 process.exit(fail ? 1 : 0);

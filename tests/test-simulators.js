@@ -158,6 +158,46 @@ console.log("\n4. Empréstimo e financiamento");
   check("entrada abate do financiado", comEntrada.principal === 40000, comEntrada.principal);
   check("custo total inclui a entrada", comEntrada.totalCost > comEntrada.totalPaid);
   check("percentual acima do valor à vista é positivo", comEntrada.surchargePct > 0, comEntrada.surchargePct);
+  check("com algo a financiar, o sinal fica desligado", comEntrada.nothingToFinance === false);
+
+  // Entrada que cobre o bem: não há o que financiar, e a função diz isso em
+  // vez de devolver tarifa e seguro como "parcela".
+  const semFinanciar = call("simLoan", { assetValue: 60000, downPayment: 60000, months: 48, annualRatePct: 22, system: "price", monthlyInsurance: 80 });
+  check("entrada igual ao bem não gera parcela", semFinanciar.nothingToFinance === true && semFinanciar.firstPayment === 0 && semFinanciar.schedule.length === 0);
+  check("sem financiamento o CET é nulo, não zero", semFinanciar.cetAnnualPct === null);
+  check("o custo total vira só a entrada", semFinanciar.totalCost === 60000, semFinanciar.totalCost);
+}
+
+/* ------------------------------------------- equivalência entre produtos */
+console.log("\n3b. CDB ou LCI: equivalência pelo líquido");
+{
+  const base = { principal: 10000, monthlyContribution: 0, months: 24, rates: RATES, startDate: "2026-01-10" };
+  const cdb = call("simFixedIncome", { ...base, indexer: "cdi", ratePct: 110 });
+  ctx.__base = base; ctx.__alvo = { indexer: "cdi", taxExempt: true, netFinal: cdb.netFinal };
+  const lci = run("fixedIncomeEquivalentRate(__base, __alvo)");
+  check("a LCI equivalente paga menos % do CDI que o CDB tributado", lci != null && lci < 110 && lci > 80, lci);
+  // Em 24 meses a alíquota do aporte único é 15%: a LCI equivalente é ~85% do
+  // CDI (110 × 0,85), com pequena diferença pela composição.
+  check("em 24 meses a equivalência fica perto de 110 × (1 − 15%)", lci != null && Math.abs(lci - 110 * 0.85) < 1.5, lci);
+  // Ida e volta: a LCI equivalente, levada de volta a CDB tributado, devolve ~110.
+  const lciSim = call("simFixedIncome", { ...base, indexer: "cdi", ratePct: lci, taxExempt: true });
+  ctx.__alvo2 = { indexer: "cdi", taxExempt: false, netFinal: lciSim.netFinal };
+  const volta = run("fixedIncomeEquivalentRate(__base, __alvo2)");
+  check("a equivalência é simétrica", volta != null && Math.abs(volta - 110) < 0.05, volta);
+  // Prazo curto: alíquota de 22,5% afasta mais os dois produtos.
+  const curto = call("simFixedIncome", { ...base, months: 6, indexer: "cdi", ratePct: 110 });
+  ctx.__alvo3 = { indexer: "cdi", taxExempt: true, netFinal: curto.netFinal };
+  ctx.__base3 = { ...base, months: 6 };
+  const lciCurto = run("fixedIncomeEquivalentRate(__base3, __alvo3)");
+  check("em 6 meses a LCI equivalente é ainda menor", lciCurto != null && lciCurto < lci, `${lciCurto} vs ${lci}`);
+  ctx.__alvo4 = { indexer: "cdi", taxExempt: true, netFinal: 0 };
+  check("sem valor a igualar não há equivalência", run("fixedIncomeEquivalentRate(__base, __alvo4)") === null);
+  // A TIR que o simulador de compra usa para "12x de R$ 450": 10x de 440 em
+  // 4.000 financiados é ~1,8% a.m.; 10x de 400 é zero.
+  ctx.__p1 = new Array(10).fill(440); ctx.__p0 = new Array(10).fill(400);
+  const embutida = run("solveIrr(4000, __p1)");
+  check("parcelas acima do valor revelam a taxa embutida", embutida > 0.017 && embutida < 0.02, embutida);
+  check("parcelas que somam o valor não têm juros", run("solveIrr(4000, __p0)") === 0);
 }
 
 /* --------------------------------------------- entrada ou amortização futura */
@@ -231,8 +271,18 @@ console.log("\n5. Cartão de crédito");
   // simulador rolava 24 meses, um cenário que a instituição não pode oferecer,
   // e com isso inflava tanto o custo do rotativo quanto a economia anunciada.
   check("o rotativo dura um único ciclo", c.rotativo.months === 1 && c.rotativo.limitedToOneCycle === true, c.rotativo.months);
-  check("os juros do ciclo saem da taxa do rotativo", Math.abs(c.rotativo.cycleInterest - 700) < 0.01, c.rotativo.cycleInterest);
+  // O pagamento acontece no vencimento; só o que NÃO foi pago vai para o
+  // rotativo. 5.000 − 750 = 4.250 × 14% = 595. A versão anterior cobrava os
+  // 14% sobre a fatura inteira (700) e depois abatia o pagamento.
   check("o pagamento mínimo é o percentual da fatura", Math.abs(c.rotativo.minPayment - 750) < 0.01, c.rotativo.minPayment);
+  check("só a parte não paga entra no rotativo", Math.abs(c.rotativo.financedBalance - 4250) < 0.01, c.rotativo.financedBalance);
+  check("os juros do ciclo incidem sobre o que ficou devendo", Math.abs(c.rotativo.cycleInterest - 595) < 0.01, c.rotativo.cycleInterest);
+  check("o saldo após o ciclo é o devido mais os juros", Math.abs(c.rotativo.finalBalance - 4845) < 0.01, c.rotativo.finalBalance);
+  check("quitar no vencimento é a referência sem encargos", c.payInFull.total === 5000 && c.payInFull.charges === 0);
+  // Pagar 100% no vencimento: nada vai ao rotativo e o caminho do cartão
+  // custa exatamente a fatura.
+  const integral = call("simCreditCard", { debt: 5000, monthlyRatePct: 14, minPaymentPct: 100, installments: 12, installmentRatePct: 7, alternativeAnnualPct: 30 });
+  check("pagando a fatura inteira não há juros de rotativo", integral.rotativo.cycleInterest === 0 && integral.cartaoTotalCharges === 0, integral.cartaoTotalCharges);
   check("o saldo restante é o que vai para o parcelamento",
     Math.abs(c.rotativo.finalBalance - c.parcelamento.financedAmount) < 0.01,
     `${c.rotativo.finalBalance} vs ${c.parcelamento.financedAmount}`);

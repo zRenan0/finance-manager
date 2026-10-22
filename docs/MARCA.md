@@ -68,6 +68,7 @@ isso pode acompanhar a marca — mas o `kind` ao lado dele, não.
 | Título da landing | `Cofre \| Organizador financeiro pessoal` |
 | Título do aplicativo | o mesmo, de propósito — ver abaixo |
 | Favicon e ícone de toque | `icons/icon-192.png` nas três páginas |
+| Símbolo | o cofre de `icons/cofre-mark.svg`: corpo arredondado, botão do segredo apontando para cima e para a direita, dois pés. É o mesmo desenho em `svgIcon("cofre")` (navegação e onboarding), na marca da landing e nos PNG do manifesto, gerados por `scripts/make-icons.js` (o `maskable` tem fundo cheio e desenho na zona segura) |
 | Atalho iOS | `apple-mobile-web-app-title` = `Cofre` no aplicativo e na landing |
 | Manifesto | `name` = `Cofre. Organizador financeiro pessoal`, `short_name` = `Cofre` |
 | Open Graph | `og:site_name` = `Cofre`, só na landing, que é a página de compartilhamento |

@@ -217,7 +217,7 @@ function renderOnboardingLayer() {
   return `<div class="onb" role="dialog" aria-modal="true" aria-label="Configuração inicial">
     <div class="onb__sheet">
       <div class="onb__head">
-        <div class="onb__brand">${svgIcon("wallet", 18)}<span>Cofre</span></div>
+        <div class="onb__brand">${svgIcon("cofre", 18)}<span>Cofre</span></div>
         <div class="onb__head-actions">
           ${/* [M42] `aria-disabled`, E NÃO `disabled`: A RAZÃO PRECISA SER OUVIDA.
 

@@ -70,6 +70,14 @@ no 1º dia a 0% no 30º. A tabela é literal no código porque não é linear.
   pode ser contratado.
 - Os encargos totais (rotativo **mais** parcelamento) são limitados a **100% do
   valor original da dívida**. O teto vale para a soma das duas fases.
+- O pagamento acontece **no vencimento, sobre a fatura**; só a parte não paga
+  entra no rotativo e rende juros até a fatura seguinte. Numa fatura de
+  R$ 5.000 com 15% pagos, os juros do ciclo incidem sobre R$ 4.250, não sobre
+  R$ 5.000. A versão anterior cobrava sobre a fatura inteira e abatia o
+  pagamento depois, inflando os encargos do ciclo.
+- O IOF do crédito (0,38% mais 0,0082% ao dia, Decreto 6.306/2007) **não entra**
+  na conta. Ele incide tanto no caminho do cartão quanto no crédito
+  alternativo, e a tela diz que ficou de fora.
 
 **Premissa declarada**
 

@@ -2,6 +2,66 @@
 
 ## Não publicado
 
+### Simuladores: cada um fazendo a própria conta direito
+
+- **Renda fixa: o campo de taxa passou a seguir o produto.** "110" valia para
+  os seis produtos, e como spread sobre a Selic ou juro real do IPCA+ isso
+  produzia resultados absurdos. Agora CDB e LCI pedem % do CDI, Tesouro Selic
+  pede o ágio sobre a Selic, IPCA+ pede o juro real, prefixado pede a taxa ao
+  ano e a poupança não pede nada (mostra a regra: 0,5% ao mês mais TR, ou 70%
+  da Selic). Trocar o produto zera a taxa e a custódia digitadas para o
+  anterior; o Tesouro já nasce com os 0,20% da B3.
+- **Renda fixa responde "CDB ou LCI?".** Para um produto tributado, a tela diz
+  quantos % do CDI uma LCI isenta precisaria pagar para empatar o líquido no
+  prazo informado; para uma LCI, o CDB que empataria. A conta leva os dois ao
+  líquido com o IR lote a lote, não por uma fórmula de aporte único. Também
+  mostra o resultado da poupança no mesmo prazo e a data do resgate.
+- **Cartão de crédito: o resultado voltou a bater com o motor.** A tela ainda
+  descrevia três saídas e um "rotativo por 24 meses" que a regra não permite, e
+  o cenário "ficar no cartão" exibia o texto do crédito alternativo. Agora são
+  os dois caminhos reais (um ciclo de rotativo mais o parcelamento obrigatório,
+  ou trocar a dívida), cada um explicado passo a passo, com a fatura à vista
+  como referência, o teto legal de 100% quando acionado e a origem da taxa do
+  parcelamento. Campo de taxa vazio passa a usar a premissa documentada, não
+  "0% ao mês".
+- **Cartão: juros do rotativo só sobre o que ficou devendo.** O pagamento é
+  feito no vencimento; a versão anterior cobrava juros sobre a fatura inteira e
+  abatia o pagamento depois, inflando os encargos do ciclo.
+- **Consórcio ganhou o reajuste anual da carta** (INCC ou IPCA do grupo) e
+  mostra a faixa do custo efetivo conforme o mês da contemplação, explicando
+  por que não existe taxa única quando a contemplação cai no meio do prazo.
+- **Aposentadoria: sem juro real, a renda perpétua é dita inexistente**, não
+  "R$ 0,00"; idades impossíveis (parar antes da idade atual, planejar até antes
+  de parar) geram aviso dizendo o que a conta usou.
+- **Financiamento e empréstimo**: entrada igual ao bem diz "não há o que
+  financiar" em vez de mostrar seguro e tarifa como parcela; valor zerado
+  mostra o que preencher; o custo além do emprestado soma juros, tarifas e
+  custos de contratação; o rodapé do imobiliário avisa que TR e MIP/DFI
+  variáveis não entram.
+- **Simular gasto (financiado) revela a taxa embutida nas parcelas.** "10x de
+  R$ 440" num bem de R$ 4.000 vira "1,77% ao mês (23,46% ao ano)", o número para
+  comparar com o CET de um empréstimo ou com o desconto à vista. Parcelas que
+  somam o valor do bem são ditas sem juros.
+
+### Assinaturas, landing, fonte e ícone
+
+- **Gasto marcado como fixo aparece em Assinaturas mesmo quando as datas não
+  formam cadência.** Duas ou mais cobranças com intervalos irregulares eram
+  descartadas apesar da marca explícita. Agora a evidência regular manda; sem
+  ela, a declaração manda; a tela diz de onde veio a cadência. Uma declaração
+  sem repetição há mais de dois meses e meio passa a ser dada como encerrada,
+  como já acontecia no caminho medido.
+- **Landing no celular: um "Começar grátis" fixo por vez.** Enquanto a doca
+  inferior está na tela, o botão do cabeçalho se recolhe.
+- **Inter e Space Grotesk embarcadas** (WOFF2 variável, subconjunto latino,
+  70 kB no total, licença OFL incluída). A interface deixa de depender da fonte
+  do sistema e tem a mesma cara em Windows, Android, iPhone e Mac; os arquivos
+  entram no pré-cache do shell para a primeira abertura offline.
+- **Ícone próprio da marca.** O cofre com o botão do segredo apontando para
+  cima substitui a carteira genérica na navegação, no onboarding, na landing e
+  nos ícones do manifesto, que ganharam uma versão "maskable" com zona segura.
+  Os PNG saem de `icons/cofre-mark.svg` por `scripts/make-icons.js`.
+
 ### Revisão visual: menos efeito, mais leitura
 
 - **O cartão principal (saldo, metas, contas, dívidas) passou a ser de cor

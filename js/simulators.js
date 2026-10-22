@@ -353,6 +353,24 @@ function simLoan(params) {
   const insurance = Math.max(0, roundMoney(p.monthlyInsurance)); // seguro prestamista/MIP
   const upfrontFee = Math.max(0, roundMoney(p.upfrontFee));   // IOF, avaliação, registro
 
+  // Entrada igual ou maior que o bem (ou valor zerado): não há o que financiar.
+  // Antes a função seguia em frente com principal 0 e devolvia tarifa e seguro
+  // como "parcela" e um CET sem sentido. A tela precisa de um sinal, não de um
+  // número.
+  if (principal <= 0) {
+    return {
+      system, months, principal: 0, down, assetValue,
+      annualRatePct: annualPct, monthlyRate: i,
+      schedule: [], firstPayment: 0, lastPayment: 0, payment: 0,
+      totalInterest: 0, totalExtras: 0, totalPaid: 0,
+      totalCost: addMoney(down, upfrontFee), upfrontFee,
+      interestOverPrincipalPct: 0,
+      surchargePct: assetValue > 0 ? ((addMoney(down, upfrontFee) - assetValue) / assetValue) * 100 : null,
+      cetMonthlyPct: null, cetAnnualPct: null,
+      nothingToFinance: true,
+    };
+  }
+
   const schedule = [];
   let balance = principal;
   let interestCents = 0;
@@ -398,7 +416,46 @@ function simLoan(params) {
     surchargePct: assetValue > 0 ? ((totalCost - assetValue) / assetValue) * 100 : null,
     cetMonthlyPct: cetMonthly == null ? null : cetMonthly * 100,
     cetAnnualPct: cetAnnual,
+    nothingToFinance: false,
   };
+}
+
+/* ==============================================================================
+ * 1B. EQUIVALÊNCIA ENTRE PRODUTOS DE RENDA FIXA
+ * ============================================================================== */
+//
+// A pergunta real de quem compara é "este CDB de 110% do CDI vale mais que a
+// LCI de 90%?", e a resposta depende do prazo, porque a alíquota do IR cai com
+// o tempo. A conta honesta é levar os dois ao LÍQUIDO no mesmo fluxo e no
+// mesmo prazo. Esta função devolve a taxa que o OUTRO produto precisaria ter
+// para entregar o mesmo valor líquido: bisseção sobre `ratePct`, reutilizando
+// `simFixedIncome` inteiro (IR lote a lote, custódia, IOF), em vez de uma
+// fórmula de gross-up que só vale para aporte único.
+//
+//   base   → as mesmas premissas da simulação (principal, aporte, prazo,
+//            custódia, premissas de mercado, data de início)
+//   target → { indexer, taxExempt, netFinal } do produto a igualar
+//
+// Devolve o `ratePct` equivalente (% do CDI para `cdi`, % a.a. para os
+// demais) ou `null` quando nenhuma taxa do intervalo pesquisado alcança o
+// valor. Zero quando o produto alvo já entrega mais sem taxa nenhuma.
+function fixedIncomeEquivalentRate(base, target) {
+  const want = Number(target && target.netFinal);
+  if (!Number.isFinite(want) || want <= 0) return null;
+  const premissas = { ...(base || {}) };
+  delete premissas.termDays;
+  const netAt = (ratePct) => simFixedIncome({
+    ...premissas, indexer: target.indexer, taxExempt: !!target.taxExempt, ratePct,
+  }).netFinal;
+  let lo = 0;
+  let hi = target.indexer === "cdi" ? 400 : 200;
+  if (netAt(lo) >= want) return 0;
+  if (netAt(hi) < want) return null;
+  for (let k = 0; k < 60; k++) {
+    const mid = (lo + hi) / 2;
+    if (netAt(mid) < want) lo = mid; else hi = mid;
+  }
+  return (lo + hi) / 2;
 }
 
 /* ==============================================================================
@@ -701,7 +758,7 @@ function solveIrr(received, payments) {
   if (!(received > 0) || !payments || payments.length === 0) return null;
   const npv = (rate) => payments.reduce((s, pmtValue, idx) => s + pmtValue / Math.pow(1 + rate, idx + 1), 0) - received;
   let lo = 0, hi = 3;
-  if (npv(lo) < 0) return 0;              // fluxo sem juros (ou com desconto)
+  if (npv(lo) <= 0) return 0;             // fluxo sem juros (ou com desconto)
   if (npv(hi) > 0) return null;           // fora do intervalo pesquisável
   for (let k = 0; k < 200; k++) {
     const mid = (lo + hi) / 2;
@@ -781,14 +838,22 @@ function simCreditCard(params) {
   const capChargesCents = debtCents;
 
   // ---- FASE 1: rotativo, UM ciclo de fatura (Resolução CMN 4.549/2017) ----
-  const rotativoInterestCents = Math.min(Math.round(debtCents * i), capChargesCents);
-  const minPaymentCents = Math.min(debtCents + rotativoInterestCents, Math.round(debtCents * (payPct / 100)));
-  const saldoAposCicloCents = debtCents + rotativoInterestCents - minPaymentCents;
+  // O pagamento acontece NO VENCIMENTO, sobre a fatura. Só a parte que não
+  // foi paga entra no rotativo e rende juros até a fatura seguinte. A versão
+  // anterior cobrava juros sobre a fatura inteira e depois abatia o pagamento,
+  // o que inflava os encargos do ciclo (em 15% pagos, 15% a mais de juros).
+  const minPaymentCents = Math.min(debtCents, Math.round(debtCents * (payPct / 100)));
+  const saldoRotativoCents = debtCents - minPaymentCents;
+  const rotativoInterestCents = Math.min(Math.round(saldoRotativoCents * i), capChargesCents);
+  const saldoAposCicloCents = saldoRotativoCents + rotativoInterestCents;
 
   const rotativo = {
     // Um ciclo. O campo continua existindo para a tela, mas agora com o valor
     // que a regra permite.
     months: 1,
+    // O que ficou devendo depois do pagamento do vencimento: é sobre isto que
+    // o rotativo cobra.
+    financedBalance: moneyFromCents(saldoRotativoCents),
     cycleInterest: moneyFromCents(rotativoInterestCents),
     minPayment: moneyFromCents(minPaymentCents),
     finalBalance: moneyFromCents(saldoAposCicloCents),
@@ -854,6 +919,10 @@ function simCreditCard(params) {
   // regra obriga em seguida. Comparar o parcelamento com um rotativo eterno
   // seria comparar com algo que a instituição não pode oferecer.
   const caminhoCartaoCents = minPaymentCents + final.totalCents;
+  // Referência: quitar a fatura inteira no vencimento. Não entra no ranking
+  // (não é uma "saída" para quem não tem o dinheiro), mas é o número que dá
+  // escala a todos os outros.
+  const payInFull = { total: debt, charges: 0 };
   const ranking = [
     { id: "cartao", label: "Ficar no cartão (1 ciclo + parcelamento)", total: moneyFromCents(caminhoCartaoCents) },
     { id: "alternativa", label: "Trocar por crédito mais barato", total: alternativa.totalPaid },
@@ -862,7 +931,7 @@ function simCreditCard(params) {
   return {
     debt, monthlyRatePct: monthlyPct,
     annualEquivalentPct: monthlyToAnnual(i),
-    rotativo, parcelamento, alternativa,
+    rotativo, parcelamento, alternativa, payInFull,
     // Custo total do caminho do cartão, já com as duas fases somadas.
     cartaoTotalPaid: moneyFromCents(caminhoCartaoCents),
     cartaoTotalCharges: moneyFromCents(rotativoInterestCents + (final.totalCents - saldoAposCicloCents)),
@@ -1274,6 +1343,6 @@ if (typeof module !== "undefined" && module.exports) {
     annualToMonthly, monthlyToAnnual, compoundRates, effectiveAnnualRate,
     simFixedIncome, simLoan, simLoanWithPrepayment, simDownPaymentVsPrepayment,
     simCreditCard, simConsortium, simFgts, simRetirement,
-    solveIrr, solveRateForContributions,
+    solveIrr, solveRateForContributions, fixedIncomeEquivalentRate,
   };
 }

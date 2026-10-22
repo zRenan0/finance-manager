@@ -40,8 +40,12 @@ const SIM_CATALOG = [
       { key: "principal", label: "Valor inicial", type: "money", def: "10000", prefix: "R$" },
       { key: "aporte", label: "Aporte mensal", type: "money", def: "500", prefix: "R$" },
       { key: "meses", label: "Prazo", type: "int", def: "24", suffix: "meses" },
-      { key: "taxa", label: "Taxa contratada", type: "pct", def: "110", suffix: "%", hint: "No CDB é o % do CDI (110 = 110% do CDI). No Tesouro IPCA+ é o juro real (IPCA + 6). No prefixado é a própria taxa ao ano." },
-      { key: "custodia", label: "Taxa anual de custódia/administração", type: "pct", def: "0", suffix: "% a.a.", hint: "Tesouro Direto cobra 0,20% a.a. na B3 (isento no Tesouro Selic até R$ 10 mil). Fundos cobram taxa de administração." },
+      // Rótulo, unidade e padrão destes dois campos dependem do produto
+      // escolhido (ver RENDAFIXA_RATE_BY_PRODUCT e simFieldSpec): "110" é
+      // uma taxa razoável para CDB em % do CDI e um absurdo como spread sobre
+      // a Selic. Antes o mesmo "110" valia para os seis produtos.
+      { key: "taxa", label: "Taxa contratada", type: "pct", def: "110", suffix: "%", dynamic: true },
+      { key: "custodia", label: "Taxa anual de custódia/administração", type: "pct", def: "0", suffix: "% a.a.", dynamic: true, hint: "Fundos cobram taxa de administração; CDB, LCI e poupança em geral não cobram nada." },
     ],
   },
   {
@@ -112,6 +116,7 @@ const SIM_CATALOG = [
       { key: "reserva", label: "Fundo de reserva", type: "pct", def: "2", suffix: "%" },
       { key: "lance", label: "Lance que você pretende dar", type: "pct", def: "0", suffix: "% da carta" },
       { key: "contemplacao", label: "Mês estimado da contemplação", type: "int", def: "30", suffix: "º mês", hint: "Sem lance, a contemplação depende de sorteio. É esse tempo de espera que separa consórcio de financiamento." },
+      { key: "reajuste", label: "Reajuste anual da carta", type: "pct", def: "0", suffix: "% a.a.", hint: "A carta é corrigida todo ano pelo índice do grupo (INCC em imóveis, preço do bem ou IPCA em veículos), e as parcelas sobem junto. Zero mostra o contrato sem correção." },
       { key: "jurosfin", label: "Juros do financiamento equivalente", type: "pct", def: "22", suffix: "% a.a." },
     ],
   },
@@ -143,6 +148,40 @@ const SIM_CATALOG = [
 
 function simSpecOf(id) { return SIM_CATALOG.find((s) => s.id === id) || SIM_CATALOG[0]; }
 
+// O campo "taxa" da renda fixa muda de significado com o produto. Cada entrada
+// diz como a taxa é anunciada no mercado para aquele papel e um padrão
+// plausível; `null` em `taxa` esconde o campo (poupança tem regra, não taxa).
+const RENDAFIXA_RATE_BY_PRODUCT = {
+  cdi: { label: "Percentual do CDI", suffix: "% do CDI", def: "110", hint: "CDB e RDB são anunciados como percentual do CDI: 110 quer dizer 110% do CDI.", custodia: "0" },
+  lci: { label: "Percentual do CDI", suffix: "% do CDI", def: "90", hint: "LCI e LCA pagam menos % do CDI porque são isentas de IR; o simulador mostra abaixo o CDB que empataria.", custodia: "0" },
+  selic: { label: "Ágio ou deságio sobre a Selic", suffix: "% a.a.", def: "0,05", hint: "Tesouro Selic rende Selic + uma pequena taxa fixa, em geral entre 0 e 0,2 ponto ao ano. Use a da oferta do dia.", custodia: "0,2" },
+  ipca: { label: "Juro real contratado (IPCA +)", suffix: "% a.a.", def: "6", hint: "Tesouro IPCA+ 6 rende IPCA mais 6% ao ano, compostos. O IPCA vem das premissas de mercado abaixo.", custodia: "0,2" },
+  pre: { label: "Taxa prefixada", suffix: "% a.a.", def: "13", hint: "A taxa fixa anunciada, ao ano. Vale até o vencimento independentemente do que a Selic fizer.", custodia: "0" },
+  poupanca: { label: null, custodia: "0" },
+};
+
+// A declaração do campo já ajustada ao contexto atual do simulador. Para a
+// renda fixa, o produto escolhido troca rótulo, unidade, dica e padrão da
+// taxa e da custódia; devolve `null` quando o campo não existe no produto.
+function simFieldSpec(simId, field) {
+  if (!field || !field.dynamic || simId !== "rendafixa") return field;
+  const produto = RENDAFIXA_RATE_BY_PRODUCT[simRaw("rendafixa", "produto")] || RENDAFIXA_RATE_BY_PRODUCT.cdi;
+  if (field.key === "taxa") {
+    if (!produto.label) return null;
+    return { ...field, label: produto.label, suffix: produto.suffix, def: produto.def, hint: produto.hint };
+  }
+  if (field.key === "custodia") {
+    const tesouro = produto.custodia !== "0";
+    return {
+      ...field, def: produto.custodia,
+      hint: tesouro
+        ? "A B3 cobra 0,20% ao ano de custódia no Tesouro Direto (o Tesouro Selic é isento até R$ 10 mil). Corretoras podem cobrar taxa própria."
+        : field.hint,
+    };
+  }
+  return field;
+}
+
 // Valor de um campo: rascunho do usuário ou o padrão declarado.
 
 function simFieldDefault(simId, field) {
@@ -163,6 +202,10 @@ function simRaw(simId, key) {
   const spec = simSpecOf(simId);
   const field = (spec.fields || []).find((f) => f.key === key);
   const option = (spec.options || []).find((o) => o.key === key);
+  if (field && field.dynamic) {
+    const ajustado = simFieldSpec(simId, field);
+    return ajustado ? String(simFieldDefault(simId, ajustado)) : "0";
+  }
   return field ? String(simFieldDefault(simId, field)) : (option ? String(option.def) : "");
 }
 
@@ -201,7 +244,7 @@ function renderSimulatorsScreen() {
         <div class="card">
           <p class="card-title">Premissas</p>
           ${(spec.options || []).map((o) => renderSimOption(id, o)).join("")}
-          ${(spec.fields || []).map((f) => renderSimField(id, f)).join("")}
+          ${(spec.fields || []).map((f) => simFieldSpec(id, f)).filter(Boolean).map((f) => renderSimField(id, f)).join("")}
           ${renderSimRatesNote()}
         </div>
         ${renderSimResult(id)}
@@ -282,26 +325,47 @@ function renderSimFixedIncome() {
   };
   const cfg = map[produto] || map.cdi;
   const meses = simInt("rendafixa", "meses", 1, 600);
-
-  const r = simFixedIncome({
+  const taxaInformada = moneyOrZero(simRaw("rendafixa", "taxa"));
+  const base = {
     principal: simMoney("rendafixa", "principal"),
     monthlyContribution: simMoney("rendafixa", "aporte"),
     months: meses,
-    indexer: cfg.indexer,
-    ratePct: moneyOrZero(simRaw("rendafixa", "taxa")),
     feeAnnualPct: moneyOrZero(simRaw("rendafixa", "custodia")),
-    taxExempt: cfg.exempt,
     rates,
-  });
+  };
+  if (!(base.principal > 0) && !(base.monthlyContribution > 0)) {
+    return `<div class="card">${renderEmptyState("piggy", "Informe um valor inicial ou um aporte mensal para ver o resultado líquido.")}</div>`;
+  }
+
+  const r = simFixedIncome({ ...base, indexer: cfg.indexer, ratePct: taxaInformada, taxExempt: cfg.exempt });
 
   // Referência de comparação: a mesma aplicação na poupança, no mesmo prazo.
-
-  const poup = simFixedIncome({
-    principal: simMoney("rendafixa", "principal"),
-    monthlyContribution: simMoney("rendafixa", "aporte"),
-    months: meses, indexer: "poupanca", taxExempt: true, rates,
-  });
+  const poup = simFixedIncome({ ...base, feeAnnualPct: 0, indexer: "poupanca", taxExempt: true });
   const ganhoVsPoupanca = subMoney(r.netFinal, poup.netFinal);
+
+  // A pergunta que decide entre produtos ("CDB de 110% ou LCI de 90%?") não
+  // se responde pela taxa anunciada, porque o IR depende do prazo. A
+  // equivalência leva os dois ao líquido no mesmo fluxo (ver
+  // fixedIncomeEquivalentRate em simulators.js).
+  const semCustodia = { ...base, feeAnnualPct: 0 };
+  let equivalencia = "";
+  if (produto === "poupanca") {
+    const regra = Number(rates.selic) > 8.5
+      ? `0,5% ao mês mais TR, porque a Selic (${fmtNum(rates.selic)}% a.a.) está acima de 8,5%`
+      : `70% da Selic mais TR, porque a Selic (${fmtNum(rates.selic)}% a.a.) está em 8,5% ou menos`;
+    equivalencia = `A poupança não tem taxa contratada: rende ${regra}. Com as premissas atuais isso dá <b>${fmtNum(rates.poupanca)}% ao ano</b>, isento de IR.`;
+  } else if (cfg.exempt) {
+    const cdb = fixedIncomeEquivalentRate(semCustodia, { indexer: "cdi", taxExempt: false, netFinal: r.netFinal });
+    if (cdb != null) equivalencia = `Para entregar o mesmo líquido em ${meses} ${meses === 1 ? "mês" : "meses"}, um CDB tributado precisaria pagar <b>${fmtNum(cdb)}% do CDI</b>. Abaixo disso, a isenta ganha.`;
+  } else {
+    const lci = fixedIncomeEquivalentRate(semCustodia, { indexer: "cdi", taxExempt: true, netFinal: r.netFinal });
+    if (lci != null) equivalencia = `Uma LCI ou LCA isenta de <b>${fmtNum(lci)}% do CDI</b> entregaria o mesmo líquido em ${meses} ${meses === 1 ? "mês" : "meses"}. Acima disso, a isenta ganha; abaixo, este produto ganha.`;
+  }
+
+  const taxaBrutaDetalhe = cfg.indexer === "cdi"
+    ? ` (${fmtNum(taxaInformada)}% de um CDI a ${fmtNum(rates.cdi)}%)`
+    : cfg.indexer === "selic" ? ` (Selic ${fmtNum(rates.selic)}% + ${fmtNum(taxaInformada)})`
+      : cfg.indexer === "ipca" ? ` (IPCA ${fmtNum(rates.ipca)}% + ${fmtNum(taxaInformada)}, compostos)` : "";
 
   return `<div class="card">
     <p class="card-title">Resultado líquido</p>
@@ -316,26 +380,34 @@ function renderSimFixedIncome() {
       <div class="sim-breakdown__row"><span>Rendimento bruto</span><b>${fmtBRL(r.grossEarnings)}</b></div>
       <div class="sim-breakdown__row"><span>Imposto de renda</span><b data-ui-css="color:var(--negative)">${r.exempt ? "isento" : `− ${fmtBRL(r.tax)}`}</b></div>
       ${r.iof > 0 ? `<div class="sim-breakdown__row"><span>IOF (resgate antes de 30 dias)</span><b data-ui-css="color:var(--negative)">− ${fmtBRL(r.iof)}</b></div>` : ""}
-      ${r.feeAnnual > 0 ? `<div class="sim-breakdown__row"><span>Taxa anual cobrada</span><b data-ui-css="color:var(--negative)">${fmtNum(r.feeAnnual)}% a.a.</b></div>` : ""}
-      <div class="sim-breakdown__row"><span>Taxa bruta contratada</span><b>${fmtNum(r.grossAnnual)}% a.a.</b></div>
+      ${r.feeAnnual > 0 ? `<div class="sim-breakdown__row"><span>Custódia ou administração</span><b data-ui-css="color:var(--negative)">${fmtNum(r.feeAnnual)}% a.a., já descontada</b></div>` : ""}
+      <div class="sim-breakdown__row"><span>Taxa bruta</span><b>${fmtNum(r.grossAnnual)}% a.a.${taxaBrutaDetalhe}</b></div>
       <div class="sim-breakdown__row sim-breakdown__row--total"><span>Rentabilidade líquida</span><b>${r.netAnnualPct != null ? `${fmtNum(r.netAnnualPct)}% a.a.` : "Sem dados"}</b></div>
       <div class="sim-breakdown__row"><span>Acima da inflação (ganho real)</span><b data-ui-css="color:${r.losesToInflation ? "var(--negative)" : "var(--positive)"}">${r.realAnnualPct != null ? `${fmtNum(r.realAnnualPct)}% a.a.` : "Sem dados"}</b></div>
+      ${produto !== "poupanca" ? `<div class="sim-breakdown__row"><span>Na poupança, no mesmo prazo</span><b>${fmtBRL(poup.netFinal)}</b></div>` : ""}
     </div>
 
     ${r.losesToInflation ? `<p class="ai-error">${svgIcon("alertTriangle", 14)} Nessa taxa o dinheiro rende menos que a inflação: você termina com mais reais e menos poder de compra.</p>` : ""}
 
     <p class="health-note">${r.exempt
-      ? `Aplicação tratada como isenta de IR nesta estimativa. Uma taxa menor do CDI pode superar um produto tributado, dependendo do prazo e das demais condições.`
-      : `O IR foi calculado <b>lote a lote</b>: cada aporte tem o próprio prazo e a própria alíquota. A alíquota efetiva da simulação ficou em <b>${fmtNum(r.effectiveAliquot)}%</b> sobre o rendimento.`}
-    ${ganhoVsPoupanca > 0 ? ` Contra a poupança no mesmo prazo, a diferença é de <b data-ui-css="color:var(--positive)">${fmtBRL(ganhoVsPoupanca)}</b>.` : ""}</p>
+      ? `Produto isento de IR nesta estimativa.`
+      : `O IR foi calculado <b>lote a lote</b>: cada aporte tem o próprio prazo e a própria alíquota. A alíquota efetiva ficou em <b>${fmtNum(r.effectiveAliquot)}%</b> sobre o rendimento${r.lots.length > 1 ? `, entre ${fmtNum(Math.min(...r.lots.map((l) => l.aliquot)))}% do aporte mais antigo e ${fmtNum(Math.max(...r.lots.map((l) => l.aliquot)))}% do mais recente` : ""}.`}
+    ${ganhoVsPoupanca > 0 && produto !== "poupanca" ? ` Contra a poupança no mesmo prazo, a diferença é de <b data-ui-css="color:var(--positive)">${fmtBRL(ganhoVsPoupanca)}</b>.` : ""}
+    ${ganhoVsPoupanca < 0 && produto !== "poupanca" ? ` <b data-ui-css="color:var(--negative)">A poupança renderia ${fmtBRL(Math.abs(ganhoVsPoupanca))} a mais</b> neste prazo.` : ""}</p>
+    ${equivalencia ? `<p class="health-note">${equivalencia}</p>` : ""}
+    <p class="footnote">Resgate no vencimento, em ${fmtDateFull(r.redeemDate)}. Resgatar antes muda a alíquota do IR e, em título prefixado ou IPCA+, o preço de mercado do papel.</p>
   </div>`;
 }
 
 /* --------------------------------------------------------- empréstimo */
 function renderSimLoan() {
   const mensal = moneyOrZero(simRaw("emprestimo", "juros"));
+  const valor = simMoney("emprestimo", "valor");
+  if (!(valor > 0)) {
+    return `<div class="card">${renderEmptyState("creditCard", "Informe o valor emprestado para ver parcela, juros e CET.")}</div>`;
+  }
   const r = simLoan({
-    principal: simMoney("emprestimo", "valor"),
+    principal: valor,
     months: simInt("emprestimo", "parcelas", 1, 480),
     annualRatePct: monthlyToAnnual(mensal / 100),
     system: simRaw("emprestimo", "sistema"),
@@ -345,31 +417,36 @@ function renderSimLoan() {
   });
   const sobra = estimateAvgMonthlySaving(state.data);
   const comprometimento = sobra > 0 ? safePct(r.firstPayment, sobra) : null;
+  const custoTotal = addMoney(r.totalInterest, addMoney(r.totalExtras, r.upfrontFee));
 
   return `<div class="card">
     <p class="card-title">Custo do empréstimo</p>
     <div class="invest-stats">
       ${simStat(r.system === "sac" ? "Primeira parcela" : "Parcela mensal", fmtBRL(r.firstPayment), { highlight: true })}
       ${simStat("Total pago", fmtBRL(r.totalPaid))}
-      ${simStat("Só de juros", fmtBRL(r.totalInterest), { color: "var(--negative)" })}
+      ${simStat("Custo além do valor emprestado", fmtBRL(custoTotal), { color: "var(--negative)" })}
     </div>
 
     <div class="sim-breakdown">
       ${r.system === "sac" ? `<div class="sim-breakdown__row"><span>Última parcela</span><b>${fmtBRL(r.lastPayment)}</b></div>` : ""}
-      <div class="sim-breakdown__row"><span>Taxa anunciada</span><b>${fmtNum(mensal)}% a.m. (${fmtNum(r.annualRatePct)}% a.a.)</b></div>
-      <div class="sim-breakdown__row sim-breakdown__row--total"><span>Custo Efetivo Total (CET)</span><b>${r.cetAnnualPct != null ? `${fmtNum(r.cetMonthlyPct)}% a.m. · ${fmtNum(r.cetAnnualPct)}% a.a.` : "Sem dados"}</b></div>
-      <div class="sim-breakdown__row"><span>Juros sobre o valor emprestado</span><b>${fmtNum(r.interestOverPrincipalPct)}%</b></div>
+      <div class="sim-breakdown__row"><span>Só de juros</span><b data-ui-css="color:var(--negative)">${fmtBRL(r.totalInterest)} (${fmtNum(r.interestOverPrincipalPct)}% do emprestado)</b></div>
       ${r.totalExtras > 0 ? `<div class="sim-breakdown__row"><span>Tarifas e seguros no período</span><b data-ui-css="color:var(--negative)">${fmtBRL(r.totalExtras)}</b></div>` : ""}
+      ${r.upfrontFee > 0 ? `<div class="sim-breakdown__row"><span>Cobrado na contratação</span><b data-ui-css="color:var(--negative)">${fmtBRL(r.upfrontFee)}</b></div>` : ""}
+      <div class="sim-breakdown__row"><span>Taxa anunciada</span><b>${fmtNum(mensal)}% a.m. (${fmtNum(r.annualRatePct)}% a.a.)</b></div>
+      <div class="sim-breakdown__row sim-breakdown__row--total"><span>Custo Efetivo Total (CET)</span><b>${r.cetAnnualPct != null ? `${fmtNum(r.cetMonthlyPct)}% a.m. · ${fmtNum(r.cetAnnualPct)}% a.a.` : "Não calculável com estes números"}</b></div>
     </div>
 
-    ${r.cetAnnualPct != null && r.cetAnnualPct > r.annualRatePct + 0.5 ? `<p class="health-note">A taxa informada é <b>${fmtNum(r.annualRatePct)}% ao ano</b>, enquanto o fluxo digitado produz custo estimado de <b data-ui-css="color:var(--negative)">${fmtNum(r.cetAnnualPct)}% ao ano</b>. Compare com o CET oficial da proposta.</p>` : ""}
-    ${comprometimento != null ? `<p class="health-note">A parcela consome <b>${fmtNum(comprometimento)}%</b> da sua sobra média mensal (${fmtBRL(sobra)}).${comprometimento > 100 ? " <b data-ui-css=\"color:var(--negative)\">Isso não cabe no seu orçamento atual.</b>" : ""}</p>` : ""}
+    ${r.cetAnnualPct != null && r.cetAnnualPct > r.annualRatePct + 0.5 ? `<p class="health-note">A taxa anunciada é <b>${fmtNum(r.annualRatePct)}% ao ano</b>, mas com tarifa, seguro e custos de contratação o dinheiro custa <b data-ui-css="color:var(--negative)">${fmtNum(r.cetAnnualPct)}% ao ano</b>. É este número, o CET, que a proposta oficial precisa mostrar; compare por ele.</p>` : ""}
+    ${comprometimento != null ? `<p class="health-note">A parcela consome <b>${fmtNum(comprometimento)}%</b> da sua sobra média mensal (${fmtBRL(sobra)}).${comprometimento > 100 ? " <b data-ui-css=\"color:var(--negative)\">Isso não cabe no seu orçamento atual.</b>" : comprometimento > 50 ? " Metade ou mais da sobra presa numa parcela deixa pouca margem para imprevistos." : ""}</p>` : `<p class="health-note">Com três meses de lançamentos o app passa a dizer quanto desta parcela cabe na sua sobra média.</p>`}
   </div>`;
 }
 
 /* ------------------------------------------------------ financiamento */
 function renderSimFinancing() {
   const bem = simMoney("financiamento", "bem");
+  if (!(bem > 0)) {
+    return `<div class="card">${renderEmptyState("home", "Informe o valor do bem para ver parcelas, juros e o custo total.")}</div>`;
+  }
   const r = simLoan({
     assetValue: bem,
     downPayment: simMoney("financiamento", "entrada"),
@@ -379,6 +456,16 @@ function renderSimFinancing() {
     monthlyInsurance: simMoney("financiamento", "seguro"),
     monthlyFee: simMoney("financiamento", "tarifa"),
   });
+
+  if (r.nothingToFinance) {
+    return `<div class="card">
+      <p class="card-title">Não há o que financiar</p>
+      <p class="health-note">A entrada de <b>${fmtBRL(r.down)}</b> cobre o valor do bem (${fmtBRL(bem)}). Reduza a entrada para ver o custo de financiar a diferença, ou use o simulador "Entrada ou amortizar?" para decidir quanto dinheiro vale a pena imobilizar.</p>
+    </div>`;
+  }
+
+  const sobra = estimateAvgMonthlySaving(state.data);
+  const comprometimento = sobra > 0 ? safePct(r.firstPayment, sobra) : null;
 
   return `<div class="card">
     <p class="card-title">Custo do financiamento</p>
@@ -392,12 +479,14 @@ function renderSimFinancing() {
       <div class="sim-breakdown__row"><span>Valor financiado</span><b>${fmtBRL(r.principal)}</b></div>
       <div class="sim-breakdown__row"><span>Juros pagos no total</span><b data-ui-css="color:var(--negative)">${fmtBRL(r.totalInterest)}</b></div>
       <div class="sim-breakdown__row"><span>Seguros e tarifas no total</span><b data-ui-css="color:var(--negative)">${fmtBRL(r.totalExtras)}</b></div>
-      <div class="sim-breakdown__row sim-breakdown__row--total"><span>CET</span><b>${r.cetAnnualPct != null ? `${fmtNum(r.cetAnnualPct)}% a.a.` : "Sem dados"}</b></div>
+      <div class="sim-breakdown__row"><span>Taxa de juros</span><b>${fmtNum(r.annualRatePct)}% a.a. (${fmtNum(r.monthlyRate * 100)}% a.m.)</b></div>
+      <div class="sim-breakdown__row sim-breakdown__row--total"><span>CET</span><b>${r.cetAnnualPct != null ? `${fmtNum(r.cetAnnualPct)}% a.a.` : "Não calculável com estes números"}</b></div>
       ${r.surchargePct != null ? `<div class="sim-breakdown__row"><span>Acima do preço à vista</span><b data-ui-css="color:var(--negative)">+${fmtNum(r.surchargePct)}%</b></div>` : ""}
     </div>
 
-    <p class="health-note">Um bem de <b>${fmtBRL(bem)}</b> sai por <b>${fmtBRL(r.totalCost)}</b> ao fim do contrato${r.surchargePct != null ? `. <b data-ui-css="color:var(--negative)">${fmtNum(r.surchargePct)}% a mais</b>` : ""}. No sistema <b>${r.system === "sac" ? "SAC" : "Price"}</b>, ${r.system === "sac" ? "a parcela começa maior e cai todo mês, e o total de juros é menor" : "a parcela é fixa do começo ao fim, o que facilita o planejamento mas paga mais juros"}.</p>
-    <p class="footnote">Se você usar 30% da renda bruta como limite pessoal de planejamento, uma primeira parcela de ${fmtBRL(r.firstPayment)} exigiria renda de ${fmtBRL(r.firstPayment / 0.3)}. A política de aprovação varia por instituição e contrato.</p>
+    <p class="health-note">Um bem de <b>${fmtBRL(bem)}</b> sai por <b>${fmtBRL(r.totalCost)}</b> ao fim do contrato${r.surchargePct != null ? `, <b data-ui-css="color:var(--negative)">${fmtNum(r.surchargePct)}% a mais</b>` : ""}. No sistema <b>${r.system === "sac" ? "SAC" : "Price"}</b>, ${r.system === "sac" ? "a parcela começa maior e cai todo mês, e o total de juros é menor" : "a parcela é fixa do começo ao fim, o que facilita o planejamento mas paga mais juros"}.</p>
+    ${comprometimento != null ? `<p class="health-note">A primeira parcela consome <b>${fmtNum(comprometimento)}%</b> da sua sobra média mensal (${fmtBRL(sobra)}).${comprometimento > 100 ? " <b data-ui-css=\"color:var(--negative)\">Isso não cabe no seu orçamento atual.</b>" : ""}</p>` : ""}
+    <p class="footnote">Se você usar 30% da renda bruta como limite pessoal de planejamento, uma primeira parcela de ${fmtBRL(r.firstPayment)} exigiria renda de ${fmtBRL(r.firstPayment / 0.3)}. A política de aprovação varia por instituição. Em financiamento imobiliário o saldo devedor costuma ser corrigido pela TR, e MIP e DFI variam com a idade e o saldo; a simulação usa seguro fixo e não aplica correção.</p>
   </div>`;
 }
 
@@ -497,57 +586,74 @@ function renderSimDownPaymentComparison() {
 
 /* -------------------------------------------------------------- cartão */
 function renderSimCard() {
+  const divida = simMoney("cartao", "divida");
+  if (!(divida > 0)) {
+    return `<div class="card">${renderEmptyState("creditCard", "Informe o valor da fatura em aberto para comparar as saídas.")}</div>`;
+  }
+  const pagaPct = moneyOrZero(simRaw("cartao", "pagamento"));
+  const jurosParcRaw = String(simRaw("cartao", "jurosparc")).trim();
   const r = simCreditCard({
-    debt: simMoney("cartao", "divida"),
+    debt: divida,
     monthlyRatePct: moneyOrZero(simRaw("cartao", "juros")),
-    minPaymentPct: moneyOrZero(simRaw("cartao", "pagamento")),
-    months: 24,
+    minPaymentPct: pagaPct,
     installments: simInt("cartao", "parcelas", 1, 48),
-    installmentRatePct: moneyOrZero(simRaw("cartao", "jurosparc")),
+    // Campo vazio não é "0% ao mês": é "não sei", e aí entra a premissa
+    // documentada do motor.
+    installmentRatePct: jurosParcRaw === "" ? undefined : moneyOrZero(jurosParcRaw),
     alternativeAnnualPct: moneyOrZero(simRaw("cartao", "alternativa")),
   });
 
+  const detalhe = {
+    cartao: `No vencimento você paga ${fmtNum(pagaPct)}% (${fmtBRL(r.rotativo.minPayment)}). Os ${fmtBRL(r.rotativo.financedBalance)} restantes ficam um ciclo no rotativo a ${fmtNum(r.monthlyRatePct)}% a.m. (${fmtBRL(r.rotativo.cycleInterest)} de juros) e, pela regra, viram parcelamento obrigatório: ${r.parcelamento.installments}x de ${fmtBRL(r.parcelamento.payment)} a ${fmtNum(r.parcelamento.monthlyRatePct)}% a.m.`,
+    alternativa: `${r.alternativa.installments}x de ${fmtBRL(r.alternativa.payment)} a ${fmtNum(r.alternativa.annualRatePct)}% a.a., usando o crédito novo para quitar a fatura inteira no vencimento.`,
+  };
+  const cartao = r.ranking.find((o) => o.id === "cartao");
+  const alternativa = r.ranking.find((o) => o.id === "alternativa");
+  const diferenca = subMoney(cartao.total, alternativa.total);
+
   return `<div class="card">
-    <p class="card-title">As três saídas, lado a lado</p>
+    <p class="card-title">Ficar no cartão ou trocar a dívida?</p>
     <div class="sim-scenarios">
-      ${r.ranking.map((opt, idx) => {
-        const detail = opt.id === "rotativo"
-          ? `Pagando ${fmtNum(moneyOrZero(simRaw("cartao", "pagamento")))}% da fatura por mês${r.rotativo.finalBalance > 0.01 ? `, ainda sobrariam ${fmtBRL(r.rotativo.finalBalance)} de dívida em 24 meses` : `, a dívida acabaria no ${r.rotativo.clearedAt}º mês`}.`
-          : opt.id === "parcelamento"
-            ? `${r.parcelamento.installments}x de ${fmtBRL(r.parcelamento.payment)} a ${fmtNum(r.parcelamento.monthlyRatePct)}% a.m.`
-            : `${r.alternativa.installments}x de ${fmtBRL(r.alternativa.payment)} a ${fmtNum(r.alternativa.annualRatePct)}% a.a.`;
-        return `<div class="sim-scenario ${idx === 0 ? "sim-scenario--best" : ""}">
+      ${r.ranking.map((opt, idx) => `<div class="sim-scenario ${idx === 0 ? "sim-scenario--best" : ""}">
           <div class="sim-scenario__head">
             <b>${escapeHtml(opt.label)}</b>
-            ${idx === 0 ? `<span class="status-badge" data-ui-css="background:var(--positive-soft); color:var(--positive)">menor custo estimado</span>` : ""}
+            ${idx === 0 ? `<span class="status-badge" data-ui-css="background:var(--positive-soft); color:var(--positive-ink)">menor custo estimado</span>` : ""}
           </div>
           <p class="sim-scenario__total">${fmtBRL(opt.total)}</p>
-          <span class="sim-scenario__detail">${detail}</span>
-        </div>`;
-      }).join("")}
+          <span class="sim-scenario__detail">${detalhe[opt.id] || ""}</span>
+        </div>`).join("")}
     </div>
 
     <div class="sim-breakdown">
-      <div class="sim-breakdown__row"><span>Juros do rotativo ao ano</span><b data-ui-css="color:var(--negative)">${fmtNum(r.annualEquivalentPct)}%</b></div>
-      <div class="sim-breakdown__row"><span>Encargos acumulados no rotativo</span><b>${fmtBRL(r.rotativo.totalCharges)}</b></div>
-      <div class="sim-breakdown__row sim-breakdown__row--total"><span>Economia trocando pela opção mais barata</span><b data-ui-css="color:var(--positive)">${fmtBRL(r.savingVsRotativo)}</b></div>
+      <div class="sim-breakdown__row"><span>Fatura em aberto (quitar no vencimento)</span><b>${fmtBRL(r.payInFull.total)}</b></div>
+      <div class="sim-breakdown__row"><span>Juros do rotativo ao ano (equivalente)</span><b data-ui-css="color:var(--negative)">${fmtNum(r.annualEquivalentPct)}%</b></div>
+      <div class="sim-breakdown__row"><span>Encargos ficando no cartão</span><b data-ui-css="color:var(--negative)">${fmtBRL(r.cartaoTotalCharges)}</b></div>
+      <div class="sim-breakdown__row"><span>Encargos no crédito alternativo</span><b data-ui-css="color:var(--negative)">${fmtBRL(r.alternativa.totalCharges)}</b></div>
+      <div class="sim-breakdown__row sim-breakdown__row--total"><span>${diferenca >= 0 ? "Economia trocando a dívida" : "Trocar sairia mais caro em"}</span><b data-ui-css="color:${diferenca >= 0 ? "var(--positive-ink)" : "var(--negative)"}">${fmtBRL(Math.abs(diferenca))}</b></div>
     </div>
 
-    ${r.rotativo.cappedByLaw ? `<p class="health-note">Os encargos pararam de crescer porque a lei limita juros e encargos do rotativo a <b>100% do valor original da dívida</b>. Sem esse teto, a projeção seria ainda pior.</p>` : ""}
-    <p class="health-note">${fmtNum(moneyOrZero(simRaw("cartao", "juros")))}% ao mês equivalem a <b data-ui-css="color:var(--negative)">${fmtNum(r.annualEquivalentPct)}% ao ano</b> nesta conversão composta. Compare o custo da dívida com alternativas reais antes de decidir.</p>
+    ${r.legal.chargeCapReached ? `<p class="health-note">Os encargos pararam de crescer porque a lei limita juros e encargos do rotativo e do parcelamento da fatura a <b>100% do valor original da dívida</b> (Lei 14.690/2023). Sem esse teto, a projeção seria pior.</p>` : ""}
+    ${r.parcelamento.rateSource === "premissa" ? `<p class="inline-alert">${svgIcon("info", 14)} Você não informou a taxa do parcelamento; usei ${fmtNum(r.parcelamento.monthlyRatePct)}% a.m., ordem de grandeza das taxas médias de cartão parcelado publicadas pelo Banco Central. Troque pela taxa da sua fatura.</p>` : ""}
+    <p class="health-note">${fmtNum(r.monthlyRatePct)}% ao mês equivalem a <b data-ui-css="color:var(--negative)">${fmtNum(r.annualEquivalentPct)}% ao ano</b>. O rotativo dura um único ciclo por regra (Resolução CMN 4.549/2017): depois dele o banco é obrigado a oferecer o parcelamento, e é por isso que não existe aqui um cenário de "rotativo por 12 meses". Pagar a fatura inteira no vencimento custa ${fmtBRL(r.payInFull.total)} e zera os encargos.</p>
+    <p class="footnote">O IOF do crédito (0,38% mais 0,0082% ao dia) incide nas duas saídas e não entra na conta. Confirme CET, prazo e parcela de cada proposta antes de trocar a dívida.</p>
   </div>`;
 }
 
 /* ----------------------------------------------------------- consórcio */
 function renderSimConsortium() {
   const credito = simMoney("consorcio", "credito");
+  if (!(credito > 0)) {
+    return `<div class="card">${renderEmptyState("briefcase", "Informe o valor da carta de crédito para ver parcela, custo e a comparação com financiar.")}</div>`;
+  }
   const prazo = simInt("consorcio", "prazo", 1, 240);
+  const reajuste = moneyOrZero(simRaw("consorcio", "reajuste"));
   const r = simConsortium({
     credit: credito, months: prazo,
     adminPct: moneyOrZero(simRaw("consorcio", "admin")),
     reserveFundPct: moneyOrZero(simRaw("consorcio", "reserva")),
     lancePct: moneyOrZero(simRaw("consorcio", "lance")),
     contemplationMonth: simInt("consorcio", "contemplacao", 1, prazo),
+    annualAdjustmentPct: reajuste,
   });
   const fin = simLoan({
     principal: credito, months: prazo,
@@ -555,6 +661,11 @@ function renderSimConsortium() {
     system: "price",
   });
   const consorcioMaisBarato = r.totalPaid < fin.totalPaid;
+  const faixa = r.effectiveRange || {};
+  const temFaixa = faixa.bestMonthlyPct != null && faixa.worstMonthlyPct != null;
+  const custoEfetivo = r.effectiveAnnualPct != null
+    ? `${fmtNum(r.effectiveAnnualPct)}% a.a. (${fmtNum(r.effectiveMonthlyPct)}% a.m.)`
+    : "Não há taxa única neste cenário";
 
   return `<div class="card">
     <p class="card-title">Consórcio × financiamento</p>
@@ -565,16 +676,21 @@ function renderSimConsortium() {
     </div>
 
     <div class="sim-breakdown">
-      <div class="sim-breakdown__row"><span>Custo total em % da carta</span><b>${fmtNum(r.costPct)}%</b></div>
-      <div class="sim-breakdown__row"><span>Custo efetivo do consórcio</span><b>${r.effectiveAnnualPct != null ? `${fmtNum(r.effectiveAnnualPct)}% a.a.` : "Sem dados"}</b></div>
+      <div class="sim-breakdown__row"><span>Custo total em % da carta recebida</span><b>${fmtNum(r.costPct)}%</b></div>
+      <div class="sim-breakdown__row"><span>Carta recebida no ${r.contemplationMonth}º mês</span><b>${fmtBRL(r.scenario.creditReceived)}</b></div>
+      ${reajuste > 0 ? `<div class="sim-breakdown__row"><span>Última parcela, após os reajustes</span><b>${fmtBRL(r.scenario.lastPayment)}</b></div>` : ""}
       ${r.lance > 0 ? `<div class="sim-breakdown__row"><span>Lance previsto</span><b>${fmtBRL(r.lance)}</b></div>` : ""}
-      <div class="sim-breakdown__row sim-breakdown__row--total"><span>Financiamento equivalente (Price)</span><b>${fmtBRL(fin.totalPaid)} · ${fmtBRL(fin.payment)}/mês</b></div>
+      <div class="sim-breakdown__row"><span>Custo efetivo com contemplação no ${r.contemplationMonth}º mês</span><b>${custoEfetivo}</b></div>
+      ${temFaixa ? `<div class="sim-breakdown__row"><span>Faixa conforme a contemplação</span><b>${fmtNum(faixa.bestMonthlyPct)}% a.m. (início) a ${fmtNum(faixa.worstMonthlyPct)}% a.m. (fim)</b></div>` : ""}
+      <div class="sim-breakdown__row sim-breakdown__row--total"><span>Financiamento equivalente (Price, ${prazo} meses)</span><b>${fmtBRL(fin.totalPaid)} · ${fmtBRL(fin.payment)}/mês</b></div>
     </div>
 
     <p class="health-note">${consorcioMaisBarato
-      ? `Em dinheiro, o consórcio sai <b data-ui-css="color:var(--positive)">${fmtBRL(subMoney(fin.totalPaid, r.totalPaid))}</b> mais barato que o financiamento. O preço disso é o tempo: sem lance, a carta só chega na contemplação; estimada aqui no <b>${r.contemplationMonth}º mês</b>. Consórcio é para quem pode esperar.`
+      ? `Em dinheiro, o consórcio sai <b data-ui-css="color:var(--positive-ink)">${fmtBRL(subMoney(fin.totalPaid, r.totalPaid))}</b> mais barato que o financiamento. O preço disso é o tempo: sem lance, a carta só chega na contemplação, estimada aqui no <b>${r.contemplationMonth}º mês</b>, e até lá você paga sem ter o bem. Consórcio é para quem pode esperar.`
       : `Neste cenário o financiamento sai <b>${fmtBRL(subMoney(r.totalPaid, fin.totalPaid))}</b> mais barato, e ainda entrega o bem hoje. A taxa de administração de ${fmtNum(moneyOrZero(simRaw("consorcio", "admin")))}% pesa mais do que parece porque incide sobre a carta inteira.`}</p>
-    <p class="footnote">As parcelas do consórcio são reajustadas quando a carta é corrigida (INCC/IPCA), e o fundo de reserva pode ser devolvido no fim do grupo. Trate o número acima como ordem de grandeza, não como contrato.</p>
+    ${r.effectiveAnnualPct == null ? `<p class="health-note">Contemplado no meio do prazo, o fluxo não se parece nem com empréstimo (receber antes, pagar depois) nem com poupança (pagar antes, receber depois), e não existe uma taxa única que o descreva. A faixa acima mostra os dois extremos: contemplado no início, o consórcio custa como um crédito; contemplado no fim, ele devolve menos do que recebeu.</p>` : ""}
+    ${reajuste === 0 ? `<p class="inline-alert">${svgIcon("info", 14)} Sem reajuste informado, a carta e as parcelas ficam paradas no valor de hoje. Em contratos longos isso subestima o total pago: informe o índice esperado do grupo no campo "Reajuste anual da carta".</p>` : ""}
+    <p class="footnote">O fundo de reserva pode ser devolvido no fim do grupo, e o financiamento comparado é pelo valor de hoje da carta, com o bem entregue de imediato. Trate os números como ordem de grandeza, não como contrato.</p>
   </div>`;
 }
 
@@ -621,6 +737,8 @@ function renderSimFgts() {
 function renderSimRetirement() {
   const rates = marketRatesOf(state.data);
   const idade = simInt("aposentadoria", "idade", 16, 90);
+  const idadeAposInformada = simInt("aposentadoria", "idadeapos", 0, 120);
+  const expectativaInformada = simInt("aposentadoria", "expectativa", 0, 130);
   const r = simRetirement({
     currentAge: idade,
     retireAge: simInt("aposentadoria", "idadeapos", idade + 1, 100),
@@ -632,28 +750,42 @@ function renderSimRetirement() {
     rates,
   });
 
+  // O motor corrige idades impossíveis sozinho; a tela precisa dizer que
+  // corrigiu, senão o resultado parece responder a uma pergunta que não foi
+  // feita.
+  const avisos = [];
+  if (idadeAposInformada <= idade) avisos.push(`A idade para parar precisa ser maior que a sua idade atual; a conta usou ${r.retireAge} anos.`);
+  if (expectativaInformada <= r.retireAge) avisos.push(`"Planejar até os" precisa ser maior que a idade de parar; a conta usou ${r.lifeExpectancy} anos.`);
+
+  const rendaPerpetua = r.incomePerpetual != null ? fmtBRL(r.incomePerpetual) : "Não existe sem juro real";
+
   return `<div class="card">
     <p class="card-title">Aos ${r.retireAge} anos</p>
     <div class="invest-stats">
       ${simStat("Patrimônio acumulado", fmtBRL(r.atRetirement), { highlight: true })}
-      ${simStat("Renda mensal possível", fmtBRL(r.incomeDepleting), { interest: true })}
-      ${simStat("Renda sem consumir o principal", fmtBRL(r.incomePerpetual))}
+      ${simStat(`Renda mensal até os ${r.lifeExpectancy}`, fmtBRL(r.incomeDepleting), { interest: true })}
+      ${simStat("Renda sem consumir o principal", rendaPerpetua)}
     </div>
+
+    ${avisos.map((a) => `<p class="inline-alert">${svgIcon("info", 14)} ${a}</p>`).join("")}
 
     <div class="sim-breakdown">
       <div class="sim-breakdown__row"><span>Você teria aportado</span><b>${fmtBRL(r.contributed)}</b></div>
-      <div class="sim-breakdown__row"><span>Juros no período</span><b data-ui-css="color:var(--positive)">${fmtBRL(r.interestEarned)}</b></div>
-      <div class="sim-breakdown__row"><span>Rendimento real usado</span><b>${fmtNum(r.realAnnualPct)}% a.a. (nominal ${fmtNum(r.nominalAnnualPct)}% − inflação ${fmtNum(rates.ipca)}%)</b></div>
+      <div class="sim-breakdown__row"><span>Juros reais no período</span><b data-ui-css="color:${r.interestEarned >= 0 ? "var(--positive-ink)" : "var(--negative)"}">${fmtBRL(r.interestEarned)}</b></div>
+      <div class="sim-breakdown__row"><span>Rendimento real usado</span><b>${fmtNum(r.realAnnualPct)}% a.a. (${fmtNum(r.nominalAnnualPct)}% nominais descontada a inflação de ${fmtNum(rates.ipca)}%)</b></div>
+      <div class="sim-breakdown__row"><span>Anos acumulando · anos de saque</span><b>${r.accumMonths / 12} · ${r.drawMonths / 12}</b></div>
       ${r.desiredIncome > 0 ? `<div class="sim-breakdown__row"><span>Capital para a renda desejada</span><b>${fmtBRL(r.capitalDepleting)}</b></div>` : ""}
+      ${r.desiredIncome > 0 && r.capitalPerpetual != null ? `<div class="sim-breakdown__row"><span>Capital para a renda sem tocar no principal</span><b>${fmtBRL(r.capitalPerpetual)}</b></div>` : ""}
       ${r.desiredIncome > 0 ? `<div class="sim-breakdown__row sim-breakdown__row--total"><span>Aporte mensal necessário</span><b>${fmtBRL(r.requiredMonthly)}</b></div>` : ""}
     </div>
 
     ${r.realRateNegative ? `<p class="ai-error">${svgIcon("alertTriangle", 14)} Com rendimento abaixo da inflação, o patrimônio encolhe em poder de compra por mais que você aporte. Revise a taxa esperada ou o produto.</p>` : ""}
+    ${!r.perpetualAvailable && !r.realRateNegative ? `<p class="health-note">${r.perpetualUnavailableReason}</p>` : ""}
 
     ${r.desiredIncome > 0 ? (r.onTrack
-      ? `<p class="health-note">${svgIcon("checkCircle", 14)} No ritmo atual você chega lá: a renda projetada de <b data-ui-css="color:var(--positive)">${fmtBRL(r.incomeDepleting)}</b> cobre os ${fmtBRL(r.desiredIncome)} que você quer, consumindo o patrimônio até os ${r.lifeExpectancy} anos. Se quiser deixar herança ou viver mais que o previsto, o número a mirar é <b>${fmtBRL(r.capitalPerpetual)}</b>, que sustenta a renda sem tocar no principal.</p>`
+      ? `<p class="health-note">${svgIcon("checkCircle", 14)} No ritmo atual você chega lá: a renda projetada de <b data-ui-css="color:var(--positive-ink)">${fmtBRL(r.incomeDepleting)}</b> cobre os ${fmtBRL(r.desiredIncome)} que você quer, consumindo o patrimônio até os ${r.lifeExpectancy} anos.${r.capitalPerpetual != null ? ` Se quiser deixar herança ou viver mais que o previsto, o número a mirar é <b>${fmtBRL(r.capitalPerpetual)}</b>, que sustenta a renda sem tocar no principal.` : ""}</p>`
       : `<p class="health-note">Faltam <b data-ui-css="color:var(--negative)">${fmtBRL(r.gapIncome)}</b> por mês para a renda que você quer. Para fechar a conta, o aporte precisaria ser de <b>${fmtBRL(r.requiredMonthly)}</b>; hoje ele é de ${fmtBRL(r.monthlyContribution)}, uma diferença de <b>${fmtBRL(r.contributionGap)}</b> por mês. Adiar a parada em poucos anos também resolve, porque a diferença é composta.</p>`) : ""}
 
-    <p class="footnote">Tudo em valores de hoje: a projeção desconta a inflação informada para facilitar a comparação do poder de compra ao longo do tempo.</p>
+    <p class="footnote">Tudo em valores de hoje: a projeção desconta a inflação informada. O rendimento nominal deve ser o líquido de imposto e taxas do produto onde o dinheiro ficará. Não entra aqui o benefício do INSS.</p>
   </div>`;
 }

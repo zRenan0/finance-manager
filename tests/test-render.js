@@ -662,6 +662,57 @@ console.log("\n5c. Fluxo do Módulo 5 pelos handlers reais");
     auditHtml(`sim:${simId}`, out);
   });
 
+  // Renda fixa: o campo "taxa" segue o produto. "110" é % do CDI para CDB; ao
+  // trocar para Tesouro Selic o rascunho antigo cai e o padrão vira o ágio.
+  click("sim-select", { value: "rendafixa" });
+  type("sim-field", "120", "rendafixa.taxa");
+  check("a taxa digitada vale para o CDB", run("simRaw('rendafixa', 'taxa')") === "120");
+  const cdbHtml = run("renderSimulatorsScreen()");
+  check("o CDB pede percentual do CDI", cdbHtml.includes("Percentual do CDI") && cdbHtml.includes("% do CDI"));
+  check("o CDB mostra a LCI que empataria", /LCI ou LCA isenta de <b>[\d,]+% do CDI<\/b>/.test(cdbHtml));
+  click("sim-set", { id: "rendafixa.produto", value: "selic" });
+  check("trocar o produto descarta a taxa do produto anterior", run("state.sim.values['rendafixa.taxa']") === undefined);
+  check("o Tesouro Selic nasce com o ágio padrão, não com 110", run("simRaw('rendafixa', 'taxa')") === "0,05");
+  const selicHtml = run("renderSimulatorsScreen()");
+  check("o Tesouro Selic pede ágio sobre a Selic e custódia da B3", selicHtml.includes("sobre a Selic") && selicHtml.includes("0,20% ao ano de custódia"));
+  click("sim-set", { id: "rendafixa.produto", value: "poupanca" });
+  const poupHtml = run("renderSimulatorsScreen()");
+  check("a poupança não tem campo de taxa", !poupHtml.includes('data-id="rendafixa.taxa"'));
+  check("a poupança explica a regra que usou", /0,5% ao mês mais TR|70% da Selic mais TR/.test(poupHtml));
+  click("sim-set", { id: "rendafixa.produto", value: "lci" });
+  const lciHtml = run("renderSimulatorsScreen()");
+  check("a LCI mostra o CDB que empataria", /CDB tributado precisaria pagar <b>[\d,]+% do CDI<\/b>/.test(lciHtml));
+  click("sim-set", { id: "rendafixa.produto", value: "cdi" });
+
+  // Cartão: os dois caminhos reais (ficar no cartão × trocar a dívida), com a
+  // fase do rotativo descrita pelo que de fato acontece.
+  click("sim-select", { value: "cartao" });
+  const cartaoHtml = run("renderSimulatorsScreen()");
+  check("o cartão mostra ficar no cartão e trocar a dívida", cartaoHtml.includes("Ficar no cartão") && cartaoHtml.includes("Trocar por crédito mais barato"));
+  check("o detalhe do cartão descreve o ciclo e o parcelamento obrigatório", /ficam um ciclo no rotativo/.test(cartaoHtml) && /parcelamento obrigatório/.test(cartaoHtml));
+  check("a referência de quitar no vencimento aparece", cartaoHtml.includes("quitar no vencimento"));
+  type("sim-field", "", "cartao.jurosparc");
+  const semTaxa = run("renderSimulatorsScreen()");
+  check("sem taxa do parcelamento, a premissa é declarada na tela", semTaxa.includes("Você não informou a taxa do parcelamento"));
+  type("sim-field", "7", "cartao.jurosparc");
+
+  // Financiamento sem nada a financiar.
+  click("sim-select", { value: "financiamento" });
+  type("sim-field", "300000", "financiamento.entrada");
+  check("entrada igual ao bem diz que não há o que financiar", run("renderSimulatorsScreen()").includes("Não há o que financiar"));
+  type("sim-field", "60000", "financiamento.entrada");
+
+  // Aposentadoria com idades impossíveis: a tela avisa a correção.
+  click("sim-select", { value: "aposentadoria" });
+  type("sim-field", "25", "aposentadoria.idadeapos");
+  const aposHtml = run("renderSimulatorsScreen()");
+  check("idade de parar menor que a atual gera aviso", aposHtml.includes("precisa ser maior que a sua idade atual"));
+  type("sim-field", "60", "aposentadoria.idadeapos");
+  type("sim-field", "2", "aposentadoria.taxa");
+  const semJuroReal = run("renderSimulatorsScreen()");
+  check("sem juro real a renda perpétua é dita inexistente, não zero", semJuroReal.includes("Não existe sem juro real") && !semJuroReal.includes("Renda sem consumir o principal</span>\n    <b>R$ 0,00"));
+  type("sim-field", "11", "aposentadoria.taxa");
+
   click("sim-select", { value: "entrada-amortizacao" });
   const comparaEntrada = run("renderSimulatorsScreen()");
   check("comparador responde com o menor custo estimado", comparaEntrada.includes("Menor custo estimado"));

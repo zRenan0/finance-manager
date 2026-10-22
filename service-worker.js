@@ -141,8 +141,13 @@ const APP_SHELL = [
   // pré-cache porque o app promete funcionar inteiro offline: o ganho do corte
   // é o caminho crítico da primeira pintura, não o total baixado.
   "js/modules/app.extras.generated.js",
+  // As duas famílias do app, em WOFF2 variável (ver fonts/README.md). Entram
+  // no shell para a primeira abertura offline já sair com a tipografia certa.
+  "fonts/inter-latin-wght-normal.woff2",
+  "fonts/space-grotesk-latin-wght-normal.woff2",
   "icons/icon-192.png",
   "icons/icon-512.png",
+  "icons/icon-maskable-512.png",
 ];
 
 /* ==============================================================================
@@ -191,8 +196,9 @@ const LANDING_PAGES = ["./", "landing.html"];
 const REQUIRED_PRECACHE = [...APP_SHELL, ...LANDING_ASSETS, ...LANDING_PAGES];
 
 // O cache de fontes de terceiros deixou de existir junto com a requisição a
-// `fonts.googleapis.com`. As fontes agora são locais (ver fonts/README.md) e
-// entram no cache do shell como qualquer outro arquivo do próprio site.
+// `fonts.googleapis.com`. As fontes agora são arquivos do próprio site, em
+// `fonts/` (ver fonts/README.md), e entram no cache do shell como qualquer
+// outro arquivo pré-carregado.
 const FONT_HOSTS = [];
 
 /* ------------------------------------------------------------------ *

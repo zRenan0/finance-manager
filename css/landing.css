@@ -2735,6 +2735,11 @@ html.lp-locked, html.lp-locked body.lp { overflow: hidden; }
 
   .lp-vs__grid { grid-template-columns: minmax(0, 1fr); }
   .lp-dock { display: flex; }
+  /* Com a doca ligada (js/landing.js marca <html data-lp-dock="on">), o
+     "Começar grátis" do cabeçalho se recolhe: na rolagem do celular havia
+     dois botões iguais presos na tela, um em cada borda. O do cabeçalho
+     volta assim que a doca sai, no topo e no fechamento da página. */
+  [data-lp-dock="on"] .lp-nav__actions > .lp-btn--primary { display: none; }
 }
 
 @media (max-width: 720px) {

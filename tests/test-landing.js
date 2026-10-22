@@ -327,5 +327,15 @@ check("há tratamento de custo de pintura para ponteiro grosso",
 check("o campo de etiquetas do caos é reduzido antes de encostar na borda",
   /\.lp-caos__field \{ --k: 0\.82; \}/.test(folhaRegras) && /\.lp-caos__field \{ --k: 0\.72; \}/.test(folhaRegras));
 
+// UM "COMEÇAR GRÁTIS" FIXO POR VEZ NO CELULAR.
+// A doca inferior e o botão do cabeçalho ficavam presos na tela ao mesmo tempo
+// durante a rolagem. O script marca o <html> enquanto a doca está ligada e a
+// folha recolhe o botão do cabeçalho só nesse intervalo, dentro da mesma faixa
+// de largura em que a doca existe.
+check("o landing.js marca o documento enquanto a doca está ligada",
+  /setAttribute\("data-lp-dock", "on"\)/.test(script) && /removeAttribute\("data-lp-dock"\)/.test(script));
+check("a folha recolhe o botão do cabeçalho enquanto a doca está ligada",
+  /\[data-lp-dock="on"\] \.lp-nav__actions > \.lp-btn--primary \{ display: none; \}/.test(folhaRegras));
+
 console.log(`\n${fail ? "FALHAS ENCONTRADAS" : "TODOS OS TESTES PASSARAM"}: ${ok} ok, ${fail} falha(s)`);
 process.exit(fail ? 1 : 0);

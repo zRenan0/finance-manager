@@ -209,20 +209,22 @@ async function main() {
   const indexHtml = read("index.html");
   check("o HTML não busca fonte de terceiro", !/fonts\.(googleapis|gstatic)\.com/.test(indexHtml));
   check("a CSP não libera domínio de fonte externa", !/fonts\.(googleapis|gstatic)\.com/.test(cspVercel));
-  // A guarda aqui é "a fonte não pode voltar a ser buscada fora", e ela
-  // exigia `../fonts/` em css/base.css. Isso presumia arquivo WOFF2 no
-  // repositório, e nunca houve nenhum: a referência rendia 404 por abertura
-  // para quem não tivesse a família instalada, e a pilha do sistema assumia
-  // do mesmo jeito. As duas famílias passaram a ser resolvidas só por
-  // `local()`, como na página comercial, e a verificação passou a medir o
-  // que de fato importa: que a folha declare fonte local e não vá buscar
-  // arquivo de fonte em endereço nenhum.
-  // A verificação de AUSÊNCIA olha só as regras: o comentário desta folha
-  // descreve, de propósito, o `url()` que saiu e como devolvê-lo. Sem a
-  // limpeza, a documentação da correção reprovaria a própria correção.
+  // As duas famílias são servidas de `fonts/`, do próprio site. A guarda é
+  // dupla: todo arquivo de fonte que a folha referencia precisa existir no
+  // repositório (uma referência quebrada rendia 404 por abertura e a pilha do
+  // sistema assumia do mesmo jeito), e nenhum pode vir de outro endereço. O
+  // comentário da folha sai antes da leitura, porque ele descreve a regra.
   const baseCss = read("css/base.css").replace(/\/\*[\s\S]*?\*\//g, "");
-  check("as fontes são declaradas localmente", /@font-face/.test(baseCss) && /src:\s*local\(/.test(baseCss));
-  check("a folha do app não busca arquivo de fonte", !/url\([^)]*\.(?:woff2?|ttf|otf)/.test(baseCss));
+  const fontesDaFolha = Array.from(baseCss.matchAll(/url\(["']?([^"')]+\.(?:woff2?|ttf|otf))["']?\)/g)).map((m) => m[1]);
+  check("as fontes são declaradas pela folha do app", /@font-face/.test(baseCss) && fontesDaFolha.length >= 2, fontesDaFolha.join(", "));
+  check("todo arquivo de fonte referenciado existe em fonts/",
+    fontesDaFolha.every((ref) => /^\.\.\/fonts\//.test(ref) && fs.existsSync(path.join(ROOT, "css", ref))), fontesDaFolha.join(", "));
+  check("nenhuma fonte vem de outro endereço", !/url\(["']?https?:/.test(baseCss));
+  const licencas = ["fonts/LICENSE-Inter.txt", "fonts/LICENSE-SpaceGrotesk.txt"];
+  check("a licença de cada família acompanha os arquivos",
+    licencas.every((f) => fs.existsSync(path.join(ROOT, f)) && /SIL Open Font License/.test(read(f))));
+  const sw = read("service-worker.js");
+  check("as fontes entram no pré-cache do shell", fontesDaFolha.every((ref) => sw.includes(`"${ref.replace(/^\.\.\//, "")}"`)));
 
   // A promessa de abrir por file:// nunca funcionou: módulos ES, service worker
   // e IndexedDB não operam nessa origem.

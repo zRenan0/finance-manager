@@ -157,6 +157,9 @@ function renderFinanceResult(r) {
       <div class="health-stat"><span>Juros/taxas</span><b data-ui-css="color:${interestColor}">${r.interestCost >= 0 ? "+" : ""}${fmtBRL(r.interestCost)}${r.valorBem > 0 ? ` (${r.interestPct.toFixed(1)}%)` : ""}</b></div>
       <div class="health-stat"><span>${r.numParcelas}x de</span><b>${fmtBRL(r.valorParcela)}</b></div>
     </div>
+    ${r.impliedMonthlyRatePct != null ? `<p class="health-note">${r.impliedMonthlyRatePct > 0.005
+      ? `Nessas parcelas há uma taxa embutida de <b data-ui-css="color:var(--negative)">${fmtNum(r.impliedMonthlyRatePct)}% ao mês</b>${r.impliedAnnualRatePct != null ? ` (${fmtNum(r.impliedAnnualRatePct)}% ao ano)` : ""} sobre os ${fmtBRL(r.financed)} financiados. É o número para comparar com o CET de um empréstimo ou com o desconto à vista.`
+      : `As parcelas somam o próprio valor financiado: não há juros embutidos. Vale perguntar pelo desconto à vista, que costuma existir quando o parcelamento é "sem juros".`}</p>` : ""}
 
     ${r.commitmentPct != null ? `
     <p class="card-title" data-ui-css="margin-top:16px">Comprometimento da renda</p>

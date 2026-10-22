@@ -412,7 +412,13 @@
     aoRolar(function (y, altura) {
       var passouHero = y > altura * 0.85;
       var chegouNoFim = fechamento ? fechamento.getBoundingClientRect().top < altura : false;
-      doca.classList.toggle("is-on", passouHero && !chegouNoFim);
+      var ligada = passouHero && !chegouNoFim;
+      doca.classList.toggle("is-on", ligada);
+      // Enquanto a doca está na tela, o botão do cabeçalho some no celular:
+      // dois "Começar grátis" fixos ao mesmo tempo era repetição, não reforço.
+      // A folha lê o atributo (ver `[data-lp-dock="on"]` em css/landing.css).
+      if (ligada) document.documentElement.setAttribute("data-lp-dock", "on");
+      else document.documentElement.removeAttribute("data-lp-dock");
     });
   }
 

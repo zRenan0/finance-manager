@@ -25,7 +25,7 @@ const SUBS_VIEWS = [
   { id: "assinaturas", label: "Assinaturas" },
   { id: "essenciais", label: "Essenciais" },
   { id: "variaveis", label: "Recorrentes" },
-  { id: "ignoradas", label: "Sem acompanhar" },
+  { id: "ignoradas", label: "Ignoradas" },
 ];
 
 function renderSubscriptionsScreen() {
@@ -315,7 +315,9 @@ function renderSubItem(s, ignored, income) {
         ? `Tratado como <b>compromisso essencial</b>${s.essentialSource === "voce" ? ", porque você classificou assim" : `, pelo tipo reconhecido (${escapeHtml(s.typeLabel)})`}. Fica fora do alerta de assinaturas e do custo anual delas; continua inteiro no comprometido do mês.`
         : `Tratado como <b>assinatura</b>${s.essentialSource === "voce" ? ", porque você classificou assim" : ""}: entra no alerta de assinaturas e no custo de 12 meses.`}</p>` : ""}
       ${s.reviewedAt ? `<p class="sub-item__note">Você revisou este item em ${fmtDateFull(s.reviewedAt)}${s.daysSinceReview > 0 ? ` (há ${s.daysSinceReview} ${s.daysSinceReview === 1 ? "dia" : "dias"})` : ""}. A marcação guarda só a data; nenhum juízo sobre a assinatura.</p>` : ""}
-      ${s.declaredOnly ? `<p class="sub-item__note">Este compromisso vem da marcação "gasto fixo mensal" no lançamento, não de um histórico de cobranças. A partir da segunda cobrança o app passa a usar as datas e os valores reais.</p>` : ""}
+      ${s.declaredOnly ? `<p class="sub-item__note">${s.irregularHistory
+        ? `As datas das ${s.occurrences} cobranças registradas não formam um intervalo regular, então a cadência mensal vem da marcação "gasto fixo mensal" no lançamento, e o valor é o da última cobrança. Quando as datas passarem a se repetir, o app usa o intervalo real.`
+        : `Este compromisso vem da marcação "gasto fixo mensal" no lançamento, não de um histórico de cobranças. A partir da segunda cobrança o app passa a usar as datas e os valores reais.`}</p>` : ""}
       <div class="sub-item__actions">
         ${ignored
           ? `<button class="btn btn--primary btn--sm" data-action="sub-track" data-id="${escapeHtml(s.key)}">Voltar a acompanhar</button>`

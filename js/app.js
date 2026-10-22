@@ -1570,7 +1570,7 @@ function renderBackHeader(title) {
 function renderSideNav() {
   return `<nav class="side-nav" aria-label="Navegação lateral">
     <div class="side-nav__brand">
-      <div class="brand-mark">${svgIcon("wallet", 19)}</div>
+      <div class="brand-mark">${svgIcon("cofre", 21)}</div>
       <span>Cofre</span>
     </div>
     ${NAV.map((item) => `

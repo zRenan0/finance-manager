@@ -107,6 +107,19 @@ function simulateFinancingImpact(data, params, goalId) {
   const interestCost = subMoney(totalPaid, valorBem);
   const interestPct = safePct(interestCost, valorBem);
 
+  // A taxa que está escondida em "12x de R$ 450". É a TIR do fluxo (valor
+  // financiado hoje contra as parcelas), a mesma conta do CET nos
+  // simuladores. Quem ouve "só 2% ao mês" raramente ouve "27% ao ano".
+  // `solveIrr`/`monthlyToAnnual` moram em simulators.js; fora do app (ou sem
+  // esse arquivo carregado) a leitura simplesmente não existe.
+  const financed = Math.max(0, subMoney(valorBem, entrada));
+  const impliedMonthlyRate = typeof solveIrr === "function" && financed > 0 && valorParcela > 0
+    ? solveIrr(financed, new Array(numParcelas).fill(valorParcela))
+    : null;
+  const impliedMonthlyRatePct = impliedMonthlyRate == null ? null : impliedMonthlyRate * 100;
+  const impliedAnnualRatePct = impliedMonthlyRate == null || typeof monthlyToAnnual !== "function"
+    ? null : monthlyToAnnual(impliedMonthlyRate);
+
   const fixedIncome = roundMoney(data.monthlyIncome || 0);
   const commitmentPct = fixedIncome > 0 ? safePct(valorParcela, fixedIncome) : null;
   const commitmentWarning = commitmentPct != null && commitmentPct > 20;
@@ -128,6 +141,7 @@ function simulateFinancingImpact(data, params, goalId) {
   return {
     valorBem, entrada, numParcelas, valorParcela,
     totalPaid, interestCost, interestPct,
+    financed, impliedMonthlyRatePct, impliedAnnualRatePct,
     commitmentPct, commitmentWarning,
     commitmentNow, commitmentBefore, commitmentAfter,
     ...monthlyImpact,
