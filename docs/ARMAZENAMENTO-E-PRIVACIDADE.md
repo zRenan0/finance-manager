@@ -121,6 +121,7 @@ repetir com segurança uma chamada cuja resposta possa ter se perdido.
 | `financas-cache-v77` | HTML do app, CSS, JavaScript, PDF.js, fontes locais, manifesto e ícones |
 | `financas-pages-v77` | Landing e outras navegações públicas |
 | `financas-fonts-v77` | Reserva para fontes externas; vazio hoje porque `FONT_HOSTS` está vazio |
+| `financas-share-v77` | Ponte do "Compartilhar com o Cofre" (Android): o texto ou arquivo compartilhado fica aqui entre o POST recebido pelo service worker e a abertura do app, que lê e apaga o pacote na hora. Nada é enviado para fora do aparelho |
 
 No pacote publicado, cada nome recebe ainda o SHA-256 integral da publicação
 depois de `v77`. Isso faz duas versões coexistirem durante a instalação sem que

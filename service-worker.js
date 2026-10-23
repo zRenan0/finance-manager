@@ -104,6 +104,15 @@ const CACHE_NAME = "financas-cache-" + VERSION;
 // `handleNavigate` e `isAppShell`, e o teste em tests/test-landing.js.
 const PAGE_CACHE = "financas-pages-" + VERSION;
 const FONT_CACHE = "financas-fonts-" + VERSION;
+// COMPARTILHAR COM O COFRE (Web Share Target). O Android entrega o conteúdo
+// compartilhado como um POST para `index.html?compartilhar=1`. Um arquivo
+// estático não responde POST, e nem deveria: quem recebe é este worker, que
+// guarda texto e arquivos neste cache, responde com um redirecionamento para o
+// app e o app consome e apaga o pacote na abertura (ver consumeSharedPayload
+// em js/app.js). Nada sai do aparelho; o cache é só a ponte entre as duas
+// requisições.
+const SHARE_CACHE = "financas-share-" + VERSION;
+const SHARE_META_KEY = "./__compartilhado/meta";
 const NAV_TIMEOUT_MS = 3500;
 
 const APP_SHELL = [
@@ -251,7 +260,7 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(
     (async () => {
       const keys = await caches.keys();
-      const manter = [CACHE_NAME, PAGE_CACHE, FONT_CACHE];
+      const manter = [CACHE_NAME, PAGE_CACHE, FONT_CACHE, SHARE_CACHE];
       await Promise.all(
         keys
           .filter((k) => k.startsWith("financas-") && manter.indexOf(k) === -1)
@@ -429,8 +438,43 @@ async function handleAsset(event) {
 /* ------------------------------------------------------------------ *
  * Roteamento
  * ------------------------------------------------------------------ */
+function isShareTarget(req) {
+  if (req.method !== "POST") return false;
+  let url;
+  try { url = new URL(req.url); } catch (_) { return false; }
+  return url.origin === self.location.origin
+    && url.pathname.endsWith("/index.html")
+    && url.searchParams.get("compartilhar") === "1";
+}
+
+async function handleShareTarget(event) {
+  try {
+    const form = await event.request.formData();
+    const cache = await caches.open(SHARE_CACHE);
+    const meta = {
+      title: String(form.get("titulo") || ""),
+      text: String(form.get("texto") || ""),
+      url: String(form.get("endereco") || ""),
+      receivedAt: new Date().toISOString(),
+      files: [],
+    };
+    const arquivos = form.getAll("arquivos").filter((f) => f && typeof f === "object" && typeof f.arrayBuffer === "function");
+    for (let i = 0; i < arquivos.length && i < 5; i++) {
+      const f = arquivos[i];
+      const key = `./__compartilhado/arquivo-${i}`;
+      await cache.put(key, new Response(f, { headers: { "Content-Type": f.type || "application/octet-stream" } }));
+      meta.files.push({ key, name: f.name || "", type: f.type || "", size: f.size || 0 });
+    }
+    await cache.put(SHARE_META_KEY, new Response(JSON.stringify(meta), { headers: { "Content-Type": "application/json" } }));
+  } catch (_) {
+    // Sem pacote legível o app abre normal e diz que nada chegou.
+  }
+  return Response.redirect("./index.html?compartilhado=1", 303);
+}
+
 self.addEventListener("fetch", (event) => {
   const req = event.request;
+  if (isShareTarget(req)) { event.respondWith(handleShareTarget(event)); return; }
   if (req.method !== "GET") return;
 
   let url;

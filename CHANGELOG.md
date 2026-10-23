@@ -2,6 +2,20 @@
 
 ## Não publicado
 
+### Compartilhar com o Cofre
+
+- **O comprovante vai para o app pelo menu Compartilhar do Android.** Pagou
+  um Pix, recebeu a notificação do cartão, baixou a fatura em PDF: toque em
+  Compartilhar, escolha Cofre e pronto. Texto vira um lançamento
+  pré-preenchido (valor, data, quem recebeu, meio de pagamento e categoria pela
+  memória), extrato e fatura caem direto na importação, e foto com QR passa
+  pelo leitor de QR sem abrir a câmera. A tela de lançamento diz de onde veio
+  e mostra o texto recebido para conferência.
+- Funciona com o app instalado (é assim que o Android oferece destinos de
+  compartilhamento); no navegador comum e no iPhone nada muda. Nada sai do
+  aparelho: o service worker guarda o pacote num cache próprio
+  (`financas-share`) e o app apaga ao ler.
+
 ### Auditoria externa: doze pontos de leitura, proteção e primeira experiência
 
 - **Patrimônio deixou de concluir "o resto perde para a inflação parado".** O

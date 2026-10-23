@@ -259,8 +259,8 @@ check("os estáticos da landing entram no cache normal",
 check("a promoção exige todo o pacote declarado",
   /const REQUIRED_PRECACHE = \[\.\.\.APP_SHELL, \.\.\.LANDING_ASSETS, \.\.\.LANDING_PAGES\]/.test(sw)
   && /obrigatoriosQuebrados/.test(sw) && /caches\.delete\(CACHE_NAME\)/.test(sw));
-check("a limpeza da ativação preserva os três baldes",
-  /const manter = \[CACHE_NAME, PAGE_CACHE, FONT_CACHE\]/.test(sw));
+check("a limpeza da ativação preserva os quatro baldes",
+  /const manter = \[CACHE_NAME, PAGE_CACHE, FONT_CACHE, SHARE_CACHE\];/.test(sw));
 check("a versão do cache foi promovida",
   /const VERSION = "v(\d+)"/.test(sw) && Number(sw.match(/const VERSION = "v(\d+)"/)[1]) >= 49);
 

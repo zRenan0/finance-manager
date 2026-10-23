@@ -451,3 +451,103 @@ const NLP_EXAMPLES = [
   "Recebi 2500 de salário",
   "Comprei um tênis 450 em 3x no crédito",
 ];
+
+/* ==============================================================================
+ * COMPROVANTE COMPARTILHADO (Web Share Target)
+ * ============================================================================== */
+// Texto que chega pelo "Compartilhar" do Android: comprovante de Pix,
+// notificação de compra no cartão, recibo de transferência. Diferente da frase
+// digitada, ele vem por LINHAS e com rótulos ("Valor", "Para", "Data"), então a
+// leitura é por rótulo primeiro; só cai na frase livre (parseNaturalEntry)
+// quando nenhum valor é reconhecido. O resultado tem a mesma forma do rascunho
+// da frase, para a tela de lançamento não precisar saber de onde veio.
+const SHARE_LABEL_DEST = /^(para|destinat[aá]rio|favorecido|benefici[aá]rio|recebedor|nome do recebedor|estabelecimento|loja|local)\s*[:\-]\s*(.+)$/i;
+const SHARE_LABEL_ORIGIN = /^(de|pagador|origem|nome do pagador)\s*[:\-]\s*(.+)$/i;
+const SHARE_LABEL_ALONE = /^(para|destinat[aá]rio|favorecido|benefici[aá]rio|recebedor|nome do recebedor|estabelecimento|de|pagador|nome do pagador)\s*:?$/i;
+const SHARE_MONEY = /(\d{1,3}(?:\.\d{3})+,\d{2}|\d+,\d{2})/;
+
+function parseSharedText(rawText, data) {
+  const text = String(rawText || "").replace(/\r/g, "").trim();
+  const out = {
+    ok: false, original: text, source: "compartilhado",
+    type: "expense", amount: null, date: todayIso(), description: "",
+    payment: "Outro", categoryId: "outros", categorySource: "padrao",
+    kind: "texto", confidence: 0, dateExplicit: false,
+  };
+  if (!text) return out;
+  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+
+  const recebido = /(voc[eê] recebeu|recebid[oa]|pix recebido|transfer[eê]ncia recebida|cr[eé]dito (em|na) conta|dep[oó]sito recebido|entrou na sua conta)/i.test(text);
+  out.type = recebido ? "income" : "expense";
+  const ehPix = /\bpix\b/i.test(text);
+  const ehCartao = /compra aprovada|cart[aã]o|cr[eé]dito|d[eé]bito/i.test(text);
+  out.kind = ehPix ? "pix" : ehCartao ? "cartao" : /\bboleto\b/i.test(text) ? "boleto" : "texto";
+  if (ehPix) out.payment = "Pix";
+  else if (ehCartao) out.payment = /d[eé]bito/i.test(text) && !/cr[eé]dito/i.test(text) ? "Débito" : "Crédito";
+
+  // Valor: o rótulo manda; sem rótulo, o primeiro "R$"; por fim qualquer
+  // número com centavos. Juros, tarifas e saldo nunca são o valor principal.
+  const rotulado = text.match(new RegExp("(?:valor(?: pago| total| da compra| transferido| da transfer[eê]ncia)?|total(?: pago)?|pago)\\s*[:\\-]?\\s*R?\\$?\\s*" + SHARE_MONEY.source, "i"));
+  const comCifrao = text.match(new RegExp("R\\$\\s*" + SHARE_MONEY.source));
+  const qualquer = text.match(SHARE_MONEY);
+  const achado = rotulado || comCifrao || qualquer;
+  if (achado) {
+    const n = parseMoneyInput(achado[1]);
+    if (Number.isFinite(n) && n > 0) out.amount = n;
+  }
+
+  const d = text.match(/\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/);
+  if (d) {
+    const iso = `${d[3]}-${String(d[2]).padStart(2, "0")}-${String(d[1]).padStart(2, "0")}`;
+    if (isRealIsoDate(iso) && iso <= todayIso()) { out.date = iso; out.dateExplicit = true; }
+  }
+
+  // Descrição: quem recebeu (gasto) ou quem pagou (receita), por rótulo na
+  // mesma linha ou na linha seguinte; depois "em LOJA" das notificações; por
+  // fim a primeira linha que não é valor, data nem cabeçalho.
+  let desc = "";
+  for (let i = 0; i < lines.length && !desc; i++) {
+    const dest = lines[i].match(SHARE_LABEL_DEST);
+    const orig = lines[i].match(SHARE_LABEL_ORIGIN);
+    if (dest && !recebido) { desc = dest[2]; break; }
+    if (orig && recebido) { desc = orig[2]; break; }
+    const alone = lines[i].match(SHARE_LABEL_ALONE);
+    if (alone && lines[i + 1]) {
+      const rot = alone[1].toLowerCase();
+      const ehOrigem = /^(de|pagador|nome do pagador)$/.test(rot);
+      if (ehOrigem === recebido) { desc = lines[i + 1]; break; }
+    }
+  }
+  if (!desc) {
+    const em = text.match(/\b(?:em|no|na)\s+([A-Z][A-Za-z0-9*.&' -]{2,40}?)(?=[.,;\n]|\s+(?:em|no|na|dia|às|as)\b|$)/m);
+    if (em) desc = em[1];
+  }
+  if (!desc) {
+    const candidata = lines.find((l) => !SHARE_MONEY.test(l) && !/\d{1,2}\/\d{1,2}\/\d{4}/.test(l)
+      && !/^(comprovante|recibo|pix|valor|data|hora|id|identificador|tipo|situa[cç][aã]o|institui[cç][aã]o|ag[eê]ncia|conta|cpf|cnpj|chave)/i.test(l) && l.length >= 3);
+    if (candidata) desc = candidata;
+  }
+  desc = desc.replace(/\s+/g, " ").replace(/^[-:\s]+/, "").replace(/\s*[-:]\s*$/, "").slice(0, 60).trim();
+  out.description = desc;
+
+  if (desc) {
+    if (typeof guessCategoryId === "function") {
+      const guess = guessCategoryId(data, desc);
+      if (guess && guess !== "outros") { out.categoryId = guess; out.categorySource = "dicionario"; }
+    }
+    if (typeof nlpCategoryFromHistory === "function") {
+      const hist = nlpCategoryFromHistory(data, desc);
+      if (hist) { out.categoryId = hist; out.categorySource = "historico"; }
+    }
+  }
+
+  out.ok = out.amount != null && out.amount > 0;
+  out.confidence = (out.ok ? 0.5 : 0) + (desc ? 0.3 : 0) + (out.dateExplicit ? 0.2 : 0);
+
+  // Nada estruturado: pode ser uma frase comum compartilhada de um bloco de notas.
+  if (!out.ok && typeof parseNaturalEntry === "function") {
+    const nat = parseNaturalEntry(text, data);
+    if (nat && nat.amount) return { ...nat, source: "compartilhado", kind: "frase", dateExplicit: !!(nat.matched && nat.matched.date) };
+  }
+  return out;
+}

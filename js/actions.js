@@ -1750,7 +1750,7 @@ function onClick(e) {
     }
     case "cancel-edit": {
       const returnTab = state.editingTxReturnTab || "dashboard";
-      state.editingTxId = null; state.editingTxReturnTab = "dashboard"; state.form = freshTxForm(); setState({ tab:returnTab }); break;
+      state.editingTxId = null; state.editingTxReturnTab = "dashboard"; state.form = freshTxForm(); state.sharedDraft = null; setState({ tab:returnTab }); break;
     }
     case "edit-tx": {
       const t = state.data.transactions.find((x) => x.id === id);
@@ -1860,6 +1860,7 @@ function onClick(e) {
       setState({ tab:returnTab });
       announceBudgetCrossings(impact);
       offerCategoryToSimilar(anterior, f);
+      state.sharedDraft = null;
       break;
     }
 

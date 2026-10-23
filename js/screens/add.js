@@ -231,6 +231,31 @@ function txOriginChipText(origin) {
 // formulário (hoje, por padrão), porque "repetir" é lançar de novo, não
 // relançar na data antiga. Em edição o bloco some: ali a pessoa está mexendo
 // num registro que já existe, e trocar tudo por outro modelo seria sabotagem.
+// De onde veio o que está no formulário quando chegou pelo Compartilhar, e a
+// dica de que isso existe para quem usa o app instalado no Android. A dica
+// não aparece no navegador comum porque o Compartilhar só entrega ao app
+// instalado; mostrar ali seria prometer um botão que não existe.
+function renderSharedNotice(editing) {
+  if (editing) return "";
+  const shared = state.sharedDraft;
+  if (shared) {
+    const origem = shared.kind === "pix" ? "comprovante de Pix" : shared.kind === "cartao" ? "notificação do cartão" : shared.kind === "boleto" ? "comprovante de boleto" : "texto compartilhado";
+    return `<div class="shared-notice" role="status">
+      ${svgIcon("share", 15)}
+      <div class="shared-notice__text">
+        <b>${shared.ok ? `Lido do ${origem}` : `Recebi um ${origem}, mas não achei o valor`}</b>
+        <span>${shared.ok ? `Confira valor, ${shared.dateExplicit ? "data" : "data (usei hoje)"} e descrição antes de salvar.` : "Digite o valor; o resto já está preenchido com o que deu para ler."}</span>
+        <details class="shared-notice__raw"><summary>Ver o texto recebido</summary><pre>${escapeHtml(shared.original)}</pre></details>
+      </div>
+    </div>`;
+  }
+  const standalone = typeof window !== "undefined" && typeof window.matchMedia === "function"
+    && window.matchMedia("(display-mode: standalone)").matches;
+  const android = typeof navigator !== "undefined" && /Android/i.test(String(navigator.userAgent || ""));
+  if (!(standalone && android) || isDemoMode()) return "";
+  return `<p class="field-hint shared-hint">${svgIcon("share", 13)} Dica: no comprovante do Pix ou na notificação do cartão, toque em Compartilhar e escolha Cofre. O lançamento chega pronto para conferir.</p>`;
+}
+
 function renderRecentTemplates(f, editing) {
   if (editing || typeof recentTransactionTemplates !== "function") return "";
   const modelos = recentTransactionTemplates(state.data, { type: f.type, limit: 4 });
@@ -292,6 +317,7 @@ function renderAddScreen() {
     </div>
 
     ${renderRecentTemplates(f, editing)}
+    ${renderSharedNotice(editing)}
 
     <div class="amount-input-wrap">
       <label class="field__label center" for="tx-amount-input">Valor</label>

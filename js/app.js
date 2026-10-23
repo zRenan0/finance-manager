@@ -184,6 +184,9 @@ let state = {
   importError: null,       // { title, detail }; erro visual da importação
   importLoading: false,
   qr: { open: false, scanning: false, error: null, checking: false, draft: null },
+  // Último conteúdo recebido pelo Compartilhar e já posto no formulário
+  // (ver applySharedPayload); a tela de lançamento diz de onde veio.
+  sharedDraft: null,
   // ---- Feature 4: lançamento em linguagem natural ----
   nlp: { text: "", drafts: [], error: null, loading: false, touched: false },
   // ---- Feature 2: backup (exportar / importar) ----
@@ -1229,6 +1232,99 @@ function applyQrDraftToForm(draft) {
     origin: draft.kind === "pix" ? "Pix lido por QR Code" : "Nota fiscal lida por QR Code",
   };
   state.editingTxId = null;
+}
+
+// ==================================================================
+// COMPARTILHAR COM O COFRE (Web Share Target)
+// ------------------------------------------------------------------
+// O comprovante do Pix, a notificação do cartão ou a fatura em PDF chegam
+// pelo menu Compartilhar do Android. O service worker recebe o POST, guarda
+// texto e arquivos num cache próprio e manda o app abrir com
+// `?compartilhado=1`. Aqui o pacote é lido, apagado e vira a coisa certa:
+// extrato ou fatura vai para a importação; imagem passa pelo leitor de QR;
+// texto vira um lançamento pré-preenchido para conferir e salvar. Nada sai
+// do aparelho em nenhum dos três caminhos.
+// ==================================================================
+async function consumeSharedPayload() {
+  let meta = null;
+  const files = [];
+  if (typeof caches === "undefined") { notify("Este navegador não recebe compartilhamento", "warn"); return; }
+  const keys = (await caches.keys()).filter((k) => k.startsWith("financas-share-"));
+  for (const key of keys) {
+    const cache = await caches.open(key);
+    const res = await cache.match("./__compartilhado/meta");
+    if (!res) continue;
+    meta = await res.json();
+    for (const f of meta.files || []) {
+      const r = await cache.match(f.key);
+      if (r) {
+        const blob = await r.blob();
+        files.push(new File([blob], f.name || "compartilhado", { type: f.type || blob.type || "" }));
+      }
+      await cache.delete(f.key);
+    }
+    await cache.delete("./__compartilhado/meta");
+    break;
+  }
+  if (!meta) { notify("Nada chegou pelo compartilhamento", "warn"); return; }
+  await applySharedPayload(meta, files);
+}
+
+async function qrFromImageFile(file) {
+  if (typeof window === "undefined" || !("BarcodeDetector" in window) || typeof createImageBitmap !== "function") return null;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const detector = new window.BarcodeDetector({ formats: ["qr_code"] });
+    const codes = await detector.detect(bitmap);
+    return codes && codes[0] && codes[0].rawValue ? String(codes[0].rawValue) : null;
+  } catch (_) { return null; }
+}
+
+async function applySharedPayload(meta, files) {
+  const file = files[0] || null;
+  if (file) {
+    const type = String(file.type || "").toLowerCase();
+    const name = String(file.name || "").toLowerCase();
+    if (type.startsWith("image/")) {
+      const raw = await qrFromImageFile(file);
+      if (raw) {
+        // Abrir o modal só DEPOIS de o rascunho existir: aberto sem rascunho,
+        // ele liga a câmera, e a pessoa compartilhou uma foto justamente para
+        // não precisar dela.
+        state.qr = { ...state.qr, open: false, scanning: false, error: null, draft: null };
+        await onQrDetected(raw);
+        state.qr.open = true;
+        setState({ tab: "add" });
+        notify("QR lido da imagem compartilhada: confira e salve");
+        return;
+      }
+      notify("Não achei um QR Code na imagem compartilhada", "warn");
+    } else if (/pdf|ofx|csv|text\/plain|octet-stream/.test(type) || /\.(pdf|ofx|csv|txt)$/.test(name)) {
+      setState({ tab: "import" });
+      await handleStatementFile(file);
+      notify(`${file.name || "Arquivo"} recebido pelo compartilhamento`);
+      return;
+    }
+  }
+  const text = [meta.title, meta.text, meta.url].filter(Boolean).join("\n").trim();
+  if (!text) { notify("O conteúdo compartilhado não tem texto nem arquivo que eu saiba ler", "warn"); return; }
+
+  const draft = parseSharedText(text, state.data);
+  const categoriaValida = (state.data.categories || []).some((c) => c.id === draft.categoryId);
+  state.form = {
+    ...freshTxForm(),
+    type: draft.type === "income" ? "income" : "expense",
+    amount: draft.amount != null && draft.amount > 0 ? draft.amount.toFixed(2).replace(".", ",") : "",
+    categoryId: categoriaValida ? draft.categoryId : state.data.categories[0].id,
+    date: draft.date || todayIso(),
+    payment: PAYMENT_METHODS.indexOf(draft.payment) >= 0 ? draft.payment : "Outro",
+    description: draft.description || "",
+    origin: "Comprovante compartilhado",
+  };
+  state.editingTxId = null;
+  state.sharedDraft = { ok: !!draft.ok, kind: draft.kind || "texto", dateExplicit: !!draft.dateExplicit, original: text.slice(0, 600) };
+  setState({ tab: "add" });
+  notify(draft.ok ? "Comprovante lido: confira e salve" : "Não achei o valor no texto compartilhado; complete o lançamento", draft.ok ? undefined : "warn");
 }
 
 // OS DOIS CAMPOS DE ARQUIVO NÃO PODEM MORAR DENTRO DE `#app`.
@@ -2676,13 +2772,15 @@ async function init() {
   // ela pode abrir direto; o parâmetro sai do endereço para não reabrir a
   // demonstração num recarregamento.
   let demoPelaUrl = false;
+  // `?compartilhado=1` é o retorno do service worker depois de receber um
+  // conteúdo pelo "Compartilhar" do Android (ver handleShareTarget).
+  let compartilhado = false;
   try {
     const query = new URLSearchParams(location.search);
-    if (query.get("demo") === "1") {
-      demoPelaUrl = true;
-      history.replaceState(null, "", location.pathname + location.hash);
-    }
-  } catch (_) { demoPelaUrl = false; }
+    if (query.get("demo") === "1") demoPelaUrl = true;
+    if (query.get("compartilhado") === "1") compartilhado = true;
+    if (demoPelaUrl || compartilhado) history.replaceState(null, "", location.pathname + location.hash);
+  } catch (_) { demoPelaUrl = false; compartilhado = false; }
   state.backup.undoAvailable = !!FinanceStore.readUndoSnapshot();
   hydrateImportUndo();
   FinanceStore.onError(() => {
@@ -2715,6 +2813,7 @@ async function init() {
   }
   window.addEventListener("popstate", applyHistoryRoute);
   if (demoPelaUrl && !isDemoMode()) enterDemoMode();
+  if (compartilhado) consumeSharedPayload().catch((e) => { if (typeof reportSafeError === "function") reportSafeError("share", e, "share_consume"); });
 
   // [M41] O SEGUNDO PEDAÇO É BUSCADO DEPOIS DO PRIMEIRO QUADRO, NO OCIOSO.
   //

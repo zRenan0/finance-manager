@@ -1047,6 +1047,7 @@ const ICONS = {
   // direita. O mesmo desenho vive em icons/cofre-mark.svg (origem dos PNG do
   // manifesto, via scripts/make-icons.js) e na marca da página comercial.
   cofre: '<rect x="2.5" y="3" width="19" height="15.5" rx="4.2"/><circle cx="12" cy="10.75" r="4.1"/><path d="M12 10.75l2.3-2.3"/><path d="M7 18.5V21M17 18.5V21"/>',
+  share: '<circle cx="18" cy="5" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="19" r="2.6"/><path d="M8.3 10.7l7.4-4.3M8.3 13.3l7.4 4.3"/>',
   wallet: '<path d="M3 7a2 2 0 0 1 2-2h13a1 1 0 0 1 1 1v2"/><path d="M3 7v11a2 2 0 0 0 2 2h14a1 1 0 0 0 1-1v-5"/><path d="M15 12h5v4h-5a2 2 0 0 1 0-4Z"/>',
   bank: '<path d="M3 9h18L12 3 3 9Z"/><path d="M5 10v8M9.5 10v8M14.5 10v8M19 10v8"/><path d="M3 21h18M4 18h16"/>',
   archive: '<rect x="3" y="5" width="18" height="4" rx="1"/><path d="M5 9v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9"/><path d="M9 13h6"/>',
@@ -16283,6 +16284,106 @@ const NLP_EXAMPLES = [
   "Comprei um tênis 450 em 3x no crédito",
 ];
 
+/* ==============================================================================
+ * COMPROVANTE COMPARTILHADO (Web Share Target)
+ * ============================================================================== */
+// Texto que chega pelo "Compartilhar" do Android: comprovante de Pix,
+// notificação de compra no cartão, recibo de transferência. Diferente da frase
+// digitada, ele vem por LINHAS e com rótulos ("Valor", "Para", "Data"), então a
+// leitura é por rótulo primeiro; só cai na frase livre (parseNaturalEntry)
+// quando nenhum valor é reconhecido. O resultado tem a mesma forma do rascunho
+// da frase, para a tela de lançamento não precisar saber de onde veio.
+const SHARE_LABEL_DEST = /^(para|destinat[aá]rio|favorecido|benefici[aá]rio|recebedor|nome do recebedor|estabelecimento|loja|local)\s*[:\-]\s*(.+)$/i;
+const SHARE_LABEL_ORIGIN = /^(de|pagador|origem|nome do pagador)\s*[:\-]\s*(.+)$/i;
+const SHARE_LABEL_ALONE = /^(para|destinat[aá]rio|favorecido|benefici[aá]rio|recebedor|nome do recebedor|estabelecimento|de|pagador|nome do pagador)\s*:?$/i;
+const SHARE_MONEY = /(\d{1,3}(?:\.\d{3})+,\d{2}|\d+,\d{2})/;
+
+function parseSharedText(rawText, data) {
+  const text = String(rawText || "").replace(/\r/g, "").trim();
+  const out = {
+    ok: false, original: text, source: "compartilhado",
+    type: "expense", amount: null, date: todayIso(), description: "",
+    payment: "Outro", categoryId: "outros", categorySource: "padrao",
+    kind: "texto", confidence: 0, dateExplicit: false,
+  };
+  if (!text) return out;
+  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+
+  const recebido = /(voc[eê] recebeu|recebid[oa]|pix recebido|transfer[eê]ncia recebida|cr[eé]dito (em|na) conta|dep[oó]sito recebido|entrou na sua conta)/i.test(text);
+  out.type = recebido ? "income" : "expense";
+  const ehPix = /\bpix\b/i.test(text);
+  const ehCartao = /compra aprovada|cart[aã]o|cr[eé]dito|d[eé]bito/i.test(text);
+  out.kind = ehPix ? "pix" : ehCartao ? "cartao" : /\bboleto\b/i.test(text) ? "boleto" : "texto";
+  if (ehPix) out.payment = "Pix";
+  else if (ehCartao) out.payment = /d[eé]bito/i.test(text) && !/cr[eé]dito/i.test(text) ? "Débito" : "Crédito";
+
+  // Valor: o rótulo manda; sem rótulo, o primeiro "R$"; por fim qualquer
+  // número com centavos. Juros, tarifas e saldo nunca são o valor principal.
+  const rotulado = text.match(new RegExp("(?:valor(?: pago| total| da compra| transferido| da transfer[eê]ncia)?|total(?: pago)?|pago)\\s*[:\\-]?\\s*R?\\$?\\s*" + SHARE_MONEY.source, "i"));
+  const comCifrao = text.match(new RegExp("R\\$\\s*" + SHARE_MONEY.source));
+  const qualquer = text.match(SHARE_MONEY);
+  const achado = rotulado || comCifrao || qualquer;
+  if (achado) {
+    const n = parseMoneyInput(achado[1]);
+    if (Number.isFinite(n) && n > 0) out.amount = n;
+  }
+
+  const d = text.match(/\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/);
+  if (d) {
+    const iso = `${d[3]}-${String(d[2]).padStart(2, "0")}-${String(d[1]).padStart(2, "0")}`;
+    if (isRealIsoDate(iso) && iso <= todayIso()) { out.date = iso; out.dateExplicit = true; }
+  }
+
+  // Descrição: quem recebeu (gasto) ou quem pagou (receita), por rótulo na
+  // mesma linha ou na linha seguinte; depois "em LOJA" das notificações; por
+  // fim a primeira linha que não é valor, data nem cabeçalho.
+  let desc = "";
+  for (let i = 0; i < lines.length && !desc; i++) {
+    const dest = lines[i].match(SHARE_LABEL_DEST);
+    const orig = lines[i].match(SHARE_LABEL_ORIGIN);
+    if (dest && !recebido) { desc = dest[2]; break; }
+    if (orig && recebido) { desc = orig[2]; break; }
+    const alone = lines[i].match(SHARE_LABEL_ALONE);
+    if (alone && lines[i + 1]) {
+      const rot = alone[1].toLowerCase();
+      const ehOrigem = /^(de|pagador|nome do pagador)$/.test(rot);
+      if (ehOrigem === recebido) { desc = lines[i + 1]; break; }
+    }
+  }
+  if (!desc) {
+    const em = text.match(/\b(?:em|no|na)\s+([A-Z][A-Za-z0-9*.&' -]{2,40}?)(?=[.,;\n]|\s+(?:em|no|na|dia|às|as)\b|$)/m);
+    if (em) desc = em[1];
+  }
+  if (!desc) {
+    const candidata = lines.find((l) => !SHARE_MONEY.test(l) && !/\d{1,2}\/\d{1,2}\/\d{4}/.test(l)
+      && !/^(comprovante|recibo|pix|valor|data|hora|id|identificador|tipo|situa[cç][aã]o|institui[cç][aã]o|ag[eê]ncia|conta|cpf|cnpj|chave)/i.test(l) && l.length >= 3);
+    if (candidata) desc = candidata;
+  }
+  desc = desc.replace(/\s+/g, " ").replace(/^[-:\s]+/, "").replace(/\s*[-:]\s*$/, "").slice(0, 60).trim();
+  out.description = desc;
+
+  if (desc) {
+    if (typeof guessCategoryId === "function") {
+      const guess = guessCategoryId(data, desc);
+      if (guess && guess !== "outros") { out.categoryId = guess; out.categorySource = "dicionario"; }
+    }
+    if (typeof nlpCategoryFromHistory === "function") {
+      const hist = nlpCategoryFromHistory(data, desc);
+      if (hist) { out.categoryId = hist; out.categorySource = "historico"; }
+    }
+  }
+
+  out.ok = out.amount != null && out.amount > 0;
+  out.confidence = (out.ok ? 0.5 : 0) + (desc ? 0.3 : 0) + (out.dateExplicit ? 0.2 : 0);
+
+  // Nada estruturado: pode ser uma frase comum compartilhada de um bloco de notas.
+  if (!out.ok && typeof parseNaturalEntry === "function") {
+    const nat = parseNaturalEntry(text, data);
+    if (nat && nat.amount) return { ...nat, source: "compartilhado", kind: "frase", dateExplicit: !!(nat.matched && nat.matched.date) };
+  }
+  return out;
+}
+
 // source: js/score.js
 // score.js. SCORE FINANCEIRO (motor puro, sem DOM, sem rede)
 // ------------------------------------------------------------------------------
@@ -28909,6 +29010,31 @@ function txOriginChipText(origin) {
 // formulário (hoje, por padrão), porque "repetir" é lançar de novo, não
 // relançar na data antiga. Em edição o bloco some: ali a pessoa está mexendo
 // num registro que já existe, e trocar tudo por outro modelo seria sabotagem.
+// De onde veio o que está no formulário quando chegou pelo Compartilhar, e a
+// dica de que isso existe para quem usa o app instalado no Android. A dica
+// não aparece no navegador comum porque o Compartilhar só entrega ao app
+// instalado; mostrar ali seria prometer um botão que não existe.
+function renderSharedNotice(editing) {
+  if (editing) return "";
+  const shared = state.sharedDraft;
+  if (shared) {
+    const origem = shared.kind === "pix" ? "comprovante de Pix" : shared.kind === "cartao" ? "notificação do cartão" : shared.kind === "boleto" ? "comprovante de boleto" : "texto compartilhado";
+    return `<div class="shared-notice" role="status">
+      ${svgIcon("share", 15)}
+      <div class="shared-notice__text">
+        <b>${shared.ok ? `Lido do ${origem}` : `Recebi um ${origem}, mas não achei o valor`}</b>
+        <span>${shared.ok ? `Confira valor, ${shared.dateExplicit ? "data" : "data (usei hoje)"} e descrição antes de salvar.` : "Digite o valor; o resto já está preenchido com o que deu para ler."}</span>
+        <details class="shared-notice__raw"><summary>Ver o texto recebido</summary><pre>${escapeHtml(shared.original)}</pre></details>
+      </div>
+    </div>`;
+  }
+  const standalone = typeof window !== "undefined" && typeof window.matchMedia === "function"
+    && window.matchMedia("(display-mode: standalone)").matches;
+  const android = typeof navigator !== "undefined" && /Android/i.test(String(navigator.userAgent || ""));
+  if (!(standalone && android) || isDemoMode()) return "";
+  return `<p class="field-hint shared-hint">${svgIcon("share", 13)} Dica: no comprovante do Pix ou na notificação do cartão, toque em Compartilhar e escolha Cofre. O lançamento chega pronto para conferir.</p>`;
+}
+
 function renderRecentTemplates(f, editing) {
   if (editing || typeof recentTransactionTemplates !== "function") return "";
   const modelos = recentTransactionTemplates(state.data, { type: f.type, limit: 4 });
@@ -28970,6 +29096,7 @@ function renderAddScreen() {
     </div>
 
     ${renderRecentTemplates(f, editing)}
+    ${renderSharedNotice(editing)}
 
     <div class="amount-input-wrap">
       <label class="field__label center" for="tx-amount-input">Valor</label>
@@ -35262,7 +35389,7 @@ function onClick(e) {
     }
     case "cancel-edit": {
       const returnTab = state.editingTxReturnTab || "dashboard";
-      state.editingTxId = null; state.editingTxReturnTab = "dashboard"; state.form = freshTxForm(); setState({ tab:returnTab }); break;
+      state.editingTxId = null; state.editingTxReturnTab = "dashboard"; state.form = freshTxForm(); state.sharedDraft = null; setState({ tab:returnTab }); break;
     }
     case "edit-tx": {
       const t = state.data.transactions.find((x) => x.id === id);
@@ -35372,6 +35499,7 @@ function onClick(e) {
       setState({ tab:returnTab });
       announceBudgetCrossings(impact);
       offerCategoryToSimilar(anterior, f);
+      state.sharedDraft = null;
       break;
     }
 
@@ -36163,6 +36291,9 @@ let state = {
   importError: null,       // { title, detail }; erro visual da importação
   importLoading: false,
   qr: { open: false, scanning: false, error: null, checking: false, draft: null },
+  // Último conteúdo recebido pelo Compartilhar e já posto no formulário
+  // (ver applySharedPayload); a tela de lançamento diz de onde veio.
+  sharedDraft: null,
   // ---- Feature 4: lançamento em linguagem natural ----
   nlp: { text: "", drafts: [], error: null, loading: false, touched: false },
   // ---- Feature 2: backup (exportar / importar) ----
@@ -37208,6 +37339,99 @@ function applyQrDraftToForm(draft) {
     origin: draft.kind === "pix" ? "Pix lido por QR Code" : "Nota fiscal lida por QR Code",
   };
   state.editingTxId = null;
+}
+
+// ==================================================================
+// COMPARTILHAR COM O COFRE (Web Share Target)
+// ------------------------------------------------------------------
+// O comprovante do Pix, a notificação do cartão ou a fatura em PDF chegam
+// pelo menu Compartilhar do Android. O service worker recebe o POST, guarda
+// texto e arquivos num cache próprio e manda o app abrir com
+// `?compartilhado=1`. Aqui o pacote é lido, apagado e vira a coisa certa:
+// extrato ou fatura vai para a importação; imagem passa pelo leitor de QR;
+// texto vira um lançamento pré-preenchido para conferir e salvar. Nada sai
+// do aparelho em nenhum dos três caminhos.
+// ==================================================================
+async function consumeSharedPayload() {
+  let meta = null;
+  const files = [];
+  if (typeof caches === "undefined") { notify("Este navegador não recebe compartilhamento", "warn"); return; }
+  const keys = (await caches.keys()).filter((k) => k.startsWith("financas-share-"));
+  for (const key of keys) {
+    const cache = await caches.open(key);
+    const res = await cache.match("./__compartilhado/meta");
+    if (!res) continue;
+    meta = await res.json();
+    for (const f of meta.files || []) {
+      const r = await cache.match(f.key);
+      if (r) {
+        const blob = await r.blob();
+        files.push(new File([blob], f.name || "compartilhado", { type: f.type || blob.type || "" }));
+      }
+      await cache.delete(f.key);
+    }
+    await cache.delete("./__compartilhado/meta");
+    break;
+  }
+  if (!meta) { notify("Nada chegou pelo compartilhamento", "warn"); return; }
+  await applySharedPayload(meta, files);
+}
+
+async function qrFromImageFile(file) {
+  if (typeof window === "undefined" || !("BarcodeDetector" in window) || typeof createImageBitmap !== "function") return null;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const detector = new window.BarcodeDetector({ formats: ["qr_code"] });
+    const codes = await detector.detect(bitmap);
+    return codes && codes[0] && codes[0].rawValue ? String(codes[0].rawValue) : null;
+  } catch (_) { return null; }
+}
+
+async function applySharedPayload(meta, files) {
+  const file = files[0] || null;
+  if (file) {
+    const type = String(file.type || "").toLowerCase();
+    const name = String(file.name || "").toLowerCase();
+    if (type.startsWith("image/")) {
+      const raw = await qrFromImageFile(file);
+      if (raw) {
+        // Abrir o modal só DEPOIS de o rascunho existir: aberto sem rascunho,
+        // ele liga a câmera, e a pessoa compartilhou uma foto justamente para
+        // não precisar dela.
+        state.qr = { ...state.qr, open: false, scanning: false, error: null, draft: null };
+        await onQrDetected(raw);
+        state.qr.open = true;
+        setState({ tab: "add" });
+        notify("QR lido da imagem compartilhada: confira e salve");
+        return;
+      }
+      notify("Não achei um QR Code na imagem compartilhada", "warn");
+    } else if (/pdf|ofx|csv|text\/plain|octet-stream/.test(type) || /\.(pdf|ofx|csv|txt)$/.test(name)) {
+      setState({ tab: "import" });
+      await handleStatementFile(file);
+      notify(`${file.name || "Arquivo"} recebido pelo compartilhamento`);
+      return;
+    }
+  }
+  const text = [meta.title, meta.text, meta.url].filter(Boolean).join("\n").trim();
+  if (!text) { notify("O conteúdo compartilhado não tem texto nem arquivo que eu saiba ler", "warn"); return; }
+
+  const draft = parseSharedText(text, state.data);
+  const categoriaValida = (state.data.categories || []).some((c) => c.id === draft.categoryId);
+  state.form = {
+    ...freshTxForm(),
+    type: draft.type === "income" ? "income" : "expense",
+    amount: draft.amount != null && draft.amount > 0 ? draft.amount.toFixed(2).replace(".", ",") : "",
+    categoryId: categoriaValida ? draft.categoryId : state.data.categories[0].id,
+    date: draft.date || todayIso(),
+    payment: PAYMENT_METHODS.indexOf(draft.payment) >= 0 ? draft.payment : "Outro",
+    description: draft.description || "",
+    origin: "Comprovante compartilhado",
+  };
+  state.editingTxId = null;
+  state.sharedDraft = { ok: !!draft.ok, kind: draft.kind || "texto", dateExplicit: !!draft.dateExplicit, original: text.slice(0, 600) };
+  setState({ tab: "add" });
+  notify(draft.ok ? "Comprovante lido: confira e salve" : "Não achei o valor no texto compartilhado; complete o lançamento", draft.ok ? undefined : "warn");
 }
 
 // OS DOIS CAMPOS DE ARQUIVO NÃO PODEM MORAR DENTRO DE `#app`.
@@ -38655,13 +38879,15 @@ async function init() {
   // ela pode abrir direto; o parâmetro sai do endereço para não reabrir a
   // demonstração num recarregamento.
   let demoPelaUrl = false;
+  // `?compartilhado=1` é o retorno do service worker depois de receber um
+  // conteúdo pelo "Compartilhar" do Android (ver handleShareTarget).
+  let compartilhado = false;
   try {
     const query = new URLSearchParams(location.search);
-    if (query.get("demo") === "1") {
-      demoPelaUrl = true;
-      history.replaceState(null, "", location.pathname + location.hash);
-    }
-  } catch (_) { demoPelaUrl = false; }
+    if (query.get("demo") === "1") demoPelaUrl = true;
+    if (query.get("compartilhado") === "1") compartilhado = true;
+    if (demoPelaUrl || compartilhado) history.replaceState(null, "", location.pathname + location.hash);
+  } catch (_) { demoPelaUrl = false; compartilhado = false; }
   state.backup.undoAvailable = !!FinanceStore.readUndoSnapshot();
   hydrateImportUndo();
   FinanceStore.onError(() => {
@@ -38694,6 +38920,7 @@ async function init() {
   }
   window.addEventListener("popstate", applyHistoryRoute);
   if (demoPelaUrl && !isDemoMode()) enterDemoMode();
+  if (compartilhado) consumeSharedPayload().catch((e) => { if (typeof reportSafeError === "function") reportSafeError("share", e, "share_consume"); });
 
   // [M41] O SEGUNDO PEDAÇO É BUSCADO DEPOIS DO PRIMEIRO QUADRO, NO OCIOSO.
   //
