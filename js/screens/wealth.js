@@ -111,6 +111,10 @@ function renderWealthForm(f) {
       <input id="wealth-dueday-input" class="input" data-field="wealth-dueday" value="${escapeHtml(f.dueDay)}" inputmode="numeric" placeholder="Ex: 10" maxlength="2" />
       <p class="field-hint">Informando o dia, a parcela aparece no Calendário e entra na previsão de saldo. Sem ele, nenhum dia é marcado; melhor não marcar do que marcar errado.</p></div>` : ""}
 
+    <div class="field"><label class="field__label" for="wealth-since-input">Desde quando você tem este item? (opcional)</label>
+      <input id="wealth-since-input" class="input" data-field="wealth-since" value="${escapeHtml(f.sinceMonth || "")}" inputmode="numeric" placeholder="MM/AAAA" autocomplete="off" maxlength="7" />
+      <p class="field-hint">Sem data, o app assume que o item já existia antes do histórico: cadastrar não conta como crescimento do patrimônio. Com a data, ele entra na curva a partir desse mês.</p></div>
+
     <div class="field"><label class="field__label" for="wealth-note-input">Observação (opcional)</label>
       <input id="wealth-note-input" class="input" data-field="wealth-note" value="${escapeHtml(f.note)}" placeholder="Ex: Tesouro Selic 2029 na corretora" autocomplete="off" maxlength="140" /></div>
 

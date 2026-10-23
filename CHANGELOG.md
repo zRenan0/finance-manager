@@ -2,6 +2,54 @@
 
 ## Não publicado
 
+### Auditoria externa: doze pontos de leitura, proteção e primeira experiência
+
+- **Patrimônio deixou de concluir "o resto perde para a inflação parado".** O
+  percentual aplicado dividia os investimentos pelo patrimônio inteiro, carro
+  e imóvel incluídos. Agora o denominador é só o dinheiro (contas, metas e
+  investimentos), ele é dito na própria frase, e o app admite que não sabe se
+  o que está em conta rende. O indicador de investimentos da Saúde usa a mesma
+  base.
+- **Proteção dos dados visível no Início.** Uma linha permanente diz onde os
+  dados estão ("Somente neste aparelho" ou "Conta ligada"), a idade do último
+  backup, a última sincronização concluída e que limpar os dados do navegador
+  apaga tudo. O aviso forte de 30 dias sem backup continua e assume o lugar
+  dela enquanto vale.
+- **Teto da fatura não é dinheiro para gastar.** "Ainda cabem R$ X na fatura"
+  virou "Limite disponível até o teto que você definiu", com a ressalva de que
+  é um limite do cartão e de que a capacidade de pagamento está no cartão de
+  orçamento.
+- **Primeira tela destravada.** O aceite da política abre o passo 1, ao lado de
+  um link para ler a política e os termos completos sem sair da configuração
+  (com volta explícita; aceitar lá vale aqui) e dos três caminhos possíveis:
+  configurar do zero, entrar numa conta, explorar a demonstração. Os dois
+  primeiros mostram que estão travados e por quê; a demonstração nunca trava.
+- **Início com menos repetição.** O "Resumo inteligente" nasce desligado (as
+  frases dele já estão no saldo, na distribuição e na previsão; liga-se na
+  personalização). O Assistente financeiro mostra no máximo três alertas e
+  omite os de teto de categoria quando o cartão de orçamentos já está na tela,
+  com atalho para o restante na Central inteligente.
+- **Realizado e projetado com nome.** O chip do cartão de saldo diz "Economia
+  até hoje" no mês em andamento; o score diz "Economia prevista no fechamento"
+  e explica a diferença entre os dois valores.
+- **Composição completa do patrimônio no Início.** A legenda passa a incluir
+  Bens e, como linhas negativas, Dívidas e Faturas abertas, com a conta que
+  fecha no total exibido.
+- **Cadastrar um bem não é enriquecer.** Sem data informada, um item cadastrado
+  vale para trás com o primeiro valor conhecido: a curva mostra variação de
+  valor, não o mês em que o app ficou sabendo. O formulário ganhou "Desde
+  quando você tem este item?" (MM/AAAA) para o caso de aquisição recente, e aí
+  o item só entra a partir desse mês. Na demonstração o crescimento desde maio
+  caiu de 443% para 32%, que é o que os números sustentam.
+- **Nomes acessíveis.** O campo de valor anuncia "Valor da movimentação" e a
+  busca de recursos "Buscar recurso".
+- **Página comercial alinhada ao app.** Cinco passos em vez de "quatro
+  perguntas"; importação descrita como OFX, CSV ou PDF; a IA explicada como de
+  fato funciona (resumo agregado na análise do mês e a frase digitada no
+  refinamento, sempre com confirmação). "Explorar demonstração" entrou ao lado
+  de "Começar grátis" no topo, e o app abre a demonstração direto pelo
+  endereço.
+
 ### Simuladores: cada um fazendo a própria conta direito
 
 - **Renda fixa: o campo de taxa passou a seguir o produto.** "110" valia para

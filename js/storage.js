@@ -1177,17 +1177,28 @@ function assetHistoryWith(history, monthKey, value) {
   return out.slice(-ASSET_HISTORY_MAX);
 }
 
-// Valor do item no fim de um mês qualquer. Antes do primeiro registro devolve 0:
-// um carro comprado em março não deve aparecer no patrimônio de janeiro.
+// Valor do item no fim de um mês qualquer.
+//
+// CADASTRAR NÃO É ENRIQUECER. Antes do primeiro registro a função devolvia 0,
+// e cadastrar um carro de R$ 42 mil que a pessoa já tinha virava "+443% de
+// patrimônio desde maio" e uma variação mensal do tamanho do carro. O item
+// não nasceu no dia do cadastro; o app é que passou a saber dele. Por isso,
+// sem data informada, o primeiro valor conhecido vale para trás: a curva
+// mostra variação de valor, não a data em que o app ficou sabendo.
+//
+// Quando a pessoa informa desde quando tem o item (`sinceMonth`), aí sim ele
+// não existe antes dessa data: um carro comprado em março não aparece em
+// janeiro. Dívida segue a mesma regra, nos dois sentidos.
 function assetValueAt(asset, monthKey) {
   const h = (asset && asset.history) || [];
-  let value = 0;
-  let found = false;
+  if (!h.length) return 0;
+  if (asset.sinceMonth && monthKey < asset.sinceMonth) return 0;
+  let value = h[0].value;
   for (let i = 0; i < h.length; i++) {
-    if (h[i].monthKey <= monthKey) { value = h[i].value; found = true; }
+    if (h[i].monthKey <= monthKey) value = h[i].value;
     else break;
   }
-  return found ? value : 0;
+  return value;
 }
 
 // Tipo de aplicação: só aceita id conhecido; qualquer outra coisa vira "outro".
@@ -1294,6 +1305,9 @@ function makeAsset(partial) {
     // Aportes, resgates e proventos com data. É o que permite XIRR e TWR.
     events: isInvestment ? normalizeInvestmentEvents(partial.events) : [],
     note: String(partial.note || "").trim().slice(0, 140),
+    // Desde quando o item existe (AAAA-MM), informado pela pessoa. Vazio quer
+    // dizer "já existia antes do histórico do app": ver assetValueAt.
+    sinceMonth: /^\d{4}-(0[1-9]|1[0-2])$/.test(String(partial.sinceMonth || "")) ? String(partial.sinceMonth) : "",
     history: assetHistoryWith(partial.history, monthKey, value),
     createdAt: partial.createdAt || nowIso,
     // Preservado quando existe: `migrate()` roda a cada boot e não pode carimbar

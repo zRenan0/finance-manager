@@ -1782,8 +1782,14 @@ function dashboardCardById(id) {
   return DASHBOARD_CARDS.find((c) => c.id === id) || null;
 }
 
+// O "Resumo inteligente" nasce desligado: as quatro frases dele (gastos contra
+// o mês passado, maior categoria, economia e projeção) já estão no cartão de
+// saldo, em "Para onde foi o dinheiro" e na previsão de caixa. Quem quiser a
+// leitura em frases liga na personalização do Início.
+const DASHBOARD_HIDDEN_BY_DEFAULT = ["summary"];
+
 function defaultDashboardLayout() {
-  return { order: DASHBOARD_CARD_IDS.slice(), hidden: [], pinned: [] };
+  return { order: DASHBOARD_CARD_IDS.slice(), hidden: DASHBOARD_HIDDEN_BY_DEFAULT.slice(), pinned: [] };
 }
 
 function isDashboardStarting(data) {
@@ -3245,17 +3251,28 @@ function assetHistoryWith(history, monthKey, value) {
   return out.slice(-ASSET_HISTORY_MAX);
 }
 
-// Valor do item no fim de um mês qualquer. Antes do primeiro registro devolve 0:
-// um carro comprado em março não deve aparecer no patrimônio de janeiro.
+// Valor do item no fim de um mês qualquer.
+//
+// CADASTRAR NÃO É ENRIQUECER. Antes do primeiro registro a função devolvia 0,
+// e cadastrar um carro de R$ 42 mil que a pessoa já tinha virava "+443% de
+// patrimônio desde maio" e uma variação mensal do tamanho do carro. O item
+// não nasceu no dia do cadastro; o app é que passou a saber dele. Por isso,
+// sem data informada, o primeiro valor conhecido vale para trás: a curva
+// mostra variação de valor, não a data em que o app ficou sabendo.
+//
+// Quando a pessoa informa desde quando tem o item (`sinceMonth`), aí sim ele
+// não existe antes dessa data: um carro comprado em março não aparece em
+// janeiro. Dívida segue a mesma regra, nos dois sentidos.
 function assetValueAt(asset, monthKey) {
   const h = (asset && asset.history) || [];
-  let value = 0;
-  let found = false;
+  if (!h.length) return 0;
+  if (asset.sinceMonth && monthKey < asset.sinceMonth) return 0;
+  let value = h[0].value;
   for (let i = 0; i < h.length; i++) {
-    if (h[i].monthKey <= monthKey) { value = h[i].value; found = true; }
+    if (h[i].monthKey <= monthKey) value = h[i].value;
     else break;
   }
-  return found ? value : 0;
+  return value;
 }
 
 // Tipo de aplicação: só aceita id conhecido; qualquer outra coisa vira "outro".
@@ -3362,6 +3379,9 @@ function makeAsset(partial) {
     // Aportes, resgates e proventos com data. É o que permite XIRR e TWR.
     events: isInvestment ? normalizeInvestmentEvents(partial.events) : [],
     note: String(partial.note || "").trim().slice(0, 140),
+    // Desde quando o item existe (AAAA-MM), informado pela pessoa. Vazio quer
+    // dizer "já existia antes do histórico do app": ver assetValueAt.
+    sinceMonth: /^\d{4}-(0[1-9]|1[0-2])$/.test(String(partial.sinceMonth || "")) ? String(partial.sinceMonth) : "",
     history: assetHistoryWith(partial.history, monthKey, value),
     createdAt: partial.createdAt || nowIso,
     // Preservado quando existe: `migrate()` roda a cada boot e não pode carimbar
@@ -16372,8 +16392,12 @@ const SCORE_PILLARS = [
         ratio,
         partial: base.partial,
         good: base.rate >= 15,
+        // "Economia prevista no fechamento" x "Economia até hoje" (cartão de
+        // saldo): são bases diferentes, e o título do número precisa dizer qual.
         detail: base.savings > 0
-          ? `Você economizou ${fmtBRL(base.savings)} (${base.rate.toFixed(0)}% da renda ${base.basis}).${scoreBasisNote(base)}`
+          ? (base.partial
+            ? `Economia prevista no fechamento: ${fmtBRL(base.savings)} (${base.rate.toFixed(0)}% da renda ${base.basis}). Estimativa, o mês ainda não terminou; o cartão de saldo mostra a economia até hoje.`
+            : `Economia do mês: ${fmtBRL(base.savings)} (${base.rate.toFixed(0)}% da renda ${base.basis}).`)
           : `Neste mês o gasto ${base.partial ? "deve superar" : "superou"} a renda em ${excesso}.${scoreBasisNote(base)}`,
         advice: base.rate >= 15 ? null : "Se 15% couber no seu mês sem criar dívida, use essa faixa como primeiro objetivo e ajuste depois.",
       };
@@ -17853,10 +17877,13 @@ const HEALTH_INDICATORS = [
     id: "investimentos",
     label: "Investimentos",
     icon: "trendUp",
-    what: "Quanto do seu patrimônio está aplicado e quanto da renda virou aporte neste mês.",
+    what: "Quanto do seu dinheiro (contas, metas e investimentos) está aplicado e quanto da renda virou aporte neste mês.",
     evaluate(data, mKey, ctx) {
       const invested = addMoney(ctx.worth.invested, ctx.worth.goals);
-      const total = ctx.worth.total;
+      // Denominador: o DINHEIRO (contas, metas e investimentos), não o
+      // patrimônio com bens. Um carro no denominador derrubava o percentual de
+      // quem tinha a reserva inteira aplicada. Ver wealthInsights em wealth.js.
+      const total = addMoney(Math.max(0, ctx.worth.cash), invested);
       const income = ctx.month.income;
       if (total <= 0 && income <= 0) return { applicable: false };
 
@@ -17869,16 +17896,16 @@ const HEALTH_INDICATORS = [
         applicable: true,
         ratio,
         display: fmtPct(share),
-        caption: "do patrimônio aplicado",
+        caption: "do dinheiro aplicado",
         description: invested > 0
-          ? `${fmtBRL(invested)} do seu patrimônio estão em investimentos e metas${contributed > 0 ? `, e você aportou ${fmtBRL(contributed)} (${contributedPct.toFixed(0)}% da renda) neste mês` : ". Nenhum aporte novo neste mês"}.`
-          : "Todo o seu dinheiro está parado em conta. Sem aplicação, a inflação corrói o poder de compra mês a mês.",
+          ? `${fmtBRL(invested)} de ${fmtBRL(total)} em contas, metas e investimentos estão aplicados (bens ficam fora)${contributed > 0 ? `, e você aportou ${fmtBRL(contributed)} (${contributedPct.toFixed(0)}% da renda) neste mês` : ". Nenhum aporte novo neste mês"}.`
+          : "Nenhum investimento ou meta cadastrado: todo o dinheiro conhecido pelo app está em conta. Se parte dele já rende, cadastre como investimento.",
         recommendation: ratio >= 0.8
           ? null
           : contributedPct < 8
             ? "Um aporte automático de 10% da renda no dia do pagamento resolve isso sem exigir disciplina mensal; o dinheiro sai antes de virar gasto."
-            : "Dinheiro parado em conta corrente perde para a inflação. Mesmo a aplicação mais conservadora protege o valor real do que você acumulou.",
-        benchmark: "Parâmetros deste indicador: 40% do patrimônio aplicado e 10% da renda aportada. Ajuste a decisão à sua reserva, prazo e dívidas.",
+            : "O que fica em conta corrente comum não rende. Se a sua conta é remunerada ou a reserva está aplicada, cadastre em Patrimônio para o indicador enxergar.",
+        benchmark: "Parâmetros deste indicador: 40% do dinheiro (contas, metas e investimentos) aplicado e 10% da renda aportada. Bens não entram no denominador.",
         cta: { label: "Cadastrar carteira", tab: "wealth" },
       };
     },
@@ -18307,14 +18334,22 @@ function wealthInsights(data, model) {
     });
   }
 
-  const invShare = composition.gross > 0 ? safePct(worth.invested, composition.gross) : 0;
-  if (composition.gross > 0) {
+  // BASE FINANCEIRA, NÃO PATRIMÔNIO BRUTO. A frase dividia os investimentos
+  // pelo patrimônio inteiro, carro e imóvel incluídos, e concluía "apenas 17%
+  // aplicado, o resto perde para a inflação parado". Ninguém aplica um carro;
+  // e o que está em conta pode ser reserva rendendo. O denominador passa a ser
+  // só o dinheiro (contas, metas e investimentos), ele é dito na própria frase,
+  // e a conclusão sobre "parado" sai: o app não sabe se a conta rende.
+  const financeiro = addMoney(addMoney(Math.max(0, worth.cash), worth.invested), worth.goals);
+  const invShare = financeiro > 0 ? safePct(worth.invested, financeiro) : 0;
+  if (financeiro > 0) {
+    const base = `de ${fmtBRL(financeiro)} em contas, metas e investimentos; bens como veículo e imóvel ficam fora dessa conta`;
     out.push({
       icon: "trendUp",
       tone: invShare >= 30 ? "positive" : "neutral",
       text: invShare >= 30
-        ? `${invShare.toFixed(0)}% do seu patrimônio está aplicado; proporção saudável para proteger o valor real.`
-        : `Apenas ${invShare.toFixed(0)}% do seu patrimônio está aplicado. O restante perde para a inflação parado.`,
+        ? `${invShare.toFixed(0)}% do seu dinheiro está em investimentos cadastrados (${base}).`
+        : `${invShare.toFixed(0)}% do seu dinheiro está em investimentos cadastrados (${base}). O app não sabe se o que está em conta rende: se parte dele é reserva aplicada ou conta remunerada, cadastre como investimento para a leitura ficar certa.`,
     });
   }
 
@@ -18377,7 +18412,7 @@ function buildWealthModel(data, months) {
 // campos. A forma do estado é vocabulário do motor, como GOAL_ICON_OPTIONS em
 // js/goals.js, e com ela na tela o pacote não conseguia adiar Patrimônio.
 function freshWealthForm(cls) {
-  return { id: null, class: cls || "conta", name: "", value: "", monthlyPayment: "", dueDay: "", note: "", inLedger: false };
+  return { id: null, class: cls || "conta", name: "", value: "", monthlyPayment: "", dueDay: "", note: "", inLedger: false, sinceMonth: "" };
 }
 
 /* Exportação para o harness de teste em Node (ignorada no navegador). */
@@ -27041,6 +27076,8 @@ function freshOnboarding() {
     open: false,
     // Assistente segurado: ver o bloco "O PORTÃO DO ASSISTENTE" abaixo.
     held: false,
+    // Lendo a política inteira sem sair da configuração (ver renderShell).
+    readingLegal: false,
     step: 1,
     name: "",
     income: "",
@@ -27273,11 +27310,38 @@ function renderOnbProgress(step) {
 }
 
 /* --------------------------------------------------------------- passo 1 */
+// A CONDIÇÃO FICA AO LADO DOS BOTÕES. O aceite da política morava no fim de
+// uma área que rola, e "Já tenho conta" e "Pular" apareciam travados sem que a
+// razão estivesse à vista. Agora o passo 1 abre com o aceite, o caminho para
+// ler os textos inteiros e os três destinos possíveis (configurar, entrar numa
+// conta, só olhar a demonstração), antes de qualquer campo.
 function renderOnbWelcome() {
+  const aceito = !!state.onboarding.legalAccepted;
   return `<div class="onb__intro">
     <span class="onb__icon">${svgIcon("sparkles", 26)}</span>
     <h1 class="onb__title">Vamos deixar o app com a sua cara</h1>
     <p class="onb__lead">São cinco telas curtas, e só duas pedem um número. Dá para mudar tudo depois em Ajustes.</p>
+  </div>
+  <div class="onb-gate">
+    <label class="legal-consent"><input id="onb-legal-check" type="checkbox" data-action-select="onb-legal" ${aceito ? "checked" : ""} /><span>Li e aceito a política de privacidade e os termos de uso.</span></label>
+    <div class="onb-gate__links">
+      <button type="button" class="link-btn" data-action="onb-read-legal">${svgIcon("shieldCheck", 14)} Ler a política e os termos completos</button>
+    </div>
+    <details class="onb-legal-summary">
+      <summary>Resumo em quatro linhas</summary>
+      <p>O app organiza dados e produz estimativas educativas. Ele não substitui proposta, contrato, consultoria de investimentos ou análise do INSS. Sem conta, os dados ficam no navegador até você exportar um backup ou apagar. Recursos de IA só enviam o conteúdo descrito depois da sua confirmação.</p>
+    </details>
+    <div class="onb-paths" aria-label="Como você quer começar">
+      <button type="button" class="onb-path ${aceito ? "" : "onb-path--locked"}" data-action="onb-start-setup" ${aceito ? "" : `aria-disabled="true" aria-describedby="onb-block-reason"`}>
+        <b>Configurar do zero</b><small>Cinco passos. Renda, conta, gastos fixos e orçamento.</small>
+      </button>
+      <button type="button" class="onb-path ${aceito ? "" : "onb-path--locked"}" data-action="onb-have-account" ${aceito ? "" : `aria-disabled="true" aria-describedby="onb-block-reason"`}>
+        <b>Já tenho conta</b><small>Entrar e trazer os dados sincronizados.</small>
+      </button>
+      <button type="button" class="onb-path" data-action="demo-enter">
+        <b>Explorar demonstração</b><small>Seis meses de dados fictícios. Nada é salvo e não precisa aceitar nada.</small>
+      </button>
+    </div>
   </div>
   <div class="field">
     <label class="field__label" for="onb-name">Como você quer ser chamado?</label>
@@ -27297,23 +27361,7 @@ function renderOnbWelcome() {
     ${svgIcon("shieldCheck", 17)}
     <p>Sem conta, seus dados financeiros ficam neste aparelho. Recursos de IA só enviam o conteúdo descrito depois da sua confirmação.</p>
   </div>
-  <!-- [M25] A demonstração NÃO exige o aceite, e a diferença é real: ela não
-       grava nada no aparelho e não envia nada para lugar nenhum, então não há
-       tratamento de dado pessoal para consentir. Quem sair dela para usar o
-       app de verdade volta para cá, com o aceite ainda pendente. -->
-  <div class="onb-demo">
-    <div class="onb-demo__text">
-      <b>Quer ver funcionando antes?</b>
-      <small>Seis meses de dados fictícios: painel, gráficos, orçamento, metas, patrimônio e recorrências. Nada é salvo.</small>
-    </div>
-    <button type="button" class="btn btn--secondary btn--sm" data-action="demo-enter">Explorar demonstração</button>
-  </div>
-  <details class="onb-legal-summary">
-    <summary>Resumo da política e dos termos</summary>
-    <p>O app organiza dados e produz estimativas educativas. Ele não substitui proposta, contrato, consultoria de investimentos ou análise do INSS. Sem conta, os dados ficam no navegador até você exportar ou apagar; com conta ligada, eles também são sincronizados com o servidor. IA e consulta de nota fiscal usam rede apenas quando você aciona esses recursos.</p>
-    <p>A tela Privacidade traz a política inteira: controlador, prazos de retenção, seus direitos e o canal para incidentes.</p>
-  </details>
-  <label class="legal-consent"><input id="onb-legal-check" type="checkbox" data-action-select="onb-legal" ${state.onboarding.legalAccepted ? "checked" : ""} /><span>Li e aceito a política de privacidade e os termos de uso da versão ${LEGAL_TEXT_VERSION}.</span></label>`;
+`;
 }
 
 /* --------------------------------------------------------------- passo 2 */
@@ -27685,7 +27733,7 @@ function renderDashboardCard(cardId, ctx) {
     case "summary":         return renderSmartSummaryCard(ctx.model);
     case "quickEntry":      return renderQuickEntryCard();
     case "advisor":         return renderAdvisorCard(ctx.mKey);
-    case "assistant":       return renderAssistantCard(ctx.mKey);
+    case "assistant":       return renderAssistantCard(ctx.mKey, ctx.visibleIds);
     case "gamification":    return renderGamificationCard(achievementsModel());
     case "budgetHealth":    return renderBudgetHealth(ctx.refDate, ctx.isCurrentMonth, ctx.model.month.expense, ctx.fixedSpent, ctx.variableSpent);
     case "categoryBudgets": return renderCategoryBudgetsCard(ctx.mKey);
@@ -27726,16 +27774,18 @@ function renderDashboardScreen() {
   const pending = isCurrentMonth ? getPendingRecurring(state.data, mKey) : [];
   const showCarry = pending.length > 0 && state.data.dismissedCarryForwardMonth !== mKey;
 
-  const ctx = { model, mKey, isCurrentMonth, refDate, fixedSpent, variableSpent, recent };
   const starting = isDashboardStarting(state.data);
   const cards = visibleDashboardCards(state.data.dashboardLayout, { isCurrentMonth, data: state.data });
+  // Os cartões sabem quais vizinhos estão na tela: é o que permite ao
+  // Assistente não repetir um alerta que o cartão de orçamentos já mostra.
+  const ctx = { model, mKey, isCurrentMonth, refDate, fixedSpent, variableSpent, recent, visibleIds: cards.map((c) => c.id) };
   const body = starting
     ? `${renderHeroCard(model)}${renderDashboardStarter()}${cards.filter((c) => c.id !== "hero").map((c) => renderDashboardCard(c.id, ctx)).join("")}`
     : cards.map((c) => renderDashboardCard(c.id, ctx)).join("");
 
   return `<div class="screen ${starting ? "screen--starter" : ""}">
     ${renderDashboardHeader(model)}
-    ${shouldWarnLocalOnly() ? renderLocalOnlyNotice() : ""}
+    ${shouldWarnLocalOnly() ? renderLocalOnlyNotice() : renderProtectionStrip()}
     ${showCarry ? renderCarryBanner(pending) : ""}
     ${state.dashboardEditing ? renderDashboardCustomizer() : ""}
 
@@ -27743,6 +27793,36 @@ function renderDashboardScreen() {
       ${body}
     </div>
   </div>`;
+}
+
+// ---- Proteção dos dados: onde estão e desde quando há cópia ----
+// Backup, exportação e senha existem, mas o estado deles morava em Ajustes.
+// Quem limpa o navegador ou troca de aparelho descobria tarde demais. Esta
+// linha fica no Início o tempo todo, em três estados: só neste aparelho, conta
+// ligada (com a última sincronização concluída) e a idade do último backup. O
+// aviso forte de "sem backup há 30 dias" (renderLocalOnlyNotice) continua
+// existindo e toma o lugar desta linha enquanto está ativo.
+function renderProtectionStrip() {
+  if (isDemoMode()) return "";
+  if ((state.data.transactions || []).length === 0) return "";
+  const conta = !!(state.account && state.account.authenticated);
+  const last = state.data.lastBackupAt;
+  const dias = last ? Math.max(0, Math.floor((Date.parse(`${todayIso()}T12:00:00`) - Date.parse(`${last}T12:00:00`)) / 86400000)) : null;
+  const backup = !last ? "sem backup ainda"
+    : `último backup ${dias === 0 ? "hoje" : dias === 1 ? "ontem" : `há ${dias} dias`}`;
+  let sincronia = "";
+  if (conta && typeof CloudSync !== "undefined") {
+    const st = CloudSync.status();
+    sincronia = st.lastSyncAt
+      ? `última sincronização concluída em ${new Date(st.lastSyncAt).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}`
+      : (st.phase === "error" ? "sincronização com falha" : "sincronização pendente");
+  }
+  const alerta = !conta && (!last || dias >= 30);
+  return `<p class="protect-strip ${alerta ? "protect-strip--warn" : ""}" role="status">
+    ${svgIcon(conta ? "shieldCheck" : "info", 14)}
+    <span class="protect-strip__text"><b>${conta ? "Conta ligada" : "Somente neste aparelho"}</b> · ${backup}${sincronia ? ` · ${sincronia}` : ""}${conta ? "" : ". Limpar os dados do navegador apaga tudo."}</span>
+    <button type="button" class="link-btn protect-strip__action" data-action="protect-data">${conta ? "Backup e dados" : "Proteger"}</button>
+  </p>`;
 }
 
 function renderDashboardStarter() {
@@ -27913,7 +27993,7 @@ function renderHeroCard(m) {
     <div class="hero-chips">
       <div class="hero-chip hero-chip--in">${svgIcon("arrowUpRight", 17)}<div><span class="hero-chip__label">Receitas do mês</span><span class="hero-chip__value">${fmtBRL(rendaLancada)}</span></div></div>
       <div class="hero-chip hero-chip--out">${svgIcon("arrowDownRight", 17)}<div><span class="hero-chip__label">Despesas do mês</span><span class="hero-chip__value">${fmtBRL(m.month.expense)}</span></div></div>
-      <div class="hero-chip ${savedTone}">${svgIcon(saved >= 0 ? "piggy" : "alertTriangle", 17)}<div><span class="hero-chip__label">Economia do mês</span><span class="hero-chip__value">${fmtBRL(saved)}</span></div></div>
+      <div class="hero-chip ${savedTone}">${svgIcon(saved >= 0 ? "piggy" : "alertTriangle", 17)}<div><span class="hero-chip__label">${m.month.partial ? "Economia até hoje" : "Economia do mês"}</span><span class="hero-chip__value">${fmtBRL(saved)}</span></div></div>
     </div>
     <div class="hero-actions">
       <button class="hero-action hero-action--primary" data-action="nav" data-tab="add">${svgIcon("plus", 17)}Adicionar movimentação</button>
@@ -28030,11 +28110,22 @@ function renderNetWorthCard(m) {
   const up = delta >= 0;
   const trendColor = up ? "var(--positive)" : "var(--negative)";
 
-  const parts = [
-    { label: "Em conta", value: Math.max(0, w.cash), color: "var(--brand)" },
-    { label: "Investimentos", value: w.invested, color: "var(--goal)" },
-    { label: "Em metas", value: w.goals, color: "var(--positive)" },
-  ];
+  // A COMPOSIÇÃO INTEIRA, NÃO SÓ O DINHEIRO. O total em cima somava bens e
+  // descontava dívidas, mas a legenda só mostrava contas, investimentos e
+  // metas, e as três linhas não explicavam o número. Agora a legenda vem da
+  // mesma função da tela de Patrimônio, com bens, e as dívidas aparecem como
+  // linha negativa: a soma fecha com o total exibido.
+  const comp = typeof wealthComposition === "function" ? wealthComposition(state.data, w) : null;
+  const legendLabel = { cash: "Em conta", invested: "Investimentos", goals: "Em metas", other: "Bens" };
+  const legendColor = { cash: "var(--brand)", invested: "var(--goal)", goals: "var(--positive)", other: "#8A5FBF" };
+  const parts = comp
+    ? comp.positive.map((b) => ({ label: legendLabel[b.id] || b.label, value: b.value, color: legendColor[b.id] || b.color }))
+    : [
+      { label: "Em conta", value: Math.max(0, w.cash), color: "var(--brand)" },
+      { label: "Investimentos", value: w.invested, color: "var(--goal)" },
+      { label: "Em metas", value: w.goals, color: "var(--positive)" },
+    ];
+  const negatives = comp ? comp.negative : [];
   const sum = parts.reduce((acc, p) => acc + p.value, 0);
 
   return `<div class="card card--networth span-2">
@@ -28061,7 +28152,13 @@ function renderNetWorthCard(m) {
         <span class="networth-legend__label">${p.label}</span>
         <b>${fmtBRL(p.value)}</b>
       </div>`).join("")}
+      ${negatives.map((n) => `<div class="networth-legend__item networth-legend__item--debt">
+        <span class="cat-dot" data-ui-css="background:${n.color}"></span>
+        <span class="networth-legend__label">${escapeHtml(n.label)}</span>
+        <b>− ${fmtBRL(n.value)}</b>
+      </div>`).join("")}
     </div>
+    ${negatives.length ? `<p class="footnote" data-ui-css="margin-top:6px">Patrimônio = ${fmtBRL(comp.gross)} em bens e dinheiro − ${fmtBRL(comp.debts)} em dívidas e faturas.</p>` : ""}
     ${w.cash < 0 ? `<p class="footnote" data-ui-css="color:var(--negative)">Seu saldo em conta está negativo em ${fmtBRL(Math.abs(w.cash))}.</p>` : ""}
     <div class="networth-actions">
       ${renderCalculationButton("net-worth")}
@@ -28278,15 +28375,19 @@ function renderCreditLimitCard(mKey) {
   const ratio = safeRatio(spent, limit);
   const color = ratio < 0.8 ? "var(--positive)" : ratio <= 1 ? "var(--goal)" : "var(--negative)";
   const remaining = subMoney(limit, spent);
+  // LIMITE DO CARTÃO NÃO É DINHEIRO PARA GASTAR. "Ainda cabem R$ 4.778 na
+  // fatura" ao lado de um orçamento estourado lia como permissão. O número é
+  // o que falta para o teto que a pessoa definiu; a capacidade de pagar está
+  // no cartão de orçamento, e a frase manda para lá.
   return `<div class="card span-3">
     <div class="health-header">
-      <p class="card-title">Fatura do cartão de crédito</p>
+      <p class="card-title">Teto da fatura do cartão</p>
       <span class="status-badge" data-ui-css="background:color-mix(in srgb, ${color} 16%, transparent); color:${color}">${svgIcon("creditCard", 13)}${fmtBRL(spent)} de ${fmtBRL(limit)}</span>
     </div>
     <div class="progress"><div class="progress__fill" data-ui-css="width:${clamp(ratio * 100, 0, 100)}%; background:${color}"></div></div>
     <p class="health-note">${remaining >= 0
-      ? `Ainda cabem <b data-ui-css="color:${color}">${fmtBRL(remaining)}</b> na fatura deste mês antes de estourar o teto.`
-      : `Você já passou <b data-ui-css="color:var(--negative)">${fmtBRL(Math.abs(remaining))}</b> do teto definido para a fatura.`}</p>
+      ? `Limite disponível até o teto que você definiu: <b data-ui-css="color:${color}">${fmtBRL(remaining)}</b>. É um limite do cartão, não dinheiro livre: o quanto ainda cabe no orçamento está no cartão de orçamento do mês.`
+      : `Você já passou <b data-ui-css="color:var(--negative)">${fmtBRL(Math.abs(remaining))}</b> do teto que definiu para a fatura.`}</p>
   </div>`;
 }
 
@@ -28438,8 +28539,18 @@ function renderBudgetSplitCard(mKey) {
 // ==================================================================
 // FEATURE 2. Assistente financeiro (motor de regras)
 // ==================================================================
-function renderAssistantCard(mKey) {
-  const alerts = getAssistantAlerts(state.data, mKey);
+function renderAssistantCard(mKey, visibleIds) {
+  const todos = getAssistantAlerts(state.data, mKey);
+  const ids = Array.isArray(visibleIds) ? visibleIds : [];
+  // O cartão de orçamentos por categoria já mostra "Moradia estourou" com
+  // barra e valores; repetir o mesmo alerta aqui era o que fazia o Início
+  // parecer quatro painéis dizendo a mesma coisa. Com ele visível, os alertas
+  // de teto saem daqui. E três é o máximo: alerta demais vira papel de parede.
+  const semRepetidos = ids.indexOf("categoryBudgets") >= 0
+    ? todos.filter((a) => !/^budget-/.test(String(a.id || "")))
+    : todos;
+  const alerts = semRepetidos.slice(0, 3);
+  const ocultos = semRepetidos.length - alerts.length;
   if (alerts.length === 0) return "";
   const severityColor = { danger: "var(--negative)", warn: "var(--goal)", info: "var(--brand)" };
   const severityBg = { danger: "var(--negative-soft)", warn: "var(--goal-soft)", info: "var(--brand-soft)" };
@@ -28448,7 +28559,7 @@ function renderAssistantCard(mKey) {
       ${svgIcon("sparkles", 18, "leak-header__icon")}
       <div>
         <p class="card-title" data-ui-css="margin:0">Assistente financeiro</p>
-        <p class="card-subtitle" data-ui-css="margin:2px 0 0">Alertas automáticos com base no seu mês, calculados no seu aparelho</p>
+        <p class="card-subtitle" data-ui-css="margin:2px 0 0">${alerts.length === 1 ? "O alerta" : `Os ${alerts.length} alertas`} que mais pesam neste mês, calculados no seu aparelho</p>
       </div>
     </div>
     <div class="assistant-alert-list">
@@ -28460,6 +28571,7 @@ function renderAssistantCard(mKey) {
         </div>
       </div>`).join("")}
     </div>
+    ${ocultos > 0 ? `<button class="btn btn--ghost btn--block btn--sm" data-ui-css="margin-top:8px" data-action="nav" data-tab="insights">${svgIcon("sparkles", 14)} Ver ${ocultos === 1 ? "mais 1 alerta" : `mais ${ocultos} alertas`} na Central inteligente</button>` : ""}
   </div>`;
 }
 
@@ -28680,10 +28792,10 @@ function renderTransferConversionScreen() {
     <div class="origin-chip">${svgIcon("info", 14)}<span>Uma transferência entre suas contas sai de uma e entra na outra. Ela não conta como gasto nem como renda.</span></div>
 
     <div class="amount-input-wrap">
-      <p class="field__label center">Valor</p>
+      <label class="field__label center" for="tx-amount-input">Valor</label>
       <div class="amount-row">
         <span class="amount-currency" data-ui-css="color:var(--ink-soft)">R$</span>
-        <input id="tx-amount-input" data-field="tx-amount" class="amount-field" data-ui-css="color:var(--ink)"
+        <input id="tx-amount-input" data-field="tx-amount" class="amount-field" aria-label="Valor da movimentação" data-ui-css="color:var(--ink)"
           value="${escapeHtml(f.amount)}" inputmode="decimal" placeholder="0,00" autocomplete="off" />
       </div>
     </div>
@@ -28860,10 +28972,10 @@ function renderAddScreen() {
     ${renderRecentTemplates(f, editing)}
 
     <div class="amount-input-wrap">
-      <p class="field__label center">Valor</p>
+      <label class="field__label center" for="tx-amount-input">Valor</label>
       <div class="amount-row">
         <span class="amount-currency" data-ui-css="color:${isIncome ? "var(--positive)" : "var(--ink-soft)"}">R$</span>
-        <input id="tx-amount-input" data-field="tx-amount" class="amount-field" data-ui-css="color:${isIncome ? "var(--positive)" : "var(--ink)"}"
+        <input id="tx-amount-input" data-field="tx-amount" class="amount-field" aria-label="Valor da movimentação" data-ui-css="color:${isIncome ? "var(--positive)" : "var(--ink)"}"
           value="${escapeHtml(f.amount)}" inputmode="decimal" placeholder="0,00" autocomplete="off" />
       </div>
     </div>
@@ -33740,8 +33852,21 @@ function onClick(e) {
       break;
     case "legal-accept":
       setData((d) => ({ ...d, privacy: acceptLegalTexts(d.privacy) }));
+      // Aceite dado pela tela de Privacidade durante a configuração inicial
+      // vale como o aceite do assistente, e devolve a pessoa para onde estava.
+      if (state.onboarding.open && state.onboarding.readingLegal) {
+        state.onboarding.legalAccepted = true;
+        state.onboarding.readingLegal = false;
+        state.tab = "dashboard";
+        render();
+      }
       notify("Política e termos aceitos");
       break;
+    // O caminho "Configurar do zero" do passo 1 é o mesmo avanço do rodapé,
+    // com nome próprio para a interface ter um "Continuar" só.
+    case "onb-start-setup": if (onbCanAdvance(1)) { state.onboarding.step = 2; render(); } break;
+    case "onb-read-legal": state.onboarding.readingLegal = true; render(); break;
+    case "onb-return": state.onboarding.readingLegal = false; state.tab = "dashboard"; render(); break;
     case "privacy-ai-mode":
       setData((d) => ({ ...d, privacy: { ...normalizePrivacy(d.privacy), aiSharing: value === "blocked" ? "blocked" : "ask" } }));
       notify(value === "blocked" ? "Envios para IA bloqueados" : "Confirmação por envio ativada");
@@ -34774,6 +34899,7 @@ function onClick(e) {
         monthlyPayment: a.monthlyPayment ? a.monthlyPayment.toFixed(2).replace(".", ",") : "",
         dueDay: a.dueDay ? String(a.dueDay) : "",
         note: a.note || "", inLedger: !!a.inLedger,
+        sinceMonth: a.sinceMonth ? `${a.sinceMonth.slice(5, 7)}/${a.sinceMonth.slice(0, 4)}` : "",
       };
       state.wealth.updatingId = null;
       state.wealth.confirmDeleteId = null;
@@ -34792,12 +34918,21 @@ function onClick(e) {
         }, "Revise os dados do patrimônio"); break;
       }
       const payment = parseMoneyInput(f.monthlyPayment);
+      // "Desde quando": MM/AAAA digitado vira AAAA-MM; vazio é "antes do app".
+      const sinceRaw = String(f.sinceMonth || "").trim();
+      const sinceMatch = sinceRaw.match(/^(\d{1,2})\s*[\/.-]\s*(\d{4})$/);
+      const sinceMonth = sinceMatch && Number(sinceMatch[1]) >= 1 && Number(sinceMatch[1]) <= 12
+        ? `${sinceMatch[2]}-${String(Number(sinceMatch[1])).padStart(2, "0")}` : "";
+      if (sinceRaw && !sinceMonth) {
+        showFormErrors({ "wealth-since-input": "Use mês e ano, como 03/2024." }, "Revise os dados do patrimônio"); break;
+      }
       const draft = {
         id: f.id || undefined,
         class: f.class, name: f.name, value,
         monthlyPayment: Number.isFinite(payment) ? payment : 0,
         dueDay: f.dueDay,
         note: f.note, inLedger: f.inLedger,
+        sinceMonth,
       };
       setData((d) => {
         const list = d.assets || [];
@@ -36348,7 +36483,7 @@ function renderLocalOnlyNotice() {
     : "Ainda não há backup.";
   return `<p class="local-only" role="status">
     ${svgIcon("info", 14)}
-    <span class="local-only__text">Seus dados estão salvos somente neste dispositivo. ${detalhe}</span>
+    <span class="local-only__text">Seus dados estão salvos somente neste dispositivo. ${detalhe} Limpar os dados do navegador apaga tudo.</span>
     <button type="button" class="link-btn local-only__action" data-action="protect-data">Proteger meus dados</button>
     <button type="button" class="icon-btn local-only__close" data-action="local-only-dismiss" aria-label="Dispensar aviso por esta sessão">${svgIcon("x", 13)}</button>
   </p>`;
@@ -37234,6 +37369,19 @@ function renderShell() {
   // atrás. Um app de dinheiro vazio não tem o que mostrar, e um menu completo no
   // primeiro segundo é convite para se perder antes de começar.
   if (state.onboarding.open && !state.booting) {
+    // Ler a política inteira sem sair da configuração: a tela de Privacidade
+    // assume o lugar do assistente, com um caminho de volta explícito. O
+    // aceite dado lá vale aqui (ver "legal-accept" em actions.js).
+    if (state.onboarding.readingLegal) {
+      state.tab = "privacy";
+      return `
+    <main class="main-content main-content--onb-legal" id="conteudo">
+      <div class="onb-return-bar"><button type="button" class="btn btn--secondary btn--sm" data-action="onb-return">${svgIcon("chevronLeft", 16)} Voltar à configuração</button></div>
+      ${renderScreen()}
+    </main>
+    <div class="sr-live" role="status" aria-live="polite" aria-atomic="true">${state.toast ? escapeHtml(state.toast) : ""}</div>
+  `;
+    }
     return `
     ${renderOnboardingLayer()}
     <div class="sr-live" role="status" aria-live="polite" aria-atomic="true">${state.toast ? escapeHtml(state.toast) : ""}</div>
@@ -37935,6 +38083,7 @@ function onInput(e) {
     case "wealth-payment": if (state.wealth.form) state.wealth.form.monthlyPayment = val; break;
     case "wealth-dueday": if (state.wealth.form) state.wealth.form.dueDay = val.replace(/[^0-9]/g, "").slice(0, 2); break;
     case "wealth-note": if (state.wealth.form) state.wealth.form.note = val; break;
+    case "wealth-since": if (state.wealth.form) state.wealth.form.sinceMonth = val.replace(/[^0-9\/.-]/g, "").slice(0, 7); break;
     case "wealth-update": state.wealth.updateValue = val; break;
     // ---- Módulo 5 ----
     case "pf-name": if (state.portfolio.form) state.portfolio.form.name = val; break;
@@ -38501,6 +38650,18 @@ async function init() {
   // já tem. `bootstrapAccountLink` libera o portão quando a descida termina.
   if (FinanceStore.scope() !== GUEST_SCOPE) holdOnboardingGate();
   else state.onboarding.open = !(state.data.onboarding && state.data.onboarding.done);
+  // "Explorar demonstração" na página comercial chega como `?demo=1`. A
+  // demonstração não grava nada nem exige aceite (ver enterDemoMode), então
+  // ela pode abrir direto; o parâmetro sai do endereço para não reabrir a
+  // demonstração num recarregamento.
+  let demoPelaUrl = false;
+  try {
+    const query = new URLSearchParams(location.search);
+    if (query.get("demo") === "1") {
+      demoPelaUrl = true;
+      history.replaceState(null, "", location.pathname + location.hash);
+    }
+  } catch (_) { demoPelaUrl = false; }
   state.backup.undoAvailable = !!FinanceStore.readUndoSnapshot();
   hydrateImportUndo();
   FinanceStore.onError(() => {
@@ -38532,6 +38693,7 @@ async function init() {
     NavHistory.replace(state.tab, [], boot.addressed ? boot.depth : 0);
   }
   window.addEventListener("popstate", applyHistoryRoute);
+  if (demoPelaUrl && !isDemoMode()) enterDemoMode();
 
   // [M41] O SEGUNDO PEDAÇO É BUSCADO DEPOIS DO PRIMEIRO QUADRO, NO OCIOSO.
   //

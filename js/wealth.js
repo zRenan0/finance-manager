@@ -155,14 +155,22 @@ function wealthInsights(data, model) {
     });
   }
 
-  const invShare = composition.gross > 0 ? safePct(worth.invested, composition.gross) : 0;
-  if (composition.gross > 0) {
+  // BASE FINANCEIRA, NÃO PATRIMÔNIO BRUTO. A frase dividia os investimentos
+  // pelo patrimônio inteiro, carro e imóvel incluídos, e concluía "apenas 17%
+  // aplicado, o resto perde para a inflação parado". Ninguém aplica um carro;
+  // e o que está em conta pode ser reserva rendendo. O denominador passa a ser
+  // só o dinheiro (contas, metas e investimentos), ele é dito na própria frase,
+  // e a conclusão sobre "parado" sai: o app não sabe se a conta rende.
+  const financeiro = addMoney(addMoney(Math.max(0, worth.cash), worth.invested), worth.goals);
+  const invShare = financeiro > 0 ? safePct(worth.invested, financeiro) : 0;
+  if (financeiro > 0) {
+    const base = `de ${fmtBRL(financeiro)} em contas, metas e investimentos; bens como veículo e imóvel ficam fora dessa conta`;
     out.push({
       icon: "trendUp",
       tone: invShare >= 30 ? "positive" : "neutral",
       text: invShare >= 30
-        ? `${invShare.toFixed(0)}% do seu patrimônio está aplicado; proporção saudável para proteger o valor real.`
-        : `Apenas ${invShare.toFixed(0)}% do seu patrimônio está aplicado. O restante perde para a inflação parado.`,
+        ? `${invShare.toFixed(0)}% do seu dinheiro está em investimentos cadastrados (${base}).`
+        : `${invShare.toFixed(0)}% do seu dinheiro está em investimentos cadastrados (${base}). O app não sabe se o que está em conta rende: se parte dele é reserva aplicada ou conta remunerada, cadastre como investimento para a leitura ficar certa.`,
     });
   }
 
@@ -225,7 +233,7 @@ function buildWealthModel(data, months) {
 // campos. A forma do estado é vocabulário do motor, como GOAL_ICON_OPTIONS em
 // js/goals.js, e com ela na tela o pacote não conseguia adiar Patrimônio.
 function freshWealthForm(cls) {
-  return { id: null, class: cls || "conta", name: "", value: "", monthlyPayment: "", dueDay: "", note: "", inLedger: false };
+  return { id: null, class: cls || "conta", name: "", value: "", monthlyPayment: "", dueDay: "", note: "", inLedger: false, sinceMonth: "" };
 }
 
 /* Exportação para o harness de teste em Node (ignorada no navegador). */

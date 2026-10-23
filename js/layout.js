@@ -75,8 +75,14 @@ function dashboardCardById(id) {
   return DASHBOARD_CARDS.find((c) => c.id === id) || null;
 }
 
+// O "Resumo inteligente" nasce desligado: as quatro frases dele (gastos contra
+// o mês passado, maior categoria, economia e projeção) já estão no cartão de
+// saldo, em "Para onde foi o dinheiro" e na previsão de caixa. Quem quiser a
+// leitura em frases liga na personalização do Início.
+const DASHBOARD_HIDDEN_BY_DEFAULT = ["summary"];
+
 function defaultDashboardLayout() {
-  return { order: DASHBOARD_CARD_IDS.slice(), hidden: [], pinned: [] };
+  return { order: DASHBOARD_CARD_IDS.slice(), hidden: DASHBOARD_HIDDEN_BY_DEFAULT.slice(), pinned: [] };
 }
 
 function isDashboardStarting(data) {

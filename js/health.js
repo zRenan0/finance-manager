@@ -354,10 +354,13 @@ const HEALTH_INDICATORS = [
     id: "investimentos",
     label: "Investimentos",
     icon: "trendUp",
-    what: "Quanto do seu patrimônio está aplicado e quanto da renda virou aporte neste mês.",
+    what: "Quanto do seu dinheiro (contas, metas e investimentos) está aplicado e quanto da renda virou aporte neste mês.",
     evaluate(data, mKey, ctx) {
       const invested = addMoney(ctx.worth.invested, ctx.worth.goals);
-      const total = ctx.worth.total;
+      // Denominador: o DINHEIRO (contas, metas e investimentos), não o
+      // patrimônio com bens. Um carro no denominador derrubava o percentual de
+      // quem tinha a reserva inteira aplicada. Ver wealthInsights em wealth.js.
+      const total = addMoney(Math.max(0, ctx.worth.cash), invested);
       const income = ctx.month.income;
       if (total <= 0 && income <= 0) return { applicable: false };
 
@@ -370,16 +373,16 @@ const HEALTH_INDICATORS = [
         applicable: true,
         ratio,
         display: fmtPct(share),
-        caption: "do patrimônio aplicado",
+        caption: "do dinheiro aplicado",
         description: invested > 0
-          ? `${fmtBRL(invested)} do seu patrimônio estão em investimentos e metas${contributed > 0 ? `, e você aportou ${fmtBRL(contributed)} (${contributedPct.toFixed(0)}% da renda) neste mês` : ". Nenhum aporte novo neste mês"}.`
-          : "Todo o seu dinheiro está parado em conta. Sem aplicação, a inflação corrói o poder de compra mês a mês.",
+          ? `${fmtBRL(invested)} de ${fmtBRL(total)} em contas, metas e investimentos estão aplicados (bens ficam fora)${contributed > 0 ? `, e você aportou ${fmtBRL(contributed)} (${contributedPct.toFixed(0)}% da renda) neste mês` : ". Nenhum aporte novo neste mês"}.`
+          : "Nenhum investimento ou meta cadastrado: todo o dinheiro conhecido pelo app está em conta. Se parte dele já rende, cadastre como investimento.",
         recommendation: ratio >= 0.8
           ? null
           : contributedPct < 8
             ? "Um aporte automático de 10% da renda no dia do pagamento resolve isso sem exigir disciplina mensal; o dinheiro sai antes de virar gasto."
-            : "Dinheiro parado em conta corrente perde para a inflação. Mesmo a aplicação mais conservadora protege o valor real do que você acumulou.",
-        benchmark: "Parâmetros deste indicador: 40% do patrimônio aplicado e 10% da renda aportada. Ajuste a decisão à sua reserva, prazo e dívidas.",
+            : "O que fica em conta corrente comum não rende. Se a sua conta é remunerada ou a reserva está aplicada, cadastre em Patrimônio para o indicador enxergar.",
+        benchmark: "Parâmetros deste indicador: 40% do dinheiro (contas, metas e investimentos) aplicado e 10% da renda aportada. Bens não entram no denominador.",
         cta: { label: "Cadastrar carteira", tab: "wealth" },
       };
     },

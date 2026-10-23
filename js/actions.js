@@ -340,8 +340,21 @@ function onClick(e) {
       break;
     case "legal-accept":
       setData((d) => ({ ...d, privacy: acceptLegalTexts(d.privacy) }));
+      // Aceite dado pela tela de Privacidade durante a configuração inicial
+      // vale como o aceite do assistente, e devolve a pessoa para onde estava.
+      if (state.onboarding.open && state.onboarding.readingLegal) {
+        state.onboarding.legalAccepted = true;
+        state.onboarding.readingLegal = false;
+        state.tab = "dashboard";
+        render();
+      }
       notify("Política e termos aceitos");
       break;
+    // O caminho "Configurar do zero" do passo 1 é o mesmo avanço do rodapé,
+    // com nome próprio para a interface ter um "Continuar" só.
+    case "onb-start-setup": if (onbCanAdvance(1)) { state.onboarding.step = 2; render(); } break;
+    case "onb-read-legal": state.onboarding.readingLegal = true; render(); break;
+    case "onb-return": state.onboarding.readingLegal = false; state.tab = "dashboard"; render(); break;
     case "privacy-ai-mode":
       setData((d) => ({ ...d, privacy: { ...normalizePrivacy(d.privacy), aiSharing: value === "blocked" ? "blocked" : "ask" } }));
       notify(value === "blocked" ? "Envios para IA bloqueados" : "Confirmação por envio ativada");
@@ -1374,6 +1387,7 @@ function onClick(e) {
         monthlyPayment: a.monthlyPayment ? a.monthlyPayment.toFixed(2).replace(".", ",") : "",
         dueDay: a.dueDay ? String(a.dueDay) : "",
         note: a.note || "", inLedger: !!a.inLedger,
+        sinceMonth: a.sinceMonth ? `${a.sinceMonth.slice(5, 7)}/${a.sinceMonth.slice(0, 4)}` : "",
       };
       state.wealth.updatingId = null;
       state.wealth.confirmDeleteId = null;
@@ -1392,12 +1406,21 @@ function onClick(e) {
         }, "Revise os dados do patrimônio"); break;
       }
       const payment = parseMoneyInput(f.monthlyPayment);
+      // "Desde quando": MM/AAAA digitado vira AAAA-MM; vazio é "antes do app".
+      const sinceRaw = String(f.sinceMonth || "").trim();
+      const sinceMatch = sinceRaw.match(/^(\d{1,2})\s*[\/.-]\s*(\d{4})$/);
+      const sinceMonth = sinceMatch && Number(sinceMatch[1]) >= 1 && Number(sinceMatch[1]) <= 12
+        ? `${sinceMatch[2]}-${String(Number(sinceMatch[1])).padStart(2, "0")}` : "";
+      if (sinceRaw && !sinceMonth) {
+        showFormErrors({ "wealth-since-input": "Use mês e ano, como 03/2024." }, "Revise os dados do patrimônio"); break;
+      }
       const draft = {
         id: f.id || undefined,
         class: f.class, name: f.name, value,
         monthlyPayment: Number.isFinite(payment) ? payment : 0,
         dueDay: f.dueDay,
         note: f.note, inLedger: f.inLedger,
+        sinceMonth,
       };
       setData((d) => {
         const list = d.assets || [];

@@ -29,7 +29,7 @@ function renderDashboardCard(cardId, ctx) {
     case "summary":         return renderSmartSummaryCard(ctx.model);
     case "quickEntry":      return renderQuickEntryCard();
     case "advisor":         return renderAdvisorCard(ctx.mKey);
-    case "assistant":       return renderAssistantCard(ctx.mKey);
+    case "assistant":       return renderAssistantCard(ctx.mKey, ctx.visibleIds);
     case "gamification":    return renderGamificationCard(achievementsModel());
     case "budgetHealth":    return renderBudgetHealth(ctx.refDate, ctx.isCurrentMonth, ctx.model.month.expense, ctx.fixedSpent, ctx.variableSpent);
     case "categoryBudgets": return renderCategoryBudgetsCard(ctx.mKey);
@@ -70,16 +70,18 @@ function renderDashboardScreen() {
   const pending = isCurrentMonth ? getPendingRecurring(state.data, mKey) : [];
   const showCarry = pending.length > 0 && state.data.dismissedCarryForwardMonth !== mKey;
 
-  const ctx = { model, mKey, isCurrentMonth, refDate, fixedSpent, variableSpent, recent };
   const starting = isDashboardStarting(state.data);
   const cards = visibleDashboardCards(state.data.dashboardLayout, { isCurrentMonth, data: state.data });
+  // Os cartões sabem quais vizinhos estão na tela: é o que permite ao
+  // Assistente não repetir um alerta que o cartão de orçamentos já mostra.
+  const ctx = { model, mKey, isCurrentMonth, refDate, fixedSpent, variableSpent, recent, visibleIds: cards.map((c) => c.id) };
   const body = starting
     ? `${renderHeroCard(model)}${renderDashboardStarter()}${cards.filter((c) => c.id !== "hero").map((c) => renderDashboardCard(c.id, ctx)).join("")}`
     : cards.map((c) => renderDashboardCard(c.id, ctx)).join("");
 
   return `<div class="screen ${starting ? "screen--starter" : ""}">
     ${renderDashboardHeader(model)}
-    ${shouldWarnLocalOnly() ? renderLocalOnlyNotice() : ""}
+    ${shouldWarnLocalOnly() ? renderLocalOnlyNotice() : renderProtectionStrip()}
     ${showCarry ? renderCarryBanner(pending) : ""}
     ${state.dashboardEditing ? renderDashboardCustomizer() : ""}
 
@@ -87,6 +89,36 @@ function renderDashboardScreen() {
       ${body}
     </div>
   </div>`;
+}
+
+// ---- Proteção dos dados: onde estão e desde quando há cópia ----
+// Backup, exportação e senha existem, mas o estado deles morava em Ajustes.
+// Quem limpa o navegador ou troca de aparelho descobria tarde demais. Esta
+// linha fica no Início o tempo todo, em três estados: só neste aparelho, conta
+// ligada (com a última sincronização concluída) e a idade do último backup. O
+// aviso forte de "sem backup há 30 dias" (renderLocalOnlyNotice) continua
+// existindo e toma o lugar desta linha enquanto está ativo.
+function renderProtectionStrip() {
+  if (isDemoMode()) return "";
+  if ((state.data.transactions || []).length === 0) return "";
+  const conta = !!(state.account && state.account.authenticated);
+  const last = state.data.lastBackupAt;
+  const dias = last ? Math.max(0, Math.floor((Date.parse(`${todayIso()}T12:00:00`) - Date.parse(`${last}T12:00:00`)) / 86400000)) : null;
+  const backup = !last ? "sem backup ainda"
+    : `último backup ${dias === 0 ? "hoje" : dias === 1 ? "ontem" : `há ${dias} dias`}`;
+  let sincronia = "";
+  if (conta && typeof CloudSync !== "undefined") {
+    const st = CloudSync.status();
+    sincronia = st.lastSyncAt
+      ? `última sincronização concluída em ${new Date(st.lastSyncAt).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}`
+      : (st.phase === "error" ? "sincronização com falha" : "sincronização pendente");
+  }
+  const alerta = !conta && (!last || dias >= 30);
+  return `<p class="protect-strip ${alerta ? "protect-strip--warn" : ""}" role="status">
+    ${svgIcon(conta ? "shieldCheck" : "info", 14)}
+    <span class="protect-strip__text"><b>${conta ? "Conta ligada" : "Somente neste aparelho"}</b> · ${backup}${sincronia ? ` · ${sincronia}` : ""}${conta ? "" : ". Limpar os dados do navegador apaga tudo."}</span>
+    <button type="button" class="link-btn protect-strip__action" data-action="protect-data">${conta ? "Backup e dados" : "Proteger"}</button>
+  </p>`;
 }
 
 function renderDashboardStarter() {
@@ -257,7 +289,7 @@ function renderHeroCard(m) {
     <div class="hero-chips">
       <div class="hero-chip hero-chip--in">${svgIcon("arrowUpRight", 17)}<div><span class="hero-chip__label">Receitas do mês</span><span class="hero-chip__value">${fmtBRL(rendaLancada)}</span></div></div>
       <div class="hero-chip hero-chip--out">${svgIcon("arrowDownRight", 17)}<div><span class="hero-chip__label">Despesas do mês</span><span class="hero-chip__value">${fmtBRL(m.month.expense)}</span></div></div>
-      <div class="hero-chip ${savedTone}">${svgIcon(saved >= 0 ? "piggy" : "alertTriangle", 17)}<div><span class="hero-chip__label">Economia do mês</span><span class="hero-chip__value">${fmtBRL(saved)}</span></div></div>
+      <div class="hero-chip ${savedTone}">${svgIcon(saved >= 0 ? "piggy" : "alertTriangle", 17)}<div><span class="hero-chip__label">${m.month.partial ? "Economia até hoje" : "Economia do mês"}</span><span class="hero-chip__value">${fmtBRL(saved)}</span></div></div>
     </div>
     <div class="hero-actions">
       <button class="hero-action hero-action--primary" data-action="nav" data-tab="add">${svgIcon("plus", 17)}Adicionar movimentação</button>
@@ -374,11 +406,22 @@ function renderNetWorthCard(m) {
   const up = delta >= 0;
   const trendColor = up ? "var(--positive)" : "var(--negative)";
 
-  const parts = [
-    { label: "Em conta", value: Math.max(0, w.cash), color: "var(--brand)" },
-    { label: "Investimentos", value: w.invested, color: "var(--goal)" },
-    { label: "Em metas", value: w.goals, color: "var(--positive)" },
-  ];
+  // A COMPOSIÇÃO INTEIRA, NÃO SÓ O DINHEIRO. O total em cima somava bens e
+  // descontava dívidas, mas a legenda só mostrava contas, investimentos e
+  // metas, e as três linhas não explicavam o número. Agora a legenda vem da
+  // mesma função da tela de Patrimônio, com bens, e as dívidas aparecem como
+  // linha negativa: a soma fecha com o total exibido.
+  const comp = typeof wealthComposition === "function" ? wealthComposition(state.data, w) : null;
+  const legendLabel = { cash: "Em conta", invested: "Investimentos", goals: "Em metas", other: "Bens" };
+  const legendColor = { cash: "var(--brand)", invested: "var(--goal)", goals: "var(--positive)", other: "#8A5FBF" };
+  const parts = comp
+    ? comp.positive.map((b) => ({ label: legendLabel[b.id] || b.label, value: b.value, color: legendColor[b.id] || b.color }))
+    : [
+      { label: "Em conta", value: Math.max(0, w.cash), color: "var(--brand)" },
+      { label: "Investimentos", value: w.invested, color: "var(--goal)" },
+      { label: "Em metas", value: w.goals, color: "var(--positive)" },
+    ];
+  const negatives = comp ? comp.negative : [];
   const sum = parts.reduce((acc, p) => acc + p.value, 0);
 
   return `<div class="card card--networth span-2">
@@ -405,7 +448,13 @@ function renderNetWorthCard(m) {
         <span class="networth-legend__label">${p.label}</span>
         <b>${fmtBRL(p.value)}</b>
       </div>`).join("")}
+      ${negatives.map((n) => `<div class="networth-legend__item networth-legend__item--debt">
+        <span class="cat-dot" data-ui-css="background:${n.color}"></span>
+        <span class="networth-legend__label">${escapeHtml(n.label)}</span>
+        <b>− ${fmtBRL(n.value)}</b>
+      </div>`).join("")}
     </div>
+    ${negatives.length ? `<p class="footnote" data-ui-css="margin-top:6px">Patrimônio = ${fmtBRL(comp.gross)} em bens e dinheiro − ${fmtBRL(comp.debts)} em dívidas e faturas.</p>` : ""}
     ${w.cash < 0 ? `<p class="footnote" data-ui-css="color:var(--negative)">Seu saldo em conta está negativo em ${fmtBRL(Math.abs(w.cash))}.</p>` : ""}
     <div class="networth-actions">
       ${renderCalculationButton("net-worth")}
@@ -622,15 +671,19 @@ function renderCreditLimitCard(mKey) {
   const ratio = safeRatio(spent, limit);
   const color = ratio < 0.8 ? "var(--positive)" : ratio <= 1 ? "var(--goal)" : "var(--negative)";
   const remaining = subMoney(limit, spent);
+  // LIMITE DO CARTÃO NÃO É DINHEIRO PARA GASTAR. "Ainda cabem R$ 4.778 na
+  // fatura" ao lado de um orçamento estourado lia como permissão. O número é
+  // o que falta para o teto que a pessoa definiu; a capacidade de pagar está
+  // no cartão de orçamento, e a frase manda para lá.
   return `<div class="card span-3">
     <div class="health-header">
-      <p class="card-title">Fatura do cartão de crédito</p>
+      <p class="card-title">Teto da fatura do cartão</p>
       <span class="status-badge" data-ui-css="background:color-mix(in srgb, ${color} 16%, transparent); color:${color}">${svgIcon("creditCard", 13)}${fmtBRL(spent)} de ${fmtBRL(limit)}</span>
     </div>
     <div class="progress"><div class="progress__fill" data-ui-css="width:${clamp(ratio * 100, 0, 100)}%; background:${color}"></div></div>
     <p class="health-note">${remaining >= 0
-      ? `Ainda cabem <b data-ui-css="color:${color}">${fmtBRL(remaining)}</b> na fatura deste mês antes de estourar o teto.`
-      : `Você já passou <b data-ui-css="color:var(--negative)">${fmtBRL(Math.abs(remaining))}</b> do teto definido para a fatura.`}</p>
+      ? `Limite disponível até o teto que você definiu: <b data-ui-css="color:${color}">${fmtBRL(remaining)}</b>. É um limite do cartão, não dinheiro livre: o quanto ainda cabe no orçamento está no cartão de orçamento do mês.`
+      : `Você já passou <b data-ui-css="color:var(--negative)">${fmtBRL(Math.abs(remaining))}</b> do teto que definiu para a fatura.`}</p>
   </div>`;
 }
 
@@ -782,8 +835,18 @@ function renderBudgetSplitCard(mKey) {
 // ==================================================================
 // FEATURE 2. Assistente financeiro (motor de regras)
 // ==================================================================
-function renderAssistantCard(mKey) {
-  const alerts = getAssistantAlerts(state.data, mKey);
+function renderAssistantCard(mKey, visibleIds) {
+  const todos = getAssistantAlerts(state.data, mKey);
+  const ids = Array.isArray(visibleIds) ? visibleIds : [];
+  // O cartão de orçamentos por categoria já mostra "Moradia estourou" com
+  // barra e valores; repetir o mesmo alerta aqui era o que fazia o Início
+  // parecer quatro painéis dizendo a mesma coisa. Com ele visível, os alertas
+  // de teto saem daqui. E três é o máximo: alerta demais vira papel de parede.
+  const semRepetidos = ids.indexOf("categoryBudgets") >= 0
+    ? todos.filter((a) => !/^budget-/.test(String(a.id || "")))
+    : todos;
+  const alerts = semRepetidos.slice(0, 3);
+  const ocultos = semRepetidos.length - alerts.length;
   if (alerts.length === 0) return "";
   const severityColor = { danger: "var(--negative)", warn: "var(--goal)", info: "var(--brand)" };
   const severityBg = { danger: "var(--negative-soft)", warn: "var(--goal-soft)", info: "var(--brand-soft)" };
@@ -792,7 +855,7 @@ function renderAssistantCard(mKey) {
       ${svgIcon("sparkles", 18, "leak-header__icon")}
       <div>
         <p class="card-title" data-ui-css="margin:0">Assistente financeiro</p>
-        <p class="card-subtitle" data-ui-css="margin:2px 0 0">Alertas automáticos com base no seu mês, calculados no seu aparelho</p>
+        <p class="card-subtitle" data-ui-css="margin:2px 0 0">${alerts.length === 1 ? "O alerta" : `Os ${alerts.length} alertas`} que mais pesam neste mês, calculados no seu aparelho</p>
       </div>
     </div>
     <div class="assistant-alert-list">
@@ -804,6 +867,7 @@ function renderAssistantCard(mKey) {
         </div>
       </div>`).join("")}
     </div>
+    ${ocultos > 0 ? `<button class="btn btn--ghost btn--block btn--sm" data-ui-css="margin-top:8px" data-action="nav" data-tab="insights">${svgIcon("sparkles", 14)} Ver ${ocultos === 1 ? "mais 1 alerta" : `mais ${ocultos} alertas`} na Central inteligente</button>` : ""}
   </div>`;
 }
 

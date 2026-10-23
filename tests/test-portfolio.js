@@ -198,12 +198,14 @@ console.log("\n7. Evolução mensal a partir do histórico");
   const data = base({ assets: [a2] });
   const m = build(data, { months: 6 });
   check("série cobre a janela pedida", m.series.length === 6, m.series.length);
-  check("mês anterior ao cadastro vale zero", m.series[0].value === 0, m.series[0].value);
+  // Cadastrar não é enriquecer: sem data informada, o primeiro valor conhecido
+  // vale para trás (ver assetValueAt em storage.js).
+  check("mês anterior ao cadastro carrega o primeiro valor conhecido", m.series[0].value === 1000, m.series[0].value);
   check("valor antigo é preservado na época certa",
     m.series[m.series.length - 4].value === 1000, m.series[m.series.length - 4].value);
   check("valor atual aparece no último ponto",
     m.series[m.series.length - 1].value === 1500, m.series[m.series.length - 1].value);
-  check("variação da janela é positiva", m.delta.up === true && m.delta.value === 1500);
+  check("variação da janela é só a valorização, não o cadastro", m.delta.up === true && m.delta.value === 500, m.delta.value);
 
   const it = m.items[0];
   check("variação do mês compara com o histórico anterior", it.monthDelta.comparable === true);

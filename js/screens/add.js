@@ -114,10 +114,10 @@ function renderTransferConversionScreen() {
     <div class="origin-chip">${svgIcon("info", 14)}<span>Uma transferência entre suas contas sai de uma e entra na outra. Ela não conta como gasto nem como renda.</span></div>
 
     <div class="amount-input-wrap">
-      <p class="field__label center">Valor</p>
+      <label class="field__label center" for="tx-amount-input">Valor</label>
       <div class="amount-row">
         <span class="amount-currency" data-ui-css="color:var(--ink-soft)">R$</span>
-        <input id="tx-amount-input" data-field="tx-amount" class="amount-field" data-ui-css="color:var(--ink)"
+        <input id="tx-amount-input" data-field="tx-amount" class="amount-field" aria-label="Valor da movimentação" data-ui-css="color:var(--ink)"
           value="${escapeHtml(f.amount)}" inputmode="decimal" placeholder="0,00" autocomplete="off" />
       </div>
     </div>
@@ -294,10 +294,10 @@ function renderAddScreen() {
     ${renderRecentTemplates(f, editing)}
 
     <div class="amount-input-wrap">
-      <p class="field__label center">Valor</p>
+      <label class="field__label center" for="tx-amount-input">Valor</label>
       <div class="amount-row">
         <span class="amount-currency" data-ui-css="color:${isIncome ? "var(--positive)" : "var(--ink-soft)"}">R$</span>
-        <input id="tx-amount-input" data-field="tx-amount" class="amount-field" data-ui-css="color:${isIncome ? "var(--positive)" : "var(--ink)"}"
+        <input id="tx-amount-input" data-field="tx-amount" class="amount-field" aria-label="Valor da movimentação" data-ui-css="color:${isIncome ? "var(--positive)" : "var(--ink)"}"
           value="${escapeHtml(f.amount)}" inputmode="decimal" placeholder="0,00" autocomplete="off" />
       </div>
     </div>

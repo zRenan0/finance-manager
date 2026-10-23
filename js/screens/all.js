@@ -97,7 +97,7 @@ function renderAllScreen() {
     <div class="card">
       <div class="all-search">
         ${svgIcon("search", 17, "all-search__icon")}
-        <input id="all-search-input" class="input" data-field="all-search" value="${escapeHtml(query)}"
+        <input id="all-search-input" class="input" data-field="all-search" aria-label="Buscar recurso" value="${escapeHtml(query)}"
           placeholder="Buscar recurso (ex: fatura, juros, meta)" autocomplete="off" />
         ${query ? `<button class="icon-btn icon-btn--muted" data-action="all-search-clear" aria-label="Limpar busca">${svgIcon("x", 15)}</button>` : ""}
       </div>

@@ -57,6 +57,8 @@ function freshOnboarding() {
     open: false,
     // Assistente segurado: ver o bloco "O PORTÃO DO ASSISTENTE" abaixo.
     held: false,
+    // Lendo a política inteira sem sair da configuração (ver renderShell).
+    readingLegal: false,
     step: 1,
     name: "",
     income: "",
@@ -289,11 +291,38 @@ function renderOnbProgress(step) {
 }
 
 /* --------------------------------------------------------------- passo 1 */
+// A CONDIÇÃO FICA AO LADO DOS BOTÕES. O aceite da política morava no fim de
+// uma área que rola, e "Já tenho conta" e "Pular" apareciam travados sem que a
+// razão estivesse à vista. Agora o passo 1 abre com o aceite, o caminho para
+// ler os textos inteiros e os três destinos possíveis (configurar, entrar numa
+// conta, só olhar a demonstração), antes de qualquer campo.
 function renderOnbWelcome() {
+  const aceito = !!state.onboarding.legalAccepted;
   return `<div class="onb__intro">
     <span class="onb__icon">${svgIcon("sparkles", 26)}</span>
     <h1 class="onb__title">Vamos deixar o app com a sua cara</h1>
     <p class="onb__lead">São cinco telas curtas, e só duas pedem um número. Dá para mudar tudo depois em Ajustes.</p>
+  </div>
+  <div class="onb-gate">
+    <label class="legal-consent"><input id="onb-legal-check" type="checkbox" data-action-select="onb-legal" ${aceito ? "checked" : ""} /><span>Li e aceito a política de privacidade e os termos de uso.</span></label>
+    <div class="onb-gate__links">
+      <button type="button" class="link-btn" data-action="onb-read-legal">${svgIcon("shieldCheck", 14)} Ler a política e os termos completos</button>
+    </div>
+    <details class="onb-legal-summary">
+      <summary>Resumo em quatro linhas</summary>
+      <p>O app organiza dados e produz estimativas educativas. Ele não substitui proposta, contrato, consultoria de investimentos ou análise do INSS. Sem conta, os dados ficam no navegador até você exportar um backup ou apagar. Recursos de IA só enviam o conteúdo descrito depois da sua confirmação.</p>
+    </details>
+    <div class="onb-paths" aria-label="Como você quer começar">
+      <button type="button" class="onb-path ${aceito ? "" : "onb-path--locked"}" data-action="onb-start-setup" ${aceito ? "" : `aria-disabled="true" aria-describedby="onb-block-reason"`}>
+        <b>Configurar do zero</b><small>Cinco passos. Renda, conta, gastos fixos e orçamento.</small>
+      </button>
+      <button type="button" class="onb-path ${aceito ? "" : "onb-path--locked"}" data-action="onb-have-account" ${aceito ? "" : `aria-disabled="true" aria-describedby="onb-block-reason"`}>
+        <b>Já tenho conta</b><small>Entrar e trazer os dados sincronizados.</small>
+      </button>
+      <button type="button" class="onb-path" data-action="demo-enter">
+        <b>Explorar demonstração</b><small>Seis meses de dados fictícios. Nada é salvo e não precisa aceitar nada.</small>
+      </button>
+    </div>
   </div>
   <div class="field">
     <label class="field__label" for="onb-name">Como você quer ser chamado?</label>
@@ -313,23 +342,7 @@ function renderOnbWelcome() {
     ${svgIcon("shieldCheck", 17)}
     <p>Sem conta, seus dados financeiros ficam neste aparelho. Recursos de IA só enviam o conteúdo descrito depois da sua confirmação.</p>
   </div>
-  <!-- [M25] A demonstração NÃO exige o aceite, e a diferença é real: ela não
-       grava nada no aparelho e não envia nada para lugar nenhum, então não há
-       tratamento de dado pessoal para consentir. Quem sair dela para usar o
-       app de verdade volta para cá, com o aceite ainda pendente. -->
-  <div class="onb-demo">
-    <div class="onb-demo__text">
-      <b>Quer ver funcionando antes?</b>
-      <small>Seis meses de dados fictícios: painel, gráficos, orçamento, metas, patrimônio e recorrências. Nada é salvo.</small>
-    </div>
-    <button type="button" class="btn btn--secondary btn--sm" data-action="demo-enter">Explorar demonstração</button>
-  </div>
-  <details class="onb-legal-summary">
-    <summary>Resumo da política e dos termos</summary>
-    <p>O app organiza dados e produz estimativas educativas. Ele não substitui proposta, contrato, consultoria de investimentos ou análise do INSS. Sem conta, os dados ficam no navegador até você exportar ou apagar; com conta ligada, eles também são sincronizados com o servidor. IA e consulta de nota fiscal usam rede apenas quando você aciona esses recursos.</p>
-    <p>A tela Privacidade traz a política inteira: controlador, prazos de retenção, seus direitos e o canal para incidentes.</p>
-  </details>
-  <label class="legal-consent"><input id="onb-legal-check" type="checkbox" data-action-select="onb-legal" ${state.onboarding.legalAccepted ? "checked" : ""} /><span>Li e aceito a política de privacidade e os termos de uso da versão ${LEGAL_TEXT_VERSION}.</span></label>`;
+`;
 }
 
 /* --------------------------------------------------------------- passo 2 */

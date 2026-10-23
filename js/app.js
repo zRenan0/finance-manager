@@ -504,7 +504,7 @@ function renderLocalOnlyNotice() {
     : "Ainda não há backup.";
   return `<p class="local-only" role="status">
     ${svgIcon("info", 14)}
-    <span class="local-only__text">Seus dados estão salvos somente neste dispositivo. ${detalhe}</span>
+    <span class="local-only__text">Seus dados estão salvos somente neste dispositivo. ${detalhe} Limpar os dados do navegador apaga tudo.</span>
     <button type="button" class="link-btn local-only__action" data-action="protect-data">Proteger meus dados</button>
     <button type="button" class="icon-btn local-only__close" data-action="local-only-dismiss" aria-label="Dispensar aviso por esta sessão">${svgIcon("x", 13)}</button>
   </p>`;
@@ -1390,6 +1390,19 @@ function renderShell() {
   // atrás. Um app de dinheiro vazio não tem o que mostrar, e um menu completo no
   // primeiro segundo é convite para se perder antes de começar.
   if (state.onboarding.open && !state.booting) {
+    // Ler a política inteira sem sair da configuração: a tela de Privacidade
+    // assume o lugar do assistente, com um caminho de volta explícito. O
+    // aceite dado lá vale aqui (ver "legal-accept" em actions.js).
+    if (state.onboarding.readingLegal) {
+      state.tab = "privacy";
+      return `
+    <main class="main-content main-content--onb-legal" id="conteudo">
+      <div class="onb-return-bar"><button type="button" class="btn btn--secondary btn--sm" data-action="onb-return">${svgIcon("chevronLeft", 16)} Voltar à configuração</button></div>
+      ${renderScreen()}
+    </main>
+    <div class="sr-live" role="status" aria-live="polite" aria-atomic="true">${state.toast ? escapeHtml(state.toast) : ""}</div>
+  `;
+    }
     return `
     ${renderOnboardingLayer()}
     <div class="sr-live" role="status" aria-live="polite" aria-atomic="true">${state.toast ? escapeHtml(state.toast) : ""}</div>
@@ -2091,6 +2104,7 @@ function onInput(e) {
     case "wealth-payment": if (state.wealth.form) state.wealth.form.monthlyPayment = val; break;
     case "wealth-dueday": if (state.wealth.form) state.wealth.form.dueDay = val.replace(/[^0-9]/g, "").slice(0, 2); break;
     case "wealth-note": if (state.wealth.form) state.wealth.form.note = val; break;
+    case "wealth-since": if (state.wealth.form) state.wealth.form.sinceMonth = val.replace(/[^0-9\/.-]/g, "").slice(0, 7); break;
     case "wealth-update": state.wealth.updateValue = val; break;
     // ---- Módulo 5 ----
     case "pf-name": if (state.portfolio.form) state.portfolio.form.name = val; break;
@@ -2657,6 +2671,18 @@ async function init() {
   // já tem. `bootstrapAccountLink` libera o portão quando a descida termina.
   if (FinanceStore.scope() !== GUEST_SCOPE) holdOnboardingGate();
   else state.onboarding.open = !(state.data.onboarding && state.data.onboarding.done);
+  // "Explorar demonstração" na página comercial chega como `?demo=1`. A
+  // demonstração não grava nada nem exige aceite (ver enterDemoMode), então
+  // ela pode abrir direto; o parâmetro sai do endereço para não reabrir a
+  // demonstração num recarregamento.
+  let demoPelaUrl = false;
+  try {
+    const query = new URLSearchParams(location.search);
+    if (query.get("demo") === "1") {
+      demoPelaUrl = true;
+      history.replaceState(null, "", location.pathname + location.hash);
+    }
+  } catch (_) { demoPelaUrl = false; }
   state.backup.undoAvailable = !!FinanceStore.readUndoSnapshot();
   hydrateImportUndo();
   FinanceStore.onError(() => {
@@ -2688,6 +2714,7 @@ async function init() {
     NavHistory.replace(state.tab, [], boot.addressed ? boot.depth : 0);
   }
   window.addEventListener("popstate", applyHistoryRoute);
+  if (demoPelaUrl && !isDemoMode()) enterDemoMode();
 
   // [M41] O SEGUNDO PEDAÇO É BUSCADO DEPOIS DO PRIMEIRO QUADRO, NO OCIOSO.
   //

@@ -152,12 +152,18 @@ console.log("\n3. Evolução usa o valor da época, não o de hoje");
   check("valor 5 meses atrás = 70.000", near(assetValueAt(carro, mKeyAgo(5)), 70000), assetValueAt(carro, mKeyAgo(5)));
   check("valor 4 meses atrás carrega o anterior", near(assetValueAt(carro, mKeyAgo(4)), 70000), assetValueAt(carro, mKeyAgo(4)));
   check("valor 3 meses atrás = 66.000", near(assetValueAt(carro, mKeyAgo(3)), 66000), assetValueAt(carro, mKeyAgo(3)));
-  check("antes do cadastro o bem não existia (0)", near(assetValueAt(carro, mKeyAgo(9)), 0), assetValueAt(carro, mKeyAgo(9)));
+  // CADASTRAR NÃO É ENRIQUECER. Sem data informada, o item já existia antes do
+  // histórico: o primeiro valor conhecido vale para trás, e a curva mostra
+  // variação de valor em vez de um degrau no mês do cadastro.
+  check("antes do cadastro, sem data, vale o primeiro valor conhecido", near(assetValueAt(carro, mKeyAgo(9)), 70000), assetValueAt(carro, mKeyAgo(9)));
+  const comprado = makeAsset({ class: "veiculo", name: "Carro novo", value: 50000, monthKey: mKeyAgo(2), sinceMonth: mKeyAgo(2) });
+  check("com data informada, antes dela o bem não existe", near(assetValueAt(comprado, mKeyAgo(3)), 0) && near(assetValueAt(comprado, mKeyAgo(2)), 50000));
+  check("data inválida é descartada", makeAsset({ class: "veiculo", name: "x", value: 1, sinceMonth: "2024-13" }).sinceMonth === "");
 
   const data = migrate({ transactions: [], assets: [carro] });
   const s = netWorthSeries(data, 8);
   check("série de 8 pontos", s.length === 8, s.length);
-  check("ponto anterior ao cadastro = 0", near(s[1].value, 0), s[1].value);
+  check("ponto anterior ao cadastro carrega o valor conhecido", near(s[1].value, 70000), s[1].value);
   check("ponto de 5 meses atrás = 70.000", near(s[3].value, 70000), s[3].value);
   check("ponto de hoje = 60.000", near(s[7].value, 60000), s[7].value);
   check("último ponto marcado como atual", s[7].isCurrent === true);

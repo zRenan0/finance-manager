@@ -106,8 +106,12 @@ const SCORE_PILLARS = [
         ratio,
         partial: base.partial,
         good: base.rate >= 15,
+        // "Economia prevista no fechamento" x "Economia até hoje" (cartão de
+        // saldo): são bases diferentes, e o título do número precisa dizer qual.
         detail: base.savings > 0
-          ? `Você economizou ${fmtBRL(base.savings)} (${base.rate.toFixed(0)}% da renda ${base.basis}).${scoreBasisNote(base)}`
+          ? (base.partial
+            ? `Economia prevista no fechamento: ${fmtBRL(base.savings)} (${base.rate.toFixed(0)}% da renda ${base.basis}). Estimativa, o mês ainda não terminou; o cartão de saldo mostra a economia até hoje.`
+            : `Economia do mês: ${fmtBRL(base.savings)} (${base.rate.toFixed(0)}% da renda ${base.basis}).`)
           : `Neste mês o gasto ${base.partial ? "deve superar" : "superou"} a renda em ${excesso}.${scoreBasisNote(base)}`,
         advice: base.rate >= 15 ? null : "Se 15% couber no seu mês sem criar dívida, use essa faixa como primeiro objetivo e ajuste depois.",
       };

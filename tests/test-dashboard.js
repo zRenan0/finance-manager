@@ -40,7 +40,9 @@ section("1. Registro e padrão");
   check("todo cartão tem id, rótulo e explicação",
     R(`DASHBOARD_CARDS.every((c) => c.id && c.label && c.hint)`));
   check("ids são únicos", R(`new Set(DASHBOARD_CARD_IDS).size === DASHBOARD_CARD_IDS.length`));
-  check("o padrão mostra tudo", R(`defaultDashboardLayout().hidden.length`) === 0);
+  // O "Resumo inteligente" nasce desligado: suas frases já estão no cartão de
+  // saldo, em "Para onde foi o dinheiro" e na previsão. Ver layout.js.
+  check("o padrão esconde só o resumo inteligente", R(`defaultDashboardLayout().hidden.join(",")`) === "summary");
   check("o padrão não força cartões sem dados", R(`defaultDashboardLayout().pinned.length`) === 0);
   check("o padrão inclui todos os cartões",
     R(`defaultDashboardLayout().order.length === DASHBOARD_CARDS.length`));
@@ -82,14 +84,16 @@ section("2. Reconciliação do que veio do disco");
 section("3. Mostrar, ocultar e reordenar");
 {
   check("ocultar registra o cartão", R(`toggleDashboardCard(defaultDashboardLayout(), "score").hidden`).indexOf("score") !== -1);
+  // O padrão já esconde o resumo inteligente; as contagens abaixo partem dele.
+  const ocultosPadrao = R(`defaultDashboardLayout().hidden.length`);
   check("ocultar de novo desfaz",
-    R(`toggleDashboardCard(toggleDashboardCard(defaultDashboardLayout(), "score"), "score").hidden.length`) === 0);
+    R(`toggleDashboardCard(toggleDashboardCard(defaultDashboardLayout(), "score"), "score").hidden.length`) === ocultosPadrao);
   check("ocultar não muda a ordem",
     R(`toggleDashboardCard(defaultDashboardLayout(), "score").order.length === DASHBOARD_CARDS.length`));
   check("cartão fixo ignora o pedido de ocultar",
-    R(`toggleDashboardCard(defaultDashboardLayout(), "hero").hidden.length`) === 0);
+    R(`toggleDashboardCard(defaultDashboardLayout(), "hero").hidden.length`) === ocultosPadrao);
   check("id inexistente não faz nada",
-    R(`toggleDashboardCard(defaultDashboardLayout(), "nada").hidden.length`) === 0);
+    R(`toggleDashboardCard(defaultDashboardLayout(), "nada").hidden.length`) === ocultosPadrao);
   check("mostrar cartão sem dados grava a escolha manual",
     R(`setDashboardCardVisibility(defaultDashboardLayout(), "score", true, { transactions: [] }).pinned`).indexOf("score") !== -1);
   check("cartão marcado aparece mesmo sem dados",
@@ -112,15 +116,15 @@ section("3. Mostrar, ocultar e reordenar");
 
 section("4. Lista efetiva por mês");
 {
-  check("no mês atual aparece tudo",
-    R(`visibleDashboardCards(defaultDashboardLayout(), { isCurrentMonth: true }).length === DASHBOARD_CARDS.length`));
+  check("no mês atual aparece tudo, menos o escondido por padrão",
+    R(`visibleDashboardCards(defaultDashboardLayout(), { isCurrentMonth: true }).length === DASHBOARD_CARDS.length - defaultDashboardLayout().hidden.length`));
   const passado = R(`visibleDashboardCards(defaultDashboardLayout(), { isCurrentMonth: false })`);
   check("em mês passado os cartões do mês corrente somem", passado.length < R(`DASHBOARD_CARDS.length`));
   check("nenhum cartão 'só do mês atual' sobra no passado", passado.every((c) => !c.monthly));
   check("cartão oculto some da lista",
     R(`visibleDashboardCards(toggleDashboardCard(defaultDashboardLayout(), "score"), { isCurrentMonth: true }).some((c) => c.id === "score")`) === false);
   check("a contagem bate com o registro",
-    R(`dashboardLayoutCounts(toggleDashboardCard(defaultDashboardLayout(), "score")).hidden`) === 1);
+    R(`dashboardLayoutCounts(toggleDashboardCard(defaultDashboardLayout(), "score")).hidden`) === R(`defaultDashboardLayout().hidden.length + 1`));
   check("base sem uso é reconhecida como início",
     R(`isDashboardStarting({ transactions: [], goals: [], assets: [] })`) === true);
   check("gamificação depende de ativação explícita",

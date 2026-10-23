@@ -62,7 +62,9 @@ const ehReescrito = (destino) => fontesReescritas.has(String(destino).replace(/^
 const referencias = Array.from(landing.matchAll(/(?:src|href)="([^"#][^"]*)"/g))
   .map((m) => m[1])
   .filter((valor) => !/^(https?:)?\/\//.test(valor) && !valor.startsWith("mailto:") && !valor.startsWith("/"))
-  .map((valor) => valor.split("#")[0])
+  // A query não faz parte do caminho no disco ("index.html?demo=1" abre a
+  // demonstração; o arquivo é index.html).
+  .map((valor) => valor.split("#")[0].split("?")[0])
   .filter(Boolean);
 
 const ausentes = [...new Set(referencias)].filter((arquivo) => !existe(arquivo) && !ehReescrito(arquivo));
@@ -127,16 +129,21 @@ const invalidos = destinos.filter((destino) => {
   if (destino === "/") return false;                       // raiz: a própria landing
   if (destino.startsWith("#")) return !ancoras.has(destino.slice(1));
   if (destino === "index.html") return false;              // aplicativo
+  if (destino === "index.html?demo=1") return false;       // demonstração (ver init em js/app.js)
   if (ehReescrito(destino)) return false;                  // rota da plataforma
   const rota = destino.match(/^index\.html#\/([a-z0-9-]+)$/);
   if (rota) return !slugs.has(rota[1]);
-  return !existe(destino.split("#")[0]);
+  return !existe(destino.split("#")[0].split("?")[0]);
 });
 check("nenhum link aponta para rota ou âncora inexistente", invalidos.length === 0, invalidos.join(", "));
 
 const cta = destinos.filter((d) => d === "index.html").length;
 check("existe mais de um caminho para o aplicativo", cta >= 3, `${cta} link(s)`);
 check("o 'Entrar' leva à tela real de conta e acesso", /href="index\.html#\/conta-e-acesso"/.test(landing));
+// A demonstração fica ao lado de "Começar grátis" no topo, e o aplicativo
+// sabe abrir direto nela pelo parâmetro (init em js/app.js).
+check("a demonstração tem um botão no herói", /lp-hero__actions[\s\S]{0,900}href="index\.html\?demo=1"/.test(landing));
+check("o aplicativo abre a demonstração pelo parâmetro", /query\.get\("demo"\) === "1"/.test(read("js/app.js")) && /enterDemoMode\(\)/.test(read("js/app.js")));
 
 /* ================================================================== *
  * 4. CSP: NADA DE ESTILO NEM SCRIPT EM ATRIBUTO

@@ -102,6 +102,7 @@
   grid-column: 2; font-family: var(--font-num); font-variant-numeric: tabular-nums;
   font-size: 13px; font-weight: 650; white-space: nowrap;
 }
+.networth-legend__item--debt b { color: var(--negative-ink); }
 
 /* ---- Cartões compactos (reserva, meta, contas) ---- */
 .mini-card__head { display: flex; align-items: center; gap: 11px; margin-bottom: 12px; }
@@ -158,6 +159,24 @@
   display: flex; flex-direction: column;
 }
 .card--reserve .mini-card__note, .card--goal-featured .mini-card__note { flex: 1; }
+
+/* ------------------------------------------------------------------
+   PROTEÇÃO DOS DADOS NO INÍCIO
+   Uma linha discreta, sempre presente: onde os dados estão e quando foi
+   a última cópia. O tom de alerta só entra sem conta e sem backup recente.
+   ------------------------------------------------------------------ */
+.protect-strip {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin: 0 0 12px; padding: 7px 10px;
+  border: 1px solid var(--border-soft); border-radius: 10px;
+  background: var(--card-alt); font-size: 12.5px; color: var(--ink-soft); line-height: 1.4;
+}
+.protect-strip > svg { flex: none; color: var(--ink-faint); }
+.protect-strip__text { flex: 1; min-width: 180px; }
+.protect-strip__text b { color: var(--ink); font-weight: 650; }
+.protect-strip__action { flex: none; font-size: 12.5px; font-weight: 650; min-height: 44px; }
+.protect-strip--warn { border-color: color-mix(in srgb, var(--goal) 40%, var(--border)); background: color-mix(in srgb, var(--goal) 8%, var(--card-alt)); }
+.protect-strip--warn > svg { color: var(--goal-ink); }
 
 /* ------------------------------------------------------------------
    [M26] AVISO DE DADOS SOMENTE LOCAIS
