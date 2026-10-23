@@ -3583,6 +3583,9 @@ const SETTING_KEYS = [
   "dashboardLayout", "dashboardFocus", "categoryRules",
   // v22; aceite explícito dos textos e preferência de envio para IA.
   "privacy", "graveyard", "lastBackupAt",
+  // Automações de entrada: lançar gastos fixos no vencimento e importar
+  // extrato sem revisão quando nada pede decisão. Ver normalizeAutomation.
+  "automation",
 ];
 
 // v9. Módulo 6. `unlocked` é { idDaConquista: "AAAA-MM-DD" }. A data importa:
@@ -4038,6 +4041,7 @@ function defaultData() {
     onboarding: defaultOnboarding(),
     dashboardLayout: defaultDashboardLayout(),
     dashboardFocus: "month",
+    automation: defaultAutomation(),
     categoryRules: defaultCategoryRules(),
     privacy: defaultPrivacy(),
     graveyard: defaultGraveyard(),
@@ -4393,6 +4397,7 @@ function migrate(parsed) {
   // existe mais ou regra apontando para categoria apagada, entre saneado.
   data.dashboardLayout = normalizeDashboardLayout(data.dashboardLayout);
   data.dashboardFocus = normalizeDashboardFocus(data.dashboardFocus);
+  data.automation = normalizeAutomation(data.automation);
   data.categoryRules = normalizeCategoryRules(data.categoryRules);
 
   // ---- v22: privacidade e consentimentos ----
@@ -7792,6 +7797,46 @@ function applyGoalTransactionMutation(data, before, after, asOf) {
   };
 }
 
+/* ---- Automações de entrada ----------------------------------------------- */
+// `autoPostFixed`: gasto fixo do mês passado entra sozinho no dia do
+// vencimento deste mês. Nasce DESLIGADO: um lançamento que a pessoa não
+// confirmou é decisão dela, e conta de valor variável (luz, água) entraria com
+// o valor do mês anterior. Liga-se com um toque no próprio aviso do Início.
+// `importAutoConfirm`: extrato em que nada pede decisão entra sem a tela de
+// revisão (ver importAutoConfirmCheck em import.js). Nasce LIGADO porque o
+// critério é estrito e a importação inteira tem desfazer.
+function defaultAutomation() { return { autoPostFixed: false, importAutoConfirm: true }; }
+function normalizeAutomation(value) {
+  const v = value && typeof value === "object" ? value : {};
+  const base = defaultAutomation();
+  return {
+    autoPostFixed: typeof v.autoPostFixed === "boolean" ? v.autoPostFixed : base.autoPostFixed,
+    importAutoConfirm: typeof v.importAutoConfirm === "boolean" ? v.importAutoConfirm : base.importAutoConfirm,
+  };
+}
+
+// Dia do vencimento de um modelo dentro de um mês, preso ao último dia.
+function fixedDueDateIn(template, monthKey) {
+  const [ano, mes] = String(monthKey).split("-").map(Number);
+  const dia = Number(String(template.date || "").slice(8, 10)) || 1;
+  return isoOfDate(new Date(ano, mes - 1, Math.min(dia, daysInMonthOf(ano, mes - 1))));
+}
+
+// Os gastos fixos pendentes deste mês cujo vencimento já chegou. Os que vencem
+// mais adiante continuam pendentes e entram no dia deles.
+function fixedDueToPost(data, monthKey, today) {
+  const hoje = today || todayIso();
+  return getPendingRecurring(data, monthKey).filter((t) => fixedDueDateIn(t, monthKey) <= hoje);
+}
+
+// Id DETERMINÍSTICO por mês e modelo. Com conta ligada, dois aparelhos abertos
+// no mesmo dia lançariam o aluguel duas vezes com ids aleatórios; com o mesmo
+// id a sincronização junta os dois num só.
+function fixedAutoPostId(template, monthKey) {
+  const chave = `${template.categoryId}|${normalizeText(template.description || "")}`;
+  return `fixo-${String(monthKey).replace("-", "")}-${recordIdHash(chave)}`.slice(0, 80);
+}
+
 function getPendingRecurring(data, currentMonthKey) {
   const [y, m] = currentMonthKey.split("-").map(Number);
   const prevDate = addMonths(new Date(y, m - 1, 1), -1);
@@ -8043,6 +8088,7 @@ function backupPayloadOf(data) {
     onboarding: normalizeOnboarding(data.onboarding, data),
     dashboardLayout: normalizeDashboardLayout(data.dashboardLayout),
     dashboardFocus: normalizeDashboardFocus(data.dashboardFocus),
+    automation: normalizeAutomation(data.automation),
     categoryRules: normalizeCategoryRules(data.categoryRules),
     privacy: normalizePrivacy(data.privacy),
     // Sem as lápides no arquivo, restaurar um backup ressuscita tudo que foi
@@ -8276,6 +8322,9 @@ function mergeBackupInto(current, incoming) {
     // seria a última coisa que ele esperaria de um botão chamado "mesclar".
     dashboardLayout: normalizeDashboardLayout(current.dashboardLayout),
     dashboardFocus: normalizeDashboardFocus(current.dashboardFocus || incoming.dashboardFocus),
+    // Automação é escolha deste aparelho agora; o arquivo antigo não a liga
+    // nem desliga.
+    automation: normalizeAutomation(current.automation || incoming.automation),
     // Regras de categorização: a UNIÃO das duas listas, por id, com a versão
     // local vencendo em caso de conflito. Regra criada em outro aparelho é
     // trabalho que ninguém quer refazer.
@@ -15230,6 +15279,45 @@ function prepareImportRows(rawFile, filename, data) {
     statementBalance: parsed.statementBalance || null,
   };
   return prepared;
+}
+
+// ------------------------------------------------------------------------------
+// IMPORTAR SEM REVISÃO QUANDO NADA PEDE DECISÃO
+// ------------------------------------------------------------------------------
+// A tela de revisão existe para as dúvidas. Quando não há nenhuma, ela vira
+// uma lista de "sim" que a pessoa aprova sem ler, todo mês. O critério abaixo é
+// estrito de propósito, e cada motivo de recusa volta junto para a tela dizer
+// por que pediu revisão:
+//
+//   * o arquivo foi lido com confiança alta e nenhuma linha ficou sem leitura;
+//   * há um destino só (uma conta, ou um cartão) para onde o extrato vai;
+//   * nenhuma linha é "parecida" com um lançamento já gravado (repetição
+//     exata é descartada sozinha e não pede decisão; "parecida" pede);
+//   * nenhuma transferência ficou ambígua;
+//   * todo gasto incluído tem categoria de confiança alta (sua regra, sua
+//     memória ou o dicionário forte), nunca o palpite genérico.
+function importAutoConfirmCheck(rows, ctx) {
+  const list = Array.isArray(rows) ? rows : [];
+  const meta = (rows && rows.meta) || {};
+  const c = ctx || {};
+  const motivos = [];
+  const incluidas = list.filter((r) => r.include);
+  if (!incluidas.length) motivos.push("nenhuma linha nova para importar");
+  if (meta.confidence && meta.confidence !== "alta") motivos.push("o arquivo foi lido com confiança abaixo da alta");
+  if (Number(meta.skipped) > 0) motivos.push(`${meta.skipped} ${Number(meta.skipped) === 1 ? "linha não foi lida" : "linhas não foram lidas"}`);
+  if (Number(c.destinationCount) !== 1) motivos.push(Number(c.destinationCount) > 1 ? "há mais de um destino possível" : "não há conta ou cartão de destino");
+  const parecidas = list.filter((r) => r.duplicateKind === "parecida").length;
+  if (parecidas) motivos.push(`${parecidas} ${parecidas === 1 ? "linha parece repetir" : "linhas parecem repetir"} um lançamento já gravado`);
+  const ambiguas = list.filter((r) => r.recordedTransferStatus && r.recordedTransferStatus !== "none" && r.recordedTransferStatus !== "unique").length;
+  if (ambiguas) motivos.push(`${ambiguas} ${ambiguas === 1 ? "transferência ficou ambígua" : "transferências ficaram ambíguas"}`);
+  const semCerteza = incluidas.filter((r) => r.type === "expense" && r.importAs !== "transfer" && r.confidence !== "alta").length;
+  if (semCerteza) motivos.push(`${semCerteza} ${semCerteza === 1 ? "gasto pede categoria" : "gastos pedem categoria"}`);
+  return {
+    eligible: motivos.length === 0,
+    reasons: motivos,
+    included: incluidas.length,
+    skippedDuplicates: list.filter((r) => r.duplicate && r.duplicateKind !== "parecida").length,
+  };
 }
 
 // ------------------------------------------------------------------------------
@@ -27873,7 +27961,10 @@ function renderDashboardScreen() {
     .slice(0, 6);
 
   const pending = isCurrentMonth ? getPendingRecurring(state.data, mKey) : [];
-  const showCarry = pending.length > 0 && state.data.dismissedCarryForwardMonth !== mKey;
+  // Com a automação ligada o aviso não pergunta nada: o que venceu já entrou
+  // (runAutoPostFixed) e o resto entra no dia.
+  const autoFixos = normalizeAutomation(state.data.automation).autoPostFixed;
+  const showCarry = pending.length > 0 && state.data.dismissedCarryForwardMonth !== mKey && !autoFixos;
 
   const starting = isDashboardStarting(state.data);
   const cards = visibleDashboardCards(state.data.dashboardLayout, { isCurrentMonth, data: state.data });
@@ -27888,6 +27979,8 @@ function renderDashboardScreen() {
     ${renderDashboardHeader(model)}
     ${shouldWarnLocalOnly() ? renderLocalOnlyNotice() : renderProtectionStrip()}
     ${showCarry ? renderCarryBanner(pending) : ""}
+    ${isCurrentMonth ? renderAutoPostedFixedNotice() : ""}
+    ${renderImportAutoNotice()}
     ${state.dashboardEditing ? renderDashboardCustomizer() : ""}
 
     <div class="grid-dashboard">
@@ -28452,7 +28545,46 @@ function renderCarryBanner(pending) {
     </div>
     <div class="banner__actions">
       <button class="btn btn--ghost btn--sm" data-action="carry-dismiss">Agora não</button>
+      <button class="btn btn--secondary btn--sm" data-action="carry-auto-on">Lançar sempre sozinho</button>
       <button class="btn btn--primary btn--sm" data-action="carry-post-all">Lançar todos</button>
+    </div>
+  </div>`;
+}
+
+// O que a automação lançou nesta sessão, com desfazer. Desfazer apaga
+// exatamente esses lançamentos e segura o resto do mês: a pessoa que desfaz
+// está dizendo "este mês não", e voltar a lançar no dia seguinte desmentiria.
+function renderAutoPostedFixedNotice() {
+  const a = state.autoPostedFixed;
+  if (!a || !a.ids || !a.ids.length) return "";
+  const nomes = a.names.slice(0, 3).map((n) => escapeHtml(n)).join(", ") + (a.names.length > 3 ? ` +${a.names.length - 3}` : "");
+  return `<div class="banner" role="status">
+    ${svgIcon("checkCircle", 20, "banner__icon")}
+    <div class="banner__text">
+      <strong>${plural(a.ids.length, "gasto fixo lançado", "gastos fixos lançados")} no vencimento · ${fmtBRL(a.total)}</strong>
+      <span>${nomes}. Conta de valor variável entra com o valor do mês passado: corrija em Movimentos se mudou.</span>
+    </div>
+    <div class="banner__actions">
+      <button class="btn btn--ghost btn--sm" data-action="auto-fixed-dismiss">Ok</button>
+      <button class="btn btn--secondary btn--sm" data-action="auto-fixed-undo">Desfazer</button>
+    </div>
+  </div>`;
+}
+
+// Importação que entrou sem revisão: o que entrou, o que foi descartado por
+// já existir e o desfazer da importação inteira.
+function renderImportAutoNotice() {
+  const n = state.importAutoNotice;
+  if (!n || !state.importUndo) return "";
+  return `<div class="banner" role="status">
+    ${svgIcon("download", 20, "banner__icon")}
+    <div class="banner__text">
+      <strong>${plural(n.count, "registro importado", "registros importados")} sem revisão${n.filename ? ` de ${escapeHtml(n.filename)}` : ""}</strong>
+      <span>Todas as categorias vieram das suas regras e da sua memória, e nada parecia repetido${n.skippedDuplicates ? `; ${plural(n.skippedDuplicates, "linha já lançada ficou", "linhas já lançadas ficaram")} de fora` : ""}.</span>
+    </div>
+    <div class="banner__actions">
+      <button class="btn btn--ghost btn--sm" data-action="import-auto-notice-dismiss">Ok</button>
+      <button class="btn btn--secondary btn--sm" data-action="import-undo">Desfazer</button>
     </div>
   </div>`;
 }
@@ -32593,8 +32725,29 @@ function renderImportScreen() {
           <span class="dropzone__subtitle">ou toque para escolher (.ofx, .csv, .pdf)</span>
         </label>`}
         ${renderImportUndoLine()}
-      </div>` : renderImportReview(rows)}
+        ${renderImportAutoToggle()}
+      </div>` : `${renderImportAutoReasons()}${renderImportReview(rows)}`}
   </div>`;
+}
+
+// Importar sem revisão quando nada pede decisão (ver importAutoConfirmCheck).
+function renderImportAutoToggle() {
+  const ligado = normalizeAutomation(state.data.automation).importAutoConfirm;
+  return `<button class="toggle-row" data-action="import-auto-toggle" aria-pressed="${ligado ? "true" : "false"}" data-ui-css="margin-top:12px">
+    <span class="toggle-row__box ${ligado ? "active" : ""}">${ligado ? svgIcon("check", 13) : ""}</span>
+    <span class="toggle-row__text">
+      <b>Importar direto quando não houver dúvida</b>
+      <span>Se todas as categorias vierem das suas regras e da sua memória, nada parecer repetido e houver um destino só, o extrato entra sem a tela de revisão. Dá para desfazer a importação inteira.</span>
+    </span>
+  </button>`;
+}
+
+// Por que esta importação pediu revisão. Sem isso, quem ligou a importação
+// direta acharia que ela não funciona.
+function renderImportAutoReasons() {
+  const motivos = state.importAutoReasons;
+  if (!motivos || !motivos.length) return "";
+  return `<p class="inline-alert">${svgIcon("info", 14)} Pedi revisão porque ${motivos.map((m) => escapeHtml(m)).join("; ")}. Resolvido isso, os próximos extratos parecidos entram direto.</p>`;
 }
 
 // [M14] Desfazer a última importação. Aparece só na tela de escolher arquivo
@@ -33857,6 +34010,84 @@ function commitDebtPayment(p) {
 // nada em bloco sem confirmação, porque pode haver uma exceção deliberada no
 // meio. Os movidos recebem registro de edição, o que é exatamente o sinal
 // que faz a memória preferir essa categoria nas próximas importações.
+// Gravação de uma importação revisada (ou dispensada de revisão, ver
+// importAutoConfirmCheck). Devolve null quando falta destino ou decisão.
+function commitImportRows(options) {
+  const opts = options || {};
+  const included = (state.importRows || []).filter((r) => r.include);
+  const meta = (state.importRows && state.importRows.meta) || {};
+  const documentKind = state.importDocumentKind === "card" ? "card" : "account";
+  const destinations = documentKind === "card"
+    ? (state.data.creditCards || []).filter((card) => !card.archived)
+    : (state.data.accounts || []).filter((account) => !account.archived);
+  const destinationId = destinations.some((item) => item.id === state.importDestinationId)
+    ? state.importDestinationId
+    : (destinations[0] ? destinations[0].id : "");
+  if (!destinationId) {
+    notify(documentKind === "card" ? "Cadastre ou escolha um cartão" : "Cadastre ou escolha uma conta", "warn");
+    return null;
+  }
+  let records = null;
+  try {
+    records = buildImportRecordsFromRows(included, meta.format, { documentKind, destinationId }, state.importFilename, state.data.accounts);
+  } catch (error) {
+    if (error && error.code === "IMPORT_TRANSFER_ACCOUNT") {
+      notify(error.message || "Escolha a outra conta da transferência", "warn");
+      render();
+      return null;
+    }
+    throw error;
+  }
+  const newTx = records.transactions;
+  const newTransfers = records.accountTransfers;
+  setData((d) => ({
+    ...d,
+    transactions: [...d.transactions, ...newTx],
+    accountTransfers: [...(d.accountTransfers || []), ...newTransfers],
+  }));
+  // [M14] Registro para desfazer. Guarda só identificadores, a data e o nome
+  // do arquivo; nenhum valor, descrição ou categoria. Grava DEPOIS de
+  // `setData`: um recibo de importação que não aconteceu seria pior que
+  // recibo nenhum. A gravação é assíncrona e não bloqueia a tela, porque
+  // falhar em anotar o recibo não pode desfazer a importação que deu certo.
+  state.importUndo = {
+    at: new Date().toISOString(),
+    filename: state.importFilename || "",
+    transactionIds: newTx.map((tx) => tx.id),
+    transferIds: newTransfers.map((transfer) => transfer.id),
+  };
+  saveImportUndo(state.importUndo);
+  // [M35] O OFX costuma declarar o saldo da conta (`<LEDGERBAL>`). Ele não
+  // vira lançamento nem ajuste: deixa a conferência daquela conta ABERTA e
+  // já preenchida com o número do banco, para a pessoa comparar quando
+  // chegar em Contas. Nada é gravado por isso: o passo de revisão do M35
+  // continua no meio do caminho.
+  const saldoDoExtrato = meta.statementBalance;
+  if (saldoDoExtrato && documentKind === "account" && destinationId) {
+    state.accountsUi.reconcileId = destinationId;
+    state.accountsUi.reconcileValue = moneyDraft(saldoDoExtrato.amount);
+    state.accountsUi.reconcileDate = saldoDoExtrato.date && saldoDoExtrato.date <= todayIso() ? saldoDoExtrato.date : todayIso();
+    state.accountsUi.reconcileReview = null;
+  }
+  state.importRows = null; state.importFilename = null; state.importDestinationId = ""; state.importVisible = IMPORT_PAGE_SIZE;
+  const importedParts = [];
+  if (newTx.length) importedParts.push(plural(newTx.length, "lançamento importado", "lançamentos importados"));
+  if (newTransfers.length) importedParts.push(plural(newTransfers.length, "transferência registrada", "transferências registradas"));
+  if (opts.auto) {
+    // Sem revisão: o aviso no Início diz o que entrou e oferece desfazer.
+    state.importAutoNotice = {
+      at: new Date().toISOString(), filename: opts.filename || "",
+      count: newTx.length + newTransfers.length, skippedDuplicates: opts.skippedDuplicates || 0,
+    };
+    notify(`${importedParts.join(" e ")} sem revisão: nada pedia decisão`);
+  } else {
+    state.importAutoNotice = null;
+    notify(importedParts.join(" e "));
+  }
+  setState({ tab: "dashboard" });
+  return { transactions: newTx.length, transfers: newTransfers.length };
+}
+
 function offerCategoryToSimilar(anterior, form) {
   if (!anterior || !form || anterior.type !== "expense" || form.type !== "expense") return;
   if (!form.categoryId || anterior.categoryId === form.categoryId) return;
@@ -35265,6 +35496,31 @@ function onClick(e) {
     case "carry-dismiss":
       setData((d) => ({ ...d, dismissedCarryForwardMonth: keyOfCurrentMonth() }));
       break;
+    case "carry-auto-on": {
+      // Um toque liga a automação e já lança o que venceu; o resto entra no dia.
+      setData((d) => ({ ...d, automation: { ...normalizeAutomation(d.automation), autoPostFixed: true } }));
+      const lancados = runAutoPostFixed({ silent: true });
+      notify(lancados > 0
+        ? `${plural(lancados, "gasto fixo lançado", "gastos fixos lançados")}; os próximos entram sozinhos no vencimento`
+        : "Os gastos fixos passam a entrar sozinhos no dia do vencimento");
+      render();
+      break;
+    }
+    case "auto-fixed-toggle":
+      setData((d) => ({ ...d, automation: { ...normalizeAutomation(d.automation), autoPostFixed: !normalizeAutomation(d.automation).autoPostFixed } }));
+      if (normalizeAutomation(state.data.automation).autoPostFixed) runAutoPostFixed({ silent: false });
+      break;
+    case "auto-fixed-undo": {
+      const aviso = state.autoPostedFixed;
+      if (!aviso) break;
+      const ids = new Set(aviso.ids || []);
+      setData((d) => ({ ...removeTransactionsWithIntegrity(d, Array.from(ids)), dismissedCarryForwardMonth: aviso.monthKey }));
+      state.autoPostedFixed = null;
+      notify("Lançamentos automáticos desfeitos; neste mês nada mais entra sozinho");
+      render();
+      break;
+    }
+    case "auto-fixed-dismiss": state.autoPostedFixed = null; render(); break;
     case "carry-post-all": {
       const mKey = keyOfCurrentMonth();
       const pending = getPendingRecurring(state.data, mKey);
@@ -35990,70 +36246,11 @@ function onClick(e) {
       notify(`Abertura de ${conta.name} recuada para ${fmtDateFull(novaAbertura)}`);
       break;
     }
-    case "import-confirm": {
-      const included = (state.importRows || []).filter((r) => r.include);
-      const meta = (state.importRows && state.importRows.meta) || {};
-      const documentKind = state.importDocumentKind === "card" ? "card" : "account";
-      const destinations = documentKind === "card"
-        ? (state.data.creditCards || []).filter((card) => !card.archived)
-        : (state.data.accounts || []).filter((account) => !account.archived);
-      const destinationId = destinations.some((item) => item.id === state.importDestinationId)
-        ? state.importDestinationId
-        : (destinations[0] ? destinations[0].id : "");
-      if (!destinationId) {
-        notify(documentKind === "card" ? "Cadastre ou escolha um cartão" : "Cadastre ou escolha uma conta", "warn");
-        break;
-      }
-      let records = null;
-      try {
-        records = buildImportRecordsFromRows(included, meta.format, { documentKind, destinationId }, state.importFilename, state.data.accounts);
-      } catch (error) {
-        if (error && error.code === "IMPORT_TRANSFER_ACCOUNT") {
-          notify(error.message || "Escolha a outra conta da transferência", "warn");
-          render();
-          break;
-        }
-        throw error;
-      }
-      const newTx = records.transactions;
-      const newTransfers = records.accountTransfers;
-      setData((d) => ({
-        ...d,
-        transactions: [...d.transactions, ...newTx],
-        accountTransfers: [...(d.accountTransfers || []), ...newTransfers],
-      }));
-      // [M14] Registro para desfazer. Guarda só identificadores, a data e o nome
-      // do arquivo; nenhum valor, descrição ou categoria. Grava DEPOIS de
-      // `setData`: um recibo de importação que não aconteceu seria pior que
-      // recibo nenhum. A gravação é assíncrona e não bloqueia a tela, porque
-      // falhar em anotar o recibo não pode desfazer a importação que deu certo.
-      state.importUndo = {
-        at: new Date().toISOString(),
-        filename: state.importFilename || "",
-        transactionIds: newTx.map((tx) => tx.id),
-        transferIds: newTransfers.map((transfer) => transfer.id),
-      };
-      saveImportUndo(state.importUndo);
-      // [M35] O OFX costuma declarar o saldo da conta (`<LEDGERBAL>`). Ele não
-      // vira lançamento nem ajuste: deixa a conferência daquela conta ABERTA e
-      // já preenchida com o número do banco, para a pessoa comparar quando
-      // chegar em Contas. Nada é gravado por isso: o passo de revisão do M35
-      // continua no meio do caminho.
-      const saldoDoExtrato = meta.statementBalance;
-      if (saldoDoExtrato && documentKind === "account" && destinationId) {
-        state.accountsUi.reconcileId = destinationId;
-        state.accountsUi.reconcileValue = moneyDraft(saldoDoExtrato.amount);
-        state.accountsUi.reconcileDate = saldoDoExtrato.date && saldoDoExtrato.date <= todayIso() ? saldoDoExtrato.date : todayIso();
-        state.accountsUi.reconcileReview = null;
-      }
-      state.importRows = null; state.importFilename = null; state.importDestinationId = ""; state.importVisible = IMPORT_PAGE_SIZE;
-      const importedParts = [];
-      if (newTx.length) importedParts.push(plural(newTx.length, "lançamento importado", "lançamentos importados"));
-      if (newTransfers.length) importedParts.push(plural(newTransfers.length, "transferência registrada", "transferências registradas"));
-      notify(importedParts.join(" e "));
-      setState({ tab: "dashboard" });
+    case "import-confirm": commitImportRows(); break;
+    case "import-auto-notice-dismiss": state.importAutoNotice = null; render(); break;
+    case "import-auto-toggle":
+      setData((d) => ({ ...d, automation: { ...normalizeAutomation(d.automation), importAutoConfirm: !normalizeAutomation(d.automation).importAutoConfirm } }));
       break;
-    }
 
     // ---- Leitor de QR da nota ----
     case "open-qr": state.qr = { open: true, scanning: false, error: null, checking: false, draft: null }; openOverlay("qr"); render(); break;
@@ -36294,6 +36491,12 @@ let state = {
   // Último conteúdo recebido pelo Compartilhar e já posto no formulário
   // (ver applySharedPayload); a tela de lançamento diz de onde veio.
   sharedDraft: null,
+  // Gastos fixos lançados sozinhos nesta sessão (ver runAutoPostFixed) e a
+  // última importação feita sem revisão: os dois viram aviso com desfazer.
+  autoPostedFixed: null,
+  importAutoNotice: null,
+  // Por que a última importação pediu revisão (ver importAutoConfirmCheck).
+  importAutoReasons: null,
   // ---- Feature 4: lançamento em linguagem natural ----
   nlp: { text: "", drafts: [], error: null, loading: false, touched: false },
   // ---- Feature 2: backup (exportar / importar) ----
@@ -37342,6 +37545,48 @@ function applyQrDraftToForm(draft) {
 }
 
 // ==================================================================
+// GASTOS FIXOS NO VENCIMENTO (automação opcional)
+// ------------------------------------------------------------------
+// Com a automação ligada, o gasto fixo do mês passado entra sozinho no dia do
+// vencimento deste mês: aluguel no dia 10, internet no dia 15. Roda na
+// abertura do app e quando ele volta para a frente (o dia pode ter virado com
+// a aba aberta). Nunca na demonstração, nunca com a configuração inicial
+// aberta e nunca num mês em que a pessoa desfez o lançamento automático.
+// Devolve quantos lançou.
+function runAutoPostFixed(options) {
+  const opts = options || {};
+  if (state.booting || isDemoMode() || state.onboarding.open) return 0;
+  const automacao = normalizeAutomation(state.data.automation);
+  if (!automacao.autoPostFixed) return 0;
+  const mKey = keyOfCurrentMonth();
+  if (state.data.dismissedCarryForwardMonth === mKey) return 0;
+  const devidos = fixedDueToPost(state.data, mKey, todayIso());
+  if (!devidos.length) return 0;
+  const existentes = new Set((state.data.transactions || []).map((t) => t.id));
+  const contaPadrao = ((state.data.accounts || []).find((a) => !a.archived) || {}).id || null;
+  const novos = devidos
+    .map((t) => makeTransaction({
+      id: fixedAutoPostId(t, mKey),
+      type: "expense", amount: t.amount, categoryId: t.categoryId, date: fixedDueDateIn(t, mKey),
+      payment: t.payment, description: t.description, recurring: true, source: "manual",
+      accountId: t.accountId || contaPadrao, creditCardId: t.creditCardId || null,
+      origin: { channel: "manual", label: "Gasto fixo lançado automaticamente no vencimento", reference: null },
+    }))
+    .filter((t) => !existentes.has(t.id));
+  if (!novos.length) return 0;
+  setData((d) => ({ ...d, transactions: [...d.transactions, ...novos] }));
+  const anterior = state.autoPostedFixed && state.autoPostedFixed.monthKey === mKey ? state.autoPostedFixed : null;
+  state.autoPostedFixed = {
+    monthKey: mKey,
+    ids: (anterior ? anterior.ids : []).concat(novos.map((t) => t.id)),
+    names: (anterior ? anterior.names : []).concat(novos.map((t) => t.description || categoryById(state.data, t.categoryId).name)),
+    total: addMoney(anterior ? anterior.total : 0, sumMoney(novos, (t) => t.amount)),
+  };
+  if (!opts.silent) notify(`${plural(novos.length, "gasto fixo lançado", "gastos fixos lançados")} no vencimento`);
+  return novos.length;
+}
+
+// ==================================================================
 // COMPARTILHAR COM O COFRE (Web Share Target)
 // ------------------------------------------------------------------
 // O comprovante do Pix, a notificação do cartão ou a fatura em PDF chegam
@@ -37534,6 +37779,20 @@ async function handleStatementFile(file, password) {
     state.importPendingFile = null;
     state.importPassword = "";
     state.importLoading = false;
+    // SEM REVISÃO QUANDO NADA PEDE DECISÃO. Ver importAutoConfirmCheck: um
+    // destino só, leitura confiável, nenhuma linha parecida com o que já
+    // existe e toda categoria com confiança alta. Senão a revisão abre e diz
+    // por quê. Demonstração nunca grava, então nunca entra aqui.
+    const destinos = state.importDocumentKind === "card"
+      ? (state.data.creditCards || []).filter((c) => !c.archived)
+      : (state.data.accounts || []).filter((a) => !a.archived);
+    const auto = importAutoConfirmCheck(state.importRows, { destinationCount: destinos.length });
+    const automacao = normalizeAutomation(state.data.automation);
+    state.importAutoReasons = automacao.importAutoConfirm ? auto.reasons : null;
+    if (automacao.importAutoConfirm && auto.eligible && !isDemoMode()) {
+      commitImportRows({ auto: true, filename: source.name, skippedDuplicates: auto.skippedDuplicates });
+      return;
+    }
     render();
     notify(`${rows.length} lançamento${rows.length === 1 ? "" : "s"} lido${rows.length === 1 ? "" : "s"} do ${(meta.format || "arquivo").toUpperCase()}`);
   } catch (err) {
@@ -38920,6 +39179,12 @@ async function init() {
   }
   window.addEventListener("popstate", applyHistoryRoute);
   if (demoPelaUrl && !isDemoMode()) enterDemoMode();
+  runAutoPostFixed({ silent: true });
+  // O dia pode virar com o app aberto em segundo plano: ao voltar para a
+  // frente, o que venceu nesse meio-tempo entra.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") runAutoPostFixed({ silent: false });
+  });
   if (compartilhado) consumeSharedPayload().catch((e) => { if (typeof reportSafeError === "function") reportSafeError("share", e, "share_consume"); });
 
   // [M41] O SEGUNDO PEDAÇO É BUSCADO DEPOIS DO PRIMEIRO QUADRO, NO OCIOSO.
@@ -39212,7 +39477,7 @@ function carregarExtras() {
   if (__extrasCarregados) return Promise.resolve(__extrasCarregados);
   if (!__extrasEmVoo) {
     __extrasEmVoo = import('./app.extras.generated.js').then((mod) => {
-      mod.instalarNucleo({ ACCOUNT_TYPE_LABELS, AI_HIDEABLE_FIELDS, ASSET_CLASSES, BACKUP_ENC_MIN_PASSWORD, BUDGET_GROUPS, BUILTIN_CATEGORY_RULES, CloudSync, DEBT_AMORTIZATION_LABELS, DEBT_TYPE_LABELS, FinanceStore, GOAL_ICON_OPTIONS, GOAL_INFLATION_MIN_DAYS, GOAL_TEMPLATES, GROUP_ICONS, GROUP_LABELS, HEALTH_INDICATORS, INVESTMENT_TYPES, LEGAL_CONTROLLER, LEGAL_DATA_INVENTORY, LEGAL_DATA_INVENTORY_GROUPS, LEGAL_PENDING, LEGAL_RETENTION, LEGAL_REVIEW_DATE, LEGAL_SUBJECT_RIGHTS, LEGAL_TEXT_VERSION, LEGAL_THIRD_PARTIES, LEGAL_THIRD_PARTY_GROUPS, MONTH_ABBR, MONTH_NAMES, RULE_MATCH_TYPES, RULE_WEIGHT_DEFAULT, RULE_WEIGHT_MAX, RULE_WEIGHT_MIN, accountsSummary, assetClassOf, backupCryptoAvailable, buildDataSourcesModel, categoryById, childCategories, clamp, compileCategoryRules, compileRulePattern, computeBudgetStatus, daysBetweenIso, debtMonthlyRateInfo, debtsModel, defaultBudgetAlerts, defaultPrivacy, divMoney, emergencyFund, emergencyLadder, escapeHtml, fmtBRL, fmtBRLShort, fmtDateFull, fmtDateShort, fmtDec, fmtNum, formatMovementTimestamp, freshGuestLink, goalExistingBalance, goalInflationPct, goalsModel, healthModel, inflateMoney, inkOf, installAvailability, investmentTypeOf, isDashboardStarting, keyOfCurrentMonth, legalAccepted, legalControllerGaps, legalControllerReady, legalDataInventoryGaps, legalThirdPartyGaps, legalThirdPartyLaunchGaps, marketRatesOf, matchCategoryRules, mergeBackupInto, moneyCompare, moneyDraft, moneyFromCents, moneyOrZero, moneyToCents, monthKeyOf, mulMoney, nextDueDateForDebt, normalizeCategoryRules, normalizePrivacy, normalizeText, notificationsModel, parseMoneyInput, passwordStrength, plural, pluralWord, portfolioModel, reconciliationHeadline, render, renderBackHeader, renderCalculationButton, renderDonut, renderEmptyState, renderGoalRing, renderLastBackupLine, renderScoreGauge, renderSparkline, safeErrorSummary, safePct, scoreGains, simulateExpenseImpact, simulateFinancingImpact, state, subMoney, svgIcon, todayIso, topLevelCategories, wealthModel });
+      mod.instalarNucleo({ ACCOUNT_TYPE_LABELS, AI_HIDEABLE_FIELDS, ASSET_CLASSES, BACKUP_ENC_MIN_PASSWORD, BUDGET_GROUPS, BUILTIN_CATEGORY_RULES, CloudSync, DEBT_AMORTIZATION_LABELS, DEBT_TYPE_LABELS, FinanceStore, GOAL_ICON_OPTIONS, GOAL_INFLATION_MIN_DAYS, GOAL_TEMPLATES, GROUP_ICONS, GROUP_LABELS, HEALTH_INDICATORS, INVESTMENT_TYPES, LEGAL_CONTROLLER, LEGAL_DATA_INVENTORY, LEGAL_DATA_INVENTORY_GROUPS, LEGAL_PENDING, LEGAL_RETENTION, LEGAL_REVIEW_DATE, LEGAL_SUBJECT_RIGHTS, LEGAL_TEXT_VERSION, LEGAL_THIRD_PARTIES, LEGAL_THIRD_PARTY_GROUPS, MONTH_ABBR, MONTH_NAMES, RULE_MATCH_TYPES, RULE_WEIGHT_DEFAULT, RULE_WEIGHT_MAX, RULE_WEIGHT_MIN, accountsSummary, assetClassOf, backupCryptoAvailable, buildDataSourcesModel, categoryById, childCategories, clamp, compileCategoryRules, compileRulePattern, computeBudgetStatus, daysBetweenIso, debtMonthlyRateInfo, debtsModel, defaultBudgetAlerts, defaultPrivacy, divMoney, emergencyFund, emergencyLadder, escapeHtml, fmtBRL, fmtBRLShort, fmtDateFull, fmtDateShort, fmtDec, fmtNum, formatMovementTimestamp, freshGuestLink, goalExistingBalance, goalInflationPct, goalsModel, healthModel, inflateMoney, inkOf, installAvailability, investmentTypeOf, isDashboardStarting, keyOfCurrentMonth, legalAccepted, legalControllerGaps, legalControllerReady, legalDataInventoryGaps, legalThirdPartyGaps, legalThirdPartyLaunchGaps, marketRatesOf, matchCategoryRules, mergeBackupInto, moneyCompare, moneyDraft, moneyFromCents, moneyOrZero, moneyToCents, monthKeyOf, mulMoney, nextDueDateForDebt, normalizeAutomation, normalizeCategoryRules, normalizePrivacy, normalizeText, notificationsModel, parseMoneyInput, passwordStrength, plural, pluralWord, portfolioModel, reconciliationHeadline, render, renderBackHeader, renderCalculationButton, renderDonut, renderEmptyState, renderGoalRing, renderLastBackupLine, renderScoreGauge, renderSparkline, safeErrorSummary, safePct, scoreGains, simulateExpenseImpact, simulateFinancingImpact, state, subMoney, svgIcon, todayIso, topLevelCategories, wealthModel });
       __extrasCarregados = mod;
       return mod;
     }).catch((erro) => { __extrasEmVoo = null; throw erro; });

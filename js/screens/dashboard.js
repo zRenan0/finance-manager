@@ -68,7 +68,10 @@ function renderDashboardScreen() {
     .slice(0, 6);
 
   const pending = isCurrentMonth ? getPendingRecurring(state.data, mKey) : [];
-  const showCarry = pending.length > 0 && state.data.dismissedCarryForwardMonth !== mKey;
+  // Com a automação ligada o aviso não pergunta nada: o que venceu já entrou
+  // (runAutoPostFixed) e o resto entra no dia.
+  const autoFixos = normalizeAutomation(state.data.automation).autoPostFixed;
+  const showCarry = pending.length > 0 && state.data.dismissedCarryForwardMonth !== mKey && !autoFixos;
 
   const starting = isDashboardStarting(state.data);
   const cards = visibleDashboardCards(state.data.dashboardLayout, { isCurrentMonth, data: state.data });
@@ -83,6 +86,8 @@ function renderDashboardScreen() {
     ${renderDashboardHeader(model)}
     ${shouldWarnLocalOnly() ? renderLocalOnlyNotice() : renderProtectionStrip()}
     ${showCarry ? renderCarryBanner(pending) : ""}
+    ${isCurrentMonth ? renderAutoPostedFixedNotice() : ""}
+    ${renderImportAutoNotice()}
     ${state.dashboardEditing ? renderDashboardCustomizer() : ""}
 
     <div class="grid-dashboard">
@@ -647,7 +652,46 @@ function renderCarryBanner(pending) {
     </div>
     <div class="banner__actions">
       <button class="btn btn--ghost btn--sm" data-action="carry-dismiss">Agora não</button>
+      <button class="btn btn--secondary btn--sm" data-action="carry-auto-on">Lançar sempre sozinho</button>
       <button class="btn btn--primary btn--sm" data-action="carry-post-all">Lançar todos</button>
+    </div>
+  </div>`;
+}
+
+// O que a automação lançou nesta sessão, com desfazer. Desfazer apaga
+// exatamente esses lançamentos e segura o resto do mês: a pessoa que desfaz
+// está dizendo "este mês não", e voltar a lançar no dia seguinte desmentiria.
+function renderAutoPostedFixedNotice() {
+  const a = state.autoPostedFixed;
+  if (!a || !a.ids || !a.ids.length) return "";
+  const nomes = a.names.slice(0, 3).map((n) => escapeHtml(n)).join(", ") + (a.names.length > 3 ? ` +${a.names.length - 3}` : "");
+  return `<div class="banner" role="status">
+    ${svgIcon("checkCircle", 20, "banner__icon")}
+    <div class="banner__text">
+      <strong>${plural(a.ids.length, "gasto fixo lançado", "gastos fixos lançados")} no vencimento · ${fmtBRL(a.total)}</strong>
+      <span>${nomes}. Conta de valor variável entra com o valor do mês passado: corrija em Movimentos se mudou.</span>
+    </div>
+    <div class="banner__actions">
+      <button class="btn btn--ghost btn--sm" data-action="auto-fixed-dismiss">Ok</button>
+      <button class="btn btn--secondary btn--sm" data-action="auto-fixed-undo">Desfazer</button>
+    </div>
+  </div>`;
+}
+
+// Importação que entrou sem revisão: o que entrou, o que foi descartado por
+// já existir e o desfazer da importação inteira.
+function renderImportAutoNotice() {
+  const n = state.importAutoNotice;
+  if (!n || !state.importUndo) return "";
+  return `<div class="banner" role="status">
+    ${svgIcon("download", 20, "banner__icon")}
+    <div class="banner__text">
+      <strong>${plural(n.count, "registro importado", "registros importados")} sem revisão${n.filename ? ` de ${escapeHtml(n.filename)}` : ""}</strong>
+      <span>Todas as categorias vieram das suas regras e da sua memória, e nada parecia repetido${n.skippedDuplicates ? `; ${plural(n.skippedDuplicates, "linha já lançada ficou", "linhas já lançadas ficaram")} de fora` : ""}.</span>
+    </div>
+    <div class="banner__actions">
+      <button class="btn btn--ghost btn--sm" data-action="import-auto-notice-dismiss">Ok</button>
+      <button class="btn btn--secondary btn--sm" data-action="import-undo">Desfazer</button>
     </div>
   </div>`;
 }

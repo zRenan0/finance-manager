@@ -535,6 +535,45 @@ function prepareImportRows(rawFile, filename, data) {
 }
 
 // ------------------------------------------------------------------------------
+// IMPORTAR SEM REVISÃO QUANDO NADA PEDE DECISÃO
+// ------------------------------------------------------------------------------
+// A tela de revisão existe para as dúvidas. Quando não há nenhuma, ela vira
+// uma lista de "sim" que a pessoa aprova sem ler, todo mês. O critério abaixo é
+// estrito de propósito, e cada motivo de recusa volta junto para a tela dizer
+// por que pediu revisão:
+//
+//   * o arquivo foi lido com confiança alta e nenhuma linha ficou sem leitura;
+//   * há um destino só (uma conta, ou um cartão) para onde o extrato vai;
+//   * nenhuma linha é "parecida" com um lançamento já gravado (repetição
+//     exata é descartada sozinha e não pede decisão; "parecida" pede);
+//   * nenhuma transferência ficou ambígua;
+//   * todo gasto incluído tem categoria de confiança alta (sua regra, sua
+//     memória ou o dicionário forte), nunca o palpite genérico.
+function importAutoConfirmCheck(rows, ctx) {
+  const list = Array.isArray(rows) ? rows : [];
+  const meta = (rows && rows.meta) || {};
+  const c = ctx || {};
+  const motivos = [];
+  const incluidas = list.filter((r) => r.include);
+  if (!incluidas.length) motivos.push("nenhuma linha nova para importar");
+  if (meta.confidence && meta.confidence !== "alta") motivos.push("o arquivo foi lido com confiança abaixo da alta");
+  if (Number(meta.skipped) > 0) motivos.push(`${meta.skipped} ${Number(meta.skipped) === 1 ? "linha não foi lida" : "linhas não foram lidas"}`);
+  if (Number(c.destinationCount) !== 1) motivos.push(Number(c.destinationCount) > 1 ? "há mais de um destino possível" : "não há conta ou cartão de destino");
+  const parecidas = list.filter((r) => r.duplicateKind === "parecida").length;
+  if (parecidas) motivos.push(`${parecidas} ${parecidas === 1 ? "linha parece repetir" : "linhas parecem repetir"} um lançamento já gravado`);
+  const ambiguas = list.filter((r) => r.recordedTransferStatus && r.recordedTransferStatus !== "none" && r.recordedTransferStatus !== "unique").length;
+  if (ambiguas) motivos.push(`${ambiguas} ${ambiguas === 1 ? "transferência ficou ambígua" : "transferências ficaram ambíguas"}`);
+  const semCerteza = incluidas.filter((r) => r.type === "expense" && r.importAs !== "transfer" && r.confidence !== "alta").length;
+  if (semCerteza) motivos.push(`${semCerteza} ${semCerteza === 1 ? "gasto pede categoria" : "gastos pedem categoria"}`);
+  return {
+    eligible: motivos.length === 0,
+    reasons: motivos,
+    included: incluidas.length,
+    skippedDuplicates: list.filter((r) => r.duplicate && r.duplicateKind !== "parecida").length,
+  };
+}
+
+// ------------------------------------------------------------------------------
 // GRAVAÇÃO; transforma as linhas revisadas em transações e persiste no IndexedDB
 // ------------------------------------------------------------------------------
 function buildTransactionsFromRows(rows, format, destination, filename) {

@@ -232,6 +232,16 @@ const SETTINGS_SECTIONS = [
   // destino dentro de um acordeão seria pedir dois toques para chegar onde
   // antes bastava um.
   {
+    id: "automacao",
+    icon: "bolt",
+    label: "Automação",
+    resumo() {
+      const a = normalizeAutomation(state.data.automation);
+      return `Gastos fixos ${a.autoPostFixed ? "entram sozinhos" : "perguntam antes"} · extrato ${a.importAutoConfirm ? "direto sem dúvida" : "sempre revisado"}`;
+    },
+    render: renderAutomationSettingsCard,
+  },
+  {
     id: "reserva",
     icon: "piggy",
     label: "Reserva de emergência",
@@ -324,6 +334,22 @@ function renderInstallCard() {
         <li>No Safari, toque em <b>Compartilhar</b> (o quadrado com a seta para cima).</li>
         <li>Escolha <b>Adicionar à Tela de Início</b> e confirme.</li>
       </ol>`}
+  </div>`;
+}
+
+// As duas automações de entrada num lugar só. Cada uma diz o que faz, o que
+// não faz e como desfazer.
+function renderAutomationSettingsCard() {
+  const a = normalizeAutomation(state.data.automation);
+  const linha = (acao, ligado, titulo, texto) => `<button class="toggle-row" data-action="${acao}" aria-pressed="${ligado ? "true" : "false"}">
+    <span class="toggle-row__box ${ligado ? "active" : ""}">${ligado ? svgIcon("check", 13) : ""}</span>
+    <span class="toggle-row__text"><b>${titulo}</b><span>${texto}</span></span>
+  </button>`;
+  return `<div class="card">
+    ${linha("auto-fixed-toggle", a.autoPostFixed, "Lançar gastos fixos no vencimento",
+      "O que você marcou como gasto fixo no mês passado entra sozinho no dia do vencimento deste mês, com aviso e desfazer no Início. Conta de valor variável entra com o valor anterior.")}
+    ${linha("import-auto-toggle", a.importAutoConfirm, "Importar extrato direto quando não houver dúvida",
+      "Sem a tela de revisão quando todas as categorias vêm das suas regras e da sua memória, nada parece repetido e há um destino só. A importação inteira pode ser desfeita.")}
   </div>`;
 }
 

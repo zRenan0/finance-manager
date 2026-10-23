@@ -187,6 +187,12 @@ let state = {
   // Último conteúdo recebido pelo Compartilhar e já posto no formulário
   // (ver applySharedPayload); a tela de lançamento diz de onde veio.
   sharedDraft: null,
+  // Gastos fixos lançados sozinhos nesta sessão (ver runAutoPostFixed) e a
+  // última importação feita sem revisão: os dois viram aviso com desfazer.
+  autoPostedFixed: null,
+  importAutoNotice: null,
+  // Por que a última importação pediu revisão (ver importAutoConfirmCheck).
+  importAutoReasons: null,
   // ---- Feature 4: lançamento em linguagem natural ----
   nlp: { text: "", drafts: [], error: null, loading: false, touched: false },
   // ---- Feature 2: backup (exportar / importar) ----
@@ -1235,6 +1241,48 @@ function applyQrDraftToForm(draft) {
 }
 
 // ==================================================================
+// GASTOS FIXOS NO VENCIMENTO (automação opcional)
+// ------------------------------------------------------------------
+// Com a automação ligada, o gasto fixo do mês passado entra sozinho no dia do
+// vencimento deste mês: aluguel no dia 10, internet no dia 15. Roda na
+// abertura do app e quando ele volta para a frente (o dia pode ter virado com
+// a aba aberta). Nunca na demonstração, nunca com a configuração inicial
+// aberta e nunca num mês em que a pessoa desfez o lançamento automático.
+// Devolve quantos lançou.
+function runAutoPostFixed(options) {
+  const opts = options || {};
+  if (state.booting || isDemoMode() || state.onboarding.open) return 0;
+  const automacao = normalizeAutomation(state.data.automation);
+  if (!automacao.autoPostFixed) return 0;
+  const mKey = keyOfCurrentMonth();
+  if (state.data.dismissedCarryForwardMonth === mKey) return 0;
+  const devidos = fixedDueToPost(state.data, mKey, todayIso());
+  if (!devidos.length) return 0;
+  const existentes = new Set((state.data.transactions || []).map((t) => t.id));
+  const contaPadrao = ((state.data.accounts || []).find((a) => !a.archived) || {}).id || null;
+  const novos = devidos
+    .map((t) => makeTransaction({
+      id: fixedAutoPostId(t, mKey),
+      type: "expense", amount: t.amount, categoryId: t.categoryId, date: fixedDueDateIn(t, mKey),
+      payment: t.payment, description: t.description, recurring: true, source: "manual",
+      accountId: t.accountId || contaPadrao, creditCardId: t.creditCardId || null,
+      origin: { channel: "manual", label: "Gasto fixo lançado automaticamente no vencimento", reference: null },
+    }))
+    .filter((t) => !existentes.has(t.id));
+  if (!novos.length) return 0;
+  setData((d) => ({ ...d, transactions: [...d.transactions, ...novos] }));
+  const anterior = state.autoPostedFixed && state.autoPostedFixed.monthKey === mKey ? state.autoPostedFixed : null;
+  state.autoPostedFixed = {
+    monthKey: mKey,
+    ids: (anterior ? anterior.ids : []).concat(novos.map((t) => t.id)),
+    names: (anterior ? anterior.names : []).concat(novos.map((t) => t.description || categoryById(state.data, t.categoryId).name)),
+    total: addMoney(anterior ? anterior.total : 0, sumMoney(novos, (t) => t.amount)),
+  };
+  if (!opts.silent) notify(`${plural(novos.length, "gasto fixo lançado", "gastos fixos lançados")} no vencimento`);
+  return novos.length;
+}
+
+// ==================================================================
 // COMPARTILHAR COM O COFRE (Web Share Target)
 // ------------------------------------------------------------------
 // O comprovante do Pix, a notificação do cartão ou a fatura em PDF chegam
@@ -1427,6 +1475,20 @@ async function handleStatementFile(file, password) {
     state.importPendingFile = null;
     state.importPassword = "";
     state.importLoading = false;
+    // SEM REVISÃO QUANDO NADA PEDE DECISÃO. Ver importAutoConfirmCheck: um
+    // destino só, leitura confiável, nenhuma linha parecida com o que já
+    // existe e toda categoria com confiança alta. Senão a revisão abre e diz
+    // por quê. Demonstração nunca grava, então nunca entra aqui.
+    const destinos = state.importDocumentKind === "card"
+      ? (state.data.creditCards || []).filter((c) => !c.archived)
+      : (state.data.accounts || []).filter((a) => !a.archived);
+    const auto = importAutoConfirmCheck(state.importRows, { destinationCount: destinos.length });
+    const automacao = normalizeAutomation(state.data.automation);
+    state.importAutoReasons = automacao.importAutoConfirm ? auto.reasons : null;
+    if (automacao.importAutoConfirm && auto.eligible && !isDemoMode()) {
+      commitImportRows({ auto: true, filename: source.name, skippedDuplicates: auto.skippedDuplicates });
+      return;
+    }
     render();
     notify(`${rows.length} lançamento${rows.length === 1 ? "" : "s"} lido${rows.length === 1 ? "" : "s"} do ${(meta.format || "arquivo").toUpperCase()}`);
   } catch (err) {
@@ -2813,6 +2875,12 @@ async function init() {
   }
   window.addEventListener("popstate", applyHistoryRoute);
   if (demoPelaUrl && !isDemoMode()) enterDemoMode();
+  runAutoPostFixed({ silent: true });
+  // O dia pode virar com o app aberto em segundo plano: ao voltar para a
+  // frente, o que venceu nesse meio-tempo entra.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") runAutoPostFixed({ silent: false });
+  });
   if (compartilhado) consumeSharedPayload().catch((e) => { if (typeof reportSafeError === "function") reportSafeError("share", e, "share_consume"); });
 
   // [M41] O SEGUNDO PEDAÇO É BUSCADO DEPOIS DO PRIMEIRO QUADRO, NO OCIOSO.

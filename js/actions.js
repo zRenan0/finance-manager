@@ -218,6 +218,84 @@ function commitDebtPayment(p) {
 // nada em bloco sem confirmação, porque pode haver uma exceção deliberada no
 // meio. Os movidos recebem registro de edição, o que é exatamente o sinal
 // que faz a memória preferir essa categoria nas próximas importações.
+// Gravação de uma importação revisada (ou dispensada de revisão, ver
+// importAutoConfirmCheck). Devolve null quando falta destino ou decisão.
+function commitImportRows(options) {
+  const opts = options || {};
+  const included = (state.importRows || []).filter((r) => r.include);
+  const meta = (state.importRows && state.importRows.meta) || {};
+  const documentKind = state.importDocumentKind === "card" ? "card" : "account";
+  const destinations = documentKind === "card"
+    ? (state.data.creditCards || []).filter((card) => !card.archived)
+    : (state.data.accounts || []).filter((account) => !account.archived);
+  const destinationId = destinations.some((item) => item.id === state.importDestinationId)
+    ? state.importDestinationId
+    : (destinations[0] ? destinations[0].id : "");
+  if (!destinationId) {
+    notify(documentKind === "card" ? "Cadastre ou escolha um cartão" : "Cadastre ou escolha uma conta", "warn");
+    return null;
+  }
+  let records = null;
+  try {
+    records = buildImportRecordsFromRows(included, meta.format, { documentKind, destinationId }, state.importFilename, state.data.accounts);
+  } catch (error) {
+    if (error && error.code === "IMPORT_TRANSFER_ACCOUNT") {
+      notify(error.message || "Escolha a outra conta da transferência", "warn");
+      render();
+      return null;
+    }
+    throw error;
+  }
+  const newTx = records.transactions;
+  const newTransfers = records.accountTransfers;
+  setData((d) => ({
+    ...d,
+    transactions: [...d.transactions, ...newTx],
+    accountTransfers: [...(d.accountTransfers || []), ...newTransfers],
+  }));
+  // [M14] Registro para desfazer. Guarda só identificadores, a data e o nome
+  // do arquivo; nenhum valor, descrição ou categoria. Grava DEPOIS de
+  // `setData`: um recibo de importação que não aconteceu seria pior que
+  // recibo nenhum. A gravação é assíncrona e não bloqueia a tela, porque
+  // falhar em anotar o recibo não pode desfazer a importação que deu certo.
+  state.importUndo = {
+    at: new Date().toISOString(),
+    filename: state.importFilename || "",
+    transactionIds: newTx.map((tx) => tx.id),
+    transferIds: newTransfers.map((transfer) => transfer.id),
+  };
+  saveImportUndo(state.importUndo);
+  // [M35] O OFX costuma declarar o saldo da conta (`<LEDGERBAL>`). Ele não
+  // vira lançamento nem ajuste: deixa a conferência daquela conta ABERTA e
+  // já preenchida com o número do banco, para a pessoa comparar quando
+  // chegar em Contas. Nada é gravado por isso: o passo de revisão do M35
+  // continua no meio do caminho.
+  const saldoDoExtrato = meta.statementBalance;
+  if (saldoDoExtrato && documentKind === "account" && destinationId) {
+    state.accountsUi.reconcileId = destinationId;
+    state.accountsUi.reconcileValue = moneyDraft(saldoDoExtrato.amount);
+    state.accountsUi.reconcileDate = saldoDoExtrato.date && saldoDoExtrato.date <= todayIso() ? saldoDoExtrato.date : todayIso();
+    state.accountsUi.reconcileReview = null;
+  }
+  state.importRows = null; state.importFilename = null; state.importDestinationId = ""; state.importVisible = IMPORT_PAGE_SIZE;
+  const importedParts = [];
+  if (newTx.length) importedParts.push(plural(newTx.length, "lançamento importado", "lançamentos importados"));
+  if (newTransfers.length) importedParts.push(plural(newTransfers.length, "transferência registrada", "transferências registradas"));
+  if (opts.auto) {
+    // Sem revisão: o aviso no Início diz o que entrou e oferece desfazer.
+    state.importAutoNotice = {
+      at: new Date().toISOString(), filename: opts.filename || "",
+      count: newTx.length + newTransfers.length, skippedDuplicates: opts.skippedDuplicates || 0,
+    };
+    notify(`${importedParts.join(" e ")} sem revisão: nada pedia decisão`);
+  } else {
+    state.importAutoNotice = null;
+    notify(importedParts.join(" e "));
+  }
+  setState({ tab: "dashboard" });
+  return { transactions: newTx.length, transfers: newTransfers.length };
+}
+
 function offerCategoryToSimilar(anterior, form) {
   if (!anterior || !form || anterior.type !== "expense" || form.type !== "expense") return;
   if (!form.categoryId || anterior.categoryId === form.categoryId) return;
@@ -1626,6 +1704,31 @@ function onClick(e) {
     case "carry-dismiss":
       setData((d) => ({ ...d, dismissedCarryForwardMonth: keyOfCurrentMonth() }));
       break;
+    case "carry-auto-on": {
+      // Um toque liga a automação e já lança o que venceu; o resto entra no dia.
+      setData((d) => ({ ...d, automation: { ...normalizeAutomation(d.automation), autoPostFixed: true } }));
+      const lancados = runAutoPostFixed({ silent: true });
+      notify(lancados > 0
+        ? `${plural(lancados, "gasto fixo lançado", "gastos fixos lançados")}; os próximos entram sozinhos no vencimento`
+        : "Os gastos fixos passam a entrar sozinhos no dia do vencimento");
+      render();
+      break;
+    }
+    case "auto-fixed-toggle":
+      setData((d) => ({ ...d, automation: { ...normalizeAutomation(d.automation), autoPostFixed: !normalizeAutomation(d.automation).autoPostFixed } }));
+      if (normalizeAutomation(state.data.automation).autoPostFixed) runAutoPostFixed({ silent: false });
+      break;
+    case "auto-fixed-undo": {
+      const aviso = state.autoPostedFixed;
+      if (!aviso) break;
+      const ids = new Set(aviso.ids || []);
+      setData((d) => ({ ...removeTransactionsWithIntegrity(d, Array.from(ids)), dismissedCarryForwardMonth: aviso.monthKey }));
+      state.autoPostedFixed = null;
+      notify("Lançamentos automáticos desfeitos; neste mês nada mais entra sozinho");
+      render();
+      break;
+    }
+    case "auto-fixed-dismiss": state.autoPostedFixed = null; render(); break;
     case "carry-post-all": {
       const mKey = keyOfCurrentMonth();
       const pending = getPendingRecurring(state.data, mKey);
@@ -2351,70 +2454,11 @@ function onClick(e) {
       notify(`Abertura de ${conta.name} recuada para ${fmtDateFull(novaAbertura)}`);
       break;
     }
-    case "import-confirm": {
-      const included = (state.importRows || []).filter((r) => r.include);
-      const meta = (state.importRows && state.importRows.meta) || {};
-      const documentKind = state.importDocumentKind === "card" ? "card" : "account";
-      const destinations = documentKind === "card"
-        ? (state.data.creditCards || []).filter((card) => !card.archived)
-        : (state.data.accounts || []).filter((account) => !account.archived);
-      const destinationId = destinations.some((item) => item.id === state.importDestinationId)
-        ? state.importDestinationId
-        : (destinations[0] ? destinations[0].id : "");
-      if (!destinationId) {
-        notify(documentKind === "card" ? "Cadastre ou escolha um cartão" : "Cadastre ou escolha uma conta", "warn");
-        break;
-      }
-      let records = null;
-      try {
-        records = buildImportRecordsFromRows(included, meta.format, { documentKind, destinationId }, state.importFilename, state.data.accounts);
-      } catch (error) {
-        if (error && error.code === "IMPORT_TRANSFER_ACCOUNT") {
-          notify(error.message || "Escolha a outra conta da transferência", "warn");
-          render();
-          break;
-        }
-        throw error;
-      }
-      const newTx = records.transactions;
-      const newTransfers = records.accountTransfers;
-      setData((d) => ({
-        ...d,
-        transactions: [...d.transactions, ...newTx],
-        accountTransfers: [...(d.accountTransfers || []), ...newTransfers],
-      }));
-      // [M14] Registro para desfazer. Guarda só identificadores, a data e o nome
-      // do arquivo; nenhum valor, descrição ou categoria. Grava DEPOIS de
-      // `setData`: um recibo de importação que não aconteceu seria pior que
-      // recibo nenhum. A gravação é assíncrona e não bloqueia a tela, porque
-      // falhar em anotar o recibo não pode desfazer a importação que deu certo.
-      state.importUndo = {
-        at: new Date().toISOString(),
-        filename: state.importFilename || "",
-        transactionIds: newTx.map((tx) => tx.id),
-        transferIds: newTransfers.map((transfer) => transfer.id),
-      };
-      saveImportUndo(state.importUndo);
-      // [M35] O OFX costuma declarar o saldo da conta (`<LEDGERBAL>`). Ele não
-      // vira lançamento nem ajuste: deixa a conferência daquela conta ABERTA e
-      // já preenchida com o número do banco, para a pessoa comparar quando
-      // chegar em Contas. Nada é gravado por isso: o passo de revisão do M35
-      // continua no meio do caminho.
-      const saldoDoExtrato = meta.statementBalance;
-      if (saldoDoExtrato && documentKind === "account" && destinationId) {
-        state.accountsUi.reconcileId = destinationId;
-        state.accountsUi.reconcileValue = moneyDraft(saldoDoExtrato.amount);
-        state.accountsUi.reconcileDate = saldoDoExtrato.date && saldoDoExtrato.date <= todayIso() ? saldoDoExtrato.date : todayIso();
-        state.accountsUi.reconcileReview = null;
-      }
-      state.importRows = null; state.importFilename = null; state.importDestinationId = ""; state.importVisible = IMPORT_PAGE_SIZE;
-      const importedParts = [];
-      if (newTx.length) importedParts.push(plural(newTx.length, "lançamento importado", "lançamentos importados"));
-      if (newTransfers.length) importedParts.push(plural(newTransfers.length, "transferência registrada", "transferências registradas"));
-      notify(importedParts.join(" e "));
-      setState({ tab: "dashboard" });
+    case "import-confirm": commitImportRows(); break;
+    case "import-auto-notice-dismiss": state.importAutoNotice = null; render(); break;
+    case "import-auto-toggle":
+      setData((d) => ({ ...d, automation: { ...normalizeAutomation(d.automation), importAutoConfirm: !normalizeAutomation(d.automation).importAutoConfirm } }));
       break;
-    }
 
     // ---- Leitor de QR da nota ----
     case "open-qr": state.qr = { open: true, scanning: false, error: null, checking: false, draft: null }; openOverlay("qr"); render(); break;

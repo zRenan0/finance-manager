@@ -1508,6 +1508,9 @@ const SETTING_KEYS = [
   "dashboardLayout", "dashboardFocus", "categoryRules",
   // v22; aceite explícito dos textos e preferência de envio para IA.
   "privacy", "graveyard", "lastBackupAt",
+  // Automações de entrada: lançar gastos fixos no vencimento e importar
+  // extrato sem revisão quando nada pede decisão. Ver normalizeAutomation.
+  "automation",
 ];
 
 // v9. Módulo 6. `unlocked` é { idDaConquista: "AAAA-MM-DD" }. A data importa:
@@ -1963,6 +1966,7 @@ function defaultData() {
     onboarding: defaultOnboarding(),
     dashboardLayout: defaultDashboardLayout(),
     dashboardFocus: "month",
+    automation: defaultAutomation(),
     categoryRules: defaultCategoryRules(),
     privacy: defaultPrivacy(),
     graveyard: defaultGraveyard(),
@@ -2318,6 +2322,7 @@ function migrate(parsed) {
   // existe mais ou regra apontando para categoria apagada, entre saneado.
   data.dashboardLayout = normalizeDashboardLayout(data.dashboardLayout);
   data.dashboardFocus = normalizeDashboardFocus(data.dashboardFocus);
+  data.automation = normalizeAutomation(data.automation);
   data.categoryRules = normalizeCategoryRules(data.categoryRules);
 
   // ---- v22: privacidade e consentimentos ----
@@ -5717,6 +5722,46 @@ function applyGoalTransactionMutation(data, before, after, asOf) {
   };
 }
 
+/* ---- Automações de entrada ----------------------------------------------- */
+// `autoPostFixed`: gasto fixo do mês passado entra sozinho no dia do
+// vencimento deste mês. Nasce DESLIGADO: um lançamento que a pessoa não
+// confirmou é decisão dela, e conta de valor variável (luz, água) entraria com
+// o valor do mês anterior. Liga-se com um toque no próprio aviso do Início.
+// `importAutoConfirm`: extrato em que nada pede decisão entra sem a tela de
+// revisão (ver importAutoConfirmCheck em import.js). Nasce LIGADO porque o
+// critério é estrito e a importação inteira tem desfazer.
+function defaultAutomation() { return { autoPostFixed: false, importAutoConfirm: true }; }
+function normalizeAutomation(value) {
+  const v = value && typeof value === "object" ? value : {};
+  const base = defaultAutomation();
+  return {
+    autoPostFixed: typeof v.autoPostFixed === "boolean" ? v.autoPostFixed : base.autoPostFixed,
+    importAutoConfirm: typeof v.importAutoConfirm === "boolean" ? v.importAutoConfirm : base.importAutoConfirm,
+  };
+}
+
+// Dia do vencimento de um modelo dentro de um mês, preso ao último dia.
+function fixedDueDateIn(template, monthKey) {
+  const [ano, mes] = String(monthKey).split("-").map(Number);
+  const dia = Number(String(template.date || "").slice(8, 10)) || 1;
+  return isoOfDate(new Date(ano, mes - 1, Math.min(dia, daysInMonthOf(ano, mes - 1))));
+}
+
+// Os gastos fixos pendentes deste mês cujo vencimento já chegou. Os que vencem
+// mais adiante continuam pendentes e entram no dia deles.
+function fixedDueToPost(data, monthKey, today) {
+  const hoje = today || todayIso();
+  return getPendingRecurring(data, monthKey).filter((t) => fixedDueDateIn(t, monthKey) <= hoje);
+}
+
+// Id DETERMINÍSTICO por mês e modelo. Com conta ligada, dois aparelhos abertos
+// no mesmo dia lançariam o aluguel duas vezes com ids aleatórios; com o mesmo
+// id a sincronização junta os dois num só.
+function fixedAutoPostId(template, monthKey) {
+  const chave = `${template.categoryId}|${normalizeText(template.description || "")}`;
+  return `fixo-${String(monthKey).replace("-", "")}-${recordIdHash(chave)}`.slice(0, 80);
+}
+
 function getPendingRecurring(data, currentMonthKey) {
   const [y, m] = currentMonthKey.split("-").map(Number);
   const prevDate = addMonths(new Date(y, m - 1, 1), -1);
@@ -5968,6 +6013,7 @@ function backupPayloadOf(data) {
     onboarding: normalizeOnboarding(data.onboarding, data),
     dashboardLayout: normalizeDashboardLayout(data.dashboardLayout),
     dashboardFocus: normalizeDashboardFocus(data.dashboardFocus),
+    automation: normalizeAutomation(data.automation),
     categoryRules: normalizeCategoryRules(data.categoryRules),
     privacy: normalizePrivacy(data.privacy),
     // Sem as lápides no arquivo, restaurar um backup ressuscita tudo que foi
@@ -6201,6 +6247,9 @@ function mergeBackupInto(current, incoming) {
     // seria a última coisa que ele esperaria de um botão chamado "mesclar".
     dashboardLayout: normalizeDashboardLayout(current.dashboardLayout),
     dashboardFocus: normalizeDashboardFocus(current.dashboardFocus || incoming.dashboardFocus),
+    // Automação é escolha deste aparelho agora; o arquivo antigo não a liga
+    // nem desliga.
+    automation: normalizeAutomation(current.automation || incoming.automation),
     // Regras de categorização: a UNIÃO das duas listas, por id, com a versão
     // local vencendo em caso de conflito. Regra criada em outro aparelho é
     // trabalho que ninguém quer refazer.

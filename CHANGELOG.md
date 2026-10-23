@@ -2,6 +2,23 @@
 
 ## Não publicado
 
+### Menos digitação: gastos fixos sozinhos e extrato sem revisão
+
+- **Gastos fixos podem entrar sozinhos no vencimento.** O aviso "Gastos fixos
+  do mês passado" ganhou "Lançar sempre sozinho": com um toque, o que venceu
+  entra na hora e o resto entra no dia (aluguel no dia 5, internet no dia 28),
+  com a data do vencimento e o valor do mês anterior. O Início mostra o que
+  entrou, com desfazer; desfazer segura o resto do mês. Nasce desligado, e
+  liga-se ou desliga-se em Ajustes > Automação. Com conta ligada, dois
+  aparelhos abertos no mesmo dia não lançam duas vezes (id fixo por mês e
+  modelo).
+- **Extrato sem dúvida entra sem a tela de revisão.** Quando o arquivo foi lido
+  com confiança alta, há um destino só, nenhuma linha parece repetir um
+  lançamento existente e toda categoria vem das suas regras ou da sua memória,
+  a importação grava direto e o Início avisa, com desfazer da importação
+  inteira. Quando falta alguma coisa, a revisão abre e diz por quê ("2 gastos
+  pedem categoria"). Interruptor na própria tela de importação e em Ajustes.
+
 ### Compartilhar com o Cofre
 
 - **O comprovante vai para o app pelo menu Compartilhar do Android.** Pagou

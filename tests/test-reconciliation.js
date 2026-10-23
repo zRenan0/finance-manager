@@ -278,7 +278,9 @@ section("10. [M35] Saldo declarado pelo extrato (OFX)");
   check("o saldo do OFX é lido do LEDGERBAL", /parseOfxLedgerBalance/.test(importSrc) && /LEDGERBAL/.test(importSrc));
   check("ele viaja como statementBalance, sem virar lançamento", /statementBalance: parseOfxLedgerBalance\(text\)/.test(importSrc));
   const commit = readSrc("js/actions.js");
-  const bloco = commit.slice(commit.indexOf('case "import-confirm"'), commit.indexOf('case "open-qr"'));
+  // A gravação da importação mora em `commitImportRows`, usada pela revisão e
+  // pela importação direta (ver importAutoConfirmCheck).
+  const bloco = commit.slice(commit.indexOf("function commitImportRows("), commit.indexOf("function offerCategoryToSimilar("));
   check("depois da importação a conferência abre preenchida, sem gravar ajuste",
     /state\.accountsUi\.reconcileValue = moneyDraft\(saldoDoExtrato\.amount\)/.test(bloco) && !/reconcileAccount\(/.test(bloco));
   check("data futura declarada no arquivo não é aceita", /saldoDoExtrato\.date <= todayIso\(\)/.test(bloco));

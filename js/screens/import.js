@@ -38,8 +38,29 @@ function renderImportScreen() {
           <span class="dropzone__subtitle">ou toque para escolher (.ofx, .csv, .pdf)</span>
         </label>`}
         ${renderImportUndoLine()}
-      </div>` : renderImportReview(rows)}
+        ${renderImportAutoToggle()}
+      </div>` : `${renderImportAutoReasons()}${renderImportReview(rows)}`}
   </div>`;
+}
+
+// Importar sem revisão quando nada pede decisão (ver importAutoConfirmCheck).
+function renderImportAutoToggle() {
+  const ligado = normalizeAutomation(state.data.automation).importAutoConfirm;
+  return `<button class="toggle-row" data-action="import-auto-toggle" aria-pressed="${ligado ? "true" : "false"}" data-ui-css="margin-top:12px">
+    <span class="toggle-row__box ${ligado ? "active" : ""}">${ligado ? svgIcon("check", 13) : ""}</span>
+    <span class="toggle-row__text">
+      <b>Importar direto quando não houver dúvida</b>
+      <span>Se todas as categorias vierem das suas regras e da sua memória, nada parecer repetido e houver um destino só, o extrato entra sem a tela de revisão. Dá para desfazer a importação inteira.</span>
+    </span>
+  </button>`;
+}
+
+// Por que esta importação pediu revisão. Sem isso, quem ligou a importação
+// direta acharia que ela não funciona.
+function renderImportAutoReasons() {
+  const motivos = state.importAutoReasons;
+  if (!motivos || !motivos.length) return "";
+  return `<p class="inline-alert">${svgIcon("info", 14)} Pedi revisão porque ${motivos.map((m) => escapeHtml(m)).join("; ")}. Resolvido isso, os próximos extratos parecidos entram direto.</p>`;
 }
 
 // [M14] Desfazer a última importação. Aparece só na tela de escolher arquivo

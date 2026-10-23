@@ -19,7 +19,7 @@ const SETTING_KEYS = [
   "budgetHistory", "version", "lastPersistAt", "userName", "emergencyGoalId", "emergencyMonths", "marketRates",
   "achievements", "recurringPrefs", "notifications", "accounts", "creditCards", "accountTransfers", "cardPayments",
   "accountAdjustments", "debtPlan", "onboarding", "dashboardLayout", "dashboardFocus", "categoryRules", "privacy",
-  "graveyard", "lastBackupAt",
+  "graveyard", "lastBackupAt", "automation",
 ];
 const TOP_LEVEL = new Set([...COLLECTIONS, ...SETTING_KEYS]);
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9:_-]{0,79}$/;
